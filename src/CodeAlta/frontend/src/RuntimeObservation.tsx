@@ -1,27 +1,35 @@
 import { useSyncExternalStore } from "react";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { tabKey, type SessionTab } from "./sessionTabs";
-import { projectRunning, sessionRunning, type createRuntimeObservations } from "./runtimeObservations";
+import { BackgroundMark } from "./BackgroundTaskViews";
+import { projectRunning, sessionBackground, sessionRunning, type createRuntimeObservations } from "./runtimeObservations";
 import { useShellLanguage } from "./shellLanguage";
 
 export type RuntimeObservationControls = { store: ReturnType<typeof createRuntimeObservations>; enabled: boolean; canObserve: (tab: SessionTab) => boolean; refresh: (tabs: readonly SessionTab[]) => void };
 
-/** Sidebar activity: a spinner while an observed session (or any observed session of a project) is running. */
+/**
+ * Sidebar activity: a spinner while an observed session (or any observed session of a project) is running, and
+ * a quieter mark for a session that runs no turn while its provider still works in the background.
+ */
 export function RunningSessionBadge({ controls, tab, projectId }: { controls: RuntimeObservationControls; tab?: SessionTab; projectId?: string | null }) {
   const { t } = useShellLanguage();
   // The answer is followed, not the observations: a refresh that changes nothing of it renders nothing.
   const running = useSyncExternalStore(controls.store.subscribe,
     () => tab ? sessionRunning(controls.store.getSnapshot(), tab) : projectRunning(controls.store.getSnapshot(), projectId ?? null));
-  if (!controls.enabled || !running || tab && !controls.canObserve(tab)) return null;
-  return <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>;
+  const background = useSyncExternalStore(controls.store.subscribe, () => tab ? sessionBackground(controls.store.getSnapshot(), tab) : 0);
+  if (!controls.enabled || tab && !controls.canObserve(tab)) return null;
+  return running ? <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>
+    : background > 0 ? <BackgroundMark count={background} /> : null;
 }
 
-/** Tab-title activity: a spinner while the session runs, nothing otherwise. */
+/** Tab-title activity: a spinner while the session runs, a quieter mark while only its background tasks go on, nothing otherwise. */
 export function SessionTabActivity({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {
   const { t } = useShellLanguage();
   const running = useSyncExternalStore(controls.store.subscribe, () => sessionRunning(controls.store.getSnapshot(), tab));
-  if (!controls.enabled || !running || !controls.canObserve(tab)) return null;
-  return <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>;
+  const background = useSyncExternalStore(controls.store.subscribe, () => sessionBackground(controls.store.getSnapshot(), tab));
+  if (!controls.enabled || !controls.canObserve(tab)) return null;
+  return running ? <span className="session-running"><ActivitySpinner size={12} label={t("Running")} /></span>
+    : background > 0 ? <BackgroundMark count={background} /> : null;
 }
 
 export function RuntimeObservationBadge({ controls, tab }: { controls: RuntimeObservationControls; tab: SessionTab }) {

@@ -468,6 +468,41 @@ row and on its project's row in the Explorer, and in the status line above the p
 open in a visible pane the three follow the run itself and start and stop together. Sessions that are
 not open are checked every five seconds, so their Explorer spinner can lag by that much.
 
+**Background tasks.** A provider can go on working for a session after the tool call that started the
+work returned, and after the run ended: Claude Code with a command in the background, a watch, an
+agent of its own. Such a session is not running (it takes a prompt) and is not idle either:
+
+- its row in the Explorer and its tab show a dot that breathes, quieter than the spinner of a run
+  (`BackgroundMark`), where the spinner would be;
+- the status line above the prompt says **N background tasks** after its usual text, also while a run
+  thinks. It opens the list of the tasks, each with what it does, its kind, how long it has been going
+  on and a button that stops it (`BackgroundTasksStatus`);
+- the tile of the tool call that started a task says **Running in the background** in the place of
+  **Completed**, with the spinner of a call that runs, and **Stopped in the background** or **Failed in
+  the background** once the task ended that way. The window of the call says the same with a tag. A task
+  that ran to its end leaves the tile as **Completed**.
+
+How it reaches the page:
+
+- The provider tells its tasks with `AgentBackgroundTasksEvent`: every task that goes on (identity, kind,
+  description, the tool call that started it) and the tasks that just ended. The event names no run,
+  because an event with a run marks its session as running, and it is given to those who listen without
+  being kept in the history or recorded: it is the state of a process that runs now, and a session read
+  again later shows no task.
+- `RuntimeSessionEntry` keeps the tasks that go on and the last ones that failed or were stopped (16 at
+  most), which `SessionRuntimeCurrentEntry.BackgroundTasks` and then `runtimeState` carry
+  (`SessionRuntimeStateEntry.backgroundTasks`, each text bounded, the tool call named as the timeline
+  names it). No new channel: the open panel reads it every second with the rest of the runtime state,
+  and the Explorer every five seconds, as for a run.
+- In the page, `backgroundTasks.ts` reads the list, `runtimeObservations` counts the tasks that go on
+  for the marks (`sessionBackground`; the open panel wins over the polled row, as for the run), and
+  `BackgroundCallsContext` gives the tiles of the session the state of the task of each call.
+- **Stop** calls `sessions.stopBackgroundTask` (epoch, session, task), which reaches the provider through
+  `OwnedSessionCommandService.StopBackgroundTaskAsync`, `SessionRuntimeService` (only a task the entry
+  lists as going on is asked to stop), `AgentHub` and `IAgentBackgroundTaskProvider`. It is not a command
+  of a run and leaves no receipt: its effect is the task leaving the list.
+- After a restart of the application nothing is shown: the tasks ended with the process of the provider.
+
 ### Projects and saved sessions
 
 **Open project** (`Ctrl+O`) is a resizable window with one field for a saved project's name or a

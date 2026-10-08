@@ -474,9 +474,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _stateEventsSeen = false;
             _cliRunning = false;
             _turnActive = false;
-            _backgroundTasks = 0;
         }
 
+        ForgetBackgroundTasks();
         ForgetOwnTurns();
         ResetRunState();
         connection.Start();
@@ -545,6 +545,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         Interlocked.Increment(ref _generation);
 
         ForgetOwnTurns();
+        ForgetBackgroundTasks();
         FailOutstandingToolCalls("Claude Code stopped before the tool call completed.");
         if (connection is not null)
         {

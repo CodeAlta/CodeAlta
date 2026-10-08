@@ -358,6 +358,33 @@ sequenceDiagram
 - A prompt sent while a turn of the CLI still runs is queued by the CLI. The run reads the end of that turn first: its `result` names no message, so the answer is the one of the turn that follows. A failure of the turn of the CLI does not fail the run of the prompt.
 - Stopping a run interrupts the CLI and withdraws what it wrote, a turn of its own included.
 
+### Background tasks
+
+The CLI says what it goes on doing outside its turns with `system` messages, which the reader of the
+connection turns into the tasks of the session (`ClaudeCodeSession.BackgroundTasks.cs`):
+
+| Message | What is read |
+| --- | --- |
+| `background_tasks_changed` | The tasks that go on, all of them at each change: `task_id`, `task_type`, `description`, `parent_task_id`, `ambient`. It is what says that a task is there. |
+| `task_started` | The `tool_use_id` of the call that started a task, which the list does not carry. It comes just after the list that first has the task. |
+| `task_updated`, `task_notification` | The end of a task: `completed`, `failed`, `stopped` or `killed`. They come just before the list that no longer has the task, so the task is taken out at its end and the second of the two messages changes nothing. |
+
+- A task is told as `AgentBackgroundTask`: `local_bash` is a `command`, `local_agent` an `agent`,
+  `local_workflow` a `workflow`, and another type keeps its name. A task marked `ambient` is housekeeping
+  of the CLI: it keeps the process alive like the others and is not shown.
+- Each change calls the handler `AgentSession` registered (`IAgentProviderBackgroundTasks`), from the
+  thread that reads the CLI and whether or not a run is going on. `AgentSession` publishes
+  `AgentBackgroundTasksEvent` to those who listen, under the lock that also orders the events of a run,
+  and neither keeps it in its history nor records it.
+- The tasks are forgotten, and told as gone, when the process starts, is closed, or ends by itself.
+- `IAgentBackgroundTaskProvider.StopBackgroundTaskAsync` sends the control request `stop_task` with the
+  `task_id`, without taking the turn gate: a task is stopped during a turn as well as between two turns.
+  The CLI then says the end of the task as for any other end (`task_updated` with `killed`, then
+  `task_notification` with `stopped`). A CLI that does not know the request, or a process that ended
+  meanwhile, answers that nothing was stopped.
+
+What the desktop application shows of them is in `doc/desktop.md`, "Running sessions".
+
 ### Tool calls of one message
 
 The CLI does not wait for the end of a message of the model to run its tool calls. It runs a call as soon as the model wrote it, some at the same time and others one after the other (seen with CLI 2.1.292: two subagents and a `Read` ran together, two `Bash` commands that write a file ran in their order). The result of a first call can therefore arrive while the model still writes the next one, and several calls are running at once.

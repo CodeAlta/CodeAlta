@@ -97,11 +97,34 @@ internal sealed class SessionRuntimeStateService
             }
             projected = new(entry.AttachmentGeneration.ToString(CultureInfo.InvariantCulture), entry.IsTerminated, entry.IsRetiring,
                 entry.ActiveRunId, entry.QueueDrainInProgress, entry.ProviderId, entry.ProviderKey, entry.ModelId,
-                entry.ReasoningEffort?.ToString(), entry.AgentPromptId, entry.PendingAgentPromptId) { Activity = activity };
+                entry.ReasoningEffort?.ToString(), entry.AgentPromptId, entry.PendingAgentPromptId)
+            { Activity = activity, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)] };
         }
         // Seven strings <=256 UTF-16 units at six-byte worst-case JSON escaping, fixed GUIDs,
         // ordinal/enums/keys plus 4 KiB framing fit below 32 KiB. No values are truncated.
         return new("ok", _hostEpoch, state.SessionId, state.RuntimeInstanceId.ToString("D"), state.CoordinatorTransitionInProgress, projected);
+    }
+
+    // A task is what a provider says of itself: one that does not fit the wire is left out, and what it says of
+    // itself is cut, so that the rest of the state is still read. The tool call is named as the timeline names it.
+    private const int MaximumBackgroundTasks = 16;
+    private static SessionRuntimeBackgroundTaskResponse? ProjectTask(SessionRuntimeBackgroundTask task)
+        => task.TaskId is { Length: <= 64 } && Identity(task.TaskId) && Identity(Cut(task.Kind, 32))
+            && (task.ToolCallId is null || Identity(RuntimeDisplayProjection.CompactIdentifier(task.ToolCallId)))
+            ? new(task.TaskId, Cut(task.Kind, 32)!, Cut(task.Description, 160), task.ToolCallId is null ? null : RuntimeDisplayProjection.CompactIdentifier(task.ToolCallId),
+                task.StartedAt?.ToString("O", CultureInfo.InvariantCulture),
+                task.Outcome switch { null => "running", CodeAlta.Agent.AgentBackgroundTaskOutcome.Failed => "failed", CodeAlta.Agent.AgentBackgroundTaskOutcome.Stopped => "stopped", _ => "completed" })
+            : null;
+
+    // Cuts a text at a character, never inside a surrogate pair, and makes one line of it.
+    private static string? Cut(string? value, int maximum)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var line = string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (line.Length <= maximum) return Text(line) ? line : null;
+        var end = char.IsHighSurrogate(line[maximum - 2]) ? maximum - 2 : maximum - 1;
+        var cut = line[..end] + "…";
+        return Text(cut) ? cut : null;
     }
 
     private SessionRuntimeStateResponse Error(string status, string? sessionId) => new(status, _hostEpoch, sessionId, null, null, null);
@@ -128,5 +151,17 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
     string? ReasoningEffort, string? AgentPromptId, string? PendingAgentPromptId)
 {
     public SessionRuntimeActivityResponse? Activity { get; init; }
+
+    /// <summary>What the provider does in the background outside its runs: the tasks that go on, then the last that failed or were stopped.</summary>
+    public IReadOnlyList<SessionRuntimeBackgroundTaskResponse> BackgroundTasks { get; init; } = [];
 }
+
+/// <summary>A background task of a session.</summary>
+/// <param name="TaskId">Its identity, by which it is stopped.</param>
+/// <param name="Kind"><c>command</c>, <c>agent</c>, <c>workflow</c>, or the name its provider gives it.</param>
+/// <param name="Description">What it does, in one line; null when its provider does not say.</param>
+/// <param name="ToolCallId">The tool call that started it, as the timeline names that call; null when unknown.</param>
+/// <param name="StartedAt">When it was first known, as a round-trip timestamp; null for a task that ended.</param>
+/// <param name="State"><c>running</c>, or how it ended: <c>failed</c> or <c>stopped</c>.</param>
+internal sealed record SessionRuntimeBackgroundTaskResponse(string TaskId, string Kind, string? Description, string? ToolCallId, string? StartedAt, string State);
 internal sealed record SessionRuntimeActivityResponse(string? Timestamp, string Source, string AdmittedEvents, string OmittedEvents);

@@ -490,6 +490,13 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
             case "get_context_usage":
                 Respond(requestId, new JsonObject { ["totalTokens"] = 18000, ["maxTokens"] = 200000, ["rawMaxTokens"] = 200000 });
                 break;
+            case "stop_task":
+                var stopped = request.GetProperty("task_id").GetString();
+                Respond(requestId, null);
+                // The order of a real CLI: the task was killed, its notice, then the list that no longer has it comes from the test.
+                Emit(new JsonObject { ["type"] = "system", ["subtype"] = "task_updated", ["task_id"] = stopped, ["patch"] = new JsonObject { ["status"] = "killed" }, ["session_id"] = SessionId });
+                Emit(new JsonObject { ["type"] = "system", ["subtype"] = "task_notification", ["task_id"] = stopped, ["status"] = "stopped", ["summary"] = "Stopped", ["session_id"] = SessionId });
+                break;
             case "interrupt":
                 _interrupted.TrySetResult();
                 if (_cli.AnswerInterrupt)

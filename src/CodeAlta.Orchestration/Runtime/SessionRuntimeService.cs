@@ -1859,6 +1859,53 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         finally { handleUse?.Dispose(); }
     }
 
+    /// <summary>
+    /// Asks the provider of a session to stop one of its background tasks. The end of the task is told by the
+    /// events of the session; a task that already ended is not an error.
+    /// </summary>
+    /// <param name="sessionId">The session, which must be attached in this runtime.</param>
+    /// <param name="taskId">The identity of the task, as the state of the session lists it.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Whether the provider took the request; false when the session is not attached, or its provider has no such tasks.</returns>
+    /// <exception cref="ArgumentException">An identity is blank.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public Task<bool> StopBackgroundTaskAsync(string sessionId, string taskId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        return AdmitAsync(() => StopBackgroundTaskBodyAsync(sessionId, taskId, cancellationToken), cancellationToken);
+    }
+
+    private async Task<bool> StopBackgroundTaskBodyAsync(string sessionId, string taskId, CancellationToken cancellationToken)
+    {
+        if (!_sessionActors.TryGet(sessionId, out var actor)) return false;
+        OwnedProviderEventForwarding.Use? handleUse = null;
+        try
+        {
+            // A task goes on outside the runs: neither a run nor a queue that drains holds this back.
+            var handle = await actor.QueryAsync(_ =>
+            {
+                if (_transitions.ContainsKey(sessionId) || !_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated
+                    || !entry.BackgroundTasks.Any(task => task.Outcome is null && string.Equals(task.TaskId, taskId, StringComparison.Ordinal)))
+                    return ValueTask.FromResult<AgentSessionHandleId?>(null);
+                handleUse = entry.Attachment.TryAcquireHandleUse();
+                return ValueTask.FromResult(handleUse is null ? (AgentSessionHandleId?)null : entry.SessionHandleId);
+            }, CancellationToken.None).ConfigureAwait(false);
+            if (handle is null) return false;
+            var lifetime = new RuntimeCommandLifetime(new { Runtime = this, Use = handleUse });
+            return await lifetime.RunAsync(token => _agentHub.StopBackgroundTaskAsync(handle.Value, taskId, token),
+                cancellationToken, handleUse!.Attachment.Cancellation.Token).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))
+        {
+            handleUse?.Retain(failure);
+            _forwarding.RetainDependencies(failure, this);
+            throw;
+        }
+        finally { handleUse?.Dispose(); }
+    }
+
     internal Task<AgentTargetedAbortOutcome?> AbortRunOwnedCommandAsync(OwnedAbortRunRequest request, CancellationToken executionCancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -1938,7 +1985,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             snapshot = new(entry.Attachment.Ordinal, entry.IsTerminated, entry.Attachment.IsRetiring,
                 entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
                 entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
-            { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents) };
+            { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = entry.BackgroundTasks };
         return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
@@ -3945,6 +3992,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ActiveRunId = runId;
             }
 
+            if (@event is AgentBackgroundTasksEvent tasks)
+            {
+                ObserveBackgroundTasks(tasks);
+            }
+
             if (@event is AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown })
             {
                 ActiveRunId = null;
@@ -3954,8 +4006,34 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             if (@event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Shutdown })
             {
                 IsTerminated = true;
+                BackgroundTasks = [];
             }
         }
+
+        /// <summary>The background tasks of the provider: those that go on, then the last that failed or were stopped.</summary>
+        public IReadOnlyList<SessionRuntimeBackgroundTask> BackgroundTasks { get; private set; } = [];
+
+        // The tasks that go on are the ones the event lists, all of them. A task that failed or was stopped is
+        // kept after them for the call that started it, which otherwise only says that it returned; a task that
+        // ran to its end leaves nothing, and neither does one that runs again.
+        private void ObserveBackgroundTasks(AgentBackgroundTasksEvent @event)
+        {
+            // A task says that it ended just before the list that no longer has it: it is not shown as going on meanwhile.
+            var live = @event.Tasks.Where(task => !@event.Ended.Any(ended => ended.TaskId == task.TaskId)).Take(MaximumBackgroundTasks)
+                .Select(static task => new SessionRuntimeBackgroundTask(task.TaskId, task.Kind, task.Description, task.ToolCallId, task.StartedAt, null))
+                .ToArray();
+            var ended = @event.Ended
+                .Where(static task => task.Outcome is not AgentBackgroundTaskOutcome.Completed && task.ToolCallId is not null)
+                .Select(task => new SessionRuntimeBackgroundTask(task.TaskId, BackgroundTasks.FirstOrDefault(known => known.TaskId == task.TaskId)?.Kind ?? "task",
+                    task.Summary, task.ToolCallId, null, task.Outcome))
+                .Concat(BackgroundTasks.Where(static task => task.Outcome is not null))
+                .Where(task => !Array.Exists(live, running => running.TaskId == task.TaskId || running.ToolCallId == task.ToolCallId))
+                .DistinctBy(static task => task.TaskId)
+                .Take(MaximumBackgroundTasks);
+            BackgroundTasks = [.. live, .. ended];
+        }
+
+        private const int MaximumBackgroundTasks = 16;
 
         public IReadOnlyList<ParentNotificationWork> TakeParentNotifications(AgentEvent? @event)
         {

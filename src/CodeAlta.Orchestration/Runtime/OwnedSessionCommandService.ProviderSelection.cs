@@ -11,6 +11,25 @@ public sealed partial class OwnedSessionCommandService
         return _runtime.ReadProviderSelectionAsync(sessionId);
     }
 
+    /// <summary>
+    /// Asks the provider of a session to stop one of its background tasks. The end of the task is told by the
+    /// state of the session; a task that already ended is not an error.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="taskId">The identity of the task, as the state of the session lists it.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns><c>ok</c> when the provider took the request, <c>unavailable</c> when the session runs no such task, <c>closed</c> when the owner is closing.</returns>
+    /// <exception cref="ArgumentException">An identity is empty.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    public async Task<string> StopBackgroundTaskAsync(string sessionId, string taskId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        lock (_gate) { if (_closed || _retained) return "closed"; }
+        try { return await _runtime.StopBackgroundTaskAsync(sessionId, taskId, cancellationToken).ConfigureAwait(false) ? "ok" : "unavailable"; }
+        catch (ObjectDisposedException) { return "closed"; }
+    }
+
     /// <summary>Saves an idle provider selection. Caller disconnect does not cancel admitted host work.</summary>
     /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion. Send/queue admission
     /// and shutdown already honor and drain this reservation. No automatic retry is performed.</remarks>

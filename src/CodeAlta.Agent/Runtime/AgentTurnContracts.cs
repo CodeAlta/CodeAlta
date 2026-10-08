@@ -62,6 +62,33 @@ internal interface IAgentProviderInitiatedTurns
 }
 
 /// <summary>
+/// A turn executor whose provider goes on working for a session in the background, outside its turns (an agent
+/// CLI with a command that still runs).
+/// </summary>
+internal interface IAgentProviderBackgroundTasks
+{
+    /// <summary>
+    /// Registers what is called when the background tasks of a session change, with the tasks that go on and
+    /// those that just ended. The handler is called while the provider is being read: it must not wait.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="handler">What is called for each change.</param>
+    /// <returns>The registration, which is disposed to end it.</returns>
+    IDisposable OnBackgroundTasksChanged(string sessionId, Action<IReadOnlyList<AgentBackgroundTask>, IReadOnlyList<AgentBackgroundTaskEnd>> handler);
+
+    /// <summary>Returns the background tasks of a session that go on now.</summary>
+    /// <param name="sessionId">The session.</param>
+    IReadOnlyList<AgentBackgroundTask> GetBackgroundTasks(string sessionId);
+
+    /// <summary>Asks the provider to stop one background task of a session.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="taskId">The identity of the task.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Whether the provider took the request.</returns>
+    Task<bool> StopBackgroundTaskAsync(string sessionId, string taskId, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// A turn executor whose provider runs tools itself (an agent CLI): the session still shows and records each
 /// tool call, but the definition that "runs" it comes from the executor.
 /// </summary>

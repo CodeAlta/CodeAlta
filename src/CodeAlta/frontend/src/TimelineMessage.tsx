@@ -1,4 +1,5 @@
 import { memo, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
@@ -43,6 +44,9 @@ type TimelineMessageProps = { item: TimelineItem; canInspect?: () => boolean; to
 
 // A long timeline is rendered again on every page of history and every live update: a row whose item,
 // source range and image reader are the same has nothing to redo.
+// What a tile says of a call whose task goes on in the background, or ended there without running to its end.
+const backgroundOutcome = { running: "Running in the background", failed: "Failed in the background", stopped: "Stopped in the background" } as const;
+
 function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps): boolean {
   const before = previous.historySource, after = next.historySource;
   return previous.item === next.item && previous.toolTile === next.toolTile && previous.canInspect === next.canInspect
@@ -62,6 +66,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const linkScope = useContext(MarkdownLinkScopeContext);
   const messageLink = openLink ? (address: string) => { if (canInspect?.() ?? true) openLink(address, linkScope); } : null;
   const state = item.category === "tool" ? toolState(item.toolPhase) : null;
+  // A call that started a task only says that it returned: what its task does in the background is said beside.
+  const backgroundCalls = useContext(BackgroundCallsContext);
+  const background = item.category === "tool" && state === "completed" && item.toolCall ? backgroundCalls.get(item.toolCall.activityId) : undefined;
   // A call that runs is followed: its tile says how much it wrote and its last line.
   const live = useToolOutput(toolOutputs, item.toolCall?.activityId, toolTile && (state === "running" || state === "pending"));
   const timestamp = timelineTime(item.timestamp, locale);
@@ -166,13 +173,13 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       if (item.category === "tool" && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
-    data-tool-phase={item.toolPhase} data-delegated={item.delegated ? "true" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
         <span>{item.category === "tool" && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup="dialog"
           onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
-          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}>{state === "running"
+          onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}>{state === "running" || background === "running"
             ? <ActivitySpinner size={10} className="tool-state-spinner" /> : <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
           : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}
           {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}</span>
@@ -195,7 +202,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         ? <div className="tool-argument-preview" data-path title={item.summary}><bdi>{item.summary}</bdi></div>
         : <div className="tool-argument-preview">{commandPreview(item.summary)}</div>)}
       {toolTile && <div className="tool-result-summary">
-        {outcome && <span className="tool-outcome">{t(outcome)}</span>}
+        {outcome && <span className="tool-outcome">{t(background ? backgroundOutcome[background] : outcome)}</span>}
         {!!item.toolExitCode && <span className="tool-exit-code">{t("Exit code {code}", { code: item.toolExitCode })}</span>}
         {item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
         {live && live.total > 0 ? <span className="tool-output-stats">{live.lines}L · {formatSize(live.total)}</span>

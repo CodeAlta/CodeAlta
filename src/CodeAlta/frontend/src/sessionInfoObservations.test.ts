@@ -9,7 +9,7 @@ const target: RuntimeTarget = { tab: { sessionId: "saved", projectId: null, path
   expectedHostEpoch: epoch, sessionId: "saved", createdAt: "2026-01-01T00:00:00Z", scope: "global", projectId: null, projectPath: null } };
 const runtime = (): SessionRuntimeScopedResponse => ({ status: "ok", hostEpoch: epoch, sessionId: "saved", scope: "global", projectId: null, projectPath: null,
   observation: { status: "ok", hostEpoch: epoch, sessionId: "saved", runtimeInstanceId: epoch, coordinatorTransitionInProgress: false,
-    entry: { attachmentGeneration: "2", isTerminated: false, isRetiring: false, activeRunId: "run", queueDrainInProgress: false,
+    entry: { attachmentGeneration: "2", isTerminated: false, isRetiring: false, activeRunId: "run", backgroundTasks: [], queueDrainInProgress: false,
       providerId: "observed-provider", providerKey: "observed-key", modelId: "observed-model", reasoningEffort: "High", agentPromptId: "current", pendingAgentPromptId: "next", activity: null } } });
 const usage = (): SessionUsageResponse => ({ status: "ok", hostEpoch: epoch, sessionId: "saved", runtimeInstanceId: epoch,
   attachmentGeneration: "2", omittedUsageEvents: "3", observation: { sequence: "4", scope: "LastOperation", source: "LocalProviderUsage",

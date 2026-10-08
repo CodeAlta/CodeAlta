@@ -2,12 +2,13 @@ import type { SessionRuntimeScopedRequest, SessionRuntimeScopedResponse, Workspa
 import { resolveSessionTab, tabKey, type SessionTab } from "./sessionTabs";
 import { validActivity } from "./recentSessions";
 import type { SessionRuntimeActivityResponse } from "#neoastra";
+import { backgroundTasks, runningBackgroundTasks } from "./backgroundTasks";
 
 export type RuntimeTarget = Readonly<{ tab: SessionTab; request: SessionRuntimeScopedRequest }>;
-export type RuntimeObservation = Readonly<{ label: string; details: string; stale?: boolean; epoch?: string; runtime?: string; attachment?: string; activity?: SessionRuntimeActivityResponse; running?: boolean; projectId?: string | null }>;
+export type RuntimeObservation = Readonly<{ label: string; details: string; stale?: boolean; epoch?: string; runtime?: string; attachment?: string; activity?: SessionRuntimeActivityResponse; running?: boolean; background?: number; projectId?: string | null }>;
 type Read = (request: SessionRuntimeScopedRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<SessionRuntimeScopedResponse>;
 export const maximumRuntimeRows = 32;
-type LiveRun = Readonly<{ running: boolean; projectId: string | null }>;
+type LiveRun = Readonly<{ running: boolean; background: number; projectId: string | null }>;
 export type RuntimeObservationState = Readonly<{ rows: ReadonlyMap<string, RuntimeObservation>; summary: string; live: ReadonlyMap<string, LiveRun> }>;
 
 /** Whether a session is working: what its open panel reports wins over the last polled observation. */
@@ -17,6 +18,15 @@ export function sessionRunning(state: RuntimeObservationState, tab: SessionTab):
 function keyRunning(state: RuntimeObservationState, key: string): boolean {
   const row = state.rows.get(key);
   return state.live.get(key)?.running ?? (!!row?.running && !row.stale);
+}
+
+/**
+ * How many tasks the provider of a session goes on doing in the background, outside its runs: what its open
+ * panel reports wins over the last polled observation, as for its run.
+ */
+export function sessionBackground(state: RuntimeObservationState, tab: SessionTab): number {
+  const key = tabKey(tab), row = state.rows.get(key);
+  return state.live.get(key)?.background ?? (row && !row.stale ? row.background ?? 0 : 0);
 }
 
 /** The keys (`tabKey`) of the sessions that are working. */
@@ -55,6 +65,7 @@ export function projectRuntimeObservation(reply: SessionRuntimeScopedResponse): 
       : entry.activeRunId ? "Observed active run" : entry.queueDrainInProgress ? "Observed queue drain" : "Observed attached · no active run";
   return { label, epoch: reply.hostEpoch, runtime: state.runtimeInstanceId, attachment: entry?.attachmentGeneration,
     running: !!entry?.activeRunId && !entry.isRetiring && !entry.isTerminated,
+    background: runningBackgroundTasks(backgroundTasks(entry)).length,
     activity: validActivity(entry?.activity) ? entry.activity : undefined,
     details: `${label}. Observed ${new Date().toISOString()}; may already be stale, not liveness/finality or command authority. Runtime ${state.runtimeInstanceId}; attachment ${entry?.attachmentGeneration ?? "absent"}; run ${entry?.activeRunId ?? "absent"}; transition ${state.coordinatorTransitionInProgress}; retiring ${entry?.isRetiring ?? "unknown"}; terminated ${entry?.isTerminated ?? "unknown"}; queue drain ${entry?.queueDrainInProgress ?? "unknown"}.` };
 }
@@ -86,12 +97,15 @@ export function createRuntimeObservations(read: Read) {
     /** The keys (`tabKey`) of the sessions that work; the set changes only when one starts or stops. */
     getRunning: () => running,
     invalidate,
-    /** Records what the open panel of a session sees of its run; null when the panel stops watching. */
-    setLive(tab: SessionTab, running: boolean | null) {
+    /**
+     * Records what the open panel of a session sees of its run, and how many tasks go on in the background;
+     * null when the panel stops watching.
+     */
+    setLive(tab: SessionTab, running: boolean | null, background = 0) {
       const key = tabKey(tab), current = state.live.get(key);
-      if (running === null ? !current : current?.running === running) return;
+      if (running === null ? !current : current?.running === running && current.background === background) return;
       const live = new Map(state.live);
-      if (running === null) live.delete(key); else live.set(key, { running, projectId: tab.projectId });
+      if (running === null) live.delete(key); else live.set(key, { running, background, projectId: tab.projectId });
       publish(state.rows, state.summary, live);
     },
     async refresh(targets: readonly RuntimeTarget[], omitted = 0) {
@@ -104,7 +118,7 @@ export function createRuntimeObservations(read: Read) {
       const missing = omitted + targets.length - selected.length;
       // A row keeps its last known activity while it reloads, so a running indicator does not blink on every refresh.
       const rows = new Map<string, RuntimeObservation>(selected.map(target => { const key = tabKey(target.tab), prior = before.get(key);
-        return [key, { label: "Loading observation…", details: "Explicit read only; no permission implied.", running: prior?.running, projectId: prior?.projectId }]; }));
+        return [key, { label: "Loading observation…", details: "Explicit read only; no permission implied.", running: prior?.running, background: prior?.background, projectId: prior?.projectId }]; }));
       const summary = (count: number) => `${count}/${selected.length} observed responses; ${missing} omitted/unverified (maximum 32 per refresh). Not atomic across actors; never a recentness or liveness report.`;
       publish(rows, summary(0));
       let completed = 0;

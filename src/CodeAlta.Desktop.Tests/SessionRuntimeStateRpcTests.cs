@@ -12,6 +12,55 @@ public sealed class SessionRuntimeStateRpcTests
     private const string Epoch = "00000000-0000-0000-0000-000000000001";
 
     [TestMethod]
+    public async Task BackgroundTasksAreListedWithinTheWire_AndWhatDoesNotFitIsLeftOutOrCut()
+    {
+        var started = DateTimeOffset.Parse("2026-01-01T12:00:00+02:00", System.Globalization.CultureInfo.InvariantCulture);
+        var longCall = "toolu_" + new string('x', 400);
+        var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null)
+        {
+            BackgroundTasks =
+            [
+                new("b1", "command", "Run   the\ntests", "toolu_1", started, null),
+                // What the provider says of itself is cut; a tool call is named as the timeline names it.
+                new("b2", new string('k', 40), new string('d', 300), longCall, started, null),
+                new("b3", "agent", null, null, null, CodeAlta.Agent.AgentBackgroundTaskOutcome.Failed),
+                new("b4", "command", "  ", "toolu_4", null, CodeAlta.Agent.AgentBackgroundTaskOutcome.Stopped),
+                // An identity that does not fit the wire leaves its task out, and only it.
+                new(new string('i', 65), "command", "Too long an identity", null, started, null),
+                new(" padded", "command", null, null, started, null),
+                new("b5", "", null, null, started, null),
+            ],
+        };
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, entry);
+        var service = new SessionRuntimeStateService((_, _) => Task.FromResult(state), Epoch);
+
+        var value = await service.CurrentAsync(new(Epoch, "session"), default);
+
+        Assert.AreEqual("ok", value.Status);
+        var tasks = value.Entry!.BackgroundTasks;
+        CollectionAssert.AreEqual(new[] { "b1", "b2", "b3", "b4" }, tasks.Select(static task => task.TaskId).ToArray());
+        Assert.AreEqual(("command", "Run the tests", "toolu_1", "running"), (tasks[0].Kind, tasks[0].Description, tasks[0].ToolCallId, tasks[0].State));
+        StringAssert.EndsWith(tasks[0].StartedAt!, "+02:00");
+        Assert.AreEqual(32, tasks[1].Kind.Length);
+        Assert.AreEqual(160, tasks[1].Description!.Length);
+        StringAssert.EndsWith(tasks[1].Description!, "…");
+        Assert.AreEqual(CodeAlta.Orchestration.Runtime.RuntimeDisplayProjection.CompactIdentifier(longCall), tasks[1].ToolCallId);
+        Assert.AreNotEqual(longCall, tasks[1].ToolCallId);
+        Assert.AreEqual(("agent", null, null, null, "failed"), (tasks[2].Kind, tasks[2].Description, tasks[2].ToolCallId, tasks[2].StartedAt, tasks[2].State));
+        Assert.AreEqual((null, "toolu_4", "stopped"), (tasks[3].Description, tasks[3].ToolCallId, tasks[3].State));
+
+        // No more tasks than the page shows, however many the provider lists: the answer stays within the wire.
+        state = state with { Entry = entry with { BackgroundTasks = [.. Enumerable.Range(0, 40).Select(index => new SessionRuntimeBackgroundTask($"t{index}", "command", new string('\u00e9', 300), "toolu_" + index, started, null))] } };
+        var many = await service.CurrentAsync(new(Epoch, "session"), default);
+        Assert.AreEqual("ok", many.Status);
+        Assert.HasCount(16, many.Entry!.BackgroundTasks);
+        Assert.IsTrue(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(many, DesktopJsonContext.Default.SessionRuntimeStateResponse).Length < 32 * 1024);
+        // An attachment whose provider has no such tasks lists none.
+        state = state with { Entry = entry with { BackgroundTasks = [] } };
+        Assert.IsEmpty((await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.BackgroundTasks);
+    }
+
+    [TestMethod]
     public async Task ActivityProjectionPreservesOffsetAndExactCountsAndRejectsInvalidTime()
     {
         var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null)

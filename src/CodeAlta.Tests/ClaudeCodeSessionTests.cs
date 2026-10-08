@@ -904,6 +904,79 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task TasksTheCliRunsInTheBackground_AreToldToTheSession_DuringARunAndOutsideOne()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli
+        {
+            // The order of a real CLI: the list of its tasks, then which call started the new one, then the turn goes on.
+            OnUserMessage = (process, user) =>
+            {
+                process.Emit(BackgroundTasks(process,
+                    new JsonObject { ["task_id"] = "b1", ["run_id"] = "r1", ["task_type"] = "local_bash", ["description"] = "Run the tests" },
+                    new JsonObject { ["task_id"] = "h1", ["task_type"] = "local_agent", ["description"] = "Housekeeping", ["ambient"] = true }));
+                process.Emit(new JsonObject
+                {
+                    ["type"] = "system", ["subtype"] = "task_started", ["task_id"] = "b1", ["run_id"] = "r1", ["tool_use_id"] = "toolu_bg",
+                    ["description"] = "Run the tests", ["is_backgrounded"] = true, ["task_type"] = "local_bash", ["session_id"] = process.SessionId,
+                });
+                process.EmitTextTurn("msg_1", "started", user);
+                return Task.CompletedTask;
+            },
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var tasks = (IAgentBackgroundTaskProvider)session;
+        Assert.IsEmpty(tasks.BackgroundTasks);
+        Assert.IsFalse(await tasks.StopBackgroundTaskAsync("b1").WaitAsync(Timeout), "Nothing runs yet: nothing is asked.");
+        var events = Collect(session);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run the tests in the background") }).WaitAsync(Timeout);
+
+        // The task is told with the call that started it; what the CLI runs for its own housekeeping is not.
+        await events.WaitForAsync(static e => e is AgentBackgroundTasksEvent { Tasks: [{ ToolCallId: "toolu_bg" }] }, Timeout);
+        var task = tasks.BackgroundTasks.Single();
+        Assert.AreEqual(("b1", "command", "Run the tests", "toolu_bg", (string?)null), (task.TaskId, task.Kind, task.Description, task.ToolCallId, task.ParentTaskId));
+        Assert.IsTrue(task.StartedAt > DateTimeOffset.UtcNow.AddMinutes(-1));
+        var told = events.Snapshot().OfType<AgentBackgroundTasksEvent>().ToArray();
+        // The tasks go on outside the runs: their event names no run, which would show the session as running.
+        Assert.IsTrue(told.All(static e => e.RunId is null && e.Ended.Count == 0 && e.Tasks.All(static item => item.TaskId == "b1")));
+        // They are the state of a process that runs now: the history of the session does not keep them.
+        Assert.IsFalse((await session.GetHistoryAsync()).OfType<AgentBackgroundTasksEvent>().Any());
+
+        // The turn ended and the task goes on. It is stopped: the CLI is asked, says that it was killed, then lists what is left.
+        var process = SessionProcess(cli);
+        Assert.IsTrue(await tasks.StopBackgroundTaskAsync("b1").WaitAsync(Timeout));
+        Assert.AreEqual("b1", process.Received.Single(static message => message.GetProperty("type").GetString() == "control_request"
+            && message.GetProperty("request").GetProperty("subtype").GetString() == "stop_task").GetProperty("request").GetProperty("task_id").GetString());
+        // The task is no longer going on from the moment its end is told.
+        await events.WaitForAsync(static e => e is AgentBackgroundTasksEvent { Tasks.Count: 0, Ended: [{ TaskId: "b1", ToolCallId: "toolu_bg", Outcome: AgentBackgroundTaskOutcome.Stopped }] }, Timeout);
+        // Its notice came too, and is not a second end; the list that no longer has it changes nothing that is shown.
+        process.Emit(BackgroundTasks(process, new JsonObject { ["task_id"] = "h1", ["task_type"] = "local_agent", ["ambient"] = true }));
+        await process.McpAsync("ping").WaitAsync(Timeout);
+        Assert.IsEmpty(tasks.BackgroundTasks);
+        Assert.AreEqual(1, events.Snapshot().OfType<AgentBackgroundTasksEvent>().Sum(static e => e.Ended.Count));
+        // Once it ended, the task is never told as going on again by what the CLI still says of that end.
+        var afterEnd = events.Snapshot().OfType<AgentBackgroundTasksEvent>().SkipWhile(static e => e.Ended.Count == 0).ToArray();
+        Assert.IsFalse(afterEnd.Any(static e => e.Tasks.Any(static item => item.TaskId == "b1")));
+
+        // No run is going on: a task that the CLI starts and that fails is told all the same, with what the CLI says of it.
+        process.Emit(BackgroundTasks(process, new JsonObject { ["task_id"] = "w1", ["task_type"] = "watch", ["description"] = "Watch the build" }));
+        await process.McpAsync("ping").WaitAsync(Timeout);
+        await events.WaitForAsync(static e => e is AgentBackgroundTasksEvent { Tasks: [{ TaskId: "w1", Kind: "watch", ToolCallId: null }] }, Timeout);
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "task_notification", ["task_id"] = "w1", ["status"] = "failed", ["summary"] = "The watch failed", ["session_id"] = process.SessionId });
+        process.Emit(BackgroundTasks(process));
+        await process.McpAsync("ping").WaitAsync(Timeout);
+        await events.WaitForAsync(static e => e is AgentBackgroundTasksEvent { Tasks.Count: 0, Ended: [{ TaskId: "w1", Outcome: AgentBackgroundTaskOutcome.Failed, Summary: "The watch failed" }] }, Timeout);
+        Assert.IsEmpty(tasks.BackgroundTasks);
+        // None of this was a run of the session.
+        Assert.IsTrue(events.Snapshot().OfType<AgentBackgroundTasksEvent>().All(static e => e.RunId is null));
+    }
+
+    private static JsonObject BackgroundTasks(ClaudeCodeFakeProcess process, params JsonObject[] tasks)
+        => new() { ["type"] = "system", ["subtype"] = "background_tasks_changed", ["tasks"] = new JsonArray([.. tasks]), ["session_id"] = process.SessionId };
+
+    [TestMethod]
     public async Task TurnTheCliStartsByItself_IsShownAsARunOfTheSession()
     {
         using var directory = TestTempDirectory.Create();
@@ -1055,6 +1128,86 @@ public sealed class ClaudeCodeSessionTests
         Assert.AreEqual("Claude Code started a turn by itself.", shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.User).Content);
         Assert.AreEqual("The tests pass.", shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
         Assert.AreEqual(1, process.UserMessages.Count);
+    }
+
+    [TestMethod]
+    public async Task TasksTheCliRunsInTheBackground_AreInTheRuntimeStateOfTheSession_WhichStopsThem()
+    {
+        // The whole composition of an application without a window: what the window reads of a session, and what it asks to stop.
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        var providerId = new ModelProviderId(options.ProviderKey);
+        await using var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        var execution = new SessionExecutionOptions
+        {
+            ProviderId = providerId,
+            ProviderKey = providerId.Value,
+            WorkingDirectory = projectRoot,
+            ProjectRoots = [projectRoot],
+            Model = "sonnet",
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, execution, title: "Claude Code", CancellationToken.None);
+        await host.RuntimeService.SendAsync(session, execution, new AgentSendOptions { Input = AgentInput.Text("run the tests in the background") }, CancellationToken.None).WaitAsync(Timeout);
+        async Task<SessionRuntimeCurrentEntry> StateAsync(Func<SessionRuntimeCurrentEntry, bool> reached)
+        {
+            using var limit = new CancellationTokenSource(Timeout);
+            while (true)
+            {
+                if ((await host.RuntimeService.GetCurrentStateAsync(session.SessionId, limit.Token)).Entry is { } entry && reached(entry)) return entry;
+                await Task.Delay(20, limit.Token);
+            }
+        }
+
+        await StateAsync(static entry => entry.ActiveRunId is null);
+        Assert.IsFalse(await host.RuntimeService.StopBackgroundTaskAsync(session.SessionId, "b1").WaitAsync(Timeout), "A task that is not listed is not asked to stop.");
+
+        // The turn is over and a command of it goes on.
+        var process = SessionProcess(cli);
+        process.Emit(BackgroundTasks(process, new JsonObject { ["task_id"] = "b1", ["task_type"] = "local_bash", ["description"] = "Run the tests" }));
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "task_started", ["task_id"] = "b1", ["tool_use_id"] = "toolu_bg", ["task_type"] = "local_bash", ["session_id"] = process.SessionId });
+        var working = await StateAsync(static entry => entry.BackgroundTasks is [{ ToolCallId: "toolu_bg" }]);
+        var task = working.BackgroundTasks.Single();
+        Assert.AreEqual(("b1", "command", "Run the tests", (AgentBackgroundTaskOutcome?)null), (task.TaskId, task.Kind, task.Description, task.Outcome));
+        Assert.IsNotNull(task.StartedAt);
+        // A task in the background is not a run: the session takes a prompt, and is not shown as thinking.
+        Assert.IsNull(working.ActiveRunId);
+        Assert.IsFalse(await host.RuntimeService.HasActiveRunAsync(session).WaitAsync(Timeout));
+
+        // It is stopped by the identity the state lists. Its end is kept for the call that started it.
+        Assert.IsTrue(await host.RuntimeService.StopBackgroundTaskAsync(session.SessionId, "b1").WaitAsync(Timeout));
+        process.Emit(BackgroundTasks(process));
+        var stopped = (await StateAsync(static entry => entry.BackgroundTasks is [{ Outcome: not null }])).BackgroundTasks.Single();
+        Assert.AreEqual(("b1", "command", "toolu_bg", AgentBackgroundTaskOutcome.Stopped, (DateTimeOffset?)null), (stopped.TaskId, stopped.Kind, stopped.ToolCallId, stopped.Outcome, stopped.StartedAt));
+        Assert.IsFalse(await host.RuntimeService.StopBackgroundTaskAsync(session.SessionId, "b1").WaitAsync(Timeout), "A task that ended is not asked to stop.");
+        Assert.AreEqual(1, process.Received.Count(static message => message.GetProperty("type").GetString() == "control_request"
+            && message.GetProperty("request").GetProperty("subtype").GetString() == "stop_task"));
+
+        // The same call starts a task again: it is shown as going on, and its previous end is forgotten.
+        process.Emit(BackgroundTasks(process, new JsonObject { ["task_id"] = "b2", ["task_type"] = "local_bash", ["description"] = "Run the tests again" }));
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "task_started", ["task_id"] = "b2", ["tool_use_id"] = "toolu_bg", ["session_id"] = process.SessionId });
+        var again = await StateAsync(static entry => entry.BackgroundTasks is [{ TaskId: "b2", ToolCallId: "toolu_bg" }]);
+        Assert.IsNull(again.BackgroundTasks.Single().Outcome);
+        // A task that runs to its end leaves nothing: the call that started it says that it completed.
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "task_notification", ["task_id"] = "b2", ["status"] = "completed", ["summary"] = "Done", ["tool_use_id"] = "toolu_bg", ["session_id"] = process.SessionId });
+        process.Emit(BackgroundTasks(process));
+        await StateAsync(static entry => entry.BackgroundTasks.Count == 0);
     }
 
     // What the CLI asks before it runs a tool call of the main conversation.

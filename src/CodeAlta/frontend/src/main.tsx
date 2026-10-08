@@ -28,6 +28,8 @@ import {
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
+import { BackgroundCallsContext } from "./BackgroundTaskViews";
+import { backgroundCalls, runningBackgroundTasks, type BackgroundTaskState } from "./backgroundTasks";
 import { MessageLinksContext } from "./TimelineMessage";
 import { markdownHrefKind, openMarkdownLink, type MarkdownLinkScope } from "./markdownLinks";
 import { MarkdownLinkScopeContext } from "./MarkdownContent";
@@ -2499,7 +2501,7 @@ function App() {
                 workCards={owned && workState.settings.notify ? <WorkItemCards hub={workHub} items={sessionCards(work, row.id)} preferredStart={workState.settings.start} busy={workBusy}
                   onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
-                onRunActivity={running => { runtimeObservations.setLive(tab, running); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
+                onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
                 active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
@@ -2865,8 +2867,8 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
 }
 
 function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
-  /** Reports whether the session is working while its panel watches it. */
-  onRunActivity?: (running: boolean | null) => void;
+  /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
+  onRunActivity?: (running: boolean | null, background?: number) => void;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; consume: () => void } | null;
   /** What started the session when it was not the user, shown above its timeline. */
@@ -2928,6 +2930,8 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const [askFormSlot, setAskFormSlot] = useState<HTMLDivElement | null>(null);
   const [askFileSlot, setAskFileSlot] = useState<HTMLDivElement | null>(null);
   const [running, setRunning] = useState<boolean | null>(null);
+  // The tool calls whose task goes on in the background, or ended there: their tiles say so.
+  const [backgroundCallStates, setBackgroundCallStates] = useState<ReadonlyMap<string, BackgroundTaskState>>(() => new Map());
   const [timelineNotices, setTimelineNotices] = useState<HTMLDivElement | null>(null);
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
@@ -3011,7 +3015,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo} />;
   // A relative link of a message, of the notes or of a tool window of this session starts from the folder it works in.
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><div className="session-workspace" data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -3060,7 +3064,12 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
         <div className="ask-form-slot" ref={setAskFormSlot} hidden={askMode === "none"} />
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={chrome}
           epoch={ownedHost ? status!.hostEpoch! : null}
-          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} onRunActivity={value => { setRunning(value); onRunActivity?.(value); }} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} onRunActivity={(value, background) => {
+            setRunning(value);
+            const calls = backgroundCalls(background ?? []);
+            setBackgroundCallStates(current => current.size === calls.size && [...calls].every(([call, state]) => current.get(call) === state) ? current : calls);
+            onRunActivity?.(value, runningBackgroundTasks(background ?? []).length);
+          }} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
@@ -3073,7 +3082,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></MarkdownLinkScopeContext.Provider>;
+  </div></BackgroundCallsContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

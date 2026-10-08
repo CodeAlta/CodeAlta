@@ -38,7 +38,24 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
 {
     /// <summary>Last valid timestamp admitted from this attachment's session/provider-correlated agent events, not historical latest activity.</summary>
     public SessionRuntimeActivity? Activity { get; init; }
+
+    /// <summary>
+    /// What the provider of this attachment does in the background outside its runs, as its last event listed it:
+    /// the tasks that go on, then the last ones that failed or were stopped. Bounded; empty for a provider that
+    /// has no such tasks.
+    /// </summary>
+    public IReadOnlyList<SessionRuntimeBackgroundTask> BackgroundTasks { get; init; } = [];
 }
+
+/// <summary>A background task of a session, as the runtime last heard of it.</summary>
+/// <param name="TaskId">The identity of the task for its provider.</param>
+/// <param name="Kind">What the task is: <c>command</c>, <c>agent</c>, <c>workflow</c>, or the name the provider gives it.</param>
+/// <param name="Description">What the task does, when the provider says it.</param>
+/// <param name="ToolCallId">The tool call that started the task, when the provider says it.</param>
+/// <param name="StartedAt">When the task was first known; null for a task that ended.</param>
+/// <param name="Outcome">Null while the task goes on; how it ended otherwise.</param>
+public sealed record SessionRuntimeBackgroundTask(string TaskId, string Kind, string? Description, string? ToolCallId,
+    DateTimeOffset? StartedAt, AgentBackgroundTaskOutcome? Outcome);
 
 /// <summary>Actor-owned attachment-local activity. Arrival order, not maximum timestamp; never a journal total.</summary>
 /// <param name="Timestamp">Timestamp of the last valid matching admitted agent event, otherwise unknown.</param>

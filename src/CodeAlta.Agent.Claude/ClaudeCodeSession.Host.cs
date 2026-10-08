@@ -90,6 +90,7 @@ internal sealed partial class ClaudeCodeSession
                 session.ReleaseAllHookGates();
                 session.FailOutstandingToolCalls("Claude Code stopped before the tool call completed.");
                 session.CancelPermissionPrompts();
+                session.ForgetBackgroundTasks();
             }
 
             events.TryWrite(new ClosedEvent(failure));
@@ -114,7 +115,6 @@ internal sealed partial class ClaudeCodeSession
     private int _ownTurnsRead;
     private string? _ownTurnNotice;
     private string? _taskSummary;
-    private int _backgroundTasks;
     private Action? _onOwnTurn;
     private TaskCompletionSource? _runForOwnTurn;
     private bool _showsOwnTurn;
@@ -268,7 +268,7 @@ internal sealed partial class ClaudeCodeSession
             lock (_gate)
             {
                 return _connection is { IsClosed: false } &&
-                       ((_stateEventsSeen ? _cliRunning : _turnActive) || _backgroundTasks > 0 || _ownTurnsRead < _ownTurnsStarted);
+                       ((_stateEventsSeen ? _cliRunning : _turnActive) || _taskSet.Count > 0 || _ownTurnsRead < _ownTurnsStarted);
             }
         }
     }
@@ -450,12 +450,10 @@ internal sealed partial class ClaudeCodeSession
                             return new MessageEvent(type, message) { Unanswered = _unansweredUserMessages.Count > 0 };
                         }
                     case "background_tasks_changed":
+                    case "task_started":
+                    case "task_updated":
                         // The commands and the subagents that go on in the background, whatever turn started them.
-                        lock (_gate)
-                        {
-                            _backgroundTasks = ClaudeCodeJson.TryGetArray(message, "tasks", out var tasks) ? tasks.GetArrayLength() : 0;
-                        }
-
+                        ReadBackgroundTaskMessage(ClaudeCodeJson.GetString(message, "subtype"), message);
                         break;
                     case "task_notification":
                         // What ended, as the CLI says it. It starts a turn of its own when no turn is running.
@@ -464,6 +462,7 @@ internal sealed partial class ClaudeCodeSession
                             _taskSummary = ClaudeCodeJson.GetString(message, "summary");
                         }
 
+                        ReadBackgroundTaskMessage("task_notification", message);
                         break;
                 }
 

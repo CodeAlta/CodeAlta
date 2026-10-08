@@ -207,6 +207,20 @@ h1, h2, h3, p { margin-top: 0; }
 .session-tabs[data-dragging="true"] { user-select: none; cursor: grabbing; }
 .session-drop-preview { position: absolute; z-index: 20; pointer-events: none; border: 2px solid var(--accent); background: var(--accent-soft); }
 .session-running { color: var(--green); flex: 0 0 auto; font-size: 11px; }
+/* A session that runs no turn while its provider still works in the background: a dot that breathes, quieter than the spinner of a run. */
+.session-background { flex: 0 0 auto; display: inline-block; width: 7px; height: 7px; margin-inline: 4px; border-radius: 50%; background: var(--green); opacity: .75; animation: session-background 2.4s ease-in-out infinite; }
+@keyframes session-background { 0%, 100% { opacity: .3; transform: scale(.8); } 50% { opacity: .9; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .session-background { animation: none; } }
+.background-tasks-status.bp6-button { min-height: 0; margin-inline-start: 6px; padding: 0 6px; color: inherit; font-size: inherit; }
+.background-tasks { display: grid; gap: 6px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 12px; }
+.background-tasks h6 { margin: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.background-tasks ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; }
+.background-tasks li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.background-task-icon { display: inline-flex; flex: none; color: var(--muted); }
+.background-task-text { display: grid; flex: 1 1 auto; min-width: 0; }
+.background-task-text strong, .background-task-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.background-task-text strong { font-weight: 500; }
+.background-task-text small { color: var(--muted); }
 .new-session-welcome { container-type: inline-size; padding: 0 8px; }
 .welcome-content { min-height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px 0; text-align: center; color: var(--muted); }
 .welcome-content p { max-width: 100%; margin: 4px 0; overflow-wrap: anywhere; }
@@ -837,6 +851,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell [data-tool-phase="failed"] { --tool-outcome-color: var(--red); }
 .ide-shell [data-tool-phase="canceled"], .ide-shell [data-tool-phase="requested"] { --tool-outcome-color: var(--muted); }
 .ide-shell [data-tool-phase="started"], .ide-shell [data-tool-phase="progressed"], .ide-shell [data-tool-phase="selected"] { --tool-outcome-color: var(--accent); }
+/* A call whose task goes on in the background, or ended there: the tone of its task, over the tone of the call that returned. */
+.ide-shell [data-tool-background="running"] { --tool-outcome-color: var(--accent); }
+.ide-shell [data-tool-background="failed"] { --tool-outcome-color: var(--red); }
+.ide-shell [data-tool-background="stopped"] { --tool-outcome-color: var(--muted); }
 .ide-shell .message-tool .tool-tile-title strong, .ide-shell .message-tool .avatar, .ide-shell .tool-command-preview, .ide-shell .tool-state-dot, .ide-shell .tool-outcome { color: var(--tool-outcome-color, var(--muted)); }
 /* Blueprint owns control appearance and state styling. These rules only fit its
    controls into the shell; the root Classes.DARK follows the theme preference. */

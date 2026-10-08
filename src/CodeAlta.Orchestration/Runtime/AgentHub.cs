@@ -277,6 +277,23 @@ public sealed class AgentHub : IAsyncDisposable
         }
     }
 
+    /// <summary>Asks the provider of an existing attachment to stop one of its background tasks.</summary>
+    /// <param name="sessionHandleId">Existing attachment identity; never acquired from a catalog or replaced.</param>
+    /// <param name="taskId">The identity of the task for its provider.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Whether the provider took the request; false for a session whose provider has no background tasks.</returns>
+    /// <exception cref="ArgumentException">The task identity is blank.</exception>
+    /// <exception cref="InvalidOperationException">The handle no longer admits references.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or provider is disposed.</exception>
+    public async Task<bool> StopBackgroundTaskAsync(AgentSessionHandleId sessionHandleId, string taskId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        try { return await entry.Coordinator.StopBackgroundTaskAsync(taskId, cancellationToken).ConfigureAwait(false); }
+        finally { entry.ReleaseReference(); }
+    }
+
     /// <summary>Signals only the expected run on an existing attachment and joins original cancellation work.</summary>
     /// <param name="sessionHandleId">Existing attachment identity; never acquired from a catalog or replaced.</param>
     /// <param name="expectedRunId">Immutable original provider run identity.</param>
@@ -726,6 +743,9 @@ public sealed class AgentHub : IAsyncDisposable
                 _controlGate.Release();
             }
         }
+
+        public Task<bool> StopBackgroundTaskAsync(string taskId, CancellationToken cancellationToken)
+            => _session is IAgentBackgroundTaskProvider provider ? provider.StopBackgroundTaskAsync(taskId, cancellationToken) : Task.FromResult(false);
 
         public Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken)
             => _session is IAgentTargetedAbortProvider provider

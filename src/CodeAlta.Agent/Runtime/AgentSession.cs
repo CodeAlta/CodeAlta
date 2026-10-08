@@ -16,7 +16,8 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
-public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns
+public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns,
+    IAgentBackgroundTaskProvider
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -43,6 +44,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly bool _allowProviderContinuation;
     private readonly Channel<AgentEvent> _eventChannel;
     private readonly ConcurrentDictionary<Guid, Action<AgentEvent>> _subscribers = new();
+    // Held while an event is given to those who listen: the events of a run and what a provider says outside
+    // the runs, from the thread that reads it, reach them one at a time.
+    private readonly Lock _publication = new();
+    private readonly IDisposable? _backgroundTasksRegistration;
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
@@ -122,6 +127,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             AllowSynchronousContinuations = false,
         });
         Provider = provider;
+        // A provider that goes on working outside the runs says so to those who listen to the session.
+        _backgroundTasksRegistration = turnExecutor is IAgentProviderBackgroundTasks background
+            ? background.OnBackgroundTasksChanged(summary.SessionId, PublishBackgroundTasks)
+            : null;
     }
 
     /// <summary>
@@ -158,6 +167,54 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var key = Guid.CreateVersion7();
         _subscribers[key] = handler;
         return new SubscriberLease(() => _subscribers.TryRemove(key, out _));
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<AgentBackgroundTask> BackgroundTasks
+        => !_disposed && _turnExecutor is IAgentProviderBackgroundTasks provider ? provider.GetBackgroundTasks(SessionId) : [];
+
+    /// <inheritdoc />
+    public Task<bool> StopBackgroundTaskAsync(string taskId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
+        return _turnExecutor is IAgentProviderBackgroundTasks provider
+            ? provider.StopBackgroundTaskAsync(SessionId, taskId, cancellationToken)
+            : Task.FromResult(false);
+    }
+
+    // The tasks are the state of a provider that runs now: they are told to those who listen and are neither
+    // kept in the history of the session nor recorded, so that a session read again later shows none. The
+    // event names no run: the tasks go on outside the runs.
+    private void PublishBackgroundTasks(IReadOnlyList<AgentBackgroundTask> tasks, IReadOnlyList<AgentBackgroundTaskEnd> ended)
+    {
+        if (!_disposed)
+        {
+            Publish(new AgentBackgroundTasksEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, tasks, ended));
+        }
+    }
+
+    private void Publish(AgentEvent @event)
+    {
+        lock (_publication)
+        {
+            if (!_eventChannel.Writer.TryWrite(@event))
+            {
+                return;
+            }
+
+            foreach (var subscriber in _subscribers.Values)
+            {
+                try
+                {
+                    subscriber(@event);
+                }
+                catch
+                {
+                }
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -893,6 +950,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
         finally { _stateGate.Release(); }
         run?.SignalCancellation();
+        _backgroundTasksRegistration?.Dispose();
         List<Exception> failures = [];
         // Start cancellation before joining operation scopes, which include actual hooks and all
         // registration/traversal disposal. No new operation can enter after _disposed was published.
@@ -2096,19 +2154,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
         foreach (var @event in events)
         {
-            if (_eventChannel.Writer.TryWrite(@event))
-            {
-                foreach (var subscriber in _subscribers.Values)
-                {
-                    try
-                    {
-                        subscriber(@event);
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
+            Publish(@event);
         }
     }
 

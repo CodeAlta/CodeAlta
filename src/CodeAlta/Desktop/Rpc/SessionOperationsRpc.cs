@@ -228,6 +228,21 @@ internal sealed class SessionOperationsService
         return new(await work.WaitAsync(cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
     }
 
+    // A task of the provider goes on outside the runs: stopping it is not a command of a run and leaves no receipt.
+    // Its effect is read where the task was listed, in the runtime state of the session.
+    [NeoRpcMethod("stopBackgroundTask")]
+    public async Task<SessionStopBackgroundTaskResult> StopBackgroundTaskAsync(SessionStopBackgroundTaskRequest request, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId);
+            if (!Identity(request.SessionId, 256) || !Identity(request.TaskId, 256)) return new("invalid_request", _epoch, request.SessionId);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId);
+        }
+        return new(await _commands.StopBackgroundTaskAsync(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
+    }
+
     [NeoRpcMethod("abort")]
     public SessionAdmission Abort(SessionAbortRequest request, CancellationToken cancellationToken)
     {

@@ -1,4 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { Callout, Tab, Tabs, Tag } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon, type IconName } from "./AppIcon";
@@ -101,6 +102,9 @@ export function ToolCallDialog({ item, reader, outputs, imageSource, current, on
   const args = useMemo(() => parseArguments(call.arguments), [call.arguments]);
   const family = toolFamily(call);
   const ended = call.state === "completed" || call.state === "failed" || call.state === "canceled";
+  // The task a call started goes on after the call returned: the window says it as the tile does.
+  const backgroundCalls = useContext(BackgroundCallsContext);
+  const background = call.state === "completed" && identity ? backgroundCalls.get(identity.activityId) : undefined;
   // The record of an ended call has its output; until it is read, the live output stays.
   const settled = ended && !pending;
   const live = useToolOutput(outputs, identity?.activityId, !settled);
@@ -137,7 +141,10 @@ export function ToolCallDialog({ item, reader, outputs, imageSource, current, on
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!event.repeat && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) onClose(); } }}>
     <AppWindowSurface storageKey="codealta.desktop.window.tool-call.v1" titleId={id} minimumSize={{ width: 420, height: 280 }}
-      title={<span className="tool-title"><AppIcon name={toolIcon(call, family)} size={15} /><span className="tool-title-name">{call.name}</span><ToolStateTag state={call.state} /></span>}
+      title={<span className="tool-title"><AppIcon name={toolIcon(call, family)} size={15} /><span className="tool-title-name">{call.name}</span><ToolStateTag state={call.state} />
+        {background && <Tag minimal round className="tool-state" data-background={background} intent={background === "running" ? "primary" : background === "failed" ? "danger" : "warning"}
+          icon={background === "running" ? <ActivitySpinner size={11} /> : undefined}>
+          {t(background === "running" ? "Running in the background" : background === "failed" ? "Failed in the background" : "Stopped in the background")}</Tag>}</span>}
       preferredSize={viewport => ({ width: Math.min(980, viewport.width - 40), height: Math.min(700, viewport.height - 40) })}
       onClose={onClose} closeLabel={t("Close")} closeRef={closeButton}>
       {(duration !== null || exitCode !== null || directory || timeout !== null || written || files.length > 0) && <div className="tool-summary">

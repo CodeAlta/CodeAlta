@@ -50,6 +50,13 @@ public sealed class DesktopOwnedSessionTests
         Assert.AreEqual("invalid_request", service.Send(request with { References = new("", "/project") }, CancellationToken.None).Status);
         var search = new SessionReferenceSearchRequest("epoch", "project", "/project", null, "file");
         Assert.AreEqual("unconfigured", (await new SessionOperationsService().SearchReferencesAsync(search, CancellationToken.None)).Status);
+        // Stopping a background task is checked like every request of the page before anything is asked.
+        Assert.AreEqual("unconfigured", (await new SessionOperationsService().StopBackgroundTaskAsync(new("epoch", "session", "b1"), CancellationToken.None)).Status);
+        Assert.AreEqual("stale_epoch", (await service.StopBackgroundTaskAsync(new("another", "session", "b1"), CancellationToken.None)).Status);
+        foreach (var refused in new SessionStopBackgroundTaskRequest[] { new("epoch", " ", "b1"), new("epoch", "session", ""), new("epoch", "session", " b1"), new("epoch", "session", new string('x', 257)) })
+            Assert.AreEqual("invalid_request", (await service.StopBackgroundTaskAsync(refused, CancellationToken.None)).Status);
+        // A page whose host owns no session has no task to stop.
+        Assert.AreEqual(("unavailable", "session"), ((await service.StopBackgroundTaskAsync(new("epoch", "session", "b1"), CancellationToken.None)).Status, "session"));
         Assert.AreEqual("stale_epoch", (await service.SearchReferencesAsync(search with { ExpectedEpoch = "old" }, CancellationToken.None)).Status);
         Assert.AreEqual("unavailable", (await service.SearchReferencesAsync(search, CancellationToken.None)).Status);
         var observation = new SessionReferenceObservationRequest("epoch", "project", "/project", null, "@file");

@@ -48,7 +48,7 @@ function releaseCurrentCall(call: typeof currentReads[number], attachmentGenerat
   call.response = { status: "ok", hostEpoch: call.request.expectedHostEpoch, sessionId: call.request.sessionId,
     runtimeInstanceId: epoch, coordinatorTransitionInProgress: false,
     entry: { attachmentGeneration, activeRunId: "literal-run", isTerminated: false, isRetiring: false,
-      queueDrainInProgress: false, providerId: "fixture", providerKey: "fixture", modelId: null,
+      backgroundTasks: [], queueDrainInProgress: false, providerId: "fixture", providerKey: "fixture", modelId: null,
       reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null } };
   call.resolve(call.response);
 }
@@ -148,7 +148,7 @@ Object.assign(window, { settingsShellFixture: { calls, rpcCalls, sends, choiceRe
       projectId: request.projectId, projectPath: request.projectPath, observation: mode === "error" ? null : {
         status: "ok", hostEpoch: epoch, sessionId: request.sessionId, runtimeInstanceId: epoch, coordinatorTransitionInProgress: mode === "transition",
         entry: mode === "absent" ? null : { attachmentGeneration: "1", isTerminated: false, isRetiring: mode === "retiring", activeRunId: "fake-run",
-           queueDrainInProgress: false, providerId: "fixture", providerKey: mode === "info" ? "observed-provider" : "fixture", modelId: mode === "info" ? "observed-model" : null,
+           backgroundTasks: [], queueDrainInProgress: false, providerId: "fixture", providerKey: mode === "info" ? "observed-provider" : "fixture", modelId: mode === "info" ? "observed-model" : null,
            reasoningEffort: mode === "info" ? "High" : null, agentPromptId: mode === "info" ? "current-agent" : null, pendingAgentPromptId: mode === "info" ? "pending-agent" : null,
            activity: { timestamp: "2026-01-01T12:00:00.0000001+02:00", source: "admitted_agent_event", admittedEvents: "2", omittedEvents: "1" } } } });
   },

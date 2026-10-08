@@ -3,8 +3,10 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
+import { BackgroundTasksStatus } from "./BackgroundTaskViews";
+import { backgroundTasks, runningBackgroundTasks, sameBackgroundTasks, type BackgroundTask } from "./backgroundTasks";
 import type { DisplayState } from "./sessionDisplay";
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
@@ -82,7 +84,8 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   remindersTrigger?: Ref<HTMLButtonElement>;
   compactTrigger?: Ref<HTMLButtonElement>;
   /** Reports whether this session is working while the panel watches it, and null once it no longer does. */
-  onRunActivity?: (running: boolean | null) => void;
+  /** What the panel sees of the run of the session and of the tasks of its provider; null when it stops watching. */
+  onRunActivity?: (running: boolean | null, background?: readonly BackgroundTask[]) => void;
   onOpenReminders?: () => void;
   /** A prompt from the New session tab: sent once, when this composer holds exactly that text and its choices are validated. */
   autoSend?: { text: string; consume: () => void } | null;
@@ -378,12 +381,25 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   // Presentation only, like the run above: the host decides what a compaction refuses.
   const compacting = !invalidEpoch && (!!pendingCompact?.inFlight || !!submittedCompact || hasPendingCompaction(sessionId, page));
   const thinkingSeconds = useThinkingElapsed(composerBusy);
+  // What the provider goes on doing in the background, outside its runs. The list is kept while a reading
+  // changes nothing of it, so that what follows it is not shown again every second.
+  const [background, setBackground] = useState<readonly BackgroundTask[]>([]);
+  useEffect(() => {
+    const read = invalidEpoch || runtimeState?.kind !== "ready" ? [] : backgroundTasks(runtimeState.snapshot.entry);
+    setBackground(current => sameBackgroundTasks(current, read) ? current : read);
+  }, [runtimeState, invalidEpoch]);
+  const backgroundRunning = useMemo(() => runningBackgroundTasks(background), [background]);
+  const stopBackgroundTask = useCallback(async (taskId: string) => {
+    if (!capability.canMutate()) return;
+    // The answer is not shown: the task leaves the list when its provider stopped it.
+    await sessions.stopBackgroundTask({ expectedEpoch: epoch, sessionId, taskId }, { timeoutMilliseconds: 15_000 });
+  }, [capability, epoch, sessionId]);
   const runActivity = useRef(onRunActivity); runActivity.current = onRunActivity;
   useEffect(() => {
     if (!watching) return;
-    runActivity.current?.(composerBusy);
+    runActivity.current?.(composerBusy, background);
     return () => runActivity.current?.(null);
-  }, [composerBusy, watching, sessionId]);
+  }, [composerBusy, background, watching, sessionId]);
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
@@ -861,7 +877,8 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
       {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
         : compacting ? t("Compacting…")
-        : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</>}
+        : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}
+      <BackgroundTasksStatus tasks={backgroundRunning} disabled={invalidEpoch} onStop={stopBackgroundTask} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
       onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: t("Ask CodeAlta to work on this project…"), onKeyDown: event => {

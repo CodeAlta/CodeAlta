@@ -8,7 +8,7 @@ const target = (id = "one"): RuntimeTarget => ({ tab: { sessionId: id, projectId
   request: { expectedHostEpoch: "epoch", sessionId: id, createdAt: "2026-01-01T00:00:00Z", scope: "global", projectId: null, projectPath: null } });
 const reply = (id = "one"): SessionRuntimeScopedResponse => ({ status: "ok", hostEpoch: "epoch", sessionId: id, scope: "global", projectId: null, projectPath: null,
   observation: { status: "ok", hostEpoch: "epoch", sessionId: id, runtimeInstanceId: "runtime", coordinatorTransitionInProgress: false,
-    entry: { attachmentGeneration: "9", isTerminated: false, isRetiring: false, activeRunId: "run", queueDrainInProgress: false,
+    entry: { attachmentGeneration: "9", isTerminated: false, isRetiring: false, activeRunId: "run", backgroundTasks: [], queueDrainInProgress: false,
       providerId: "fake", providerKey: "fake", modelId: null, reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null } } });
 
 test("runtime observations distinguish active, absent, transition, retiring, termination and errors without idle inference", () => {
