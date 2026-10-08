@@ -400,9 +400,9 @@ A turn that goes on is never interrupted for it: the note goes with the next pro
 
 A subagent of Claude Code works inside the process of the CLI: it is no session of CodeAlta, so the user cannot open it, read its timeline, write to it or stop it, and it is not listed under its parent. All the session shows of it is a few lines under the tool call that started it, and nothing at all once that call returned because the subagent runs in the background, which is the default of the CLI.
 
-A session that has the `alta` live tool therefore starts the CLI with `--disallowedTools=Agent,Task` (the tool under its name and under the one older versions gave it; `ClaudeCodeLauncher`): the model is not offered the tool, and the note above tells it that what it delegates is a child session (`alta session create`, `alta session send`), as the agent prompt describes for every provider. Checked with CLI 2.1.292: either name removes the tool from the list the CLI reports (`system`/`init`), and a model asked for it answers that it has none.
+A session that has the `alta` live tool therefore starts the CLI with `--disallowedTools=Agent,Task,Workflow` (the subagent tool under its name and under the one older versions gave it, and the tool that runs agents from a script, which are no sessions either; `ClaudeCodeLauncher`): the model is not offered these tools, and the note above tells it that what it delegates is a child session (`alta session create`, `alta session send`), as the agent prompt describes for every provider. Checked with CLI 2.1.292: either name removes the subagent tool from the list the CLI reports (`system`/`init`), `Workflow` removes that one, and a model asked for a subagent tool answers that it has none.
 
-A session without the live tool keeps the subagents of Claude Code, since it has nothing to delegate to. The `Workflow` tool of the CLI, which runs agents from a script when the user asks for it by name, is left as it is.
+A session without the live tool keeps the subagents and the workflows of Claude Code, since it has nothing to delegate to.
 
 ### Permissions, questions and edits
 

@@ -75,8 +75,9 @@ public sealed class ClaudeCodeSessionTests
         StringAssert.Contains(appended, "`alta ask`");
         StringAssert.Contains(appended, "`alta session`");
         // What the model delegates is a child session, which the user sees: the CLI starts without its own
-        // subagent tool, under its name and the one older versions gave it, and the model is told so.
-        CollectionAssert.Contains(process.Launch.Arguments.ToArray(), "--disallowedTools=Agent,Task");
+        // subagent tool, under its name and the one older versions gave it, and without the one that runs agents
+        // from a script, and the model is told so.
+        CollectionAssert.Contains(process.Launch.Arguments.ToArray(), "--disallowedTools=Agent,Task,Workflow");
         StringAssert.Contains(appended, "`alta session` for everything you delegate");
         StringAssert.Contains(appended, "no subagent tool of Claude Code");
         Assert.IsFalse(appended.Contains("stay yours", StringComparison.Ordinal));

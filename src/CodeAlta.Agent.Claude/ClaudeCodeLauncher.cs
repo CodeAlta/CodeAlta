@@ -19,8 +19,9 @@ internal static class ClaudeCodeLauncher
     /// <summary>The prefix the CLI gives the tools of that server.</summary>
     public const string McpToolPrefix = "mcp__" + McpServerName + "__";
 
-    // The tool that starts a subagent of the CLI, by its name and by the one older versions gave it.
-    private const string SubagentTools = "Agent,Task";
+    // The tools that start agents inside the CLI: a subagent, by its name and by the one older versions gave it,
+    // and the agents of a workflow script.
+    private const string SubagentTools = "Agent,Task,Workflow";
 
     // The server is served by this process over the control protocol: nothing is listening anywhere.
     private const string McpConfig = "{\"mcpServers\":{\"" + McpServerName + "\":{\"type\":\"sdk\",\"name\":\"" + McpServerName + "\"}}}";
