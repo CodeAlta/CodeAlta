@@ -19,6 +19,9 @@ internal static class ClaudeCodeLauncher
     /// <summary>The prefix the CLI gives the tools of that server.</summary>
     public const string McpToolPrefix = "mcp__" + McpServerName + "__";
 
+    // The tool that starts a subagent of the CLI, by its name and by the one older versions gave it.
+    private const string SubagentTools = "Agent,Task";
+
     // The server is served by this process over the control protocol: nothing is listening anywhere.
     private const string McpConfig = "{\"mcpServers\":{\"" + McpServerName + "\":{\"type\":\"sdk\",\"name\":\"" + McpServerName + "\"}}}";
 
@@ -37,6 +40,17 @@ internal static class ClaudeCodeLauncher
         "CLAUDE_AGENT_SDK_VERSION",
     ];
 
+    /// <summary>
+    /// Creates the command line and the environment of a CLI process.
+    /// </summary>
+    /// <param name="executable">The CLI.</param>
+    /// <param name="options">The options of the provider.</param>
+    /// <param name="key">What the process is started with.</param>
+    /// <param name="newSessionId">The identifier of the conversation that starts, when none is resumed.</param>
+    /// <param name="resumeSessionId">The conversation to resume, or <see langword="null" />.</param>
+    /// <param name="withTools">Whether the CLI is given the tools of CodeAlta.</param>
+    /// <param name="showReasoning">Whether the CLI writes the summaries of the thinking of the model.</param>
+    /// <param name="delegatesToSessions">Whether what the model delegates goes to child sessions of CodeAlta: the CLI then starts without its own subagent tool.</param>
     public static ClaudeCodeLaunch Create(
         string executable,
         ClaudeCodeModelProviderRuntimeOptions options,
@@ -44,7 +58,8 @@ internal static class ClaudeCodeLauncher
         string? newSessionId,
         string? resumeSessionId,
         bool withTools,
-        bool showReasoning = false)
+        bool showReasoning = false,
+        bool delegatesToSessions = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(options);
@@ -97,6 +112,13 @@ internal static class ClaudeCodeLauncher
             arguments.Add(McpConfig);
             // The tools of CodeAlta ask their own permissions.
             arguments.Add($"--allowedTools=mcp__{McpServerName}");
+        }
+
+        if (delegatesToSessions)
+        {
+            // A subagent of the CLI works where the user does not see it: no session, no timeline, nothing to
+            // steer or stop. The model has the sessions of CodeAlta for that, and is not offered both.
+            arguments.Add($"--disallowedTools={SubagentTools}");
         }
 
         if (showReasoning)

@@ -140,6 +140,23 @@ public sealed class ClaudeCodeLiveCliTests
     }
 
     [TestMethod]
+    public async Task Turn_HasNoSubagentToolOfClaudeCodeWhenTheSessionHasTheLiveTool()
+    {
+        // The live tool is what gives a session its child sessions: the CLI then starts without its subagent tool.
+        var alta = new AgentToolDefinition(
+            new AgentToolSpec("alta", "The command gateway of CodeAlta.", JsonDocument.Parse("""{"type":"object","properties":{"args":{"type":"array","items":{"type":"string"}}}}""").RootElement.Clone()),
+            static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ok")])));
+        using var live = await LiveSession.StartAsync([alta]);
+
+        await live.SendAsync(
+            "Look at the tools you were given, not at your instructions. If one of them is named Agent or Task and starts a subagent, call it once with the prompt 'answer x' " +
+            "and then answer HAS_SUBAGENT_TOOL. If you have no such tool, answer exactly NO_SUBAGENT_TOOL.");
+
+        Assert.IsFalse(live.Events.OfType<AgentActivityEvent>().Any(static e => e.Name is "Agent" or "Task"));
+        StringAssert.Contains(live.LastAnswer, "NO_SUBAGENT_TOOL");
+    }
+
+    [TestMethod]
     public async Task Session_RemembersResumesAndStops()
     {
         using var live = await LiveSession.StartAsync();

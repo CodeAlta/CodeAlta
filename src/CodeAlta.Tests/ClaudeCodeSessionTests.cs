@@ -34,6 +34,9 @@ public sealed class ClaudeCodeSessionTests
         Assert.IsTrue(process.Launch.Arguments.Any(static argument => argument.StartsWith("--session-id=", StringComparison.Ordinal)));
         Assert.AreEqual(directory.Path, process.Launch.WorkingDirectory);
         Assert.AreEqual("hello", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()));
+        Assert.IsFalse(
+            process.Launch.Arguments.Any(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)),
+            "A session without the live tool has no child sessions to delegate to: Claude Code keeps its subagents.");
 
         var delta = events.Snapshot().OfType<AgentContentDeltaEvent>().Single(static e => e.Kind == AgentContentKind.Assistant);
         var completed = events.Snapshot().OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant);
@@ -71,6 +74,12 @@ public sealed class ClaudeCodeSessionTests
         // What CodeAlta has its own mechanism for is said once, for every agent prompt: which one to use.
         StringAssert.Contains(appended, "`alta ask`");
         StringAssert.Contains(appended, "`alta session`");
+        // What the model delegates is a child session, which the user sees: the CLI starts without its own
+        // subagent tool, under its name and the one older versions gave it, and the model is told so.
+        CollectionAssert.Contains(process.Launch.Arguments.ToArray(), "--disallowedTools=Agent,Task");
+        StringAssert.Contains(appended, "`alta session` for everything you delegate");
+        StringAssert.Contains(appended, "no subagent tool of Claude Code");
+        Assert.IsFalse(appended.Contains("stay yours", StringComparison.Ordinal));
         // A turn the CLI starts by itself after a run is shown while the session is open: what has to bring the
         // agent back in any case takes a reminder.
         StringAssert.Contains(appended, "starts a turn the user sees as a run of the session");

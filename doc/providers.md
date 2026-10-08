@@ -384,7 +384,7 @@ The instructions are the ones every provider gets: there is no second set of pro
 
 - a tool named `<name>` is `mcp__codealta__<name>`, and `alta <command> ...` is a call of that tool with those words as `args`, never a shell command;
 - CodeAlta's file, search, web, shell and question tools are not part of the session: the same work is done with the tools of Claude Code, which the note does not name (which ones a version of the CLI has is its own business);
-- what CodeAlta has its own way for is done its way, because the user sees and manages it in the window: `alta session` for the delegation the user asks for (the subagents of Claude Code stay its own, for its own work), `alta ask`, `alta skill`, the plan mode and the plan files, `alta notes`, `alta reminder`;
+- what CodeAlta has its own way for is done its way, because the user sees and manages it in the window: `alta session` for everything the model delegates (see "Sub-agents" below), `alta ask`, `alta skill`, the plan mode and the plan files, `alta notes`, `alta reminder`;
 - a background command of its own that ends after its turn, or a wake-up of its own that fires, starts a turn the user sees as a run of the session, as long as the session stays open in CodeAlta (see "Turns Claude Code starts by itself"): for what has to bring it back in any case it sets an `alta reminder`;
 - where the instructions differ from the defaults of Claude Code (when to commit, for instance), the instructions are followed.
 
@@ -395,6 +395,14 @@ The instructions are the ones every provider gets: there is no second set of pro
 - what the conversation was told is not known (the hash kept in the provider state of the session differs after a restart of the application, or the session predates this): the note gives all the instructions, as a replacement.
 
 A turn that goes on is never interrupted for it: the note goes with the next prompt. The provider state of the session keeps the hash of what was told last (`instructions`).
+
+### Sub-agents
+
+A subagent of Claude Code works inside the process of the CLI: it is no session of CodeAlta, so the user cannot open it, read its timeline, write to it or stop it, and it is not listed under its parent. All the session shows of it is a few lines under the tool call that started it, and nothing at all once that call returned because the subagent runs in the background, which is the default of the CLI.
+
+A session that has the `alta` live tool therefore starts the CLI with `--disallowedTools=Agent,Task` (the tool under its name and under the one older versions gave it; `ClaudeCodeLauncher`): the model is not offered the tool, and the note above tells it that what it delegates is a child session (`alta session create`, `alta session send`), as the agent prompt describes for every provider. Checked with CLI 2.1.292: either name removes the tool from the list the CLI reports (`system`/`init`), and a model asked for it answers that it has none.
+
+A session without the live tool keeps the subagents of Claude Code, since it has nothing to delegate to. The `Workflow` tool of the CLI, which runs agents from a script when the user asks for it by name, is left as it is.
 
 ### Permissions, questions and edits
 
@@ -448,7 +456,7 @@ args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 - A turn Claude Code starts by itself is only shown while its process runs. The process ends with the session (the application is closed, the session is detached, a stopped turn that the CLI does not end), and its background commands with it: nothing then starts the turn. The note above therefore tells Claude Code to set an `alta reminder` for what has to bring it back in any case. A process that lists a background task is kept for as long as the task runs, also one that never ends (a development server).
 - The message of the run that shows such a turn is recorded as a user message, and the timeline shows it as one.
 - A tool call that was running when a run is stopped stays shown as running, as for any provider: the session records no end for it.
-- The tool calls of a subagent are shown as the output of the `Agent` tool call that started it, not as tool calls of the session.
+- In a session without the live tool, the tool calls of a subagent of Claude Code are shown as the output of the `Agent` tool call that started it, not as tool calls of the session, and only until that call returns.
 - `ExitPlanMode` and tools other than commands and edits are allowed without a CodeAlta prompt.
 - Images and PDFs of a prompt are sent as attachments; other files are passed as text.
 - Changing the instructions or the tools during a conversation does not change the system prompt the CLI recorded.

@@ -68,8 +68,9 @@ internal static class ClaudeCodePrompts
         if (hasGateway)
         {
             // Claude Code has a tool of its own for most of what CodeAlta does with its sessions, questions,
-            // skills, plans and notes. The instructions name the way of CodeAlta without saying it wins.
-            builder.AppendLine($"- What CodeAlta has its own way for, do its way: the user sees and manages it in the CodeAlta window. That is `{GatewayTool} session` for the child sessions and the delegation the user asks for (your own subagents stay yours, for your own work), `{GatewayTool} ask` for questions to the user, `{GatewayTool} skill` for the skills the instructions list, the plan mode and the plan files as the instructions describe them, `{GatewayTool} notes` and `{GatewayTool} reminder`.");
+            // skills, plans and notes. The instructions name the way of CodeAlta without saying it wins. Its
+            // subagent tool is the one it is started without (ClaudeCodeLauncher): what it delegates is a session.
+            builder.AppendLine($"- What CodeAlta has its own way for, do its way: the user sees and manages it in the CodeAlta window. That is `{GatewayTool} session` for everything you delegate (a sub-agent is a child session of CodeAlta, as the instructions describe, also for a search or a review of your own: this session has no subagent tool of Claude Code), `{GatewayTool} ask` for questions to the user, `{GatewayTool} skill` for the skills the instructions list, the plan mode and the plan files as the instructions describe them, `{GatewayTool} notes` and `{GatewayTool} reminder`.");
             // The CLI tells the model that a background command starts it again when it ends. CodeAlta shows that
             // turn as a run, but only a process that is still there starts it: a reminder does not depend on it.
             builder.AppendLine($"- A background command of yours that ends after your turn, or a wake-up of yours that fires, starts a turn the user sees as a run of the session, as long as the session stays open in CodeAlta. For what has to bring you back in any case, set a `{GatewayTool} reminder` as the instructions say.");

@@ -451,7 +451,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         string appendSystemPrompt,
         CancellationToken cancellationToken)
     {
-        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning);
+        bool hasGateway;
+        lock (_gate)
+        {
+            hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
+        }
+
+        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning, delegatesToSessions: hasGateway);
         var channel = Channel.CreateUnbounded<TurnEvent>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var generation = Interlocked.Increment(ref _generation);
         var transport = _transportFactory.Start(launch);
