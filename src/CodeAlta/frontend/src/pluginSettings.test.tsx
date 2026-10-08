@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { PluginsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { PluginRows, pluginFailure, pluginRows } from "./PluginSettings";
+import { PluginProblems, PluginRows, pluginFailure, pluginRows } from "./PluginSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
@@ -31,6 +31,38 @@ test("the plugins that ship with CodeAlta come first and are on until configurat
   assert.equal(rows[1].entry?.id, "git");
   assert.equal(rows[5].description, "Keeps notes.");
   assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "ui"]);
+});
+
+test("a source plugin with the id of a plugin that ships with CodeAlta keeps its own row and its actions", () => {
+  const rows = pluginRows([entry("git", { enabledGlobal: false, enabled: false, state: "Disabled", runtime: null })], english);
+  assert.deepEqual(rows.map(row => [row.id, row.builtIn, row.entry?.kind ?? null, row.enabled]),
+    [["mcp", true, null, true], ["git", true, null, false], ["jira", true, null, true], ["statistics", true, null, true], ["ui", true, null, true], ["git", false, "Source", false]]);
+  const html = render([entry("git")]);
+  assert.equal(cards(html).filter(value => value.includes("<strong>git</strong>") && value.includes('aria-label="Edit git"')).length, 1, html);
+  assert.ok(!card(html, "Git").includes("Edit Git"), html);
+});
+
+test("what could not be read is named above the list, with its path and what was said of it, in every language", () => {
+  const problems = [
+    { kind: "config", path: "/work/app/.alta/config.toml", message: "(2,1): expected ]", scope: "Project" },
+    { kind: "folder", path: "/home/.alta/plugins", message: "Access denied", scope: "Global" },
+    { kind: "name", path: "/home/.alta/plugins/my plugin", message: null, scope: "Global" },
+    { kind: "runtime", path: null, message: "The process cannot access the file", scope: null },
+  ];
+  for (const locale of locales) {
+    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(PluginProblems, { problems, omitted: 3 })));
+    assert.equal(html.split('class="plugin-failure"').length - 1, 5, html);
+    for (const text of [
+      translate(locale, "The configuration file {path} could not be read.", { path: "/work/app/.alta/config.toml" }) + " (2,1): expected ]",
+      translate(locale, "The plugin folder {path} could not be read.", { path: "/home/.alta/plugins" }) + " Access denied",
+      translate(locale, "{path} is not listed: the name of its folder is not a plugin id.", { path: "/home/.alta/plugins/my plugin" }),
+      translate(locale, "The state of the running plugins could not be read."),
+      translate(locale, "{count} more are not listed.", { count: 3 }),
+    ]) assert.ok(html.includes(text), `${locale}: ${text}\n${html}`);
+  }
+  assert.equal(renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(PluginProblems, { problems: [], omitted: 0 }))), "");
 });
 
 test("a source plugin that is on is built again and opened in the code editor from its row, in every language", () => {

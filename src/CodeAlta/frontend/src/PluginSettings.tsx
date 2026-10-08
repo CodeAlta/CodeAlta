@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
-import { plugins, type PluginsEntry } from "#neoastra";
+import { plugins, type PluginsEntry, type PluginsProblem } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
 import { settingsFailure, type SettingsNotice, type SettingsScope } from "./settingsEditing";
@@ -43,14 +43,38 @@ export function pluginFailure(status: string, message?: string | null): Settings
 /** One row of the page: a plugin that ships with CodeAlta, or one that configuration or a plugin folder names. */
 export type PluginRow = Readonly<{ id: string; name: string; description: string | null; enabled: boolean; entry: PluginsEntry | null; builtIn: boolean }>;
 
-/** The rows of what the host lists: the plugins that ship with CodeAlta first, enabled until configuration says otherwise. */
+/**
+ * The rows of what the host lists: the plugins that ship with CodeAlta first, enabled until configuration says
+ * otherwise. A source plugin that has the id of one of them keeps a row of its own, with its actions.
+ */
 export function pluginRows(listed: readonly PluginsEntry[], t: (key: MessageKey) => string): PluginRow[] {
+  const source = (entry: PluginsEntry) => entry.kind === "Source";
   return [
-    ...builtIn.map(plugin => { const entry = listed.find(value => value.id === plugin.id) ?? null;
-      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: entry?.enabled ?? true, entry, builtIn: true }; }),
-    ...listed.filter(entry => !builtIn.some(plugin => plugin.id === entry.id))
+    ...builtIn.map(plugin => { const entry = listed.find(value => value.id === plugin.id && !source(value)) ?? null;
+      // Configuration has one switch per id: the package of that id says what it holds for the built-in one.
+      const configured = entry?.enabled ?? listed.find(value => value.id === plugin.id)?.enabledGlobal ?? true;
+      return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true }; }),
+    ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id))
       .map(entry => ({ id: entry.id, name: entry.name || entry.id, description: entry.description, enabled: entry.enabled, entry, builtIn: false })),
   ];
+}
+
+const problemText: Record<string, MessageKey> = {
+  config: "The configuration file {path} could not be read.",
+  folder: "The plugin folder {path} could not be read.",
+  name: "{path} is not listed: the name of its folder is not a plugin id.",
+  runtime: "The state of the running plugins could not be read.",
+};
+
+/** What the host could not read while it listed the rest: each file or folder by its path, with what was said of it. */
+export function PluginProblems({ problems, omitted }: { problems: readonly PluginsProblem[]; omitted: number }) {
+  const { t } = useShellLanguage();
+  if (problems.length === 0 && omitted <= 0) return null;
+  return <div className="plugin-problems" role="alert">
+    {problems.map((problem, index) => <small key={index} className="plugin-failure">
+      {t(problemText[problem.kind] ?? "The settings could not be read.", { path: problem.path ?? "" })}{problem.message ? ` ${problem.message}` : ""}</small>)}
+    {omitted > 0 && <small className="plugin-failure">{t("{count} more are not listed.", { count: omitted })}</small>}
+  </div>;
 }
 
 /**
@@ -154,6 +178,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, api = plu
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || disabled}>{t("New plugin")}</Button></PopoverNext>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="plugin" title="Plugins unavailable" /> : <>
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
+      <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} />
       <PluginRows rows={rows} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} />
     </>}
   </SettingsPage>;

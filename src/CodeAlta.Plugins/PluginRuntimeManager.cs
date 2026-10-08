@@ -331,7 +331,9 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         {
             new() { RootPath = Path.Combine(options.GlobalRoot, "plugins"), Scope = PluginScope.Global },
         };
-        if (options.ProjectContext is not null)
+        // A host started in the folder that holds the global root (the home folder) has one plugin folder: its
+        // packages are the global ones, and are not found a second time as those of the project.
+        if (options.ProjectContext is not null && !SameDirectory(Path.Combine(options.ProjectContext.ProjectPath, ".alta", "plugins"), roots[0].RootPath))
         {
             roots.Add(new PluginRoot
             {
@@ -343,6 +345,18 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         }
 
         return roots;
+    }
+
+    private static bool SameDirectory(string left, string right)
+    {
+        try
+        {
+            return PathComparer.Equals(PluginRuntimePathService.NormalizeDirectory(left), PluginRuntimePathService.NormalizeDirectory(right));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException)
+        {
+            return false; // A path that names no folder is the folder of nothing.
+        }
     }
 
     private static PluginHostInfo CreateHostInfo(PluginRuntimeManagerOptions options)

@@ -1639,7 +1639,8 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .plugin-picker-row[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
 .plugin-picker-label, .plugin-picker-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-picker-description { color: var(--muted); font-size: 12px; text-align: right; }
-.plugin-settings .settings-editor-name .plugin-failure { color: var(--red); white-space: normal; overflow-wrap: anywhere; }
+.plugin-settings .settings-editor-name .plugin-failure, .plugin-problems .plugin-failure { color: var(--red); white-space: normal; overflow-wrap: anywhere; }
+.plugin-problems { display: grid; gap: 4px; font-size: 12px; }
 .plugin-detail + .plugin-detail { margin-top: 12px; }
 
 /* Providers: default markers on blank fields and the account sign-in block. */

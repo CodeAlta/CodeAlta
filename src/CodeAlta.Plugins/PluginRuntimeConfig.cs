@@ -83,8 +83,9 @@ public sealed class PluginRuntimeConfigResolver
                 Diagnostics = diagnostics,
             };
         }
-        catch (InvalidDataException ex)
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
         {
+            // Also a file that stopped being readable between its validation and this load.
             diagnostics.Add(PluginRuntimeDiagnostic.Error(
                 PluginRuntimeDiagnosticSource.Config,
                 "Plugin enablement was not resolved because CodeAlta configuration could not be loaded after validation.",
@@ -224,7 +225,23 @@ public sealed class PluginRuntimeConfigResolver
             return true;
         }
 
-        var validation = CodeAltaConfigStore.ValidateGlobalConfigContent(File.ReadAllText(path), path);
+        string content;
+        try
+        {
+            content = File.ReadAllText(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Another program is writing the file, or it cannot be opened: enablement is not guessed.
+            diagnostics.Add(PluginRuntimeDiagnostic.Error(
+                PluginRuntimeDiagnosticSource.Config,
+                $"Plugin enablement was not resolved because the {scope} CodeAlta config could not be read: {exception.Message}",
+                path: path,
+                exception: exception));
+            return false;
+        }
+
+        var validation = CodeAltaConfigStore.ValidateGlobalConfigContent(content, path);
         if (validation.IsValid)
         {
             return true;

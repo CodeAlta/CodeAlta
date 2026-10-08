@@ -1590,6 +1590,26 @@ not started in is listed and edited, not loaded), `changed`, `errors`, `runtime`
 `unavailable`; `create` answers the folder id, the path and the name of the new plugin, or `exists`
 and `invalid`.
 
+`list` answers `ok` with every plugin it could read, and names what it could not read in `problems`
+(`PluginProblems` shows them above the list, in red, each with its path and what the parser or the
+system said):
+
+| `kind` | What could not be read | What the list does |
+| --- | --- | --- |
+| `config` | The global `config.toml` or the `.alta/config.toml` of the project: it does not parse, or another program is writing it | The plugins are listed as if that file said nothing of them |
+| `folder` | A plugin folder that cannot be listed | The packages of the other folder are listed |
+| `name` | A package whose folder name is no plugin id | It is named with its folder and not listed |
+| `runtime` | What the running host did with the packages | The plugins are listed without their running state |
+
+`omitted` counts what is neither listed nor named: plugins past the limit of one listing, and an id of
+configuration that is no plugin id. An exception the listing does not expect answers `read_failed`
+and is written to the log (`CodeAlta.Desktop.Rpc`). A source plugin that has the id of a built-in one
+(`git`, `mcp`...) has a row of its own after the built-in rows.
+
+The plugin runtime has one plugin folder when the application is started in the folder that holds
+the global root (the home folder, whose `.alta/plugins` is `~/.alta/plugins`): the packages are the
+global ones, and none is built or listed twice (`PluginRuntimeManager.Roots`).
+
 ## Plugins
 
 The normal launch (`alta`, `alta --dev`) starts the plugin runtime like the terminal UI, before the

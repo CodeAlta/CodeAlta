@@ -921,7 +921,16 @@ public sealed class PluginBuildManifestStore
 
         void Add(string sourcePath)
         {
-            var fullPath = Path.GetFullPath(sourcePath);
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(sourcePath);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+            {
+                return; // An `#:include` line whose text is no path names no source file: the build reports it.
+            }
+
             if (!seenPaths.Add(fullPath) || !File.Exists(fullPath))
             {
                 return;

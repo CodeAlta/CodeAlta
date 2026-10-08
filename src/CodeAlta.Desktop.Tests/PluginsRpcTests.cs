@@ -1,5 +1,7 @@
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Plugins;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -135,7 +137,6 @@ public sealed class PluginsRpcTests
         Assert.AreEqual(GlobalConfiguration, File.ReadAllText(fixture.GlobalConfig));
 
         File.WriteAllText(fixture.GlobalConfig, "[plugins\nbroken");
-        Assert.AreEqual("config_invalid", (await fixture.Service.ListAsync(new(Epoch, null), default)).Status);
         var unreadable = await fixture.Service.SetEnabledAsync(new(Epoch, null, "Global", "sample-plugin", false), default);
         Assert.AreEqual("config_invalid", unreadable.Status);
         Assert.IsNull(unreadable.Message);
@@ -150,6 +151,105 @@ public sealed class PluginsRpcTests
         Assert.AreEqual("archived_project", (await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default)).Status);
         Assert.AreEqual("archived_project", (await fixture.Service.SetEnabledAsync(new(Epoch, fixture.Project.Id, "Project", "local-plugin", false), default)).Status);
         Assert.IsFalse(File.Exists(fixture.ProjectConfig));
+    }
+
+    [TestMethod]
+    public async Task List_WithAConfigurationFileThatDoesNotParse_ListsThePluginsAndNamesTheFile()
+    {
+        using var fixture = await Fixture.CreateAsync(GlobalConfiguration);
+        var project = fixture.Project.Id;
+        Directory.CreateDirectory(Path.GetDirectoryName(fixture.ProjectConfig)!);
+        // What an agent wrote to turn its plugin on, with a table that does not close.
+        File.WriteAllText(fixture.ProjectConfig, "[plugins.local-plugin\nenabled = true\n");
+
+        var listed = await fixture.Service.ListAsync(new(Epoch, project), default);
+
+        Assert.AreEqual("ok", listed.Status);
+        CollectionAssert.AreEquivalent(new[] { "sample-plugin", "mcp", "local-plugin" }, listed.Plugins.Select(plugin => plugin.Id).ToArray());
+        var problem = listed.Problems!.Single();
+        Assert.AreEqual(("config", fixture.ProjectConfig, "Project"), (problem.Kind, problem.Path, problem.Scope));
+        Assert.IsFalse(string.IsNullOrWhiteSpace(problem.Message));
+        // The global file is read: what it says still applies. The project file says nothing here.
+        Assert.IsTrue(listed.Plugins.Single(plugin => plugin.Id == "mcp") is { Enabled: false, EnabledGlobal: false });
+        Assert.IsTrue(listed.Plugins.Single(plugin => plugin.Id == "local-plugin") is { Enabled: true, EnabledProject: null, Scope: "Project" });
+        Assert.AreEqual(0, (await fixture.Service.ListAsync(new(Epoch, null), default)).Problems!.Count, "The file of a project is not read without that project.");
+
+        File.Delete(fixture.ProjectConfig);
+        File.WriteAllText(fixture.GlobalConfig, "[plugins\nbroken");
+        listed = await fixture.Service.ListAsync(new(Epoch, project), default);
+        Assert.AreEqual("ok", listed.Status);
+        CollectionAssert.AreEquivalent(new[] { "sample-plugin", "local-plugin" }, listed.Plugins.Select(plugin => plugin.Id).ToArray());
+        problem = listed.Problems!.Single();
+        Assert.AreEqual(("config", fixture.GlobalConfig, "Global"), (problem.Kind, problem.Path, problem.Scope));
+    }
+
+    [TestMethod]
+    public async Task List_WithAConfigurationFileAnotherProgramIsWriting_ListsThePlugins()
+    {
+        using var fixture = await Fixture.CreateAsync(GlobalConfiguration);
+        PluginsListResponse listed;
+        using (new FileStream(fixture.GlobalConfig, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            listed = await fixture.Service.ListAsync(new(Epoch, null), default);
+        }
+
+        Assert.AreEqual("ok", listed.Status);
+        Assert.IsTrue(listed.Plugins.Any(plugin => plugin.Id == "sample-plugin"));
+        if (!OperatingSystem.IsWindows()) return; // Elsewhere a file that is open for writing is still read.
+        Assert.AreEqual(("config", fixture.GlobalConfig), (listed.Problems!.Single().Kind, listed.Problems!.Single().Path));
+    }
+
+    [TestMethod]
+    public async Task List_NamesThePackageItSkipsForTheNameOfItsFolder()
+    {
+        using var fixture = await Fixture.CreateAsync(null);
+        var skipped = Directory.CreateDirectory(Path.Combine(fixture.Projects.Options.GlobalRoot, "plugins", "my plugin")).FullName;
+        File.WriteAllText(Path.Combine(skipped, "plugin.cs"), "// A folder name with a space is no plugin id.\n");
+
+        var listed = await fixture.Service.ListAsync(new(Epoch, null), default);
+
+        Assert.AreEqual(("ok", 0), (listed.Status, listed.Omitted));
+        CollectionAssert.AreEqual(new[] { "sample-plugin" }, listed.Plugins.Select(plugin => plugin.Id).ToArray());
+        var problem = listed.Problems!.Single();
+        Assert.AreEqual(("name", skipped, "Global"), (problem.Kind, problem.Path, problem.Scope));
+    }
+
+    [TestMethod]
+    public async Task List_WhenTheProjectIsTheFolderOfTheGlobalRoot_ListsEachPluginOnce()
+    {
+        // CodeAlta started in the home folder: the plugin folder of that project is the one of the user.
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-plugins-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var home = Directory.CreateDirectory(Path.Combine(root, "home")).FullName;
+            var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(home, ".alta")).FullName });
+            var project = await projects.UpsertFromPathAsync(home);
+            await using var runtime = new PluginRuntimeManager();
+            await runtime.StartAsync(new PluginRuntimeManagerOptions
+            {
+                GlobalRoot = projects.Options.GlobalRoot, IsHeadless = true,
+                ProjectContext = new PluginProjectContext { ProjectId = project.Id, ProjectPath = project.ProjectPath },
+            });
+            // Written after the start, as an agent does: nothing is built here.
+            var package = Directory.CreateDirectory(Path.Combine(projects.Options.GlobalRoot, "plugins", "commits")).FullName;
+            File.WriteAllText(Path.Combine(package, "plugin.cs"), "// Lists the commits of the project.\n");
+            var service = new PluginsService(projects, Epoch, runtime);
+
+            foreach (var projectId in new[] { null, project.Id })
+            {
+                var listed = await service.ListAsync(new(Epoch, projectId), default);
+                Assert.AreEqual("ok", listed.Status, projectId);
+                Assert.AreEqual(0, listed.Problems!.Count, projectId);
+                var entry = listed.Plugins.Single();
+                Assert.AreEqual(("commits", "Global", "plugin:global:commits", package), (entry.Id, entry.Scope, entry.Folder, entry.Path));
+                Assert.IsTrue(entry.Loadable, "The running host loads it.");
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { /* Best-effort cleanup of a temporary directory. */ }
+        }
     }
 
     private sealed class Fixture : IDisposable

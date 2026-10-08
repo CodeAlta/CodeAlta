@@ -3,6 +3,7 @@ using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 using NeoAstra.Rpc;
 using Tomlyn;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Rpc;
 
@@ -70,30 +71,78 @@ internal sealed class PluginsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
+            // What cannot be read is named and the rest is listed: one file or one folder hides nothing else.
+            var problems = new List<PluginsProblem>();
             CodeAltaConfigDocument global;
             CodeAltaConfigDocument? local;
             lock (_gate)
             {
-                global = _store.LoadGlobal();
-                local = project.Root is null ? null : _store.LoadProject(project.Root);
+                global = Configuration(_store.LoadGlobal, _projects.Options.ConfigPath, PluginScope.Global, problems);
+                local = project.Root is not { } projectRoot ? null
+                    : Configuration(() => _store.LoadProject(projectRoot), Path.Combine(projectRoot, ".alta", "config.toml"), PluginScope.Project, problems);
+            }
+
+            var packages = new List<SourcePluginPackage>();
+            var roots = Roots(request.ProjectId, project.Root);
+            for (var index = 0; index < roots.Count; index++)
+            {
+                // A project that is the folder of the global root (the home folder) has the global plugin folder.
+                if (index > 0 && SameDirectory(roots[index].RootPath, roots[0].RootPath)) continue;
+                try
+                {
+                    packages.AddRange(_discovery.Discover(roots[index]));
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    // The folder changes while it is read (an agent writes a plugin), or it cannot be opened.
+                    problems.Add(new("folder", roots[index].RootPath, Clean(exception.Message), roots[index].Scope.ToString()));
+                }
             }
 
             // No built-in definitions: the page has their rows, whichever host runs them.
-            var entries = _builder.Build([], _discovery.Discover(Roots(request.ProjectId, project.Root)), global, local);
+            var entries = _builder.Build([], packages, global, local);
             // What the running host did with the packages of its own folders, by the file of each.
-            var hosted = (_runtime?.GetPackages() ?? []).ToDictionary(static package => package.Package.EntryFilePath, PathComparer);
+            var hosted = new Dictionary<string, PluginPackageStatus>(PathComparer);
+            var runtimeKnown = _runtime is not null;
+            try
+            {
+                foreach (var package in _runtime?.GetPackages() ?? []) hosted.TryAdd(package.Package.EntryFilePath, package);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or NotSupportedException)
+            {
+                // The plugins are listed without what the host did with them.
+                Log(exception, "The running plugins could not be listed");
+                runtimeKnown = false;
+                hosted.Clear();
+                problems.Add(new("runtime", null, Clean(exception.Message)));
+            }
+
             var plugins = new List<PluginsEntry>();
+            var omitted = 0;
             foreach (var entry in entries)
             {
-                if (plugins.Count == MaximumPlugins || !ValidId(entry.PluginId)) continue;
+                var discovered = entry.State != PluginManagementState.UnknownConfig;
+                if (!ValidId(entry.PluginId))
+                {
+                    // A package whose folder name is no plugin id is named with its folder; an id of configuration is counted.
+                    if (discovered && Path.GetDirectoryName(entry.SourcePath) is { } skipped) problems.Add(new("name", skipped, null, entry.Scope.ToString()));
+                    else omitted++;
+                    continue;
+                }
+
+                if (plugins.Count == MaximumPlugins)
+                {
+                    omitted++;
+                    continue;
+                }
+
                 var id = entry.PluginId!;
                 var enabledGlobal = Configured(global, id);
                 var enabledProject = Configured(local, id);
-                var discovered = entry.State != PluginManagementState.UnknownConfig;
                 var enabled = discovered ? entry.Enabled : enabledGlobal ?? enabledProject ?? true;
                 var status = discovered && entry.SourcePath is { } source ? hosted.GetValueOrDefault(source) : null;
                 // A package the host does not load (the one of another project) is not started.
-                var (runtime, message) = _runtime is null || !discovered || !enabled ? (null, null) : status is null ? ("stopped", null) : RuntimeState(status);
+                var (runtime, message) = !runtimeKnown || !discovered || !enabled ? (null, null) : status is null ? ("stopped", null) : RuntimeState(status);
                 var folder = discovered ? new PluginFolder(entry.Scope == PluginScope.Project ? request.ProjectId : null, id) : (PluginFolder?)null;
                 // A plugin that runs says its own name and what it does; the README of its package otherwise.
                 var running = status?.Plugins.Count == 1 ? status.Plugins[0] : null;
@@ -104,16 +153,38 @@ internal sealed class PluginsService
                     folder?.Id, discovered ? Path.GetDirectoryName(entry.SourcePath) : null, status is not null, status?.SourceChanged ?? false, Errors(status)));
             }
 
-            return new("ok", request.ProjectId, plugins, entries.Count - plugins.Count);
-        }
-        catch (InvalidDataException)
-        {
-            return Failed("config_invalid"); // A configuration file that does not parse hides the enablement.
+            return new("ok", request.ProjectId, plugins, omitted, problems);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            Log(exception, "The plugins could not be listed");
             return Failed("read_failed");
         }
+    }
+
+    // The configuration of a scope; an empty one, and the file named, when the file cannot be read or parsed: the
+    // plugins are then listed as if it said nothing of them.
+    private static CodeAltaConfigDocument Configuration(Func<CodeAltaConfigDocument> load, string path, PluginScope scope, List<PluginsProblem> problems)
+    {
+        try
+        {
+            return load();
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            // The parser says where; the system says why a file being written cannot be opened.
+            problems.Add(new("config", path, Clean(exception.GetBaseException().Message), scope.ToString()));
+            return new CodeAltaConfigDocument();
+        }
+    }
+
+    private static bool SameDirectory(string left, string right)
+        => PathComparer.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)));
+
+    // The exception only: its message may name a path, and nothing of a file is written.
+    private static void Log(Exception exception, string message)
+    {
+        if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(exception, message);
     }
 
     /// <summary>Saves the enablement override of one plugin id in the global or project configuration.</summary>
@@ -338,7 +409,22 @@ internal sealed class PluginsService
 }
 
 internal sealed record PluginsListRequest(string? ExpectedEpoch, string? ProjectId);
-internal sealed record PluginsListResponse(string Status, string? ProjectId, IReadOnlyList<PluginsEntry> Plugins, int Omitted);
+
+/// <summary>The plugins that could be listed, and what could not be read.</summary>
+/// <param name="Omitted">How many plugins are neither listed nor named by a problem: past the limit, or an id of configuration that is no plugin id.</param>
+/// <param name="Problems">What could not be read; the plugins beside it are listed.</param>
+internal sealed record PluginsListResponse(string Status, string? ProjectId, IReadOnlyList<PluginsEntry> Plugins, int Omitted, IReadOnlyList<PluginsProblem>? Problems = null);
+
+/// <summary>
+/// One thing the listing could not read. The kind is <c>config</c> (a configuration file that cannot be read or
+/// parsed: what it says of the plugins is not applied), <c>folder</c> (a plugin folder that cannot be listed),
+/// <c>name</c> (a package that is not listed because the name of its folder is no plugin id) or <c>runtime</c>
+/// (what the running host did with the packages is not known).
+/// </summary>
+/// <param name="Path">The file or the folder, when the problem is about one.</param>
+/// <param name="Message">What the parser or the system said.</param>
+/// <param name="Scope"><c>Global</c> or <c>Project</c>, when the file or the folder is of one of them.</param>
+internal sealed record PluginsProblem(string Kind, string? Path, string? Message, string? Scope = null);
 
 /// <summary>
 /// One plugin. The kind is <c>Source</c> (a discovered package) or <c>Config</c> (an id only named in configuration);
