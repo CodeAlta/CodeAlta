@@ -77,6 +77,48 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void Preferences_KeepTheZoom_WhenItIsNot100Percent()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-zoom-").FullName;
+        try
+        {
+            var file = Path.Combine(root, "preferences.json");
+            Assert.AreEqual(100, DesktopPreferences.Load(root).Zoom);
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Ask, Zoom: 125).Save(root));
+            Assert.AreEqual("""{"onClose":"ask","zoom":125}""", File.ReadAllText(file));
+            Assert.AreEqual(125, DesktopPreferences.Load(root).Zoom);
+            // A file without a choice about closing still has its zoom.
+            File.WriteAllText(file, """{"zoom":150}""");
+            Assert.AreEqual(150, DesktopPreferences.Load(root).Zoom);
+            // 100 percent is the default: it is not written.
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Ask, Zoom: 100).Save(root));
+            Assert.AreEqual("""{"onClose":"ask"}""", File.ReadAllText(file));
+            // A zoom that is none gives 100 percent, whatever else the file says.
+            foreach (var bad in new[] { "24", "501", "\"125\"", "125.5", "null" })
+            {
+                File.WriteAllText(file, "{\"onClose\":\"exit\",\"zoom\":" + bad + "}");
+                Assert.AreEqual((DesktopCloseBehavior.Exit, 100), (DesktopPreferences.Load(root).OnClose, DesktopPreferences.Load(root).Zoom), bad);
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    [DataRow(100, 1, 110)]
+    [DataRow(100, -1, 90)]
+    [DataRow(300, 1, 400)]
+    [DataRow(50, -1, 33)]
+    // The bounds hold.
+    [DataRow(500, 1, 500)]
+    [DataRow(25, -1, 25)]
+    // A zoom between two steps goes to the next one, as a file edited by hand may give.
+    [DataRow(105, 1, 110)]
+    [DataRow(105, -1, 100)]
+    // 0 resets.
+    [DataRow(175, 0, 100)]
+    public void Zoom_StepsAsInABrowser(int zoom, int direction, int expected) => Assert.AreEqual(expected, DesktopPreferences.NextZoom(zoom, direction));
+
+    [TestMethod]
     public void CloseBehavior_HasOneNameForTheFileAndThePage()
     {
         foreach (var (behavior, name) in new[] { (DesktopCloseBehavior.Ask, "ask"), (DesktopCloseBehavior.KeepRunning, "keep"), (DesktopCloseBehavior.Exit, "exit") })
@@ -99,7 +141,8 @@ public sealed class DesktopShellTests
         // What the page reads: the names of the generated client.
         // Without a shell the width of the conversations is the whole space, and asking for another keeps it.
         Assert.AreEqual(("unavailable", 100), (service.SetSessionWidth(new(70, "session-1")).Status, service.SetSessionWidth(new(70)).SessionWidth));
-        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null,"trayIcon":false}""",
+        Assert.AreEqual(("unavailable", 100), (service.Zoom(new(1)).Status, service.Zoom(new(-1)).Zoom));
+        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null,"trayIcon":false,"zoom":100}""",
             JsonSerializer.Serialize(service.Preferences(new()) with { Platform = "windows" }, DesktopJsonContext.Default.DesktopShellPreferences));
         Assert.AreEqual("""{"kind":"session-width","runningSessions":0,"busyTerminals":0,"sessionWidth":60,"sessionId":"session-1"}""",
             JsonSerializer.Serialize(new DesktopShellEvent("session-width", 0, SessionWidth: 60, SessionId: "session-1"), DesktopJsonContext.Default.DesktopShellEvent));

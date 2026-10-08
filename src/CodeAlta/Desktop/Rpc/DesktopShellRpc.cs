@@ -60,6 +60,18 @@ internal sealed class DesktopShellService
     }
 
     /// <summary>
+    /// Zooms the window's view one step in (<c>1</c>) or out (<c>-1</c>), or back to 100 percent (<c>0</c>), and
+    /// keeps the zoom for the next starts. It runs on the window's thread, which the view requires.
+    /// </summary>
+    [NeoRpcMethod("zoom", Dispatch = NeoRpcDispatchMode.UiThread)]
+    public DesktopShellPreferences Zoom(DesktopShellZoomRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _shell?.StepZoom(Math.Sign(request.Direction));
+        return Current();
+    }
+
+    /// <summary>
     /// Hides the window and leaves the application running: the answer to the <c>confirm-close</c> notice of
     /// <see cref="Watch"/>.
     /// </summary>
@@ -143,7 +155,7 @@ internal sealed class DesktopShellService
     private DesktopShellPreferences Current() => _shell is null
         ? new("unavailable", DesktopPreferences.Name(DesktopCloseBehavior.Ask), false, Platform, false)
         : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
-            [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable);
+            [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable, _shell.Zoom);
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
@@ -188,8 +200,10 @@ internal sealed record DesktopShellRevealEntryResponse(string Status);
 /// <param name="SessionWidth">The user's setting: the width of the conversations, in percent of the space of a session.</param>
 /// <param name="SessionWidths">The sessions that are shown with a width of their own, set by an <c>alta appearance</c> command.</param>
 /// <param name="TrayIcon">The application has an icon in the notification area; without one on macOS it stays in the Dock.</param>
+/// <param name="Zoom">The zoom of the window's view, in percent.</param>
 internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded,
-    int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null, bool TrayIcon = false);
+    int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null, bool TrayIcon = false,
+    int Zoom = DesktopPreferences.DefaultZoom);
 
 /// <summary>The width one session is shown with instead of the user's setting.</summary>
 internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);
@@ -197,3 +211,6 @@ internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);
 /// <param name="Percent">The width of the conversations, from 40 to 100.</param>
 /// <param name="SessionId">The session the user resized, when there is one: it follows the setting again.</param>
 internal sealed record DesktopShellSessionWidthRequest(int Percent, string? SessionId = null);
+
+/// <param name="Direction"><c>1</c> zooms in a step, <c>-1</c> out a step, and <c>0</c> back to 100 percent.</param>
+internal sealed record DesktopShellZoomRequest(int Direction);
