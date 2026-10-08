@@ -139,6 +139,37 @@ public sealed class AgentRuntimeTests
     }
 
     [TestMethod]
+    public async Task AgentRuntime_SessionWhoseWorktreeIsGone_RefusesTheRunBeforeItReachesTheProvider()
+    {
+        using var temp = TestTempDirectory.Create();
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var worktree = Directory.CreateDirectory(Path.Combine(temp.Path, "trees", "quiet-heron")).FullName;
+        var agentRuntime = CreateAgentRuntime(temp.Path, out var executor);
+        await agentRuntime.StartAsync().ConfigureAwait(false);
+        await using var session = await agentRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = "openai", Model = "gpt-5.4", WorkingDirectory = project, WorktreeDirectory = worktree,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("one") }).ConfigureAwait(false);
+        var errors = new List<string>();
+        using var subscription = session.Subscribe(@event => { if (@event is AgentErrorEvent error) lock (errors) errors.Add(error.Message); });
+
+        Directory.Delete(worktree, recursive: true);
+
+        // The run says what is missing, where a provider would say that its executable could not be started.
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("two") })).ConfigureAwait(false);
+        Assert.AreEqual($"The git worktree this session works in, '{worktree}', no longer exists.", failure.Message);
+        Assert.AreEqual(1, executor.Requests.Count);
+        lock (errors) CollectionAssert.AreEqual(new[] { failure.Message }, errors);
+
+        // The session is not left busy: it runs again once the folder is back.
+        Directory.CreateDirectory(worktree);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("three") }).ConfigureAwait(false);
+        Assert.AreEqual(worktree, executor.Requests[1].WorkingDirectory);
+    }
+
+    [TestMethod]
     public async Task AgentRuntime_CreateSession_UsesDefaultProviderWhenNotSpecified()
     {
         using var temp = TestTempDirectory.Create();

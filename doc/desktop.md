@@ -2333,8 +2333,14 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   terminal. The composer asks for the branch every two seconds: when the folder is gone the list of
   sessions is read again, and the session shows its worktree struck through, as **removed**. The next
   message is then answered in the folder of the project: the session no longer records the worktree,
-  and is told that the folder it worked in is gone. Whether the folder exists is looked at when a
-  session is listed and each time it is about to work; it is never remembered.
+  and is told that the folder it worked in is gone. What waits for the session is answered the same
+  way, without a message of the user: the answer that a child session forwards to it, or a queued
+  prompt, first attaches the session again in the folder of the project
+  (`TryMarkNextQueuedPromptSubmittingAsync`). Whether the folder exists is looked at when a
+  session is listed and each time it is about to work; it is never remembered. A run that would still
+  start in a worktree that is gone is refused before any provider is asked, with an error that names
+  the folder (`AgentSession.ExecuteRunAsync`), where a provider that starts a process would report
+  that its executable could not be started.
 - **Changes tab.** A repository with more than one checkout lists them above the files, under
   **Worktrees**: the folder of the project first, then each worktree with its branch and the number of
   sessions that work in it. A row shows the changes and the commits of its checkout. The changes button

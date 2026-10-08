@@ -2802,7 +2802,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     }
 
                     var sessionHandleId = entry.SessionHandleId;
-                    if (!string.IsNullOrWhiteSpace(entry.PendingAgentPromptId))
+                    // What waits in the queue is run by the attachment of the session, without a send that prepares
+                    // it. A session whose worktree was removed meanwhile is attached again first, in the folder of
+                    // its project: the answer a child forwards to it is then read, and not lost to a run that
+                    // cannot start in a folder that is gone.
+                    if (!string.IsNullOrWhiteSpace(entry.PendingAgentPromptId)
+                        || (entry.WorktreeDirectory is not null && ExistingWorktree(entry.WorktreeDirectory) is null))
                     {
                         var session = entry.ToDescriptor();
                         var prepared = await EnsureCoordinatorSessionCoreAsync(session, entry.ToExecutionOptions(), actorCancellationToken).ConfigureAwait(false);

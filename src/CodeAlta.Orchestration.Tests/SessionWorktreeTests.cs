@@ -119,6 +119,37 @@ public sealed class SessionWorktreeTests
     }
 
     [TestMethod]
+    public async Task AnswerOfAChild_ForwardedToASessionWhoseWorktreeIsGone_IsReadInTheFolderOfItsProject()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Parent", null, temp.Worktree);
+        Assert.AreEqual(temp.Worktree, (await SendAsync(host, provider, session, "one")).WorkingDirectory);
+        // The child it started, as `alta session create` starts one: its answers are forwarded to the session.
+        var childOptions = new SessionExecutionOptions
+        {
+            ProviderId = provider.Descriptor.ProviderId, ProviderKey = provider.Descriptor.ProviderId.Value, Model = "fake-model",
+            WorkingDirectory = temp.ProjectRoot, ProjectRoots = [temp.ProjectRoot],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+        };
+        var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, childOptions, "Child", session.SessionId, null, CancellationToken.None);
+
+        // The work of the session landed and its worktree is removed, while the child still works.
+        Directory.Delete(temp.Worktree, recursive: true);
+        await host.RuntimeService.SendAsync(child, childOptions, new AgentSendOptions { Input = AgentInput.Text("work") }, CancellationToken.None);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(temp.ProjectRoot, (await provider.Turns.Reader.ReadAsync(timeout.Token)).WorkingDirectory);
+
+        // The answer of the child starts a run of the session: it is read, in the folder of the project.
+        var forwarded = await provider.Turns.Reader.ReadAsync(timeout.Token);
+        Assert.AreEqual(temp.ProjectRoot, forwarded.WorkingDirectory);
+        StringAssert.Contains(forwarded.Instructions, $"The git worktree this session worked in, `{temp.Worktree}`, is no longer there.");
+        while (await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);
+        Assert.IsNull((await ListedAsync(host, session.SessionId)).WorktreePath);
+    }
+
+    [TestMethod]
     public async Task SessionRestoredAfterTheHostRestarts_WorksInItsWorktreeAgain()
     {
         using var temp = TempDirectory.Create();

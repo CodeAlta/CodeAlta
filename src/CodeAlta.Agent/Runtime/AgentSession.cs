@@ -231,6 +231,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 await run.Start.RunAsync(lifecycle, runId, linkedCts.Token).ConfigureAwait(false);
             }
             linkedCts.Token.ThrowIfCancellationRequested();
+            // A provider that starts a process in a folder that is gone reports it as a failure of its executable.
+            if (!string.IsNullOrWhiteSpace(_summary.WorktreeDirectory) && !Directory.Exists(_summary.WorktreeDirectory))
+                throw new InvalidOperationException($"The git worktree this session works in, '{_summary.WorktreeDirectory}', no longer exists.");
             var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
             var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills());
             var requestDeveloperInstructions = CombineDeveloperInstructions(
