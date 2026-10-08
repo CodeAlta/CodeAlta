@@ -12,8 +12,11 @@
 .editor-side-view:hover { background: color-mix(in srgb, var(--panel-2) 55%, transparent); color: var(--text); }
 .editor-side-view[aria-selected="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .editor-side-header { flex: none; display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 3px 4px 0 12px; }
-.editor-side-title { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em;
+.editor-side-names { flex: 1 1 0; display: grid; min-width: 0; }
+.editor-side-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em;
   text-transform: uppercase; }
+/* The folder itself, cut at its start: the end of a path is what tells two folders apart. */
+.editor-side-root { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--muted); font-size: 11px; line-height: 1.35; opacity: .8; }
 .editor-side-actions { flex: none; display: inline-flex; color: var(--muted); }
 .editor-side-empty.bp6-non-ideal-state { flex: 1 1 auto; min-height: 0; padding: 16px; }
 .editor-side-splitter { flex: none; width: 7px; margin-inline: -3px; border-inline: 3px solid transparent; background: var(--line); background-clip: padding-box; cursor: col-resize; z-index: 2; touch-action: none; }
@@ -140,6 +143,9 @@
 .editor-status .file-editor-status { margin-right: 10px; }
 .editor-status-path { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; margin-right: 6px; }
 .editor-status-path > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The path of a file on the disk is a button that copies it: as wide as its text, and the rest of the bar stays at the end. */
+button.editor-status-path { flex: 0 1 auto; margin: 0 auto 0 -6px; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+button.editor-status-path:hover { background: var(--panel-2); color: var(--text); }
 .editor-status-item { flex: none; padding: 2px 7px; border: 0; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; }
 button.editor-status-item { cursor: pointer; }
 button.editor-status-item:hover { background: var(--panel-2); color: var(--text); }

@@ -4,7 +4,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { locales, translate } from "../localization";
 import { ShellLanguageContext } from "../shellLanguage";
+import { EditorRootPath, EditorStatusPath } from "./EditorPaths";
 import { EditorTabs } from "./EditorTabs";
+import { absoluteTreePath } from "./fileTree";
 import { deletionWording } from "./UnsavedDialogs";
 
 const never = () => assert.fail("rendering must not dispatch");
@@ -26,6 +28,20 @@ test("a tab shows its file, the folder of a name that repeats, and whether the f
     assert.ok(tabs[0].includes(translate(locale, "Unsaved changes")) && tabs[1].includes(translate(locale, "Close {name}", { name: "index.ts" })), html);
     assert.ok(html.includes(translate(locale, "Open files")));
   }
+});
+
+test("the tooltip of a tab, the side and the status bar say where the files are on the disk", () => {
+  const root = "C:\\code\\<app>", language = { locale: "en", choice: "en", setLanguage: never } as const;
+  const render = (element: ReturnType<typeof createElement>) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: language }, element));
+  const tabs = render(createElement(EditorTabs, { files: [{ path: "src/index.ts", preview: false }], active: null, state: () => ({ dirty: false, missing: false }),
+    tooltip: path => absoluteTreePath(root, path), onSelect: never, onClose: never, onPin: never, onMove: never, onMenu: never }));
+  assert.ok(tabs.includes('title="C:\\code\\&lt;app&gt;\\src\\index.ts"') && tabs.includes('<span class="editor-tab-name">index.ts</span>'), tabs);
+  // The folder is written whole, and is its own tooltip where it is cut.
+  assert.equal(render(createElement(EditorRootPath, { path: root })), '<span class="editor-side-root" title="C:\\code\\&lt;app&gt;"><bdi>C:\\code\\&lt;app&gt;</bdi></span>');
+  // The status bar keeps the path in the folder as its text; the full path is what its tooltip says and what it copies.
+  const status = render(createElement(EditorStatusPath, { icon: "fileCode", tone: "blue", text: "src/index.ts", fullPath: absoluteTreePath(root, "src/index.ts"), copy: never }));
+  assert.ok(status.startsWith('<button type="button" class="editor-status-path" title="C:\\code\\&lt;app&gt;\\src\\index.ts"') && status.includes("<span>src/index.ts</span>"), status);
+  assert.ok(status.includes(`aria-label="${translate("en", "Copy path")}: C:\\code\\&lt;app&gt;\\src\\index.ts"`) && status.includes('data-file-tone="blue"'), status);
 });
 
 test("the question before a deletion says where the entry goes, and what is lost with it", () => {

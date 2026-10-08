@@ -211,6 +211,8 @@ CodeAlta Desktop has a code editor for each project: one tab that holds the file
 
 The **Files** pane lists the folders and files of the project, without those excluded by `.gitignore`. Changed files have the color and the letter of their git status.
 
+The full path of the project folder is written under the name of the project, at the top of the pane. **Copy path** in the `…` menu beside it copies it.
+
 - Click a file to preview it. Double-click it, or edit it, to keep its tab open.
 - **New file** and **New folder** are at the top of the pane. `F2` renames, and `Delete` moves to the Recycle Bin or the Trash.
 - Drag a file or a folder onto another folder to move it.
@@ -232,6 +234,8 @@ The **Files** pane lists the folders and files of the project, without those exc
 `Ctrl+N`, or the **+** button beside the tabs, starts a new file. It is named **Untitled-1** and stays in the editor only: write in it at once, and save it when you want to keep it. `Ctrl+S` then asks for its path in the project, and creates the folders that do not exist yet.
 
 A new file is plain text. Choose its language with `Ctrl+K` `M`, or click the language in the status bar. The same choice changes the language of any open file.
+
+The status bar shows the path of the open file in the project. Hover over it, or over the tab of a file, to see the full path; click it to copy the full path.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-editor-new-file.webp" alt="A new untitled file in the code editor with the dialog that selects its language" loading="lazy">

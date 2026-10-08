@@ -17,6 +17,7 @@ import { canSaveDocument, documentChecked, documentConflictDismissed, documentEd
 import { fileLanguage, languageExtension, languageName, type EditorLanguage } from "../monaco/fileLanguage";
 import { LanguageDialog, SaveAsDialog } from "./UntitledDialogs";
 import { EditorExplorer, type ExplorerEntry, type ExplorerHandle } from "./EditorExplorer";
+import { EditorRootPath, EditorStatusPath } from "./EditorPaths";
 import { EditorSearch, type SearchHandle } from "./EditorSearch";
 import { EditorSurface, type EditorSurfaceHandle, type SurfaceCursor, type SurfaceInfo } from "./EditorSurface";
 import { EditorTabs } from "./EditorTabs";
@@ -25,7 +26,7 @@ import { activateEditorFile, closeEditorFiles, cycleEditorFile, editorSideWidth,
 import { fileReadFailure } from "./fileEditorState";
 import type { FileEditors } from "./fileEditors";
 import { emptySearchOptions, searchable, searchEvent, searchKey, startSearch, type SearchMatch, type SearchOptions, type SearchResults } from "./fileSearch";
-import { applyTreeListing, collapseTree, emptyFileTree, expandTreeFolders, joinTreePath, noTreeDecorations, parentTreePath, removeTreePath, renameTreePath, toggleTreeFolder,
+import { absoluteTreePath, applyTreeListing, collapseTree, emptyFileTree, expandTreeFolders, joinTreePath, noTreeDecorations, parentTreePath, removeTreePath, renameTreePath, toggleTreeFolder,
   treeAncestors, treeBaseName, treeDecorations, treeEntryRows, treeQueries, treeRows, type FileTree, type TreeDecorations, type TreeEdit } from "./fileTree";
 import { ImageView } from "./ImageView";
 import { DeleteEntryDialog, UnsavedFileDialog } from "./UnsavedDialogs";
@@ -531,7 +532,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   }
   actions.current = { save: () => saveAll(), closeFile: () => { if (latest.current.files.active === null) return false; close([latest.current.files.active]); return true; } };
 
-  const absolute = (path: string) => { const separator = tab.projectPath.includes("\\") ? "\\" : "/"; return path ? `${tab.projectPath.replace(/[\\/]+$/u, "")}${separator}${path.split("/").join(separator)}` : tab.projectPath; };
+  const absolute = (path: string) => absoluteTreePath(tab.projectPath, path);
   const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => { /* The clipboard is not available: nothing is copied. */ });
   function reveal(path: string) {
     if (!epoch) return;
@@ -743,7 +744,10 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
           {narrow && <Button variant="minimal" size="small" icon={<AppIcon name="close" size={15} />} aria-label={t("Hide the files")} title={t("Hide the files")} onClick={() => show(null)} />}
         </div>
         {side === "files" && <header className="editor-side-header">
-          <strong className="editor-side-title" title={tab.projectPath}>{projectName ?? t("Unavailable project")}</strong>
+          <span className="editor-side-names">
+            <strong className="editor-side-title" title={tab.projectPath}>{projectName ?? t("Unavailable project")}</strong>
+            <EditorRootPath path={tab.projectPath} />
+          </span>
           <span className="editor-side-actions">
             {!readOnlyFolder && <Button variant="minimal" size="small" icon={<AppIcon name="newFile" size={15} />} aria-label={t("New file")} title={t("New file")} disabled={!epoch} onClick={() => createHere(false)} />}
             {!readOnlyFolder && <Button variant="minimal" size="small" icon={<AppIcon name="newFolder" size={15} />} aria-label={t("New folder")} title={t("New folder")} disabled={!epoch} onClick={() => createHere(true)} />}
@@ -753,6 +757,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
               <MenuItem icon={<AppIcon name="refresh" size={15} />} text={t("Refresh")} onClick={() => refreshTree.current()} />
               <MenuItem roleStructure="listoption" selected={preferences.ignored} shouldDismissPopover={false} icon={<AppIcon name="eye" size={15} />} text={t("Show ignored files")}
                 onClick={() => prefer({ ignored: !preferences.ignored })} />
+              <MenuItem icon={<AppIcon name="copy" size={15} />} text={t("Copy path")} onClick={() => copy(tab.projectPath)} />
               {capabilities.reveal && <MenuItem icon={<AppIcon name="openExternal" size={15} />} text={revealLabel} onClick={() => reveal("")} />}
             </Menu>}>
               <Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("More actions")} title={t("More actions")} />
@@ -776,6 +781,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     </>}
     <div className="editor-main">
       <EditorTabs files={files.open} active={activePath} leading={sideToggle} trailing={<>{newFileButton}{fileActions}</>}
+        tooltip={path => isUntitledPath(path) ? documentName(path) : absolute(path)}
         state={path => { const document = documents.get(path); return { dirty: !!document?.dirty, missing: !!document?.missing }; }}
         onSelect={path => { setFiles(current => activateEditorFile(current, path)); focusEditor(); }} onClose={path => close([path])}
         onPin={path => setFiles(current => pinEditorFile(current, path))} onMove={(path, index) => setFiles(current => moveEditorFile(current, path, index))} onMenu={tabMenu} />
@@ -828,7 +834,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         {shownDocument && activePath !== null ? <>
           <span className="file-editor-status" data-state={shownDocument.conflict || shownDocument.missing ? "conflict" : shownDocument.dirty ? "modified" : "clean"} role="status">
             {(busy || shownDocument.reloading) && <ActivitySpinner size={12} />}{t(documentStatus(shownDocument))}</span>
-          <span className="editor-status-path" title={onDisk ? activePath : name!}><span className="file-tab-icon" data-file-tone={look!.tone}><AppIcon name={look!.icon} size={13} /></span><span>{onDisk ? activePath : name}</span></span>
+          {onDisk ? <EditorStatusPath icon={look!.icon} tone={look!.tone} text={activePath} fullPath={absolute(activePath)} />
+            : <span className="editor-status-path" title={name!}><span className="file-tab-icon" data-file-tone={look!.tone}><AppIcon name={look!.icon} size={13} /></span><span>{name}</span></span>}
           {showSurface && <button type="button" className="editor-status-item" title={`${t("Go to line")} (Ctrl+G)`} onClick={() => surface.current?.run("editor.action.gotoLine")}>
             {t("Ln {line}, Col {column}", cursor)}{cursor.selected > 0 && ` (${t("{count} selected", { count: cursor.selected.toLocaleString(locale) })})`}</button>}
           {showSurface && info && <span className="editor-status-item">{info.spaces ? t("Spaces: {count}", { count: info.tabSize }) : t("Tab size: {count}", { count: info.tabSize })}</span>}

@@ -13,9 +13,11 @@ const dragType = "application/x-codealta-editor-tab";
  * (a double click, or an edit); a file with unsaved edits shows a dot where its close button is. Tabs are
  * dragged to another place of the strip, and closed with the middle button.
  */
-export function EditorTabs({ files, active, state, leading, trailing, onSelect, onClose, onPin, onMove, onMenu }: {
+export function EditorTabs({ files, active, state, tooltip, leading, trailing, onSelect, onClose, onPin, onMove, onMenu }: {
   files: readonly EditorFile[]; active: string | null;
   state: (path: string) => EditorTabState;
+  /** What the tooltip of a tab says: where its file is on the disk. Without it, the path of the file in its folder. */
+  tooltip?: (path: string) => string;
   /** Controls before and after the tabs: the side toggle, the actions of the file shown. */
   leading?: ReactNode; trailing?: ReactNode;
   onSelect: (path: string) => void; onClose: (path: string) => void; onPin: (path: string) => void;
@@ -66,7 +68,7 @@ export function EditorTabs({ files, active, state, leading, trailing, onSelect, 
         const look = fileAppearance(file.path, false), shown = names.get(file.path)!, known = state(file.path);
         return <div key={file.path} role="tab" id={`editor-tab-${index}`} className="editor-tab" aria-selected={file.path === active} tabIndex={-1} draggable
           data-preview={file.preview} data-dirty={known.dirty} data-missing={known.missing} data-drop={drop === index ? "before" : drop === files.length && index === files.length - 1 ? "after" : undefined}
-          title={file.path}
+          title={tooltip ? tooltip(file.path) : file.path}
           onDragStart={event => { event.dataTransfer.setData(dragType, file.path); event.dataTransfer.effectAllowed = "move"; }}
           onDragEnd={() => setDrop(null)}
           onMouseDown={event => { if (event.button === 1) event.preventDefault(); }}

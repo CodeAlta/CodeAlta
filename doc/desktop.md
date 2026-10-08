@@ -1803,6 +1803,9 @@ that file. While an editor is in front, the commands that act on a session are u
 the left of the file tabs hides and shows the side, and its splitter sets its width. In a pane narrower than
 560 pixels the side and the file take turns.
 
+- The header of **Files** has the name of the project and, under it, the full path of its folder on one line,
+  cut at its start when the side is too narrow so that the end of the path stays in view (the whole path is
+  its tooltip). The `…` menu of the header has **Copy path** for that folder.
 - **Files** is a tree read one folder at a time: `projectFiles.list` is asked for the project folder and for
   each folder as it is opened, never for what is below a closed folder. What git ignores is left out;
   **Show ignored files** (the `…` menu) lists it dimmed. The open folders are listed again every four
@@ -1830,7 +1833,7 @@ the left of the file tabs hides and shows the side, and its splitter sets its wi
 
 **Open files.** A tab per file with the icon of its type; a name that several tabs share is followed by its
 folder. A tab shows a dot while its file has unsaved edits and is struck through when the file is gone from
-the disk. Tabs are dragged to another place of the strip, closed with the middle button or `Ctrl+W`, and
+the disk; its tooltip is the full path of the file. Tabs are dragged to another place of the strip, closed with the middle button or `Ctrl+W`, and
 `Ctrl+Tab` / `Ctrl+Shift+Tab` go to the next and the previous one. The menu of a tab has **Close**, **Close
 others**, **Close saved**, **Close all**, **Keep open**, the two paths and **Show in the files**. `Ctrl+W`
 closes the file shown; with no file left it closes the editor. The open files, the one shown, the side and the
@@ -1847,8 +1850,9 @@ places of the word under the caret, and:
 - `Alt+Z` and the `…` menu turn **Wrap lines** on and off (on at first); the menu also has **Minimap**,
   **Reload from disk**, **Copy path** and the three commands above.
 - The status bar shows the state (**Saved**, **Modified**, **Saving…**, **Read-only**, **Changed on disk**,
-  **Deleted on disk**), the path, the line and column (a click goes to a line), the indentation, the line
-  endings, the encoding, the language, and **Save**.
+  **Deleted on disk**), the path of the file in the project (its tooltip is the full path, and a click copies
+  the full path), the line and column (a click goes to a line), the indentation, the line endings, the
+  encoding, the language, and **Save**.
 
 The file name or extension chooses the highlighting; anything unknown is plain text. Every grammar Monaco
 ships is available (about eighty), and the app adds its own small grammars for what Monaco lacks: JSON, TOML,

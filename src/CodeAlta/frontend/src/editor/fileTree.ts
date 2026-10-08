@@ -23,6 +23,11 @@ export const treeQueryLimit = 256;
 export const joinTreePath = (folder: string, name: string) => folder ? `${folder}/${name}` : name;
 export const parentTreePath = (path: string) => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 export const treeBaseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+/** The full path of an entry of a root folder, written with the separator of that folder; the folder itself for "". */
+export function absoluteTreePath(root: string, path: string): string {
+  const separator = root.includes("\\") ? "\\" : "/";
+  return path ? `${root.replace(/[\\/]+$/u, "")}${separator}${path.split("/").join(separator)}` : root;
+}
 /** The folders above a path, outermost first: "a/b/c.ts" has "a" and "a/b". */
 export function treeAncestors(path: string): string[] {
   const parts = path.split("/"), result: string[] = [];

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ProjectFileFolder } from "#neoastra";
-import { applyTreeListing, collapseTree, emptyFileTree, expandTreeFolders, joinTreePath, parentTreePath, removeTreePath, renameTreePath, toggleTreeFolder, treeAncestors,
+import { absoluteTreePath, applyTreeListing, collapseTree, emptyFileTree, expandTreeFolders, joinTreePath, parentTreePath, removeTreePath, renameTreePath, toggleTreeFolder, treeAncestors,
   treeBaseName, treeDecorations, treeEntryRows, treeNameProblem, treeQueries, treeQueryLimit, treeRows, treeTypeAhead, type FileTree, type TreeEntry } from "./fileTree";
 
 const entry = (name: string, ignored = false): TreeEntry => name.endsWith("/") ? { name: name.slice(0, -1), directory: true, ignored } : { name, directory: false, ignored };
@@ -16,6 +16,15 @@ test("paths are joined, split and walked from the project folder down", () => {
   assert.deepEqual([parentTreePath("a.ts"), parentTreePath("src/deep/a.ts")], ["", "src/deep"]);
   assert.deepEqual([treeBaseName("a.ts"), treeBaseName("src/deep/a.ts")], ["a.ts", "a.ts"]);
   assert.deepEqual([treeAncestors("a.ts"), treeAncestors("a/b/c.ts")], [[], ["a", "a/b"]]);
+});
+
+test("the full path of an entry is written as its root folder is", () => {
+  assert.deepEqual([absoluteTreePath("C:\\code\\app", "src/deep/a.ts"), absoluteTreePath("C:\\code\\app\\", "a.ts"), absoluteTreePath("C:\\", "a.ts")],
+    ["C:\\code\\app\\src\\deep\\a.ts", "C:\\code\\app\\a.ts", "C:\\a.ts"]);
+  assert.deepEqual([absoluteTreePath("/home/me/app", "src/a.ts"), absoluteTreePath("/home/me/app/", "a.ts"), absoluteTreePath("/", "a.ts")],
+    ["/home/me/app/src/a.ts", "/home/me/app/a.ts", "/a.ts"]);
+  // The folder itself has the path it was given.
+  assert.deepEqual([absoluteTreePath("C:\\code\\app", ""), absoluteTreePath("/home/me/app", "")], ["C:\\code\\app", "/home/me/app"]);
 });
 
 test("a folder is read when it is opened: only the project folder and the open folders under it are asked for", () => {
