@@ -108,22 +108,40 @@ the TUI. Closing the last saved tab selects the nonclosable local prompt draft.
 The draft entry remains available alongside saved tabs; Ctrl+W on it does nothing.
 Reopen restores the most recently closed valid tab (window-local history).
 
-Only one `SessionWorkspace` is mounted. Its existing scope/session key and
-App-owned request, draft, scroll/follow, display and runtime stores are retained.
-Changing tabs uses the existing selected-session read/subscription lifecycle;
-there are no hidden live workspaces or background polling/provider starts.
-Closing an inactive tab does not read history or replace the active display
-attachment. Pending/uncertain Sends retain the exact original request and are
-never retried by navigation. Draft text retains the existing bounded local
-storage behavior; scroll/follow memory is window-local, not restart persistence.
+`SessionTabStrip` is the FlexLayout dock of the content area: its model
+(`createSessionTabModel` in `sessionTabLayout.ts`) holds the tabs of sessions and
+the tabs of projects (see File editor tabs below), which can be moved and split
+into panes. Floating, popouts and edge docking are disabled. Settings and
+Reminders are not tabs: each is a native modal dialog over the dock, which stays
+mounted.
 
-`SessionTabStrip` is an accessible navigation strip inside the existing
-`SessionContentLayout` FlexLayout content slot. FlexLayout still controls the
-responsive session/content geometry through its public adapter. The strip does
-not create another docking model or put Settings into tabs. Keeping one content
-slot avoids hidden live-session factories. Native popouts/floating are disabled;
-Settings remains a sidebar-entry modal with mounted inert workspace, and
-Reminders still intentionally unmounts/remounts it.
+Each open session tab has its own `SessionWorkspace`, with its own display,
+runtime, review and notes owners (`createSessionPaneOwners` in `main.tsx`). The
+model sets `tabEnableRenderOnDemand: false`, so the content of a hidden tab stays
+mounted: waits in flight, drafts and the loaded timeline survive a change of tab.
+`SessionTabContent` follows the visibility of its node and tells the pane, which
+observes only while it is visible, the workspace is shown and Settings is closed.
+A pane that does not observe pauses its automatic history, live, runtime,
+receipt, Ask, notes and choice reads until it is visible again; the visible panes
+of a split keep observing. A hidden session tab also keeps the element it
+rendered when it was hidden (`retained`), so a render of the window does not cost
+more with each open tab; the tab of the selected session is never kept that way.
+Hiding a pane does not cancel admitted commands. Closing an inactive tab does
+not read history or replace the active display attachment. Pending/uncertain
+Sends retain the exact original request and are never retried by navigation.
+Draft text retains the existing bounded local storage behavior; scroll/follow
+memory is window-local, not restart persistence. See "Workspace" in
+[CodeAlta Desktop](desktop.md).
+
+The tabs and the layout are those of the shown space. `App` keeps one model for
+each space (`spaceLayout` in `main.tsx`), gives it to the strip as `layout` and
+keys the strip by the id of the space. Showing another space unmounts the panes
+of the space that is left: only the tabs of the shown space are in the page, and
+the sessions of the others keep running in the host. The tabs of a space come
+back when it is shown again, with its panes where they were; after a restart the
+tabs come back from the storage keys of the space and the panes are laid out
+anew, because the model is kept in memory only. See "Spaces" in
+[CodeAlta Desktop](desktop.md).
 
 ## Keyboard and indicators
 
@@ -176,8 +194,8 @@ or start a provider. It reuses the catalog composer and expanded prompt editor,
 including Help/palette keys, F6 and modal keyboard ownership. Tab cycling includes
 the draft. Text is App-owned per project ID / global scope, matching the TUI's
 scope-local draft model. Selecting a project while drafting stays in the draft;
-selecting a saved tab restores that tab's scope. Settings keeps the editor mounted
-and inert; Reminders may unmount workspace DOM without losing App-owned text.
+selecting a saved tab restores that tab's scope. Settings and Reminders, modal
+dialogs over the dock, keep the editor mounted and inert.
 
 Bounded text (32,768 UTF-16 units) is also stored under a separate local-draft key
 when storage permits. Reload restores text when its scope is selected; a restored

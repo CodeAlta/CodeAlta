@@ -36,9 +36,9 @@ the same child identities. Public tab resize subscriptions and model updates
 share a coalesced public `Layout.redraw()`; cleanup disconnects the probe observer,
 removes subscriptions and cancels any pending frame, including StrictMode replay.
 
-The content slot now also contains the App-owned [session navigation strip](session-tabs.md)
-above the one active keyed workspace. Tab navigation does not add hidden live
-workspaces or change this adapter's private model, sizing or lifetime contract.
+The content slot holds the [dock of the session tabs](session-tabs.md), a
+FlexLayout model of its own for each space. Each open tab of the shown space
+keeps its pane mounted, and a hidden pane pauses its reads.
 
 ## Maintained verification
 
