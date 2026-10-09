@@ -482,6 +482,98 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public void PermissionPolicy_FollowsTheMode_AndTheHostWhenThereIsNone()
+    {
+        Assert.AreEqual(SessionPermissionPolicy.Approve, SessionPermissionModes.Policy("bypassPermissions", reviewByDefault: true));
+        Assert.AreEqual(SessionPermissionPolicy.AcceptEdits, SessionPermissionModes.Policy(" acceptEdits ", reviewByDefault: false));
+        Assert.AreEqual(SessionPermissionPolicy.Review, SessionPermissionModes.Policy("default", reviewByDefault: false));
+        // A mode of a provider that decides more by itself still has what it asks reviewed.
+        foreach (var mode in new[] { "auto", "dontAsk", "plan", "unknown" })
+            Assert.AreEqual(SessionPermissionPolicy.Review, SessionPermissionModes.Policy(mode, reviewByDefault: false), mode);
+        // No mode: the policy of the host, which the mode named for it says.
+        Assert.AreEqual(SessionPermissionPolicy.Approve, SessionPermissionModes.Policy(null, reviewByDefault: false));
+        Assert.AreEqual(SessionPermissionPolicy.Review, SessionPermissionModes.Policy(" ", reviewByDefault: true));
+        Assert.AreEqual("bypassPermissions", SessionPermissionModes.Default(reviewByDefault: false));
+        Assert.AreEqual("default", SessionPermissionModes.Default(reviewByDefault: true));
+    }
+
+    [TestMethod]
+    public async Task DefaultPermissionHandler_AnswersWithThePolicyOfTheSession()
+    {
+        // The host denies by itself; the policy of each session comes first.
+        await using var permissions = new SessionPermissionService(static () => false)
+        {
+            SessionPolicy = static sessionId => sessionId switch
+            {
+                "all" => SessionPermissionPolicy.Approve,
+                "edits" => SessionPermissionPolicy.AcceptEdits,
+                _ => SessionPermissionPolicy.Review,
+            },
+        };
+        var provider = new ModelProviderId("fixture");
+        AgentPermissionRequest Command(string sessionId) => new AgentCommandPermissionRequest(provider, sessionId, DateTimeOffset.UtcNow,
+            null, "interaction", null, "command", "folder", null, null, null, null, null);
+        AgentPermissionRequest Change(string sessionId) => new AgentFileChangePermissionRequest(provider, sessionId, DateTimeOffset.UtcNow,
+            null, "interaction", "folder", null);
+        async Task<AgentPermissionDecisionKind> Answer(AgentPermissionRequest request)
+            => (await permissions.OwnedDefaultPermissionHandler(request, CancellationToken.None)).Kind;
+
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, await Answer(Command("all")));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, await Answer(Change("all")));
+        // File changes are approved, commands are not: outside a send of the window there is no review to wait in.
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, await Answer(Change("edits")));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, await Answer(Command("edits")));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, await Answer(Command("ask")));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, await Answer(Change("ask")));
+    }
+
+    [TestMethod]
+    public Task SessionPermissionModes_AProviderWithoutModesOffersThoseOfTheHost_AndBypassesByDefault() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "bypassPermissions" }, choices.PermissionModes.ToArray());
+        Assert.AreEqual("bypassPermissions", choices.DefaultPermissionMode);
+        Assert.IsNull(choices.Current.PermissionMode);
+
+        // A session without a mode: what its run asks is approved, and nothing waits for the user.
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        Assert.AreEqual(SessionPermissionPolicy.Approve, f.Host.RuntimeService.GetPermissionPolicy(f.SessionId));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(f.Track(f.Provider.SendPermission!))).Kind);
+        Assert.HasCount(0, (await f.Observe(f.Host.RuntimeService.Permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
+    public Task SessionPermissionModes_ASessionThatAsksFirstIsReviewed_WhileTheHostBypasses() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+
+        // The send chooses the mode: what its run asks waits for the user, whatever the host does by default.
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("ask", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Ask } }));
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        Assert.AreEqual(SessionPermissionPolicy.Review, f.Host.RuntimeService.GetPermissionPolicy(f.SessionId));
+        var pending = f.Track(f.Provider.SendPermission!);
+        var permissions = f.Host.RuntimeService.Permissions;
+        var entry = (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries.Single();
+        Assert.AreEqual("inert fixture command", entry.Request.Command);
+        Assert.IsFalse(pending.IsCompleted);
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(pending)).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        Assert.AreEqual("default", (await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId)))!.Current.PermissionMode);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task DifferentProviderSelection_IsAdmittedThenFailsPreparationWithoutReplacingSource() => Fixture.RunAsync(async f =>
     {
         // This helper completes a real owned Send and commits the fake idle event; it does not compact.
@@ -1623,12 +1715,13 @@ public sealed class OwnedSessionCommandServiceTests
         internal ControlledProvider Provider { get; } = new();
         internal CodeAltaHost Host => _host ?? throw new InvalidOperationException("Host setup has not completed.");
 
-        internal static async Task RunAsync(Func<Fixture, Task> body, int capacity = 256, bool holdPreparation = false, bool reviewPermissions = false)
+        internal static async Task RunAsync(Func<Fixture, Task> body, int capacity = 256, bool holdPreparation = false, bool reviewPermissions = false,
+            bool sessionPermissionModes = false)
         {
             var fixture = new Fixture();
             try
             {
-                fixture._setup = fixture.Track(fixture.SetupAsync(capacity, holdPreparation, reviewPermissions));
+                fixture._setup = fixture.Track(fixture.SetupAsync(capacity, holdPreparation, reviewPermissions, sessionPermissionModes));
                 await fixture.Observe(fixture._setup);
                 var launch = fixture.NewGate();
                 fixture._body = fixture.Track(fixture.RunBodyAsync(body, launch.Task));
@@ -1657,7 +1750,7 @@ public sealed class OwnedSessionCommandServiceTests
             await Track(body(this)).ConfigureAwait(false);
         }
 
-        private async Task SetupAsync(int capacity, bool holdPreparation, bool reviewPermissions)
+        private async Task SetupAsync(int capacity, bool holdPreparation, bool reviewPermissions, bool sessionPermissionModes)
         {
             // Parent must admit these runtime I/O routes only after auditing this complete fixture.
             // Check existing ancestry before side effects; this is not a reparse-race sandbox.
@@ -1745,6 +1838,9 @@ public sealed class OwnedSessionCommandServiceTests
                 BuiltInSkillRoot = builtin,
                 OwnedCommandReceiptCapacity = capacity,
                 ReviewOwnedCommandPermissions = reviewPermissions,
+                // The host of the desktop: it approves by itself, and the mode of a session comes first.
+                AutoApproveOwnedPermissions = sessionPermissionModes,
+                SessionPermissionModes = sessionPermissionModes,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 StartPlugins = false,
                 OwnsLogging = false,

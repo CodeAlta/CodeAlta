@@ -70,6 +70,8 @@ import { ArchivedActionRecovery } from "./ArchivedActionRecovery";
 import { createReminderActions } from "./reminderActions";
 import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type ActiveReminders } from "./activeReminders";
 import { ReminderBadge } from "./ReminderBadge";
+import { SessionWaitingBadge, WaitingBadge } from "./WaitingBadge";
+import { PermissionSettings } from "./PermissionSettings";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions, noOutgoing } from "./sessionOperations";
@@ -167,7 +169,7 @@ import { createSpacesHub } from "./spaces/spacesHub";
 import { SpaceActivityBar, SpaceSwitch } from "./spaces/SpaceViews";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
-import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers,
+import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers, spaceShows,
   spaceStorageKey } from "./spaces/spaces";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
@@ -209,7 +211,7 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost";
+type View = "workspace" | "appearance" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App() {
@@ -892,6 +894,23 @@ function App() {
         action: { text: translate(shownLocale.current, "Show"), onClick: () => void openSpaceSession(call.space.id, call) } });
     }
   }, [calls, spaceId]);
+  // The sessions that wait for the user (a question, a command to allow, a form): marked in the Explorer and on their
+  // tab. One of the space that is shown is also said once, when it starts to wait while another session is on screen.
+  const waitingSessions = useMemo(() => new Set(spacesState.sessions.filter(session => session.waiting).map(session => session.sessionId)), [spacesState.sessions]);
+  const saidWaiting = useRef<ReadonlySet<string> | null>(null);
+  useEffect(() => {
+    const said = saidWaiting.current;
+    saidWaiting.current = waitingSessions;
+    // What waited when the window started is not news.
+    if (!said) return;
+    for (const session of spacesState.sessions) {
+      if (!session.waiting || said.has(session.sessionId) || session.sessionId === sessionId
+        || !spaceShows(spacesState.spaces, spaceId, session.projectId)) continue;
+      showToast({ intent: "warning", icon: "help", timeout: 12_000,
+        message: translate(shownLocale.current, "{title} waits for you", { title: session.title || translate(shownLocale.current, "A session") }),
+        action: { text: translate(shownLocale.current, "Show"), onClick: () => { selectProject(session.projectId, session.sessionId); focusPromptSoon(); } } });
+    }
+  }, [waitingSessions]);
   function activateFile(tab: FileTab | null) { setFileTabs(state => activateFileTab(state, tab)); }
   function openFile(tab: FileTab) {
     // At the tab limit a file with unsaved edits is never the one that makes room.
@@ -1333,7 +1352,10 @@ function App() {
       if (currentView.current !== "workspace" || settingsVisible.current
         || modalDialogOpen() || document.querySelector(".project-editor[data-active='true'], .terminal-panel[data-active='true']")) return;
       const prompt = document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt");
-      if (prompt) prompt.focus();
+      // A request that waits for the user's permission is what its session shows first: its first choice takes the focus.
+      const choice = prompt?.closest(".composer-region")?.querySelector<HTMLElement>(".command-permission-panel button[data-permission-choice]:not(:disabled)");
+      if (choice) choice.focus();
+      else if (prompt) prompt.focus();
       else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
     }));
   }
@@ -2008,6 +2030,7 @@ function App() {
   function sessionMarks(session: WorkspaceSession, scope: string | null) {
     return <>
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
+      <SessionWaitingBadge waiting={waitingSessions.has(session.id)} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
       {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
@@ -2661,7 +2684,8 @@ function App() {
                 onOpen={showTerminal} onClose={terminal => terminalWorkspace.hub.close(terminal.id)} /> }}
             terminals={owned ? { count: id => terminalsOf(terminalList, id).length, create: project => void createTerminal(project.id) } : undefined}
             changes={owned ? { open: id => fileTabs.open.some(tab => isChangesTab(tab) && tab.projectId === id), show: project => showChanges(project) } : undefined}
-            activity={id => <><RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
+            activity={id => <><WaitingBadge count={spacesState.sessions.reduce((count, session) => count + (session.waiting && session.projectId === id ? 1 : 0), 0)} />
+              <RunningSessionBadge controls={runtimeObservationControls()} projectId={id} />
               <ReminderBadge count={activeReminders ? scopeReminderCount(activeReminders, snapshot, id) : 0} />
               {id !== null && <WorkItemsBadge counts={workByProject.get(id)} onOpen={owned ? () => openWorkItems({ projectId: id }) : undefined} />}</>}
             canRename={owned} renameBusy={projectRenameBusy || !mutation?.capability.canMutate()} onRename={() => void beginProjectRename()}
@@ -2827,7 +2851,7 @@ function App() {
                 permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
                 selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider>;
             }}
-            capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()}
+            capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions}
             onSessionTabClick={focusPromptSoon}
             select={selectSessionTab} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
@@ -2915,8 +2939,9 @@ function App() {
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
         sessionWidth, setSessionWidth, confirms: { ...confirms, set: setConfirm },
-        permissions: owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions } : null,
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
+      : settingsSection === "permissions" ? <PermissionSettings
+        permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions } : null} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
@@ -3059,6 +3084,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"], ["spaces", "Spaces", "space"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
+      ["permissions", "Permissions", "shield"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
     ["Advanced", [["config", "Configuration file", "config"], ["mcpHost", "CodeAlta MCP", "remote"]]],

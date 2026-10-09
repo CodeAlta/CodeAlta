@@ -69,6 +69,17 @@ public sealed class CodeAltaHostOptions
     /// </remarks>
     public Func<bool>? ReviewOwnedPermissionsPolicy { get; init; }
 
+    /// <summary>
+    /// Gets whether the permission mode chosen for a session decides what the host does with its requests, before
+    /// the policy of the host: a session in the mode that bypasses permissions is approved automatically, one in a
+    /// mode that asks is reviewed. Default false: every session has the policy of the host.
+    /// </summary>
+    /// <remarks>
+    /// With it a provider without permission modes of its own offers those of the host
+    /// (<see cref="Runtime.SessionPermissionModes.HostModes"/>). A host that must review everything leaves it off.
+    /// </remarks>
+    public bool SessionPermissionModes { get; init; }
+
     /// <summary>Gets whether owned sends expose the restricted, operation-bound ask producer. Default is false.</summary>
     public bool EnableOwnedAsks { get; init; }
 

@@ -31,8 +31,8 @@ import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
-import { PermissionModeSelect } from "./PermissionModeSelect";
-import { chosenPermissionMode, effectivePermissionMode, offeredPermissionModes } from "./permissionModes";
+import { PermissionModeMenu } from "./PermissionModeMenu";
+import { chosenPermissionMode, offeredPermissionModes } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
@@ -827,10 +827,8 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     setChoicesNotice("");
   }
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;
-  // Only a provider with permission modes shows the choice. The chip names a mode chosen for the session, and the
-  // provider's own one only when Claude Code then runs requests without CodeAlta's review.
+  // The permission mode is shown where the host offers modes.
   const permissionModes = offeredPermissionModes(activeChoices);
-  const permission = activeChoices && selected && permissionModes.length ? effectivePermissionMode(activeChoices, selected) : null;
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
   async function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
@@ -885,7 +883,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
         // Text that cannot be staged (a request is pending, the queue is full) goes back to the composer, never lost.
         if (!stageLatest.current(kind, value, [])) editLatest.current(latestText.current.trim() ? `${latestText.current}
 ${value}` : value);
-      }} takeFocus={() => !latestText.current.trim() && !images.length} />}
+      }} takeFocus={() => !latestText.current.trim() && !images.length} onAnswered={() => promptInput.current?.focus()} visible={active} />}
     <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>
@@ -919,15 +917,11 @@ ${value}` : value);
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
            repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, steerFromComposer)) { event.preventDefault(); event.stopPropagation(); }
       } }}
-    options={<ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
+    options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selected?.providerKey ?? t("session provider"), providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
-        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null),
-        permission: permission?.id && (permission.chosen || permission.skipsReview) ? { id: permission.id, skipsReview: permission.skipsReview } : null }}
-      permission={activeChoices && selected && permissionModes.length ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
-        value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} providerMode={activeChoices.defaultPermissionMode ?? null}
-        disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined}
+        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null) }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -955,7 +949,10 @@ ${value}` : value);
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </HTMLSelect>}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
-        onChange={value => select("reasoningEffort", value)} />} />}>
+        onChange={value => select("reasoningEffort", value)} />} />
+      {activeChoices && selected && permissionModes.length > 0 && <PermissionModeMenu id={`composer-permission-${sessionId}`}
+        value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
+        disabled={selectionDisabled} onChange={value => select("permissionMode", value)} />}</>}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
       {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} />}
       {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}

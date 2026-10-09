@@ -407,7 +407,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
 
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Send, request.SessionId);
             // The policy of this send, fixed here: every later step of it, setup and cleanup alike, reads this.
-            var review = _reviewPermissions();
+            // Where a session has a policy of its own, it is known once the session is prepared: the send may then
+            // be reviewed, and is closed as one that is.
+            var review = _runtime.SessionPermissionModes || _reviewPermissions();
             if (review) _permissionsUsed = true;
             operation = new SendOperation(request, receipt) { AskSubmission = askSubmission, ReviewPermissions = review };
             Keep(new ReceiptEntry(receipt, request, Ask: askSubmission, Release: operation.ReleaseDecision));
@@ -606,7 +608,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
             // The policy of this queued send, fixed here as it is for a direct one.
-            var queueReview = _reviewPermissions();
+            var queueReview = _runtime.SessionPermissionModes || _reviewPermissions();
             if (queueReview) _permissionsUsed = true;
             operation = new(request, receipt) { ReviewPermissions = queueReview };
             Keep(new(receipt, Queue: request, Release: operation.ReleaseDecision));
@@ -859,10 +861,17 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 }
                 else
                 {
-                    if (operation.ReviewPermissions || _enableUserInput)
-                        operation.PermissionExecution = await _runtime.Permissions.CreateOwnedExecutionAsync(
-                            operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, operation.ReviewPermissions, _enableUserInput).ConfigureAwait(false);
-                    if ((operation.ReviewPermissions || _enableUserInput) && operation.PermissionExecution is null)
+                    // The policy of the session, read once now that it is prepared: the mode a send chooses is saved
+                    // by then. A session whose requests are all approved needs no execution, unless it asks questions.
+                    SessionPermissionPolicy? policy = _runtime.SessionPermissionModes ? _runtime.GetPermissionPolicy(prepared.Session.SessionId) : null;
+                    var reviewed = policy is { } own ? own != SessionPermissionPolicy.Approve || _enableUserInput : operation.ReviewPermissions || _enableUserInput;
+                    if (reviewed)
+                        operation.PermissionExecution = policy is { } chosen
+                            ? await _runtime.Permissions.CreateOwnedExecutionAsync(
+                                operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, chosen, _enableUserInput).ConfigureAwait(false)
+                            : await _runtime.Permissions.CreateOwnedExecutionAsync(
+                                operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, operation.ReviewPermissions, _enableUserInput).ConfigureAwait(false);
+                    if (reviewed && operation.PermissionExecution is null)
                     {
                         result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_unavailable");
                     }

@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
-import { PermissionChipPart, PermissionModeSelect } from "./PermissionModeSelect";
-import { chosenPermissionMode, effectivePermissionMode, offeredPermissionModes, providerPermissionMode } from "./permissionModes";
+import { PermissionModeMenu } from "./PermissionModeMenu";
+import { chosenPermissionMode, offeredPermissionModes, providerPermissionMode } from "./permissionModes";
 import { captureSubmission } from "./sessionOperations";
 import { changeSelection, completeSelection, restoreSelection, validSelection } from "./sessionSelection";
 
 const current: SessionSelection = { providerKey: "claude", agentPromptId: "default", modelId: "one", reasoningEffort: "High" };
-const modes = [{ id: "default", skipsReview: false }, { id: "acceptEdits", skipsReview: true }, { id: "auto", skipsReview: true },
-  { id: "dontAsk", skipsReview: true }, { id: "bypassPermissions", skipsReview: true }];
+const modes = [{ id: "default" }, { id: "acceptEdits" }, { id: "auto" }, { id: "dontAsk" }, { id: "bypassPermissions" }];
 const choices: SessionChoicesResponse = { status: "ok", epoch: "epoch", sessionId: "session", current,
   prompts: [{ id: "default", name: "Default" }],
   models: [{ id: "one", name: "One", efforts: ["High"], imageInput: null, startEffort: "High" },
@@ -68,14 +67,12 @@ test("a saved mode the provider no longer offers does not hold back another chan
   }
 });
 
-test("the mode shown is the chosen one, else the provider's, and says whether the review is skipped", () => {
+test("the mode chosen for a session is its own, the one a Send names, or none for the default", () => {
   assert.equal(chosenPermissionMode(choices, current), null);
-  assert.deepEqual(effectivePermissionMode(choices, current), { id: "plan", chosen: false, skipsReview: false });
-  assert.deepEqual(effectivePermissionMode(choices, { ...current, permissionMode: "bypassPermissions" }), { id: "bypassPermissions", chosen: true, skipsReview: true });
+  assert.equal(chosenPermissionMode(choices, { ...current, permissionMode: "bypassPermissions" }), "bypassPermissions");
   const overridden = { ...choices, current: { ...current, permissionMode: "acceptEdits" } };
   assert.equal(chosenPermissionMode(overridden, overridden.current), "acceptEdits");
   assert.equal(chosenPermissionMode(overridden, { ...current, permissionMode: providerPermissionMode }), null);
-  assert.deepEqual(effectivePermissionMode({ ...choices, defaultPermissionMode: "dontAsk" }, current), { id: "dontAsk", chosen: false, skipsReview: true });
 });
 
 test("a Send carries the chosen mode, and leaves the field out when the session keeps its own", () => {
@@ -87,19 +84,19 @@ test("a Send carries the chosen mode, and leaves the field out when the session 
   assert.equal(captureSubmission("epoch", "session", "text", "key", { ...current, permissionMode: " auto" }), null);
 });
 
-test("the composer offers the provider's setting first, then the modes by name, and warns of those without the review", () => {
-  const html = renderToStaticMarkup(<PermissionModeSelect id="permission" value="dontAsk" modes={modes} providerMode="plan" onChange={() => {}} />);
-  assert.match(html, /aria-label="Permissions"/);
-  assert.match(html, /<option value="" title="plan">Provider setting \(Plan\)<\/option>/);
-  for (const name of ["Default", "⚠ Accept edits", "⚠ Auto", "⚠ Don&#x27;t ask", "⚠ Bypass permissions"]) assert.ok(html.includes(`>${name}</option>`), name);
-  assert.match(html, /data-skips-review="true"/);
-  assert.match(html, /refuses the rest, without CodeAlta&#x27;s review\. <code>dontAsk<\/code>/);
-  // The setting of the CLI, when the provider names no mode; its default mode skips nothing.
-  const cli = renderToStaticMarkup(<PermissionModeSelect id="permission" value={null} modes={modes} providerMode={null} onChange={() => {}} />);
-  assert.match(cli, /<option value="" selected="">The setting of the CLI<\/option>/);
-  assert.doesNotMatch(cli, /data-skips-review/);
-
-  const chip = (permission: { id: string; skipsReview: boolean }) => renderToStaticMarkup(<PermissionChipPart {...permission} />);
-  assert.match(chip({ id: "acceptEdits", skipsReview: true }), /composer-permission-part" data-skips-review="true" title="Claude Code runs requests without CodeAlta&#x27;s review in this mode\.">.*Accept edits/);
-  assert.doesNotMatch(chip({ id: "default", skipsReview: false }), /data-skips-review/);
+test("the composer names the mode the session runs in: its own, else the default one, quietly", () => {
+  const button = (value: string | null, defaultMode: string | null) =>
+    renderToStaticMarkup(<PermissionModeMenu id="permission" value={value} modes={modes} defaultMode={defaultMode} onChange={() => {}} />);
+  // No mode of its own: the default one is named, and the button is not marked.
+  const quiet = button(null, "bypassPermissions");
+  assert.match(quiet, /aria-label="Permissions: Bypass permissions"/);
+  assert.match(quiet, /composer-permission-name">Bypass permissions</);
+  assert.doesNotMatch(quiet, /data-own/);
+  // A mode of its own is named and marked.
+  const own = button("default", "bypassPermissions");
+  assert.match(own, /data-own="true"/);
+  assert.match(own, /composer-permission-name">Ask first</);
+  // A default a session cannot be given (the plan mode of a provider), and the setting of the CLI when there is none.
+  assert.match(button(null, "plan"), /composer-permission-name">Plan</);
+  assert.match(button(null, null), /composer-permission-name">The setting of the CLI</);
 });

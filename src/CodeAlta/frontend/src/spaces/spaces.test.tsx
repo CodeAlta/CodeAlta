@@ -5,7 +5,7 @@ import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSessio
 import { dropChange, movedOrder } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, restoreShownSpace, sameMembers, sameSpaces, scopeSnapshot,
-  spaceActivities, spaceBrand, spaceCalls, spaceMembers, spaceNameProblem, spaceQuiet, spaceStorageKey } from "./spaces";
+  spaceActivities, spaceBrand, spaceCalls, spaceMembers, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey } from "./spaces";
 import { activityMilliseconds, createSpacesHub, type SpacesApi } from "./spacesHub";
 
 const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem> = {}): SpaceItem =>
@@ -91,6 +91,14 @@ test("what each space is doing is worked out from what the sessions do", () => {
   assert.equal(readSessionActivity(null), null);
 });
 
+test("the space that is shown has the sessions of its projects and the chats, and the default one has them all", () => {
+  const spaces = readSpaces([item("default"), item("work", ["a"])]);
+  assert.equal(spaceShows(spaces, "default", "b"), true);
+  assert.equal(spaceShows(spaces, "work", "a"), true);
+  assert.equal(spaceShows(spaces, "work", "b"), false);
+  assert.equal(spaceShows(spaces, "work", null), true, "A chat is shown in every space.");
+});
+
 test("a session that needs the user is called out only where the user is not looking", () => {
   const spaces = readSpaces([item("default", ["a", "b", "c", "d"]), item("work", ["a", "b"]), item("personal", ["b", "c"])]);
   const sessions = [doing("in-a", "a", { waiting: true }), doing("in-c-failed", "c", { failed: true }), doing("in-c", "c", { waiting: true }), doing("in-d", "d", { failed: true }),
@@ -164,7 +172,7 @@ test("dropping a project on a space adds it, moves it or copies it, and dropping
   assert.equal(movedOrder(spaces, "default", 1), null);
 });
 
-test("the hub lists the spaces once, follows what the host says, and asks what the sessions do only with more than one space", async () => {
+test("the hub lists the spaces once, follows what the host says, and says what each space does only with more than one space", async () => {
   let listed = [item("default", ["a"])];
   let sessions = [doing("s1", "a", { running: true })];
   const calls: string[] = [];
@@ -191,8 +199,10 @@ test("the hub lists the spaces once, follows what the host says, and asks what t
   await waited;
   await settle();
   assert.deepEqual([hub.getSnapshot().loaded, hub.getSnapshot().available, hub.getSnapshot().spaces.map(space => space.id)], [true, true, ["default"]]);
-  // With the default space alone nothing is asked about the sessions.
-  assert.deepEqual(calls, ["list", "watch"]);
+  // With the default space alone the sessions are known, for the ones that wait for the user, and no space has an activity.
+  assert.deepEqual(calls, ["list", "watch", "activity"]);
+  await hub.refreshActivity();
+  assert.deepEqual(hub.getSnapshot().sessions.map(session => session.sessionId), ["s1"]);
   assert.equal(hub.getSnapshot().activity.size, 0);
 
   const created = await hub.create("Work", null, "briefcase", null, ["a"]);

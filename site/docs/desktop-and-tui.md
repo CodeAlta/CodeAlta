@@ -89,7 +89,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
 
 Use CodeAlta Desktop for daily work: it shows more at once, and it has features that the TUI does not have.
 
-Use CodeAlta TUI when you want to stay in a terminal, or when you want to review each tool permission request.
+Use CodeAlta TUI when you want to stay in a terminal.
 
 ## What is shared
 

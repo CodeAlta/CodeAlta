@@ -25,15 +25,16 @@ const noSessions: readonly SpaceSessionActivity[] = Object.freeze([]);
 const empty: SpacesState = { loaded: false, available: false, spaces: [defaultSpace], sessions: noSessions, activity: noActivity };
 /** How long the page waits before it listens again after the host stopped telling. */
 export const reconnectMilliseconds = 2000;
-/** How often the page asks what the sessions of the spaces do, while there is more than the default space. */
+/** How often the page asks what the sessions do: which ones run, failed or wait for the user. */
 export const activityMilliseconds = 4000;
 
 export type SpacesHub = ReturnType<typeof createSpacesHub>;
 
 /**
  * Keeps what the host says of the spaces. It lists once it is connected, again each time the host says they
- * changed, and when a call that changes something returns. While there is more than the default space it also
- * asks, every few seconds, what the sessions of every space are doing.
+ * changed, and when a call that changes something returns. It also asks, every few seconds, what the sessions
+ * are doing: the window marks the ones that wait for the user, and says what each space is doing once there is
+ * more than the default one.
  */
 export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, milliseconds) => setTimeout(run, milliseconds), clear: timer => clearTimeout(timer as number) },
   visible: () => boolean = () => typeof document === "undefined" || document.visibilityState !== "hidden") {
@@ -68,7 +69,7 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
         const kept = sameSpaces(state.spaces, spaces) ? state.spaces : spaces;
         if (state.loaded && state.available && kept === state.spaces) return;
         // The spaces changed: what their sessions do is worked out again from the last reading.
-        show({ loaded: true, available: true, spaces: kept, sessions: kept.length > 1 ? state.sessions : noSessions,
+        show({ loaded: true, available: true, spaces: kept, sessions: state.sessions,
           activity: kept.length > 1 ? spaceActivities(kept, state.sessions) : noActivity });
       } catch {
         // The host is gone: the next connection lists again. Who waited for a first answer goes on with the default space.
@@ -84,12 +85,15 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
 
   async function readActivity() {
     const host = epoch;
-    if (!host || !state.available || state.spaces.length < 2) return;
+    if (!host || !state.available) return;
     try {
       const reply = await api.activity({ expectedEpoch: host }, { timeoutMilliseconds: 10_000 });
       if (epoch !== host || reply.status !== "ok") return;
       const sessions = reply.sessions.map(readSessionActivity).filter(session => session !== null);
-      if (!sameSessions(state.sessions, sessions)) show({ ...state, sessions, activity: spaceActivities(state.spaces, sessions) });
+      // The sessions are known with one space too: the window marks the ones that wait for the user. What each
+      // space is doing is only worked out when there is more than the default one.
+      if (!sameSessions(state.sessions, sessions))
+        show({ ...state, sessions, activity: state.spaces.length > 1 ? spaceActivities(state.spaces, sessions) : noActivity });
     } catch { /* What was known stays until the next reading. */ }
   }
 

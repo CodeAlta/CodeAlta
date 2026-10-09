@@ -152,19 +152,22 @@ In the desktop app, the agent prompt, provider, model and reasoning effort are i
   <figcaption class="small text-secondary mt-2">Agent prompt, provider, model and reasoning effort for the next send.</figcaption>
 </figure>
 
-A session of a provider that has permission modes (today [Claude Code](model-providers.md#claude-code))
-also has **Permissions** in that picker. It starts with **Provider setting**, the mode configured for the
-provider, or **The setting of the CLI** when the provider sets none (your own Claude Code settings then
-choose), and lists the modes the session can have instead: **Default**, **Accept edits**, **Auto**, **Don't
-ask** and **Bypass permissions**. A line under the list says what the chosen mode does. The modes in which
-the agent acts without asking you are marked ⚠ and shown in the warning color: with them, its commands or
-file changes are not reviewed in CodeAlta, even with [review](#tool-permissions) turned on. **Don't ask**
-does not mean "allow everything": Claude Code then runs only what its own settings allow and refuses the
-rest, while **Bypass permissions** runs everything. The mode
-applies from the next prompt you send, without restarting the session, and stays with the session when you
-reopen it; switching the session to another provider takes it back to that provider's setting. The picker
-shows the mode while the session has one of its own, and always when it skips the review. A new session
-gets the choice once it has started.
+Beside that picker, a small button names the permission mode of the session and opens the list of modes:
+
+| Mode | What the session does |
+| --- | --- |
+| **Ask first** | Asks you before it runs a command or changes a file. |
+| **Accept edits** | Changes files without asking, and asks before it runs a command. |
+| **Bypass permissions** | Runs commands and changes files without asking. |
+| **Auto** ([Claude Code](model-providers.md#claude-code) only) | Claude Code decides for each request. |
+| **Don't ask** (Claude Code only) | Never asks: Claude Code runs what its own settings allow and refuses the rest. |
+
+The mode marked **Default** in the list is the one a session runs in when you choose none: the mode of
+its provider when it has one, otherwise the default mode of the application, which is **Bypass
+permissions** unless you change it in Settings > Permissions (see [Tool permissions](#tool-permissions)).
+A mode you choose applies from the next prompt you send, without restarting the session, and stays with
+the session when you reopen it. Switching the session to another provider takes it back to the default.
+A new session gets the choice once it has started.
 
 `Ctrl+Enter` steers a running provider session. If the provider cannot steer live, CodeAlta re-queues the prompt for the next normal turn. `F8` aborts the running turn.
 
@@ -584,15 +587,28 @@ The Workspace Settings dialog covers the navigator and the UI theme, and is sepa
 
 Agents ask for permission before running commands or changing files. **Auto approve commands** is enabled by default in the TUI Workspace Settings: requests are approved automatically. Turn it off to review each request with **Allow Once**, **Allow for Session**, or **Deny**.
 
-In the desktop app, **Review what the sessions do** in Settings > Appearance does the same, and is **on
-by default**: an agent runs with the privileges of CodeAlta, so the window asks before a command runs or a
-file is written. Turn it off to approve everything automatically. It applies to what the sessions do next,
-not to what is already running: a request already waiting can still be answered after you turn it off, and
-a turn that started without review is not stopped when you turn it on. It covers commands and file changes
-alike. The permission mode of a
-session, or of its provider, still decides what that provider resolves by itself before anything is asked
-here. A session that
-is waiting for you is counted in the activity of its space.
+In the desktop app, each session has a [permission mode](#agent-prompt-model-and-permissions). Settings >
+Permissions sets the **Default mode**, for the sessions that have none of their own: **Bypass permissions**
+(the default: requests are approved automatically) or **Ask first**. A change applies to what the sessions
+do next, not to a turn that is already running. An agent runs with the privileges of CodeAlta: a mode
+decides what you are asked, it is not a sandbox.
+
+When a session asks, the request appears on top of its prompt, with the command and its folder, or the
+folder of the file change. **Allow once** has the focus: press `Enter` to allow, `2` or `Escape` to deny,
+or write in the field below what the agent should do instead. Once you answered, the focus goes back to
+the prompt.
+
+A session that waits for your answer is marked in the Explorer, on its project and on its tab. When it is
+not the session on screen, a message says so, with **Show** to go to it. It is also counted in the
+activity of its space.
+
+Only a turn you start from the window can ask. A turn that starts without you, such as a sub-agent that
+another session drives or the turn that receives the result of a background job, has nobody to ask: in a
+mode that asks, its commands and file changes are refused, and the agent is told so.
+
+A session in a mode that asks cannot start a [background job](sessions.md#background-jobs): the command of
+a job is one nobody would be asked about. While the default mode is **Ask first**, sessions cannot type in
+a terminal or give an automation a command either.
 
 A request appears on top of the prompt of its session, with the command it would run and its folder, or the
 folder it would write under, and what the agent says it is for. Answer with **Allow once** or **Deny**, or

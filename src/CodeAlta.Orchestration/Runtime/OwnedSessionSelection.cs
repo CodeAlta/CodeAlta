@@ -83,12 +83,17 @@ public sealed partial class OwnedSessionCommandService
         // What the session runs with, never "a default": a session without a model shows the one it starts with.
         var (modelId, effort) = StartingModel(provider, session.ModelId, session.ReasoningEffort, models);
         var configured = SelectionProvider?.Invoke(new ModelProviderId(provider));
+        // The modes of the provider when it has some, as Claude Code does. Any other provider runs the tools of
+        // CodeAlta, whose requests the host answers: where the mode of a session decides that, it offers the modes of the host.
+        var modes = configured?.PermissionModes.Where(static mode => !ProviderOnlyPermissionModes.Contains(mode)).Take(16).ToArray() ?? [];
+        if (modes.Length == 0 && _runtime.SessionPermissionModes) modes = [.. SessionPermissionModes.HostModes];
         return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode }, prompts,
             models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
                 { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort }).ToArray())
         {
-            PermissionModes = configured?.PermissionModes.Where(static mode => !ProviderOnlyPermissionModes.Contains(mode)).Take(16).ToArray() ?? [],
-            DefaultPermissionMode = configured?.DefaultPermissionMode,
+            PermissionModes = modes,
+            // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.
+            DefaultPermissionMode = _runtime.SessionPermissionModes ? _runtime.GetDefaultPermissionMode(provider) : configured?.DefaultPermissionMode,
         };
     }
 

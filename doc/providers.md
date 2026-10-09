@@ -515,6 +515,13 @@ mode of the user's settings, learned from `initialize` (`current_permission_mode
 orchestration keeps the session's mode in its saved local state (`permission_mode`, also in the SQLite cache),
 reads it at every attach and clears it on a provider switch.
 
+The mode also decides what the desktop host does with what the CLI asks (`SessionPermissionModes.Policy`, see
+"Permission modes" in `desktop.md`): `bypassPermissions` approves, `acceptEdits` approves file changes and has
+commands reviewed, any other mode has every request reviewed. The other providers run the tools of CodeAlta and
+report no modes: the desktop host offers their sessions its own three (`default`, `acceptEdits`,
+`bypassPermissions`), which need nothing from the provider since the host answers the requests. The session
+keeps the mode the same way; `AgentSession` passes it in the turn request, which those providers ignore.
+
 ### Limits
 
 - A prompt that starts with `/` is a slash command of Claude Code (`/compact`, `/context`, `/clear`).

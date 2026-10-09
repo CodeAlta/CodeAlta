@@ -156,14 +156,16 @@ internal sealed partial class BuiltInAltaCommandContributor
             timeout = given;
         }
 
-        // A host that has the user review the commands of its sessions runs none that nobody reviewed.
-        if (context.Services.Get<AltaJobPolicy>() is { AcceptsCommands: false })
-        {
-            return PermissionDenied(context, "job.startDenied", "This host has the user review the commands of its sessions: a session cannot start a command in the background. Run it with your shell tool.");
-        }
-
         var explicitSession = NormalizeOptionalText(options.SessionId);
         var sessionId = explicitSession ?? NormalizeOptionalText(context.Caller.SourceSessionId);
+
+        // A session whose commands the user reviews starts none that nobody reviewed: the session that calls is the
+        // one that acts, whichever session the job is for.
+        if (context.Services.Get<AltaJobPolicy>() is { } policy && !policy.Accepts(NormalizeOptionalText(context.Caller.SourceSessionId) ?? sessionId))
+        {
+            return PermissionDenied(context, "job.startDenied", "The user reviews the commands of this session: it cannot start a command in the background. Run it with your shell tool.");
+        }
+
         if (sessionId is null)
         {
             return UsageError(context, "usage.missingSession", "A job belongs to a session, which is told its end: use --session <session-id> when no session calls.", path);
@@ -426,4 +428,17 @@ internal sealed partial class BuiltInAltaCommandContributor
 /// Whether a session may start a command in the background. A host that has the user review the commands of its
 /// sessions does not let them: a command started this way is one nobody reviewed.
 /// </param>
-public sealed record AltaJobPolicy(bool AcceptsCommands);
+public sealed record AltaJobPolicy(bool AcceptsCommands)
+{
+    /// <summary>
+    /// Gets or initializes what decides for one session, by its identifier, in a host whose sessions do not all
+    /// have the same policy. Null, the default, leaves <see cref="AcceptsCommands"/> to decide for every session.
+    /// </summary>
+    public Func<string, bool>? AcceptsCommandsOf { get; init; }
+
+    /// <summary>Gets whether a session may start a command in the background.</summary>
+    /// <param name="sessionId">The session that acts, or null when no session does.</param>
+    /// <returns>False when the commands of that session are reviewed.</returns>
+    public bool Accepts(string? sessionId)
+        => AcceptsCommands && (sessionId is null || AcceptsCommandsOf?.Invoke(sessionId) != false);
+}

@@ -107,9 +107,8 @@ public sealed class DesktopOwnedSessionTests
 
         var choices = await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)));
         Assert.AreEqual("ok", choices.Status);
-        // Plan stays a mode of the provider's configuration; the others say whether the CLI runs things without the review.
+        // Plan stays a mode of the provider's configuration.
         CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions" }, choices.PermissionModes!.Select(mode => mode.Id).ToArray());
-        CollectionAssert.AreEqual(new[] { false, true, true, true, true }, choices.PermissionModes!.Select(mode => mode.SkipsReview).ToArray());
         Assert.AreEqual("plan", choices.DefaultPermissionMode);
         Assert.IsNull(choices.Current!.PermissionMode);
 

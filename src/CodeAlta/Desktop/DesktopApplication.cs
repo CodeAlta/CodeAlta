@@ -348,6 +348,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The user's setting decides, read at every send. The launch flag of the isolated-roots mode
                 // still forces the review on for a host started with it.
                 ReviewOwnedPermissionsPolicy = () => options.ReviewOwnedCommandPermissions || shell.ReviewPermissions,
+                // The mode chosen for a session comes first; a host started with that flag reviews every session.
+                SessionPermissionModes = !options.ReviewOwnedCommandPermissions,
                 EnableOwnedAsks = true,
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
                 // Source plugins are the same build as in the terminal application; the start-up screen
@@ -545,10 +547,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The tasks and the plans of the projects: files of each project, and the sessions of this instance that proposed or run them.
                 var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(worktreeConfig, host.CatalogOptions.StateRoot);
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
-                    new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
-                    // A command a session starts in the background is one nobody reviewed.
-                    options.ReviewOwnedCommandPermissions ? new AltaJobPolicy(AcceptsCommands: false) : null);
+                    // What a session types in a terminal, and the command it gives an automation, is reviewed by nobody:
+                    // not while the setting of the user has the commands of the sessions reviewed.
+                    new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions) { Reviews = () => shell.ReviewPermissions },
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions) { Reviews = () => shell.ReviewPermissions }, worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
+                    // A command a session starts in the background is one nobody reviewed: only a session whose
+                    // requests are all approved starts one.
+                    new AltaJobPolicy(AcceptsCommands: !options.ReviewOwnedCommandPermissions)
+                    {
+                        AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId) == SessionPermissionPolicy.Approve,
+                    });
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);

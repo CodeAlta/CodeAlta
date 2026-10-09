@@ -160,7 +160,7 @@ An agent can start a command without waiting for it: a long build or test run, o
 
 In CodeAlta Desktop the line above the prompt says how many background tasks a session has. Select it to see each job with how long it has run, open what it writes as it comes, or stop it. A job stays in the list for ten minutes after it ended, with its result. In the conversation, the result of a job appears as a **Background job** message.
 
-The agent uses the `alta job` commands for this: `start` (with `--timeout` for a command that could hang, and `--notify success` or `never` to change when the result is sent), `list`, `status`, `output` and `cancel`. Jobs end when CodeAlta exits, and CodeAlta Desktop asks before exiting while one runs. When CodeAlta Desktop is started with the review of commands, a session cannot start a job.
+The agent uses the `alta job` commands for this: `start` (with `--timeout` for a command that could hang, and `--notify success` or `never` to change when the result is sent), `list`, `status`, `output` and `cancel`. Jobs end when CodeAlta exits, and CodeAlta Desktop asks before exiting while one runs. A session whose [permission mode](workspace.md#tool-permissions) asks before commands cannot start a job.
 
 Agents can update the Notes of the current session (the sidebar Notes panel in the TUI, the Notes window in the desktop app) with `alta notes set --stdin`, read it back with `alta notes get`, and clear it with `alta notes clear`. Notes are session-scoped sticky Markdown for plans, checklists, and progress summaries; switching tabs shows the selected session's notes, and reopening a session restores the latest notes set/clear event from that session's journal.
 

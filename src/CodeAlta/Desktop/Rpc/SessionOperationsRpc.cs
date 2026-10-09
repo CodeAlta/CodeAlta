@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using System.Globalization;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
@@ -192,7 +191,7 @@ internal sealed class SessionOperationsService
                 choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())
                     { ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString() }).ToArray())
             {
-                PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode, SkipsReview(mode))).ToArray(),
+                PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
                 DefaultPermissionMode = choices.DefaultPermissionMode,
             };
         }
@@ -495,14 +494,6 @@ internal sealed class SessionOperationsService
             && string.Equals(value, parsed.ToString("D"), StringComparison.Ordinal);
     }
 
-    // The modes in which Claude Code runs some of what the session does without asking: CodeAlta's review does
-    // not see it. bypassPermissions runs everything, dontAsk runs what the CLI's own settings allow and refuses the rest,
-    // acceptEdits runs the file changes and auto lets a classifier of the CLI decide. The page shows them with a warning.
-    private static readonly FrozenSet<string> ReviewSkippingPermissionModes =
-        FrozenSet.ToFrozenSet(["acceptEdits", "auto", "dontAsk", "bypassPermissions"], StringComparer.Ordinal);
-
-    private static bool SkipsReview(string permissionMode) => ReviewSkippingPermissionModes.Contains(permissionMode);
-
     private static bool Identity(string? value, int maximum, bool trim = true)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > maximum || (trim && value != value.Trim())) return false;
@@ -555,8 +546,8 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultPermissionMode { get; init; }
 }
-// SkipsReview: the CLI runs some of what the session does without CodeAlta's review in this mode.
-internal sealed record SessionPermissionModeChoice(string Id, bool SkipsReview);
+// A mode a session can be given, by its identifier: the page names it.
+internal sealed record SessionPermissionModeChoice(string Id);
 internal sealed record SessionAbortRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);
 internal sealed record SessionSteerRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId, string Text);

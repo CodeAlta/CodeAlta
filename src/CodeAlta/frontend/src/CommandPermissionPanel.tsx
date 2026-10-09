@@ -14,7 +14,7 @@ const armDelay = 400;
  * while the session runs and none is shown, once more when the run ends with some shown, and after the answer to a
  * decision, which it acknowledges itself.
  */
-export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus }: {
+export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus, onAnswered, visible = true }: {
   reviewer: ReturnType<typeof createPermissionReviewer>; epoch: string; sessionId: string;
   canReview: () => boolean;
   /** Whether the session has a run that may ask for permission. */
@@ -26,6 +26,10 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   instruct?: (kind: "Steer" | "Queue", text: string) => void;
   /** Whether a request that appears may take the focus from the composer: it has no draft being written. */
   takeFocus?: () => boolean;
+  /** Called when the user answered a request: the composer takes the focus back. */
+  onAnswered?: () => void;
+  /** Whether the session is the one on screen: a request that waits takes the focus when its session is shown. */
+  visible?: boolean;
 }) {
   const { t } = useShellLanguage();
   const [state, setState] = useState<PermissionReviewState>();
@@ -82,14 +86,15 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     return () => clearTimeout(timer);
   }, [attempt]);
   useEffect(() => {
-    if (armed === null || armed !== attempt) return;
-    // Answering with the keyboard alone: the list takes the focus when nothing else is being written. The list, not a
-    // choice: a space or an Enter typed at that moment answers nothing, the arrows go to the choices.
+    if (armed === null || armed !== attempt || !visible) return;
+    // Answering with the keyboard alone: the first choice takes the focus when nothing else is being written, and
+    // Enter answers with it. It does so once the choices are armed, and a space typed at that moment answers nothing.
+    // A session that is shown while its request already waits is the same: the request is what it shows first.
     const focused = document.activeElement;
     const region = card.current?.closest(".composer-region") ?? card.current;
     if ((focused === document.body || focused === null || !!region?.contains(focused)) && (takeFocus?.() ?? false))
-      choices.current?.focus();
-  }, [armed]);
+      choices.current?.querySelector<HTMLElement>("button[data-permission-choice]:not(:disabled)")?.focus();
+  }, [armed, visible]);
   const outcome = <>
     {state?.kind === "resolving" && <p role="status">{t("Sending your decision…")}</p>}
     {state?.kind === "error" && <p role="alert">{t("Command review unavailable ({code}).", { code: state.code })} {state.reloadRequired && t("Reload the window to review requests again. A decision already sent stays sent.")}</p>}
@@ -109,6 +114,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       instruct(original?.state === "resolved" && original.origin.handle.attemptId === value.handle.attemptId ? "Steer" : "Queue", text);
     });
     if (text) setInstead("");
+    // The request is answered: what the user writes next goes to the prompt.
+    onAnswered?.();
   }
   const ready = canReview() && state === shown && armed === attempt;
   // Deny is the answer that means the same for every provider: the run goes on without the action. Stopping the run
@@ -147,7 +154,10 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     {entry.reason !== null && entry.reason.trim() && <p className="detail" data-permission-reason>{entry.reason}</p>}
     <div ref={choices} className="permission-choices" role="group" tabIndex={-1} aria-labelledby={`${sessionId}-permission-question`} onKeyDown={move}>
       {decisions.map(([decision, label], index) => <button key={decision} type="button" data-permission-choice data-permission-decision={decision}
-        disabled={!ready} tabIndex={index === 0 ? 0 : -1} onKeyDown={event => { if (event.repeat && event.key === "Enter") event.preventDefault(); }}
+        disabled={!ready} tabIndex={index === 0 ? 0 : -1}
+        // A key held down answers nothing, and neither does a space: it is typed in a text, not to answer.
+        onKeyDown={event => { if ((event.repeat && event.key === "Enter") || event.key === " ") event.preventDefault(); }}
+        onKeyUp={event => { if (event.key === " ") event.preventDefault(); }}
         onClick={event => decide(event.currentTarget, entry, decision)}>
         <span className="permission-choice-index" aria-hidden="true">{index + 1}</span>{t(label)}</button>)}
       {instruct && <form className="permission-instead" onSubmit={event => {

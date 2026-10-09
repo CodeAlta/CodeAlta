@@ -34,12 +34,13 @@ internal enum DesktopCloseBehavior
 /// loads.
 /// </param>
 /// <param name="ReviewPermissions">
-/// Whether the commands and the file changes of a session are reviewed instead of being approved automatically.
-/// On unless the user turned it off: an agent runs with the privileges of CodeAlta, and nothing here is a
-/// sandbox. The host keeps it because it is the permission policy of every session it owns, read at every send.
+/// Whether the commands and the file changes of a session are reviewed instead of being approved automatically,
+/// when neither the session nor its provider has a permission mode that says it. Off unless the user turned it
+/// on: the sessions bypass permissions, as they did before the setting existed. The host keeps it because it is
+/// the default permission policy of the sessions it owns, read at every send.
 /// </param>
 internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true, int SessionWidth = DesktopPreferences.DefaultSessionWidth,
-    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = true)
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false)
 {
     /// <summary>The least width of a conversation, in percent.</summary>
     internal const int MinimumSessionWidth = CodeAlta.LiveTool.IAltaAppearance.MinimumSessionWidth;
@@ -94,8 +95,8 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             // The whole space unless the file says otherwise, with a width that is one.
             var width = root.TryGetProperty("sessionWidth", out var wide) && wide.ValueKind == JsonValueKind.Number && wide.TryGetInt32(out var percent) && IsSessionWidth(percent)
                 ? percent : DefaultSessionWidth;
-            // Reviewed unless the file says otherwise: only the choice to approve automatically is written.
-            var review = !(root.TryGetProperty("reviewPermissions", out var reviewed) && reviewed.ValueKind == JsonValueKind.False);
+            // Approved automatically unless the file says otherwise: only the choice to review is written.
+            var review = root.TryGetProperty("reviewPermissions", out var reviewed) && reviewed.ValueKind == JsonValueKind.True;
             var zoom = root.TryGetProperty("zoom", out var zoomed) && zoomed.ValueKind == JsonValueKind.Number && zoomed.TryGetInt32(out var factor) && IsZoom(factor)
                 ? factor : DefaultZoom;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
@@ -124,7 +125,7 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
                 + (SessionWidth == DefaultSessionWidth ? "" : ",\"sessionWidth\":" + SessionWidth.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                + (ReviewPermissions ? "" : ",\"reviewPermissions\":false") + "}");
+                + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + "}");
             File.Move(temporary, path, overwrite: true);
             return true;
         }

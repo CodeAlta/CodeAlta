@@ -428,7 +428,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .command-permission-panel > p { margin: 4px 0 0; }
 .command-permission-panel code { overflow-wrap: anywhere; }
 .command-permission-panel .permission-choices { display: grid; gap: 6px; margin-top: 10px; }
-/* The list has the focus before a choice does: the card says so. */
+/* The list can have the focus without a choice having it: the card says so. */
 .command-permission-panel .permission-choices:focus { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
 .command-permission-panel .permission-choices > button, .ide-shell .command-permission-panel .permission-choices > button { display: flex; align-items: center; gap: 8px; width: 100%; height: auto; min-height: 34px; margin: 0; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); background: transparent; font: inherit; text-align: start; cursor: pointer; }
 .command-permission-panel .permission-choices > button:hover:not(:disabled) { background: var(--panel-2); }
@@ -871,6 +871,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 /* A row: its name, and its control at the end. The control takes the room it needs first and the name what
    is left: a name column that took its share first left the control too little, and the control went over it. */
 .settings-field { display: grid; grid-template-columns: minmax(140px, 1fr) auto; align-items: center; gap: 6px 20px; padding: 12px 0; border-top: 1px solid var(--line); }
+/* A card that starts with a field has no line above it. */
+.appearance-settings > .settings-field:first-child { padding-top: 0; border-top: 0; }
 .settings-field > label, .settings-field-label { max-width: 280px; color: var(--text); }
 .settings-field-control { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .settings-field-control .bp6-html-select { min-width: 220px; max-width: 100%; }
@@ -963,11 +965,17 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-reasoning-slider .bp6-slider { min-width: 0; height: 36px; }
 .composer-reasoning-slider .bp6-slider-label { font-size: 11px; white-space: nowrap; }
 .composer-reasoning-static { color: var(--muted); font-size: 12px; }
-/* A mode in which Claude Code runs requests without CodeAlta's review is shown in the warning color, on the chip too. */
-.composer-permission-description { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
-.composer-permission-description svg { flex: 0 0 auto; margin-top: 1px; }
-.composer-permission-description code { font-size: 11px; opacity: .8; }
-.composer-permission-description[data-skips-review], .composer-selection-part.composer-permission-part[data-skips-review], .composer-selection-part.composer-permission-part[data-skips-review] svg { color: var(--yellow); }
+/* The permission mode of the session: a small chip beside the selection one, quiet while the session runs in the default mode. */
+.composer-permission.bp6-button { flex: 0 1 auto; min-width: 0; padding: 3px 9px; border: 1px solid transparent; border-radius: 999px; color: var(--muted); font-size: 12px; }
+.composer-permission.bp6-button:hover, .bp6-popover-open > .composer-permission.bp6-button, .composer-permission.bp6-button[aria-expanded="true"] { border-color: var(--line-strong); color: var(--text); }
+.composer-permission.bp6-button[data-own] { color: var(--text); }
+.composer-permission.bp6-button[data-own] svg { color: var(--accent); }
+.composer-permission .bp6-button-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.permission-mode-menu { min-width: 260px; max-width: min(340px, calc(100vw - 32px)); }
+.permission-mode-item .bp6-text-overflow-ellipsis, .permission-mode-item .bp6-fill { display: grid; gap: 1px; }
+.permission-mode-name { font-weight: 600; }
+.permission-mode-description { color: var(--muted); font-size: 12px; line-height: 1.35; white-space: normal; }
+.permission-mode-item .bp6-menu-item-label { align-self: start; font-size: 11px; }
 .composer-selection-links { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 -6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .composer-send-group.bp6-button-group { flex: 0 0 auto; }
 .composer-send-group .composer-send-options.bp6-button { min-width: 22px; padding: 0 3px; }
@@ -1124,6 +1132,9 @@ dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { di
 .context-usage-grid dd { margin: 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
 /* Explorer marker for sessions and scopes with active reminders. */
+/* A session that waits for the user: easy to spot among the marks of the Explorer and on its tab. */
+.waiting-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; margin-inline-start: 4px; padding: 1px 5px; border-radius: 999px; color: #1c1300; background: var(--yellow); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.flexlayout__tab_button_leading .waiting-badge { margin-inline: 0 2px; }
 .reminder-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; margin-inline-start: 4px; color: var(--accent); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* Sub-agents have a color of their own, the one of the row of a session started by another: the count of the
    sessions a session started, the card of a message between agents, and the session such a message names. */

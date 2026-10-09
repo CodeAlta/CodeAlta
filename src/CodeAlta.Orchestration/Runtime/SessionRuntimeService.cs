@@ -127,8 +127,61 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _catalogOptions = catalogOptions;
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
+        _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
         Permissions = new SessionPermissionService(autoApproveOwnedPermissions);
         Jobs = new SessionJobService(DeliverJobResultAsync);
+    }
+
+    private readonly Func<bool> _autoApproveOwnedPermissions;
+    private readonly bool _sessionPermissionModes;
+
+    /// <summary>
+    /// Gets or initializes whether the permission mode of a session decides what the host does with its requests
+    /// (<see cref="GetPermissionPolicy"/>). False, the default, leaves every session the one policy of the host.
+    /// </summary>
+    public bool SessionPermissionModes
+    {
+        get => _sessionPermissionModes;
+        init
+        {
+            _sessionPermissionModes = value;
+            Permissions.SessionPolicy = value ? GetPermissionPolicy : null;
+        }
+    }
+
+    /// <summary>
+    /// Gets what the host does with the permission requests of a session: the policy of the mode chosen for the
+    /// session, else of the mode its provider is configured with, else the one of the host.
+    /// </summary>
+    /// <param name="sessionId">The session. One that is not attached has the policy of the host.</param>
+    /// <returns>The policy, read now: a send keeps the one it started with.</returns>
+    public SessionPermissionPolicy GetPermissionPolicy(string sessionId)
+    {
+        var reviewByDefault = !_autoApproveOwnedPermissions();
+        return _sessionPermissionModes && !string.IsNullOrWhiteSpace(sessionId) && _entries.TryGetValue(sessionId, out var entry)
+            ? Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), reviewByDefault)
+            : Runtime.SessionPermissionModes.Policy(null, reviewByDefault);
+    }
+
+    /// <summary>
+    /// Gets the permission mode a session of a provider runs in when none is chosen for it: the mode the provider is
+    /// configured with, else the one that names the policy of the host.
+    /// </summary>
+    /// <param name="providerKey">The key of the provider.</param>
+    /// <returns>A permission mode.</returns>
+    public string GetDefaultPermissionMode(string? providerKey)
+        => ConfiguredPermissionMode(providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
+
+    private string? ConfiguredPermissionMode(string? providerKey)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey)) return null;
+        foreach (var provider in _agentHub.SelectionProviders)
+        {
+            if (string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase))
+                return NormalizeOptionalText(provider.DefaultPermissionMode);
+        }
+
+        return null;
     }
 
     /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
@@ -1358,6 +1411,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             WorktreeDirectory = worktree,
             ProviderRegistrationVersion = providerVersion,
+            PermissionMode = permissionMode,
         };
 
         projector.Entry = entry;
@@ -1639,7 +1693,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     if (entry is not null && (entry.HasActiveRun || entry.QueueDrainInProgress || !HasOwnedCommandDefaults(entry)))
                         throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
                     if (entry is not null)
+                    {
                         await _agentHub.SetPermissionModeAsync(entry.SessionHandleId, permissionMode, actorCancellationToken).ConfigureAwait(false);
+                        entry.PermissionMode = permissionMode;
+                    }
                     var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
                     if (!string.Equals(NormalizeOptionalText(localState?.PermissionMode), permissionMode, StringComparison.Ordinal))
                     {
@@ -3978,6 +4035,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
         public long ProviderRegistrationVersion { get; init; }
+
+        /// <summary>The permission mode chosen for the session, or null for the one of its provider. Read from any thread.</summary>
+        public string? PermissionMode
+        {
+            get => Volatile.Read(ref _permissionMode);
+            set => Volatile.Write(ref _permissionMode, value);
+        }
+
+        private string? _permissionMode;
 
         public string? Model { get; }
 

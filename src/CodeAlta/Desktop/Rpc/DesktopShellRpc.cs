@@ -221,7 +221,7 @@ internal sealed record DesktopShellRevealEntryResponse(string Status);
 /// </param>
 internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded,
     int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null, bool TrayIcon = false,
-    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = true);
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false);
 
 /// <summary>Asks to review the commands and the file changes of the sessions, or to approve them automatically.</summary>
 /// <param name="Review">Whether they are reviewed.</param>

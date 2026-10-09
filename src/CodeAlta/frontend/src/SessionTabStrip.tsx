@@ -7,6 +7,7 @@ import { useShellLanguage } from "./shellLanguage";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
+import { SessionWaitingBadge } from "./WaitingBadge";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
 import { emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -72,7 +73,7 @@ const noFiles = emptyFileTabs();
 
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
-export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, capture, children, renderSession, newSessionLabel,
+export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, terminal, onSessionTabClick, layout }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
@@ -84,6 +85,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   drafts?: SessionTabDrafts;
   select: (tab: SessionTab) => void; close: (tab: SessionTab) => void; reopen: () => void;
   observations?: RuntimeObservationControls;
+  /** The sessions that wait for the user: their tab says so. */
+  waiting?: ReadonlySet<string>;
   capture: () => () => boolean; children: ReactNode;
   renderSession?: (tab: SessionTab, visible: boolean) => ReactNode;
   newSessionLabel?: string;
@@ -257,7 +260,9 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
         values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
-        if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
+        // A session that waits for the user says so before anything else: its run goes nowhere until it is answered.
+        if (tab?.sessionId && waiting?.has(tab.sessionId)) values.leading = <SessionWaitingBadge waiting />;
+        else if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
       }}
       onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" ref={markMountedTitleBar} variant="minimal" size="small" className="session-tab-more"
         icon={<AppIcon name="ellipsis" size={16} />} aria-label={t("Open sessions")} aria-haspopup="menu"

@@ -7,15 +7,21 @@ import type { MessageKey } from "./localization";
  */
 export const providerPermissionMode = "provider";
 
-// The modes of the Claude Code CLI, by their id. Their names and descriptions are the keys of the localization.
+// The modes by their id: those of the Claude Code CLI, three of which every provider has because CodeAlta answers
+// the requests of its sessions (default, acceptEdits, bypassPermissions). Their names and descriptions are the keys
+// of the localization.
 const modes: Readonly<Record<string, Readonly<{ name: MessageKey; description: MessageKey }>>> = Object.freeze({
-  default: { name: "Default", description: "Claude Code asks before it runs a command or changes a file; CodeAlta reviews each request." },
-  acceptEdits: { name: "Accept edits", description: "Claude Code changes files without CodeAlta's review; it still asks before commands." },
+  default: { name: "Ask first", description: "Always ask before making changes." },
+  acceptEdits: { name: "Accept edits", description: "Accept file edits; ask before commands." },
   plan: { name: "Plan", description: "Claude Code plans and changes nothing." },
-  auto: { name: "Auto", description: "A classifier of Claude Code allows or refuses each request, without CodeAlta's review." },
-  dontAsk: { name: "Don't ask", description: "Claude Code never asks: it runs what its own settings allow and refuses the rest, without CodeAlta's review." },
-  bypassPermissions: { name: "Bypass permissions", description: "Claude Code runs everything without asking, and without CodeAlta's review." },
+  auto: { name: "Auto", description: "Claude Code handles permission decisions." },
+  dontAsk: { name: "Don't ask", description: "Never ask; refuse what is not already allowed." },
+  bypassPermissions: { name: "Bypass permissions", description: "Accept all permissions." },
 });
+
+/** The mode in which commands and file changes wait for the user, and the one in which nothing does. */
+export const askPermissionMode = "default";
+export const bypassPermissionMode = "bypassPermissions";
 
 /** The localization key of the name of a mode, or null for a mode CodeAlta does not know: its id names it. */
 export function permissionModeName(id: string): MessageKey | null {
@@ -27,24 +33,16 @@ export function permissionModeDescription(id: string): MessageKey | null {
   return Object.hasOwn(modes, id) ? modes[id].description : null;
 }
 
-/** The modes a session of the provider can be given; none for a provider without modes, whose composer hides the choice. */
+/** The modes a session can be given; none where the host offers no choice, whose composer hides it. */
 export function offeredPermissionModes(choices: SessionChoicesResponse | undefined): readonly SessionPermissionModeChoice[] {
   return choices?.permissionModes ?? [];
 }
 
-/** The mode the next Send runs the session in, chosen for it: an id, or null for the mode of its provider. */
+/**
+ * The mode the next Send runs the session in, chosen for it: an id, or null for the default one (the mode of its
+ * provider, else the one of the application, which the host reports as `defaultPermissionMode`).
+ */
 export function chosenPermissionMode(choices: SessionChoicesResponse, value: SessionSelection): string | null {
   const mode = value.permissionMode ?? choices.current?.permissionMode ?? null;
   return mode === providerPermissionMode ? null : mode;
-}
-
-/**
- * What the session runs in with this selection: the chosen mode, else the one the provider is configured with (null
- * when it leaves it to the CLI), and whether Claude Code then runs requests without CodeAlta's review.
- */
-export function effectivePermissionMode(choices: SessionChoicesResponse, value: SessionSelection): Readonly<{ id: string | null; chosen: boolean; skipsReview: boolean }> {
-  const chosen = chosenPermissionMode(choices, value);
-  const id = chosen ?? choices.defaultPermissionMode ?? null;
-  // The host says which modes skip the review; the provider's own mode is listed unless a session cannot be given it (plan).
-  return { id, chosen: chosen !== null, skipsReview: id !== null && offeredPermissionModes(choices).some(mode => mode.id === id && mode.skipsReview) };
 }
