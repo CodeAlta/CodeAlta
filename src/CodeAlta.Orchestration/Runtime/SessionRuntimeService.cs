@@ -1049,7 +1049,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // again where it works now; an attachment that is busy, or that this caller does not own, stays where it is.
         var settled = existing is not null && (existing.HasActiveRun || existing.QueueDrainInProgress || (ownedCommand && !HasOwnedCommandDefaults(existing)));
         var worktree = settled ? existing!.WorktreeDirectory : ExistingWorktree(session.WorktreeDirectory);
-        bool Reusable(RuntimeSessionEntry entry) => entry.Matches(options, prompt) && string.Equals(entry.WorktreeDirectory, worktree, StringComparison.Ordinal);
+        bool Reusable(RuntimeSessionEntry entry) => entry.Matches(options, prompt) && string.Equals(entry.WorktreeDirectory, worktree, StringComparison.Ordinal)
+            && UsesCurrentProvider(entry);
+        // A provider whose settings were saved is registered again: an idle attachment is attached again, to run with
+        // them. One that runs, or that another caller configured, keeps the provider it started with, and so does one
+        // whose provider is no longer registered.
+        bool UsesCurrentProvider(RuntimeSessionEntry entry)
+        {
+            if (entry.HasActiveRun || entry.QueueDrainInProgress || (ownedCommand && !HasOwnedCommandDefaults(entry)))
+                return true;
+            var current = _agentHub.GetProviderRegistrationVersion(entry.ProviderKey);
+            return current == 0 || current == entry.ProviderRegistrationVersion;
+        }
         if (ownedCommand && existing is not null && !Reusable(existing)
             && (existing.HasActiveRun || existing.QueueDrainInProgress || !HasOwnedCommandDefaults(existing)))
             throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
@@ -1227,6 +1238,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             OnUserInputRequest = options.OnUserInputRequest,
         };
 
+        // Read before the runtime is created: a provider registered again in between is only attached again once more.
+        var providerVersion = _agentHub.GetProviderRegistrationVersion(sessionOptions.ProviderKey);
         if (startNewSession)
         {
             var handle = await _agentHub.StartSessionAsync(sessionOptions, cancellationToken).ConfigureAwait(false);
@@ -1316,6 +1329,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             attachment)
         {
             WorktreeDirectory = worktree,
+            ProviderRegistrationVersion = providerVersion,
         };
 
         projector.Entry = entry;
@@ -3877,6 +3891,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The git worktree this attachment runs in; null when it runs in <see cref="WorkingDirectory"/>.</summary>
         public string? WorktreeDirectory { get; init; }
+
+        /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
+        public long ProviderRegistrationVersion { get; init; }
 
         public string? Model { get; }
 

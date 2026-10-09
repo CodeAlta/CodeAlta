@@ -349,6 +349,63 @@ public sealed class SessionRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task EnsureCoordinatorSessionAsync_AttachesAnIdleSessionAgainOnceItsProviderIsRegisteredAgain()
+    {
+        using var temp = new TempDirectory();
+        var providerId = new ModelProviderId("saved-provider");
+        var recorder = new BlockingProviderRuntime.Recorder();
+        var registry = new ModelProviderRegistry();
+        void Register() => registry.RegisterOrReplace(
+            new ModelProviderDescriptor(new ModelProviderId(providerId.Value), "Saved Provider") { DefaultModelId = "model-a" },
+            () => new BlockingProviderRuntime(providerId, recorder));
+        Register();
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var session = CreateSession("session-1", providerId, temp.Path);
+        session.ModelId = "model-a";
+        var options = CreateOptions(providerId, temp.Path, model: "model-a");
+
+        var first = await runtime.EnsureCoordinatorSessionAsync(session, options).ConfigureAwait(false);
+        Assert.AreEqual(first, await runtime.EnsureCoordinatorSessionAsync(session, options).ConfigureAwait(false), "Nothing changed: the attachment is kept.");
+
+        // The settings of the provider were saved, which registers it again: the next send runs with them.
+        Register();
+        var second = await runtime.EnsureCoordinatorSessionAsync(session, options).ConfigureAwait(false);
+
+        Assert.AreNotEqual(first, second);
+        Assert.AreEqual(2, recorder.ResumeCount);
+        Assert.AreEqual(second, await runtime.EnsureCoordinatorSessionAsync(session, options).ConfigureAwait(false));
+        Assert.AreEqual(2, recorder.ResumeCount);
+    }
+
+    [TestMethod]
+    public async Task EnsureCoordinatorSessionAsync_KeepsTheProviderOfASessionThatRuns_WhenTheProviderIsRegisteredAgain()
+    {
+        using var temp = new TempDirectory();
+        var providerId = new ModelProviderId("saved-while-running");
+        var recorder = new BlockingProviderRuntime.Recorder { RunsOn = true };
+        var registry = new ModelProviderRegistry();
+        void Register() => registry.RegisterOrReplace(
+            new ModelProviderDescriptor(new ModelProviderId(providerId.Value), "Saved While Running") { DefaultModelId = "model-a" },
+            () => new BlockingProviderRuntime(providerId, recorder));
+        Register();
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var session = CreateSession("session-1", providerId, temp.Path);
+        session.ModelId = "model-a";
+        var options = CreateOptions(providerId, temp.Path, model: "model-a");
+        var first = await runtime.EnsureCoordinatorSessionAsync(session, options).ConfigureAwait(false);
+        await runtime.SendAsync(session, options, new AgentSendOptions { Input = new AgentInput([new AgentInputItem.Text("hello")]) })
+            .WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+
+        Register();
+
+        Assert.AreEqual(first, await runtime.EnsureCoordinatorSessionAsync(session, options).ConfigureAwait(false), "A run is not stopped by a saved setting.");
+        Assert.AreEqual(1, recorder.ResumeCount);
+        Assert.AreEqual(0, recorder.AbortCount);
+    }
+
+    [TestMethod]
     public async Task EnsureCoordinatorSessionAsync_UsesPendingAgentPromptFromLiveToolForStaleSessionState()
     {
         using var temp = new TempDirectory();
@@ -684,6 +741,9 @@ public sealed class SessionRuntimeServiceTests
 
             public TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+            /// <summary>Whether a send returns its run at once, as a provider does, and the run then never ends.</summary>
+            public bool RunsOn { get; init; }
+
             public TaskCompletionSource ReleaseSend { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
             public int AbortCount => Volatile.Read(ref _abortCount);
@@ -722,7 +782,7 @@ public sealed class SessionRuntimeServiceTests
             public async Task<AgentRunId> SendAsync(AgentSendOptions options, CancellationToken cancellationToken = default)
             {
                 recorder.SendStarted.TrySetResult();
-                await recorder.ReleaseSend.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                if (!recorder.RunsOn) await recorder.ReleaseSend.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
                 return new AgentRunId("run-blocking");
             }
 

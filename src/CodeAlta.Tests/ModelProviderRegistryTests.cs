@@ -58,6 +58,29 @@ public sealed class ModelProviderRegistryTests
     }
 
     [TestMethod]
+    public async Task Registry_VersionsEachRegistrationOfAProvider()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("Claude"), "Claude", "claude-code");
+        var other = new ModelProviderDescriptor(new ModelProviderId("other"), "Other", "test");
+        Assert.AreEqual(0, registry.GetRegistrationVersion(new ModelProviderId("claude")), "A provider that is not registered has no version.");
+
+        registry.RegisterOrReplace(descriptor, () => new TestModelProviderRuntime(descriptor));
+        var first = registry.GetRegistrationVersion(new ModelProviderId("claude"));
+        registry.RegisterOrReplace(other, () => new TestModelProviderRuntime(other));
+        await registry.GetOrCreateRuntimeAsync(new ModelProviderId("CLAUDE"));
+
+        Assert.AreNotEqual(0, first);
+        Assert.AreEqual(first, registry.GetRegistrationVersion(new ModelProviderId("claude")), "Another provider, or a runtime of this one, is no new registration.");
+
+        registry.RegisterOrReplace(descriptor, () => new TestModelProviderRuntime(descriptor));
+        Assert.AreNotEqual(first, registry.GetRegistrationVersion(new ModelProviderId("claude")));
+
+        registry.Unregister(new ModelProviderId("claude"));
+        Assert.AreEqual(0, registry.GetRegistrationVersion(new ModelProviderId("claude")));
+    }
+
+    [TestMethod]
     public void Registry_FiltersDisabledProvidersByDefault()
     {
         var registry = new ModelProviderRegistry();
