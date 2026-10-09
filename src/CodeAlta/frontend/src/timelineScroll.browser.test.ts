@@ -7,9 +7,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { browserBaseArgs, browserExecutable } from "./browserTarget";
 
-const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-  "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+const edge = browserExecutable;
 
 // Headless Edge + test-owned profile/fixture when installed. This is a mounted browser layout test,
 // not a native WebView2 acceptance test or a launch of the real desktop/catalog.
@@ -23,7 +23,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch",
+    browser = spawn(edge!, [...browserBaseArgs,
       `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let attempt = 0; attempt < 100 && !port; attempt++) {

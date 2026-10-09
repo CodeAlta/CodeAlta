@@ -7,8 +7,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { browserBaseArgs, browserExecutable } from "./browserTarget";
 
-const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+const edge = browserExecutable;
 
 const call = { eventType: "activity", kind: "ToolCall", activityId: "call", name: "shell_command" };
 const shellArguments = JSON.stringify({ command: "dotnet build\n  -c Release", workdir: "C:\\code\\app", timeoutMs: 30000 });
@@ -33,7 +34,7 @@ test("the window of a tool call follows it: live output, then its record, with a
       + await readFile(new URL("../node_modules/@xterm/xterm/css/xterm.css", import.meta.url), "utf8") + await readFile(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body class="bp6-dark"><div id="root"></div><script src="fixture.js"></script></body></html>');
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch", "--window-size=1400,1000",
+    browser = spawn(edge!, [...browserBaseArgs, "--window-size=1400,1000",
       `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let attempt = 0; attempt < 100 && !port; attempt++) {

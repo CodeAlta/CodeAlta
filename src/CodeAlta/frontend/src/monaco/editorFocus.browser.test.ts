@@ -7,8 +7,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { browserBaseArgs, browserExecutable } from "../browserTarget";
 
-const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+const edge = browserExecutable;
 
 // Two real editors in a real page: the text and the keys are the browser's own input, as for a user.
 test("what is typed goes to the editor that has the keyboard, also after a focus that no event announced", { skip: !edge, timeout: 120_000 }, async () => {
@@ -30,7 +31,7 @@ test("what is typed goes to the editor that has the keyboard, also after a focus
       } }] });
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch", "--allow-file-access-from-files",
+    browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
       `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let attempt = 0; attempt < 100 && !port; attempt++) {

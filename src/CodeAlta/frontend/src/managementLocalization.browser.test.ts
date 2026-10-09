@@ -8,8 +8,9 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { locales, translate } from "./localization";
+import { browserBaseArgs, browserExecutable } from "./browserTarget";
 
-const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+const edge = browserExecutable;
 test("batch deletion locale changes retain exact confirmations, original owners and uncertainty", { skip: !edge, timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-management-language-"));
   let browser: ReturnType<typeof spawn> | undefined;
@@ -19,7 +20,7 @@ test("batch deletion locale changes retain exact confirmations, original owners 
     await writeFile(join(root, "style.css"), await readFile(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch", `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
+    browser = spawn(edge!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let attempt = 0; attempt < 100 && !port; attempt++) {
       try { port = (await readFile(join(root, "profile", "DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]; }

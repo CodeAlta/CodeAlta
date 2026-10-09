@@ -7,8 +7,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { browserBaseArgs, browserExecutable } from "./browserTarget";
 
-const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+const edge = browserExecutable;
 
 test("production MarkdownContent retains useful HTML without resource or app authority under production CSP", { skip: !edge, timeout: 60_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-markdown-boundary-"));
@@ -19,7 +20,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
       bundle: true, platform: "browser", format: "iife", write: false });
     const origin = "https://markdown-production.invalid", page = origin + "/index.html", script = origin + "/fixture.js";
     const assets = new Map([[page, '<!doctype html><html><head><link rel="icon" href="data:,"></head><body><div id="app"></div><script src="/fixture.js"></script></body></html>'], [script, bundle.outputFiles[0].text]]);
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch",
+    browser = spawn(edge!, [...browserBaseArgs,
       "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let i = 0; i < 100 && !port; i++) {

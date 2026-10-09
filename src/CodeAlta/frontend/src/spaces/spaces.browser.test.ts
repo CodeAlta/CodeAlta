@@ -7,8 +7,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { browserBaseArgs, browserExecutable } from "../browserTarget";
 
-const edge = ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+const edge = browserExecutable;
 test("the window shows one space at a time: its projects, its sessions and its own tabs, which come back with it", { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-spaces-"));
   let browser: ReturnType<typeof spawn> | undefined;
@@ -32,7 +33,7 @@ test("the window shows one space at a time: its projects, its sessions and its o
       + readFileSync(new URL("../style.css", import.meta.url), "utf8") + readFileSync(new URL("./spaces.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
-    browser = spawn(edge!, ["--headless=new", "--disable-gpu", "--no-first-run", "--disable-background-networking", "--disable-extensions", "--edge-skip-compat-layer-relaunch", "--allow-file-access-from-files",
+    browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
       `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
     let port = "";
     for (let i = 0; i < 100 && !port; i++) {
