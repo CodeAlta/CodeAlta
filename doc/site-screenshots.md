@@ -85,7 +85,7 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `settings`, `models`, `model-providers`, `prompts`, `skills`, `mcp`, `logs`, `pull-request-settings`, `copilot-skills`, `copilot-agents`, `copilot-mcp` | A page of Settings over a session. Never select a provider row that shows an account, and never the Configuration file page. `copilot-mcp` needs a `.github/mcp.json` in the project, added for the capture and removed after it. |
 | `code-editor`, `editor-search`, `editor-session`, `editor-preview`, `editor-new-file`, `changes` | The code editor and the Changes tab of SharpYaml, with changes made for the capture. |
 | `theme-dark`, `theme-light`, `themes` | One scene in each theme; `themes` is a montage of six color schemes. |
-| `work-items`, `issues`, `sub-agents`, `pull-request`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with sub-agents, the pull request menu (a crop), a conversation at 70%. |
+| `work-items`, `issues`, `sub-agents`, `pull-request`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with more sub-agents than the sidebar lists (five), the pull request menu (a crop), a conversation at 70%. |
 | `terminal`, `worktrees`, `automations`, `plugins` and their close-ups | They need state that is built for them (a running terminal, two worktrees, automations in the project configuration, a temporary plugin) and removed afterwards. |
 
 Changes made for a capture are applied as patches and reversed after it. Record `git status`, `HEAD` and
@@ -116,6 +116,14 @@ What the scenes with state of their own need:
 - **The sidebar.** A project lists its recent sessions only, and the sessions of the scenes get older: click
   **Show more** until they are all listed, then hide the others and the row of **Show more** itself
   (`.session-list-disclosure`).
+- **Sub-agents.** A session has an arrow and lists four sub-agents, with a **Show more** of its own under them
+  (`.sub-agent-disclosure`, which is a `.session-list-disclosure` too). `sub-agents` shows that line: leave it
+  as it comes instead of clicking it, and keep it for the session of the picture only, since a hidden test
+  session can have one as well. More sub-agents are made with `alta session create --parent <id>`, which
+  takes a parent that ran since the instance started: send it a one-word prompt first. The answers of the
+  sub-agents are then no longer at the end of the timeline: **Load previous messages** brings them back.
+  `home`, `explorer` and the three `split` pictures have a session with sub-agents as their subject too, and
+  are retaken with `sub-agents` when that part of the sidebar changes.
 - **Space activity.** The marks of a space are those of its sessions, so they need real ones. For a session that
   waits: show the other space, open a new session in one of its projects and send from the page (the **Start
   session** button of the prompt bar: a question asked with `alta ask` is only raised in a run started from the

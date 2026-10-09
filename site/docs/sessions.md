@@ -113,8 +113,8 @@ In CodeAlta Desktop:
 - What agents send each other is shown as an **Agent message**, in its own color: the prompt a sub-agent receives, and the answer it gives back. The message names the session it comes from. Click the name to open that session.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-sub-agents.webp" alt="A session with three sub-agents listed under it in the sidebar and the answer of one of them in its timeline" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Three sub-agents under their session in the sidebar, and the answer of one of them as an agent message.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-sub-agents.webp" alt="A session with five sub-agents: four listed under it in the sidebar, Show more for the fifth, and the answers of two of them in its timeline" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The sub-agents of a session under it in the sidebar, <strong>Show more…</strong> for the fifth, and their answers as agent messages.</figcaption>
 </figure>
 
 ## Prompting for delegated work
