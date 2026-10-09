@@ -521,6 +521,8 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// null to follow the answer Claude Code saved for the key.
     /// </summary>
     public string? AnthropicApiKey { get; init; }
+
+    /// <summary>
     /// The permission mode the file gives a provider that runs the Claude Code CLI; null when it leaves the mode
     /// to the settings of the CLI, and always null for the other provider types.
     /// </summary>

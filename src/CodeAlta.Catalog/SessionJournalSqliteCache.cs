@@ -681,8 +681,12 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     // say it: the column is added and the rows are read again from the journals.
     private static async Task AddPermissionModeColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
+        // The column is looked for inside the transaction, which holds the write lock: another connection opening the
+        // cache at the same time may have added it since.
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using (var command = connection.CreateCommand())
         {
+            command.Transaction = transaction;
             command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_permission_mode';";
             if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
             {
@@ -690,7 +694,6 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             }
         }
 
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
