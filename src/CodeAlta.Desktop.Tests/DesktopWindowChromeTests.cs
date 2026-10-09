@@ -1,6 +1,7 @@
 using CodeAlta.Desktop;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra;
+using NeoAstra.Desktop;
 using NeoAstra.Desktop.WindowState;
 using NeoAstra.Rpc;
 
@@ -90,20 +91,23 @@ public sealed class DesktopWindowChromeTests
     }
 
     [TestMethod]
-    public async Task WindowsTaskbarProgress_TracksSimulatedSessionActivity()
+    public async Task WindowsTaskbarProgress_FollowsTheActivityItReads()
     {
         var states = new List<NeoWindowProgressState>();
+        var running = false;
         await using var progress = new DesktopWindowsTaskbarProgress((state, _) =>
         {
             states.Add(state);
-            return Task.CompletedTask;
-        });
+            return ValueTask.FromResult(NeoDesktopStatus.Success);
+        }, () => running, static () => true, static message => Assert.Fail(message));
 
-        // An idle runtime, one running session, another notification while it is running, then completion.
-        await progress.SetActivityAsync(hasRunningSessions: false);
-        await progress.SetActivityAsync(hasRunningSessions: true);
-        await progress.SetActivityAsync(hasRunningSessions: true);
-        await progress.SetActivityAsync(hasRunningSessions: false);
+        // Nothing runs, a session runs, it still runs at the next reading, then it ends.
+        await progress.RefreshAsync();
+        running = true;
+        await progress.RefreshAsync();
+        await progress.RefreshAsync();
+        running = false;
+        await progress.RefreshAsync();
 
         CollectionAssert.AreEqual(
             new[] { NeoWindowProgressState.None, NeoWindowProgressState.Indeterminate, NeoWindowProgressState.None },
@@ -111,22 +115,101 @@ public sealed class DesktopWindowChromeTests
     }
 
     [TestMethod]
-    public async Task WindowsTaskbarProgress_DisposalClearsAnActiveIndicator()
+    public async Task WindowsTaskbarProgress_SetsAgainAStateTheDesktopDidNotAccept()
     {
         var states = new List<NeoWindowProgressState>();
+        var failures = new List<string>();
+        var answers = new Queue<NeoDesktopStatus>([NeoDesktopStatus.Failed, NeoDesktopStatus.Failed, NeoDesktopStatus.Success]);
+        await using var progress = new DesktopWindowsTaskbarProgress((state, _) =>
+        {
+            states.Add(state);
+            return answers.TryDequeue(out var answer) ? ValueTask.FromResult(answer) : throw new InvalidOperationException("The taskbar is gone.");
+        }, static () => true, static () => true, failures.Add);
+
+        // Refused twice, accepted, then left alone: a failure is not remembered as the state of the taskbar.
+        await progress.RefreshAsync();
+        await progress.RefreshAsync();
+        await progress.RefreshAsync();
+        await progress.RefreshAsync();
+
+        CollectionAssert.AreEqual(Enumerable.Repeat(NeoWindowProgressState.Indeterminate, 3).ToArray(), states);
+        Assert.AreEqual(1, failures.Count, "A failure that lasts is reported once, not at each reading.");
+        StringAssert.Contains(failures[0], "Failed");
+
+        // A setter that throws does not stop the indicator either: disposal still asks to clear it.
+        await progress.DisposeAsync();
+        Assert.AreEqual(NeoWindowProgressState.None, states[^1]);
+        Assert.AreEqual(2, failures.Count);
+        StringAssert.Contains(failures[1], "The taskbar is gone.");
+    }
+
+    [TestMethod]
+    public async Task WindowsTaskbarProgress_IsSetAgainOnTheButtonOfAWindowShownAgain()
+    {
+        var states = new List<NeoWindowProgressState>();
+        var shown = false;
         var progress = new DesktopWindowsTaskbarProgress((state, _) =>
         {
             states.Add(state);
-            return Task.CompletedTask;
-        });
+            return ValueTask.FromResult(NeoDesktopStatus.Success);
+        }, static () => true, () => shown, static message => Assert.Fail(message));
 
-        await progress.SetActivityAsync(hasRunningSessions: true);
+        // A window that is not shown yet has no taskbar button.
+        await progress.RefreshAsync();
+        Assert.AreEqual(0, states.Count);
+
+        // Shown: its button may not be there at the reading that sees it, so the next one sets the progress.
+        shown = true;
+        await progress.RefreshAsync();
+        Assert.AreEqual(0, states.Count);
+        await progress.RefreshAsync();
+        await progress.RefreshAsync();
+        CollectionAssert.AreEqual(new[] { NeoWindowProgressState.Indeterminate }, states);
+
+        // Closed to the notification area while the session runs, then opened again: the new button has no progress.
+        shown = false;
+        await progress.RefreshAsync();
+        shown = true;
+        await progress.RefreshAsync();
+        await progress.RefreshAsync();
+        CollectionAssert.AreEqual(new[] { NeoWindowProgressState.Indeterminate, NeoWindowProgressState.Indeterminate }, states);
+
+        // A hidden window has no progress to clear.
+        shown = false;
+        await progress.RefreshAsync();
+        await progress.DisposeAsync();
+        Assert.AreEqual(2, states.Count);
+    }
+
+    [TestMethod]
+    public async Task WindowsTaskbarProgress_ReadsTheActivityByItselfAndClearsWhenDisposed()
+    {
+        var states = new List<NeoWindowProgressState>();
+        var shown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cleared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = false;
+        var progress = new DesktopWindowsTaskbarProgress((state, _) =>
+        {
+            lock (states) states.Add(state);
+            if (state == NeoWindowProgressState.Indeterminate) shown.TrySetResult();
+            else cleared.TrySetResult();
+            return ValueTask.FromResult(NeoDesktopStatus.Success);
+        }, () => Volatile.Read(ref running), static () => true, static message => Assert.Fail(message), TimeSpan.FromMilliseconds(10));
+
+        // A queued prompt that is sent, a run started by an agent: no event tells the indicator, it reads.
+        await cleared.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Volatile.Write(ref running, true);
+        await shown.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
         await progress.DisposeAsync();
         await progress.DisposeAsync();
 
-        CollectionAssert.AreEqual(
-            new[] { NeoWindowProgressState.Indeterminate, NeoWindowProgressState.None },
-            states);
+        lock (states)
+        {
+            CollectionAssert.AreEqual(
+                new[] { NeoWindowProgressState.None, NeoWindowProgressState.Indeterminate, NeoWindowProgressState.None },
+                states);
+        }
     }
 
     [TestMethod]
