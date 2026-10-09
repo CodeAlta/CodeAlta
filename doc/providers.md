@@ -295,12 +295,24 @@ Relevant config keys for `type = "xai"` include `auth_source`, `model_discovery`
 The provider follows Anthropic's conditions for running Claude Code from another product ([Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)):
 
 - The executable is the user's own installation. CodeAlta ships none, installs none and modifies none (`ClaudeCodeCliLocator`).
-- CodeAlta never sees a credential. The CLI signs in with what the user set up for it: `claude` then `/login`, an API key, or a cloud provider. There is no login flow, no token store and no `api_key`/`api_key_env`/`api_url` for this type (the configuration rejects them), and `ClaudeCodeLauncher` neither sets nor removes any authentication, endpoint or provider variable. It never passes `--bare`, which would restrict the CLI to API-key authentication.
+- CodeAlta stores and forwards no credential. The CLI signs in with what the user set up for it: `claude` then `/login`, an API key, or a cloud provider. There is no login flow, no token store and no `api_key`/`api_key_env`/`api_url` for this type (the configuration rejects them), and `ClaudeCodeLauncher` sets no authentication, endpoint or provider variable. The one it may remove is `ANTHROPIC_API_KEY` (below). It never passes `--bare`, which would restrict the CLI to API-key authentication.
 - Usage is billed by Anthropic to the account the CLI is signed in to. CodeAlta does not pay for, resell or route it.
 - Claude Code keeps its system prompt, its tools, its permission rules, its hooks and its settings. CodeAlta adds to them (`appendSystemPrompt`, an MCP server, a hook that only waits before an edit, a hook that refuses the plan mode of Claude Code); it replaces none.
 - The UI names the provider for what it runs ("Claude Code"). It is one provider type among others, not a product or feature name of CodeAlta.
 
-The variables removed from the child's environment are only the marks of a Claude Code session CodeAlta itself may have been started from (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, ...). `CLAUDE_AGENT_SDK_CLIENT_APP=codealta/<version>` names CodeAlta in the CLI's user agent.
+The variables removed from the child's environment are the marks of a Claude Code session CodeAlta itself may have been started from (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, ...), and `ANTHROPIC_API_KEY` when the user chose their login over it. `CLAUDE_AGENT_SDK_CLIENT_APP=codealta/<version>` names CodeAlta in the CLI's user agent.
+
+### `ANTHROPIC_API_KEY`
+
+Run in a terminal, Claude Code asks once whether to use an `ANTHROPIC_API_KEY` of its environment, and saves the answer in its configuration file (`customApiKeyResponses` of `.claude.json`, in `CLAUDE_CONFIG_DIR` or the home folder: the last 20 characters of the trimmed key, under `approved` or `rejected`). Started in print mode, as CodeAlta starts it, it asks nothing and uses the key: the turns are billed to the API account of the key, not to the plan of the user's login, whatever the user answered in the terminal. CodeAlta decides instead, before the process starts (`ClaudeCodeApiKey`):
+
+| `anthropic_api_key` | The CLI |
+| --- | --- |
+| `use` | is given the key. |
+| `ignore` | is started without it (`ANTHROPIC_API_KEY` removed from its environment), and signs in with the user's login. |
+| absent | follows the answer Claude Code saved for the key: given it when approved, started without it when rejected. Without an answer, a turn does not start: it fails with a message that names the setting. |
+
+Nothing is decided when the variable is absent, or when the CLI uses a cloud provider (`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`). CodeAlta only reads `.claude.json`: a file it cannot read or whose shape it does not know saves no answer, so a change of the CLI can make a turn ask for the setting, never bill a key the user did not approve. The processes that only list the models or read the usage of the plan are given what a turn would be, and keep the key while nothing is decided: they send no prompt.
 
 The models are the ones the CLI lists for the account. Each is then described by what models.dev knows of the Anthropic model it runs (`ClaudeCodeModelCatalog.Describe`): the catalog is asked under the provider `anthropic`, for the `resolvedModel` of the entry, so that an alias such as `sonnet` gets the family, the limits and the abilities of the model it stands for. The entry keeps the name and the description the CLI gave it. An entry with a larger context window (`[1m]`) keeps the limits the CLI reports, not the ones listed for the model.
 
@@ -487,6 +499,7 @@ model = "sonnet"                       # optional; omit to let Claude Code choos
 reasoning_effort = "high"              # optional; low, medium, high, xhigh or max
 command = "~/.local/bin/claude"        # optional; default: `claude` on PATH or in an installer folder
 permission_mode = "default"            # optional; default, acceptEdits, plan, auto, dontAsk or bypassPermissions
+anthropic_api_key = "ignore"           # optional; use or ignore ANTHROPIC_API_KEY; default: Claude Code's saved answer
 args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 ```
 

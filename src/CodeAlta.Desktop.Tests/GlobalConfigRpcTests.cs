@@ -282,6 +282,37 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_WritesTheChoiceForAnthropicApiKeyOfClaudeCode_AndOfNoOtherType()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        var edit = new GlobalConfigProviderEdit("claude", "claude-code", true, null, null, null, null, null, null, true);
+
+        Assert.AreEqual("invalid", fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { AnthropicApiKey = "ask" }, false, false)).Status);
+        Assert.AreEqual(ProvidersConfig, File.ReadAllText(fixture.ConfigPath), "A refused edit must not write.");
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { AnthropicApiKey = " ignore " }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "anthropic_api_key = \"ignore\"");
+        var after = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual("ignore", after.Providers.Single(static provider => provider.Key == "claude").AnthropicApiKey);
+        Assert.IsNull(after.Providers.Single(static provider => provider.Key == "local").AnthropicApiKey);
+
+        // Blank follows the answer Claude Code saved: the setting is taken out.
+        var blank = fixture.Service.SaveProvider(new(Epoch, after.Revision, "claude", edit with { AnthropicApiKey = " " }, false, false));
+        Assert.AreEqual("ok", blank.Status, blank.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("anthropic_api_key", StringComparison.Ordinal));
+
+        // A type that does not run Claude Code does not keep it.
+        var use = fixture.Service.SaveProvider(new(Epoch, blank.Revision, "claude", edit with { AnthropicApiKey = "use" }, false, false));
+        Assert.AreEqual("ok", use.Status, use.Message);
+        var retyped = fixture.Service.SaveProvider(new(Epoch, use.Revision, "claude",
+            edit with { Type = "anthropic", ApiKeyEnv = "CODEALTA_ANTHROPIC_API_KEY", ClearApiKey = false, AnthropicApiKey = "use" }, false, false));
+        Assert.AreEqual("ok", retyped.Status, retyped.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("anthropic_api_key", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task SaveProvider_UpdatesOnlyTheEditedFieldsAndKeepsTheStoredSecret()
     {
         await using var fixture = new Fixture(ProvidersConfig);

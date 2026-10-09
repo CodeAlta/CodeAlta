@@ -132,7 +132,8 @@ public sealed class ClaudeCodeProviderTests
         Assert.AreEqual("1", launch.Environment["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"]);
 
         // Only the marks of a Claude Code session CodeAlta was started from are removed. The CLI authenticates with
-        // what the user configured: no credential, endpoint or provider variable is set or removed.
+        // what the user configured: no credential, endpoint or provider variable is set or removed, unless the
+        // API key is to be left out (below).
         var removed = launch.Environment.Where(static pair => pair.Value is null).Select(static pair => pair.Key).ToArray();
         CollectionAssert.Contains(removed, "CLAUDECODE");
         CollectionAssert.Contains(removed, "CLAUDE_CODE_ENTRYPOINT");
@@ -149,6 +150,78 @@ public sealed class ClaudeCodeProviderTests
         Assert.IsFalse(launch.Arguments.Contains("--bare"));
         Assert.IsFalse(launch.Arguments.Contains("--dangerously-skip-permissions"));
     }
+
+    [TestMethod]
+    public void Launcher_LeavesOutTheApiKeyOnlyWhenAskedTo()
+    {
+        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code" };
+        var key = new ClaudeCodeLaunchKey(null, null, null);
+
+        var without = ClaudeCodeLauncher.Create("/bin/claude", options, key, null, null, withTools: true, withoutApiKey: true);
+        var with = ClaudeCodeLauncher.Create("/bin/claude", options, key, null, null, withTools: true);
+
+        Assert.IsTrue(without.Environment.TryGetValue("ANTHROPIC_API_KEY", out var removed));
+        Assert.IsNull(removed, "A null value removes the inherited variable.");
+        Assert.IsFalse(with.Environment.ContainsKey("ANTHROPIC_API_KEY"));
+        // Nothing else of the authentication of the CLI is touched: its login is what it falls back to.
+        CollectionAssert.AreEquivalent(
+            with.Environment.Keys.Append("ANTHROPIC_API_KEY").ToArray(),
+            without.Environment.Keys.ToArray());
+    }
+
+    [TestMethod]
+    [DataRow(null, ClaudeCodeApiKeyPolicy.FollowClaudeCode, null, "NoKey")]
+    [DataRow(" ", ClaudeCodeApiKeyPolicy.Use, null, "NoKey")]
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.Use, null, "Use")]
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.Ignore, null, "Ignore")]
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.FollowClaudeCode, null, "Undecided")]
+    // Claude Code saves the last 20 characters of the trimmed key.
+    [DataRow(" sk-ant-api03-xxxx0123456789abcdefKLMN ", ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"customApiKeyResponses":{"approved":[],"rejected":["0123456789abcdefKLMN"]}}""", "Ignore")]
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"customApiKeyResponses":{"approved":["0123456789abcdefKLMN"],"rejected":["0123456789abcdefKLMN"]}}""", "Use")]
+    [DataRow("short-key", ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"customApiKeyResponses":{"approved":["short-key"]}}""", "Use")]
+    // An answer for another key, or a file of another shape, is no answer.
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"customApiKeyResponses":{"rejected":["another-key-entirely"]}}""", "Undecided")]
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"customApiKeyResponses":{"rejected":"0123456789abcdefKLMN"}}""", "Undecided")]
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"apiKeyResponses":{}}""", "Undecided")]
+    [DataRow("sk-ant-api03-xxxx0123456789abcdefKLMN", ClaudeCodeApiKeyPolicy.FollowClaudeCode, "{ not json", "Undecided")]
+    public void ApiKey_IsDecidedByThePolicyThenByTheAnswerClaudeCodeSaved(string? key, ClaudeCodeApiKeyPolicy policy, string? config, string expected)
+    {
+        var decision = ClaudeCodeApiKey.Decide(policy, name => name == "ANTHROPIC_API_KEY" ? key : null, () => config);
+
+        Assert.AreEqual(Enum.Parse<ClaudeCodeApiKeyDecision>(expected), decision);
+    }
+
+    [TestMethod]
+    [DataRow("CLAUDE_CODE_USE_BEDROCK", "1")]
+    [DataRow("CLAUDE_CODE_USE_VERTEX", "true")]
+    [DataRow("CLAUDE_CODE_USE_FOUNDRY", " ON ")]
+    public void ApiKey_OfACliThatUsesACloudProvider_IsLeftAlone(string variable, string value)
+    {
+        var environment = new Dictionary<string, string> { ["ANTHROPIC_API_KEY"] = "sk-ant-api03-key", [variable] = value };
+
+        var decision = ClaudeCodeApiKey.Decide(ClaudeCodeApiKeyPolicy.FollowClaudeCode, name => environment.GetValueOrDefault(name), static () => null);
+
+        Assert.AreEqual(ClaudeCodeApiKeyDecision.NoKey, decision);
+    }
+
+    [TestMethod]
+    public void ApiKey_AnswersAreReadWhereClaudeCodeKeepsThem()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "claude-config");
+
+        Assert.AreEqual(Path.Combine(folder, ".claude.json"), ClaudeCodeApiKey.ClaudeConfigPath(name => name == "CLAUDE_CONFIG_DIR" ? folder : null));
+        Assert.AreEqual(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json"),
+            ClaudeCodeApiKey.ClaudeConfigPath(static _ => null));
+    }
+
+    [TestMethod]
+    [DataRow("use", ClaudeCodeApiKeyPolicy.Use)]
+    [DataRow(" ignore ", ClaudeCodeApiKeyPolicy.Ignore)]
+    [DataRow(null, ClaudeCodeApiKeyPolicy.FollowClaudeCode)]
+    [DataRow("", ClaudeCodeApiKeyPolicy.FollowClaudeCode)]
+    public void ApiKeyPolicy_IsReadFromTheSettingOfTheProvider(string? value, ClaudeCodeApiKeyPolicy expected)
+        => Assert.AreEqual(expected, ClaudeCodeModelProviderRuntimeOptions.ParseApiKeyPolicy(value));
 
     [TestMethod]
     public void Launcher_ResumesAndLeavesTheDefaultModelToTheCli()

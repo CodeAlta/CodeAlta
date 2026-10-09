@@ -27,7 +27,8 @@ internal static class ClaudeCodeLauncher
     private const string McpConfig = "{\"mcpServers\":{\"" + McpServerName + "\":{\"type\":\"sdk\",\"name\":\"" + McpServerName + "\"}}}";
 
     // Variables that describe the Claude Code session CodeAlta itself may have been started from. They are not
-    // the user's configuration: authentication and provider variables are inherited untouched.
+    // the user's configuration: authentication and provider variables are inherited untouched, but for the API key
+    // the caller decides about (ClaudeCodeApiKey).
     private static readonly string[] InheritedSessionVariables =
     [
         "CLAUDECODE",
@@ -52,6 +53,7 @@ internal static class ClaudeCodeLauncher
     /// <param name="withTools">Whether the CLI is given the tools of CodeAlta.</param>
     /// <param name="showReasoning">Whether the CLI writes the summaries of the thinking of the model.</param>
     /// <param name="delegatesToSessions">Whether what the model delegates goes to child sessions of CodeAlta: the CLI then starts without its own subagent tool.</param>
+    /// <param name="withoutApiKey">Whether the CLI is started without the API key of the environment, to sign in with the user's login.</param>
     public static ClaudeCodeLaunch Create(
         string executable,
         ClaudeCodeModelProviderRuntimeOptions options,
@@ -60,7 +62,8 @@ internal static class ClaudeCodeLauncher
         string? resumeSessionId,
         bool withTools,
         bool showReasoning = false,
-        bool delegatesToSessions = false)
+        bool delegatesToSessions = false,
+        bool withoutApiKey = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(options);
@@ -135,6 +138,11 @@ internal static class ClaudeCodeLauncher
         foreach (var name in InheritedSessionVariables)
         {
             environment[name] = null;
+        }
+
+        if (withoutApiKey)
+        {
+            environment[ClaudeCodeApiKey.Variable] = null;
         }
 
         // The CLI tells this side when a session is idle again, and names CodeAlta in its user agent.

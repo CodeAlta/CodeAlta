@@ -486,6 +486,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             command = " ~/.local/bin/claude "
             args = ["--add-dir", "/data"]
             permission_mode = " acceptEdits "
+            anthropic_api_key = " ignore "
             models_include_regex = "sonnet|opus"
             """);
 
@@ -499,6 +500,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("~/.local/bin/claude", provider.Command);
         CollectionAssert.AreEqual(new[] { "--add-dir", "/data" }, provider.Arguments);
         Assert.AreEqual("acceptEdits", provider.PermissionMode);
+        Assert.AreEqual("ignore", provider.AnthropicApiKey);
         Assert.AreEqual("Claude Code", CodeAltaConfigStore.CreateProviderTypeDefaults("claude-code").DisplayName);
 
         // The settings of the CLI are written back, and the default display name is not.
@@ -506,6 +508,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         var saved = File.ReadAllText(Path.Combine(temp.Path, "config.toml"));
         StringAssert.Contains(saved, "command = \"~/.local/bin/claude\"");
         StringAssert.Contains(saved, "permission_mode = \"acceptEdits\"");
+        StringAssert.Contains(saved, "anthropic_api_key = \"ignore\"");
         StringAssert.Contains(saved, "args = [");
         Assert.IsFalse(saved.Contains("display_name", StringComparison.Ordinal));
         var reloaded = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
@@ -517,6 +520,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
     [DataRow("api_key_env = \"ANTHROPIC_API_KEY\"", "api_key_env")]
     [DataRow("api_url = \"https://api.anthropic.com\"", "api_url")]
     [DataRow("permission_mode = \"everything\"", "permission_mode")]
+    [DataRow("anthropic_api_key = \"ask\"", "anthropic_api_key")]
     [DataRow("args = [\"\"]", "args")]
     public void LoadGlobalProviderDefinitions_ClaudeCodeRejectsCredentialsAndUnknownModes(string setting, string field)
     {
@@ -540,6 +544,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
     [DataRow("command = \"claude\"", "command")]
     [DataRow("args = [\"--verbose\"]", "args")]
     [DataRow("permission_mode = \"plan\"", "permission_mode")]
+    [DataRow("anthropic_api_key = \"use\"", "anthropic_api_key")]
     public void LoadGlobalProviderDefinitions_RejectsCliSettingsForApiProviders(string setting, string field)
     {
         using var temp = TempDirectory.Create();

@@ -68,6 +68,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private bool _mcpInitialized;
     private Task? _interrupt;
     private bool _showReasoning = true;
+    private bool _withoutApiKey;
     private int _disposed;
 
     public ClaudeCodeSession(string sessionId, ClaudeCodeModelProviderRuntimeOptions options)
@@ -355,6 +356,16 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             throw new InvalidOperationException(resolution.Error ?? "Claude Code was not found.");
         }
 
+        // Started here, the CLI would use an API key of the environment without asking: nothing starts until the
+        // user said whether to use it.
+        var apiKey = ClaudeCodeApiKey.Decide(_options);
+        if (apiKey == ClaudeCodeApiKeyDecision.Undecided)
+        {
+            throw new InvalidOperationException(ClaudeCodeApiKey.UndecidedMessage);
+        }
+
+        _withoutApiKey = apiKey == ClaudeCodeApiKeyDecision.Ignore;
+
         // Claude Code keeps the system prompt a conversation started with: what is appended here is read by a
         // new conversation only. A conversation that is resumed is told what changed with its next prompt.
         var appendSystemPrompt = CreateAppendSystemPrompt(request);
@@ -457,7 +468,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
         }
 
-        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning, delegatesToSessions: hasGateway);
+        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning, delegatesToSessions: hasGateway, _withoutApiKey);
         var channel = Channel.CreateUnbounded<TurnEvent>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var generation = Interlocked.Increment(ref _generation);
         var transport = _transportFactory.Start(launch);

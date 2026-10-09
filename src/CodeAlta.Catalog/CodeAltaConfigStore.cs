@@ -45,6 +45,7 @@ public sealed class CodeAltaConfigStore
     private const string ClaudeCodeProviderType = "claude-code";
     private const string ClaudeCodeDefaultDisplayName = "Claude Code";
     private static readonly string[] ClaudeCodePermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+    private static readonly string[] ClaudeCodeApiKeyChoices = ["use", "ignore"];
     private const string CopilotDirectDefaultDisplayName = "Copilot";
     private const string CopilotDirectDefaultAuthSource = "github_device_flow";
     private const string CopilotDirectDefaultModelDiscovery = "copilot_endpoint_with_static_fallback";
@@ -1548,6 +1549,7 @@ public sealed class CodeAltaConfigStore
         definition.DisplayName ??= ClaudeCodeDefaultDisplayName;
         definition.Command = NormalizeText(definition.Command);
         definition.PermissionMode = NormalizeText(definition.PermissionMode);
+        definition.AnthropicApiKey = NormalizeText(definition.AnthropicApiKey);
         if (definition.Arguments is { Count: 0 })
         {
             definition.Arguments = null;
@@ -1561,6 +1563,7 @@ public sealed class CodeAltaConfigStore
             RejectUnsupportedField(definition, "command", definition.Command);
             RejectUnsupportedField(definition, "args", definition.Arguments is { Count: > 0 } ? definition.Arguments : null);
             RejectUnsupportedField(definition, "permission_mode", definition.PermissionMode);
+            RejectUnsupportedField(definition, "anthropic_api_key", definition.AnthropicApiKey);
         }
 
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
@@ -1722,6 +1725,13 @@ public sealed class CodeAltaConfigStore
                 {
                     throw new InvalidOperationException(
                         $"providers.{definition.ProviderKey} permission_mode must be one of: {string.Join(", ", ClaudeCodePermissionModes)}.");
+                }
+
+                if (definition.AnthropicApiKey is { } apiKeyChoice &&
+                    !ClaudeCodeApiKeyChoices.Contains(apiKeyChoice, StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"providers.{definition.ProviderKey} anthropic_api_key must be one of: {string.Join(", ", ClaudeCodeApiKeyChoices)}.");
                 }
 
                 if (definition.Arguments is { } arguments && arguments.Exists(static argument => string.IsNullOrWhiteSpace(argument)))
@@ -2191,6 +2201,7 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.Command) ||
                definition.Arguments is { Count: > 0 } ||
                !string.IsNullOrWhiteSpace(definition.PermissionMode) ||
+               !string.IsNullOrWhiteSpace(definition.AnthropicApiKey) ||
                !string.IsNullOrWhiteSpace(definition.GitHubEnterpriseUrl) ||
                !string.IsNullOrWhiteSpace(definition.GitHubTokenEnv) ||
                !string.IsNullOrWhiteSpace(definition.CopilotTokenEnv) ||
@@ -2286,6 +2297,7 @@ public sealed class CodeAltaConfigStore
             Command = definition.Command,
             Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
             PermissionMode = definition.PermissionMode,
+            AnthropicApiKey = definition.AnthropicApiKey,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,
             CopilotTokenEnv = definition.CopilotTokenEnv,
