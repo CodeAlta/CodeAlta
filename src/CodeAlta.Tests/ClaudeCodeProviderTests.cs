@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Tests;
 
@@ -240,8 +241,37 @@ public sealed class ClaudeCodeProviderTests
         Assert.IsFalse(launch.Arguments.Contains("--effort"));
         Assert.IsFalse(launch.Arguments.Contains("--permission-mode"));
         Assert.AreEqual("low", ClaudeCodeLauncher.ToEffort(AgentReasoningEffort.Minimal));
+
+        // The mode of a session is the one the CLI starts in, rather than the one of the provider.
+        var session = ClaudeCodeLauncher.Create(
+            "/bin/claude",
+            new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", PermissionMode = "acceptEdits" },
+            new ClaudeCodeLaunchKey(null, null, null),
+            newSessionId: "0f0e0d0c-0b0a-4908-8706-050403020100",
+            resumeSessionId: null,
+            withTools: true,
+            permissionMode: "bypassPermissions");
+        CollectionAssert.IsSubsetOf(new[] { "--permission-mode", "bypassPermissions" }, session.Arguments.ToArray());
+        Assert.IsFalse(session.Arguments.Contains("acceptEdits"));
+        Assert.IsFalse(session.Arguments.Any(static argument => argument.Contains("dangerously", StringComparison.Ordinal)));
         Assert.AreEqual("max", ClaudeCodeLauncher.ToEffort(AgentReasoningEffort.Max));
         Assert.AreEqual("claude-fable-5-1[1m]", ClaudeCodeLauncher.ToModelOption(" claude-fable-5-1[1m] "));
+    }
+
+    [TestMethod]
+    public async Task Provider_ReportsThePermissionModesOfTheCliAndItsOwn()
+    {
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", PermissionMode = " auto " });
+
+        var expected = new[] { "default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions" };
+        CollectionAssert.AreEqual(expected, runtime.Descriptor.PermissionModes.ToArray());
+        CollectionAssert.AreEqual(expected, runtime.RuntimeDescriptor.Profile!.PermissionModes.ToArray());
+        Assert.AreEqual("auto", runtime.Descriptor.DefaultPermissionMode);
+        Assert.IsNull(ClaudeCodeModelProviderRuntime.CreateDescriptor(new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "other" }).DefaultPermissionMode);
+
+        // Providers without modes report none.
+        Assert.AreEqual(0, new ModelProviderDescriptor(new ModelProviderId("openai"), "OpenAI").PermissionModes.Count);
+        Assert.AreEqual(0, new AgentProviderProfile().PermissionModes.Count);
     }
 
     [TestMethod]

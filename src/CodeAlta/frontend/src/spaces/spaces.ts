@@ -234,6 +234,12 @@ export function spaceNameProblem(name: string, spaces: readonly Space[], ownId: 
   return spaces.some(space => space.id !== ownId && space.name.toLowerCase() === wanted.toLowerCase()) ? "taken" : null;
 }
 
+/** Whether the space that is shown has a session of a project: its project is in it, or it is a chat, which every space shows. */
+export function spaceShows(spaces: readonly Space[], shownId: string, projectId: string | null): boolean {
+  const shown = findSpace(spaces, shownId);
+  return shown.isDefault || projectId === null || shown.projectIds.includes(projectId);
+}
+
 /** A session that needs the user in a space other than the one shown. */
 export type SpaceCall = Readonly<{ space: Space; sessionId: string; projectId: string | null; title: string; waiting: boolean }>;
 

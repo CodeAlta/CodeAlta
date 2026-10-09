@@ -3146,8 +3146,13 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.NotFound, unknown.ExitCode);
         Assert.AreEqual(4, shell.Processes.Count);
 
-        // A host that has the user review the commands of its sessions starts none of them this way.
-        var reviewed = CreateDispatcher(services.Add(new AltaJobPolicy(AcceptsCommands: false)));
+        // A session whose commands the user reviews starts none of them this way: the host says it for each session,
+        // or for all of them.
+        Assert.IsFalse(new AltaJobPolicy(AcceptsCommands: false).Accepts(sessionId));
+        Assert.IsTrue(new AltaJobPolicy(AcceptsCommands: true).Accepts(sessionId));
+        Assert.IsTrue(new AltaJobPolicy(AcceptsCommands: true) { AcceptsCommandsOf = static _ => false }.Accepts(null), "No session acts: the host decides.");
+        var reviewed = CreateDispatcher(services.Add(new AltaJobPolicy(AcceptsCommands: true)
+            { AcceptsCommandsOf = id => !string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase) }));
         var denied = await reviewed.InvokeAsync(["job", "start", "--command", "echo", "--cwd", root.Path], caller: caller).ConfigureAwait(false);
         Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.ExitCode);
         StringAssert.Contains(denied.Stdout, "job.startDenied");

@@ -17,7 +17,8 @@ export type PermissionDecisionObservation = Readonly<{
 }>;
 type RetainedDecision = {
   readonly origin: DecisionOrigin;
-  readonly providerId: string; readonly command: string; readonly workingDirectory: string; readonly reason: string | null;
+  readonly providerId: string; readonly kind: string; readonly command: string | null; readonly workingDirectory: string | null;
+  readonly grantRoot: string | null; readonly reason: string | null;
   readonly controller: AbortController;
   waiter: Promise<SessionPermissionResolution> | null;
   state: PermissionDecisionObservation["state"];
@@ -117,7 +118,8 @@ export function createPermissionReviewer(
           const original: RetainedDecision = {
             origin: Object.freeze({ expectedHostEpoch: selectedRequest.expectedHostEpoch,
               handle: Object.freeze({ ...entry.handle }), decision }),
-            providerId: entry.providerId, command: entry.command, workingDirectory: entry.workingDirectory, reason: entry.reason,
+            providerId: entry.providerId, kind: entry.kind, command: entry.command, workingDirectory: entry.workingDirectory,
+            grantRoot: entry.grantRoot, reason: entry.reason,
             controller: new AbortController(), waiter: null, state: "pending", code: null, observed: false,
           };
           retained = original; // Synchronous exclusion, before any callback or transport can reenter.
@@ -183,6 +185,14 @@ function validCommand(entry: SessionPermissionCommand, session: string): boolean
     && (h.runId === null || identity(h.runId)) && guid(h.operationId) && guid(h.runtimeInstanceId) && guid(h.attemptId)
     && typeof h.attachmentGeneration === "string" && /^[1-9][0-9]{0,18}$/.test(h.attachmentGeneration)
     && BigInt(h.attachmentGeneration) <= 9223372036854775807n && identity(entry.providerId)
-    && text(entry.command, 4096, true) && text(entry.workingDirectory, 1024, true)
-    && (entry.reason === null || text(entry.reason, 1024, false));
+    && shaped(entry) && (entry.reason === null || text(entry.reason, 1024, false));
+}
+// Each kind carries its own complete shape and nothing of the other's: a command has its command line and its
+// folder, a file change has the root it asks to write under.
+function shaped(entry: SessionPermissionCommand): boolean {
+  return entry.kind === "commandExecution"
+    ? text(entry.command, 4096, true) && text(entry.workingDirectory, 1024, true) && entry.grantRoot === null
+    : entry.kind === "fileChange"
+    ? text(entry.grantRoot, 1024, true) && entry.command === null && entry.workingDirectory === null
+    : false;
 }

@@ -94,7 +94,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         AgentHub agentHub, IAgentSessionCatalog agentSessionCatalog, ProjectCatalog projectCatalog,
         SessionViewCatalog sessionViewCatalog, AgentInstructionTemplateProvider instructionTemplateProvider,
         CatalogOptions catalogOptions, SkillCatalog? skillCatalog, bool autoApproveOwnedPermissions)
+        : this(agentHub, agentSessionCatalog, projectCatalog, sessionViewCatalog, instructionTemplateProvider,
+            catalogOptions, skillCatalog, () => autoApproveOwnedPermissions)
     {
+    }
+
+    /// <summary>
+    /// Initializes a runtime whose owned automatic-permission policy is read again for every request, so a host
+    /// whose user turns review on or off applies it to what comes next without being restarted.
+    /// </summary>
+    /// <remarks>Automatic approval grants tools the host's privileges; roots are not a sandbox.</remarks>
+    /// <exception cref="ArgumentNullException">A required runtime dependency is null.</exception>
+    public SessionRuntimeService(
+        AgentHub agentHub, IAgentSessionCatalog agentSessionCatalog, ProjectCatalog projectCatalog,
+        SessionViewCatalog sessionViewCatalog, AgentInstructionTemplateProvider instructionTemplateProvider,
+        CatalogOptions catalogOptions, SkillCatalog? skillCatalog, Func<bool> autoApproveOwnedPermissions)
+    {
+        ArgumentNullException.ThrowIfNull(autoApproveOwnedPermissions);
         ArgumentNullException.ThrowIfNull(agentHub);
         ArgumentNullException.ThrowIfNull(agentSessionCatalog);
         ArgumentNullException.ThrowIfNull(projectCatalog);
@@ -111,8 +127,61 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _catalogOptions = catalogOptions;
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
+        _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
         Permissions = new SessionPermissionService(autoApproveOwnedPermissions);
         Jobs = new SessionJobService(DeliverJobResultAsync);
+    }
+
+    private readonly Func<bool> _autoApproveOwnedPermissions;
+    private readonly bool _sessionPermissionModes;
+
+    /// <summary>
+    /// Gets or initializes whether the permission mode of a session decides what the host does with its requests
+    /// (<see cref="GetPermissionPolicy"/>). False, the default, leaves every session the one policy of the host.
+    /// </summary>
+    public bool SessionPermissionModes
+    {
+        get => _sessionPermissionModes;
+        init
+        {
+            _sessionPermissionModes = value;
+            Permissions.SessionPolicy = value ? GetPermissionPolicy : null;
+        }
+    }
+
+    /// <summary>
+    /// Gets what the host does with the permission requests of a session: the policy of the mode chosen for the
+    /// session, else of the mode its provider is configured with, else the one of the host.
+    /// </summary>
+    /// <param name="sessionId">The session. One that is not attached has the policy of the host.</param>
+    /// <returns>The policy, read now: a send keeps the one it started with.</returns>
+    public SessionPermissionPolicy GetPermissionPolicy(string sessionId)
+    {
+        var reviewByDefault = !_autoApproveOwnedPermissions();
+        return _sessionPermissionModes && !string.IsNullOrWhiteSpace(sessionId) && _entries.TryGetValue(sessionId, out var entry)
+            ? Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), reviewByDefault)
+            : Runtime.SessionPermissionModes.Policy(null, reviewByDefault);
+    }
+
+    /// <summary>
+    /// Gets the permission mode a session of a provider runs in when none is chosen for it: the mode the provider is
+    /// configured with, else the one that names the policy of the host.
+    /// </summary>
+    /// <param name="providerKey">The key of the provider.</param>
+    /// <returns>A permission mode.</returns>
+    public string GetDefaultPermissionMode(string? providerKey)
+        => ConfiguredPermissionMode(providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
+
+    private string? ConfiguredPermissionMode(string? providerKey)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey)) return null;
+        foreach (var provider in _agentHub.SelectionProviders)
+        {
+            if (string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase))
+                return NormalizeOptionalText(provider.DefaultPermissionMode);
+        }
+
+        return null;
     }
 
     /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
@@ -576,6 +645,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             session.ReasoningEffort = reasoningEffort;
         }
 
+        // Only the local state says it, and none is a choice too: the mode of the provider.
+        session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
+
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
         {
             session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory);
@@ -605,6 +677,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = localState.ProviderKey,
             ModelId = localState.ModelId,
             ReasoningEffort = localState.ReasoningEffort,
+            PermissionMode = localState.PermissionMode,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
             MessageCount = localState.MessageCount,
@@ -1213,6 +1286,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             instructionsAlreadyComposed = instructionTransformations.Count > 0;
         }
 
+        // The permission mode is the one saved with the session: what attaches it does not have to know it.
+        var permissionMode = NormalizeOptionalText(startNewSession
+            ? session.PermissionMode
+            : (await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false))?.PermissionMode);
         var sessionOptions = new AgentSessionResumeOptions
         {
             SessionId = requestedSessionId,
@@ -1224,6 +1301,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
+            PermissionMode = permissionMode,
             Streaming = true,
             WorkingDirectory = options.WorkingDirectory,
             WorktreeDirectory = worktree,
@@ -1276,6 +1354,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.WorktreeDirectory = worktree;
         session.ModelId = options.Model;
         session.ReasoningEffort = options.ReasoningEffort;
+        session.PermissionMode = permissionMode;
         session.AgentPromptId = effectiveAgentPromptId ?? session.AgentPromptId;
         await UpsertSessionMetadataAsync(session, options, title, cancellationToken).ConfigureAwait(false);
         var actor = GetActorForWork(session.SessionId);
@@ -1332,6 +1411,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             WorktreeDirectory = worktree,
             ProviderRegistrationVersion = providerVersion,
+            PermissionMode = permissionMode,
         };
 
         projector.Entry = entry;
@@ -1587,6 +1667,58 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         OwnedSessionAskExecution? askExecution = null, OwnedAskSubmission? askSubmission = null)
         => AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None, permissionExecution,
             ownedCommand: true, askExecution: askExecution, askSubmission: askSubmission), CancellationToken.None);
+
+    /// <summary>
+    /// Saves the permission mode of an owned session and gives it to its attachment, which is not attached again:
+    /// its next run requests the mode.
+    /// </summary>
+    /// <param name="session">The session, resolved by the owner.</param>
+    /// <param name="permissionMode">One of the permission modes of its provider, or null for the one the provider is configured with.</param>
+    /// <exception cref="InvalidOperationException">The attachment runs, drains its queue, or is not owned.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    internal Task SetOwnedPermissionModeAsync(SessionViewDescriptor session, string? permissionMode)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        permissionMode = NormalizeOptionalText(permissionMode);
+        return AdmitAsync(async () =>
+        {
+            while (true)
+            {
+                ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
+                var transition = await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
+                {
+                    // An attachment that is being made reads the saved mode: it is waited for, then given the new one.
+                    if (_transitions.TryGetValue(session.SessionId, out var pending)) return (Task?)pending;
+                    if (_entries.TryGetValue(session.SessionId, out var entry) && (entry.IsTerminated || entry.Attachment.IsRetiring)) entry = null;
+                    if (entry is not null && (entry.HasActiveRun || entry.QueueDrainInProgress || !HasOwnedCommandDefaults(entry)))
+                        throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
+                    if (entry is not null)
+                    {
+                        await _agentHub.SetPermissionModeAsync(entry.SessionHandleId, permissionMode, actorCancellationToken).ConfigureAwait(false);
+                        entry.PermissionMode = permissionMode;
+                    }
+                    var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
+                    if (!string.Equals(NormalizeOptionalText(localState?.PermissionMode), permissionMode, StringComparison.Ordinal))
+                    {
+                        if (localState is null)
+                        {
+                            localState = new SessionViewLocalState();
+                            CopySessionMetadata(session, localState);
+                        }
+
+                        localState.PermissionMode = permissionMode;
+                        await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, actorCancellationToken).ConfigureAwait(false);
+                    }
+
+                    session.PermissionMode = permissionMode;
+                    return (Task?)null;
+                }, CancellationToken.None).ConfigureAwait(false);
+                if (transition is null) return;
+                // Its failure belongs to the one that attaches.
+                await transition.ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).ConfigureAwait(false);
+            }
+        }, CancellationToken.None);
+    }
 
     // Fixed default-policy check only; per-operation association remains in the permission mailbox.
     private bool HasOwnedCommandDefaults(RuntimeSessionEntry candidate)
@@ -3497,6 +3629,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             LatestSummary = session.LatestSummary,
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort,
+            PermissionMode = session.PermissionMode,
             AgentPromptId = session.AgentPromptId,
             MessageCount = session.MessageCount,
             SourcePath = session.SourcePath,
@@ -3902,6 +4035,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
         public long ProviderRegistrationVersion { get; init; }
+
+        /// <summary>The permission mode chosen for the session, or null for the one of its provider. Read from any thread.</summary>
+        public string? PermissionMode
+        {
+            get => Volatile.Read(ref _permissionMode);
+            set => Volatile.Write(ref _permissionMode, value);
+        }
+
+        private string? _permissionMode;
 
         public string? Model { get; }
 

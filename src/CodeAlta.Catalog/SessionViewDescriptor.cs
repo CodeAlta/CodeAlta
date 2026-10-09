@@ -124,6 +124,13 @@ public sealed class SessionViewDescriptor
     public CodeAlta.Agent.AgentReasoningEffort? ReasoningEffort { get; set; }
 
     /// <summary>
+    /// Gets or sets the permission mode chosen for the session, or <see langword="null"/> for the one its provider is
+    /// configured with.
+    /// </summary>
+    [JsonPropertyName("permission_mode")]
+    public string? PermissionMode { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier when known.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]

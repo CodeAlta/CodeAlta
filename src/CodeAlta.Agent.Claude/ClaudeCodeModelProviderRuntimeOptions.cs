@@ -13,7 +13,8 @@ namespace CodeAlta.Agent.Claude;
 public sealed class ClaudeCodeModelProviderRuntimeOptions
 {
     /// <summary>
-    /// The permission modes of the CLI a provider can be configured with.
+    /// The permission modes of the CLI a provider can be configured with, and a session given. The provider reports
+    /// them (<see cref="ModelProviderDescriptor.PermissionModes"/>).
     /// </summary>
     public static IReadOnlyList<string> PermissionModes { get; } = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
 
@@ -40,7 +41,8 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
 
     /// <summary>
     /// Gets or initializes the permission mode the CLI starts with (one of <see cref="PermissionModes"/>).
-    /// When it is empty the CLI uses the mode of the user's settings.
+    /// When it is empty the CLI uses the mode of the user's settings. A session given a mode of its own
+    /// (<see cref="Runtime.AgentTurnRequest.PermissionMode"/>) runs in that one instead.
     /// </summary>
     public string? PermissionMode { get; init; }
 

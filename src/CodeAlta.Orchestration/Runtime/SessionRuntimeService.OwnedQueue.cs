@@ -105,9 +105,13 @@ public sealed partial class SessionRuntimeService
                     item.Execution.Token.ThrowIfCancellationRequested();
                     QueueRunLifecycle? lifecycle = null;
                     var send = new AgentSendOptions { Input = AgentInput.Text(request.Text) };
-                    if (reviewPermissions || enableUserInput)
+                    // The policy of the session, read once when its queued prompt starts, as a direct send reads it.
+                    SessionPermissionPolicy? policy = SessionPermissionModes ? GetPermissionPolicy(request.SessionId) : null;
+                    if (policy is { } own ? own != SessionPermissionPolicy.Approve || enableUserInput : reviewPermissions || enableUserInput)
                     {
-                        permission = await Permissions.CreateOwnedExecutionAsync(receipt.OperationId, request.SessionId, item.Execution.Token, reviewPermissions, enableUserInput).ConfigureAwait(false);
+                        permission = policy is { } chosen
+                            ? await Permissions.CreateOwnedExecutionAsync(receipt.OperationId, request.SessionId, item.Execution.Token, chosen, enableUserInput).ConfigureAwait(false)
+                            : await Permissions.CreateOwnedExecutionAsync(receipt.OperationId, request.SessionId, item.Execution.Token, reviewPermissions, enableUserInput).ConfigureAwait(false);
                         if (permission is null || !await Permissions.BindOwnedExecutionAsync(permission, _runtimeInstanceId,
                             captured.Attachment, captured.ProviderId).ConfigureAwait(false))
                             throw new QueueBindingException();

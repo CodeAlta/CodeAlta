@@ -17,7 +17,7 @@ namespace CodeAlta.Agent.Runtime;
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
 public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns,
-    IAgentBackgroundTaskProvider
+    IAgentBackgroundTaskProvider, IAgentPermissionModeProvider
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -44,6 +44,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly List<AgentOperationUsageSnapshot> _compactionSummaryOperations = [];
     private AgentRunId? _compactionRunId;
     private readonly AgentSessionCreateOptions _options;
+    // The permission mode of the next runs: the one of the options until it is set.
+    private string? _permissionMode;
     private readonly bool _allowProviderContinuation;
     private readonly Channel<AgentEvent> _eventChannel;
     private readonly ConcurrentDictionary<Guid, Action<AgentEvent>> _subscribers = new();
@@ -120,6 +122,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             new AgentTurnExecutorCompactionSummaryExecutor(turnExecutor),
             RecordCompactionSummaryUsageAsync);
         _options = options;
+        _permissionMode = NormalizeOptionalText(options.PermissionMode);
         _allowProviderContinuation = allowProviderContinuation;
         _summary = summary;
         _state = RebuildLoadedSkillsState(state, history);
@@ -187,6 +190,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return _turnExecutor is IAgentProviderBackgroundTasks provider
             ? provider.StopBackgroundTaskAsync(SessionId, taskId, cancellationToken)
             : Task.FromResult(false);
+    }
+
+    /// <inheritdoc />
+    public string? PermissionMode => Volatile.Read(ref _permissionMode);
+
+    /// <inheritdoc />
+    public void SetPermissionMode(string? permissionMode)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Volatile.Write(ref _permissionMode, NormalizeOptionalText(permissionMode));
     }
 
     // The tasks are the state of a provider that runs now: they are told to those who listen and are neither
@@ -260,6 +273,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     throw new InvalidOperationException($"Local raw-API session '{SessionId}' already has an active run.");
                 _activeRunId = run.Id;
                 _activeRun = run;
+                run.PermissionMode = PermissionMode;
                 _activeRunConversationStartIndex = _conversation.Count;
                 _pendingSteerInputs.Clear();
                 admitted = true;
@@ -1069,6 +1083,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         internal bool CancellationReserved { get; set; }
         internal bool CancellationSealed { get; set; }
         internal bool Closing { get; set; }
+        internal string? PermissionMode { get; set; }
         internal void SignalCancellation() => _cancel.TrySetResult(true);
         internal void CompleteWithoutCancellation() => _cancel.TrySetResult(false);
         private async Task CancelAsync()
@@ -1372,6 +1387,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
             ReasoningEffort = _options.ReasoningEffort,
+            // A run keeps the mode it started with; what runs outside one takes the current mode.
+            PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
             Conversation = _toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,

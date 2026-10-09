@@ -10,7 +10,11 @@ const request = Object.freeze({ expectedHostEpoch: epoch, sessionId: "selected" 
 function command(): SessionPermissionCommand {
   return { handle: { operationId: epoch, runtimeInstanceId: runtime, attachmentGeneration: "9223372036854775807",
     sessionId: "selected", runId: null, interactionId: "interaction", attemptId: epoch },
-    providerId: "fake", command: "inert command\ncomplete", workingDirectory: "Q:\\fixture", reason: null };
+    providerId: "fake", kind: "commandExecution", command: "inert command\ncomplete", workingDirectory: "Q:\\fixture",
+    grantRoot: null, reason: null };
+}
+function fileChange(): SessionPermissionCommand {
+  return { ...command(), kind: "fileChange", command: null, workingDirectory: null, grantRoot: "Q:\\fixture" };
 }
 function page(entries = [command()]): SessionPermissionsPage {
   return { status: "ok", hostEpoch: epoch, sessionId: "selected", entries, hasMore: false };
@@ -191,7 +195,11 @@ test("malformed command windows are rejected whole without enabling approval", (
     page([{ ...entry, handle: { ...entry.handle, attachmentGeneration: "01" } }]),
     page([{ ...entry, handle: { ...entry.handle, attachmentGeneration: "9223372036854775808" } }]),
     page([{ ...entry, handle: { ...entry.handle, operationId: epoch.toUpperCase() } }]),
-    page([{ ...entry, handle: { ...entry.handle, runId: "\0" } }])];
+    page([{ ...entry, handle: { ...entry.handle, runId: "\0" } }]),
+    // Neither kind may carry the other's fields, and neither may arrive without its own.
+    page([{ ...entry, kind: "fileChange" }]), page([{ ...entry, grantRoot: "Q:\\fixture" }]),
+    page([{ ...fileChange(), grantRoot: null }]), page([{ ...fileChange(), command: "inert" }]),
+    page([{ ...fileChange(), workingDirectory: "Q:\\fixture" }]), page([{ ...entry, kind: "somethingElse" }])];
   for (const result of invalid) {
     const states: PermissionReviewState[] = []; let resolutions = 0;
     const scope = f.reviewer(async () => result, async () => { resolutions++; throw Error("forbidden"); })
@@ -200,6 +208,20 @@ test("malformed command windows are rejected whole without enabling approval", (
     assert.equal(resolutions, 0);
     assert.deepEqual(states.at(-1), { kind: "error", code: "invalid_response", reloadRequired: false });
   }
+}));
+
+test("a file change is reviewed like a command, by the root it asks to write under", () => Fixture.run(async f => {
+  const entry = fileChange();
+  const states: PermissionReviewState[] = []; const handles: unknown[] = [];
+  const scope = f.reviewer(async () => page([entry]),
+      async requested => { handles.push(requested.handle); return { status: "resolved", hostEpoch: epoch, handle: requested.handle }; })
+    .forSelection(request, f.controller().signal, value => states.push(value));
+  await f.wait(scope.refresh());
+  const listed = ready(states).entries;
+  assert.equal(listed.length, 1);
+  assert.deepEqual([listed[0]!.kind, listed[0]!.grantRoot, listed[0]!.command], ["fileChange", "Q:\\fixture", null]);
+  await f.wait(scope.decide(listed[0]!, "deny"));
+  assert.equal(handles.length, 1, "a file change reaches the host like a command does");
 }));
 
 test("Allow once Deny Cancel forward exact handles and require fresh review after a result", () => Fixture.run(async f => {

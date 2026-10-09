@@ -73,6 +73,35 @@ public sealed class SessionRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task ProviderSelection_ClearsThePermissionModeOfTheSession()
+    {
+        using var temp = new TempDirectory();
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(new(new("target"), "Target", "openai-responses"), () => throw new AssertFailedException("Selection must not activate a provider."));
+        await using var hub = new AgentHub(registry, temp.Path);
+        await using var runtime = CreateRuntime(temp.Path, hub);
+        var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = temp.Path }).JournalStore;
+        var store = journal.CreateSessionStore();
+        var now = DateTimeOffset.UtcNow;
+        var descriptor = new SessionViewDescriptor { SessionId = "provider-mode", Kind = SessionViewKind.GlobalSession,
+            ProviderId = "original", ProviderKey = "original", Title = "Mode", WorkingDirectory = temp.Path, CreatedAt = now, UpdatedAt = now };
+        await journal.EnsureHeaderAsync(descriptor);
+        await store.UpsertSessionAsync(new() { SessionId = descriptor.SessionId, ProviderId = new("original"), ProviderKey = "original",
+            ProtocolFamily = "original", WorkingDirectory = temp.Path, Title = "Mode", CreatedAt = now, UpdatedAt = now });
+        await store.UpsertStateAsync(new() { SessionId = descriptor.SessionId, ProviderKey = "original", ProtocolFamily = "original", UpdatedAt = now });
+        await journal.AppendStateAsync(descriptor, new() { ProviderKey = "original", AgentPromptId = "default", PermissionMode = "acceptEdits" });
+        var before = await runtime.ReadProviderSelectionAsync(descriptor.SessionId);
+        Assert.IsNotNull(before);
+
+        Assert.AreEqual("ok", await runtime.SelectOwnedProviderAsync(before, "target"));
+
+        // The modes are those of a provider: the session runs on the new one in the mode it is configured with.
+        var state = await journal.ReadLatestStateAsync(descriptor.SessionId, now);
+        Assert.AreEqual("target", state!.ProviderKey);
+        Assert.IsNull(state.PermissionMode);
+    }
+
+    [TestMethod]
     public void FormatAgentPromptSourcePathForTimeline_UsesProjectRelativePathWhenAvailable()
     {
         var projectRoot = Path.Combine(Path.GetTempPath(), "CodeAltaProject");

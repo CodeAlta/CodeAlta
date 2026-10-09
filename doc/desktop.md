@@ -11,8 +11,10 @@ reference for maintainers. The user documentation is under `site/docs`, starting
 Running `alta` with no options starts the same host as `altatui`: it owns the current project and
 the `~/.alta` runtime, acquires the shared runtime lock, starts the configured providers, and runs the
 built-in plugins (MCP, Git, Statistics) and the source plugins of `~/.alta/plugins` and of the
-launch project. Tool permissions are approved automatically and provider input forms are cancelled
-unless an isolated-root launch opts in to review them. WebView-only data stays in the platform-local
+launch project. The commands and the file changes of a session are approved automatically unless the
+permission mode of the session, of its provider or of Settings > Permissions asks first (see "Permission
+modes" below); provider input forms are cancelled unless an
+isolated-root launch opts in to them. WebView-only data stays in the platform-local
 application-data directory, and existing `.alta` storage is not migrated.
 
 No-argument startup derives a stable WebView data directory from the platform's local application-data
@@ -376,7 +378,7 @@ that key (`dismissDialogsOnOutsidePress` in `modalDialogs.ts`, one pair of liste
 of the page). The press and its release are both outside, so a selection or a window dragged out of its
 dialog closes nothing; with a menu or a popover open in the window, the click closes that alone. A
 window that asks something, or holds what is being typed, stays open and is closed by its own buttons
-or Escape: the review of a command permission, the input a provider asks for, the dialog of a plugin
+or Escape: the input a provider asks for, the dialog of a plugin
 other than a message, the editor of an automation and **New space**. Such a `dialog` carries
 `data-outside-press="keep"` (`keptOnOutsidePress`, or `keepOnOutsidePress` of `AppWindow`). The
 questions that are Blueprint dialogs (unsaved changes, closing the window, exiting) already ignore a
@@ -824,6 +826,21 @@ applies the same rule (`AgentModelDefaults`) to what it reports for a session an
 selects nothing, so a Send never reaches a provider without a model while the provider lists one.
 Choosing another model starts it with its own effort. A saved model the provider does not list is
 kept and shown as **Unverified**; settings change again once a listed model is chosen.
+
+Beside the chip, a small button (`PermissionModeMenu`) names the permission mode the session runs in and
+opens the modes it can be given (`SessionChoicesResponse.PermissionModes`; empty hides the button, as in
+a host that forces the review). Each mode has a name and a line that says what it does; the one the
+session runs in has a check. The mode a session without one runs in
+(`SessionChoicesResponse.DefaultPermissionMode`: the provider's `permission_mode`, else the default of the
+application) is marked **Default** in the list, and choosing it gives the session no mode of its own; a
+default a session cannot be given (`plan`, which stays provider-wide) has an entry of its own. The button
+is quiet while the session runs in the default mode and stands out when it has a mode of its own. A
+saved mode that is no longer offered stays shown as **Unverified**. The choice travels with the next Send
+(`SessionSelection.PermissionMode`: an id, or `"provider"` to go back to the default; absent keeps the
+session's); the host keeps it in the session's local state (`permission_mode`), reads the policy of the
+send from it (see "Permission modes"), and for Claude Code switches the running CLI with
+`set_permission_mode`, restarting it only when the CLI refuses. A provider switch clears it. New-session
+drafts have no button: the choice appears once the session exists.
 
 The provider indicator is a compact active-provider count, green when ready and orange when
 providers fail or are unsupported. Owned startup initializes the configured providers, as in
@@ -3291,25 +3308,92 @@ signalling does not establish run completion.
 On narrow screens the labelled controls wrap rather than clip; exact-target evidence and the
 separate **Abort original Send operation** remain available.
 
+#### Permission modes
+
+What the host does with the permission requests of a session follows from one mode
+(`SessionPermissionModes`, `SessionPermissionPolicy` in the orchestration):
+
+| Mode | Policy | The host |
+| --- | --- | --- |
+| `bypassPermissions` | `Approve` | answers every request with Allow once |
+| `acceptEdits` | `AcceptEdits` | approves file changes and has commands reviewed |
+| any other (`default`, and the `auto`, `dontAsk`, `plan` of Claude Code) | `Review` | has every request it receives reviewed |
+
+The mode of a session is, in this order: the one chosen for it (the permission button of the composer,
+saved with the session), the one its provider is configured with (`permission_mode` of a Claude Code
+provider), and the default of the application. **Settings > Permissions > Default mode** sets that
+default: **Bypass permissions** unless the user chose **Ask first**. It is kept in `preferences.json`
+(`reviewPermissions`, written only as `true`) and read by `SessionRuntimeService.GetPermissionPolicy`.
+Every provider has the three modes of the host, because the host answers the requests of its sessions:
+the providers that run the tools of CodeAlta are offered `default`, `acceptEdits` and
+`bypassPermissions`, and Claude Code its own list, which has them. For Claude Code the mode is also
+given to the CLI, which decides what it asks at all.
+
+One send reads the policy once, after its session is prepared (the mode a send chooses is saved by
+then), so its setup and its cleanup agree: a change applies to what the sessions do next rather than to
+what is already running. A send whose policy is `Approve` has no permission execution, and its requests
+reach the default handler of the host, which answers with the policy of their session. That handler
+also answers the requests outside a send of the window (a prompt the host queued, a session another
+session drives): it approves what the policy approves and denies the rest, since such a run has no
+review to wait in. The window can always answer: the boot status reports the review available
+(`commandReviewEnabled`) for every owned host, and `sessionPermissions` lists and resolves requests
+whatever the modes are now.
+
+`--review-owned-command-permissions` forces the review on for every session: the host then ignores the
+modes of the sessions (`CodeAltaHostOptions.SessionPermissionModes` is off) and offers none but those
+of Claude Code.
+
+What a session does without a request must not go round its mode. `alta job start` is refused
+(`job.startDenied`) for a session whose policy is not `Approve` (`AltaJobPolicy.AcceptsCommandsOf`).
+While the default mode asks first, a session cannot type in a terminal (`alta terminal`) or give an
+automation a command, as in a host started with the flag.
+
+A session that waits for an answer counts among the sessions that wait for the user in the activity of
+its space (`SpaceSessionActivity.Waiting`). The page marks it with `WaitingBadge` in the Explorer (its
+row and its project) and on its tab, and says it once in a toast with **Show** when it starts to wait
+while another session is on screen; a session of another space has the toast of its space.
+
 Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
-into manual review of supported plain command requests. The selected-session review shows the
-complete command, working directory and optional reason, with **Allow once / Deny / Cancel**.
-After a manual refresh, deliberately choose **Review command permission** to open the native
-HTML dialog for that exact observed entry. Opening or dismissing it performs no read or decision;
-Close/Escape dismisses presentation, unlike the explicit **Cancel** permission decision.
-Pending and uncertain original outcomes remain retained when the dialog closes.
-Refresh pending commands manually; this is not a notification stream. Unsupported permission
-payloads remain denied, this review flag alone leaves user input cancelled, and there is no Allow for Session option.
+into manual review of supported command and file-change requests. The selected-session review shows a
+command with its complete command line, working directory and optional reason, and a file change with
+the complete root it asks to write under and its optional reason, with **Allow once / Deny** (the RPC still takes **Cancel**).
+Each kind is held to its own whole shape: a command that carries parsed actions, network access or a
+policy amendment is refused rather than shown as less than it is, and a request that arrives with the
+fields of the other kind, or without its own, is refused with the window it came in.
+The panel (`CommandPermissionPanel`, on top of the composer of the session) is shown only while a
+request waits, a decision is being sent or reading the requests failed. It reads the pending requests of
+its session by itself: at once when the session is selected, then every 1.5 seconds while the session runs
+and no request is shown. A request that is shown is not read again while the run goes on, so the entry
+being answered is not replaced under the user; the end of the run reads once more what is left. It shows
+the first waiting entry, its command line and working directory or the root of the file change, and its
+reason, then its choices as one list: **Allow once**, **Deny** and a text field. It offers no **Cancel**:
+its effect depends on the provider (Claude Code stops the turn, the tools of CodeAlta only fail the call),
+while **Deny** means the same everywhere and the Stop button of the composer stops a run.
+The choices are disabled for 400 ms after an entry appears (and after a selection shows it again), so a
+click aimed at what was there does not answer it. The arrow keys move along the list (Left and Right
+move the caret in the text field), Enter answers with the focused choice, 1-2 answer directly and
+Escape denies (in the text field, Escape first clears its text; Escape that ends an IME composition
+answers nothing); a held key answers nothing, and neither does a space. When the entry arms, or when its
+session is shown while it waits, the first choice (**Allow once**) takes the focus if the focus is
+nowhere, in the composer region or in the card, and the composer has no draft text or image: Enter then
+allows. Focusing the prompt of a session (a tab, **Show** of a toast) goes to that choice too while a
+request waits. Once the user answered, the focus goes back to the prompt (`onAnswered`). The card
+announces a waiting request to screen readers (a polite status), and the list is labelled by its
+question.
+Text in the field and Enter send **Deny** and, once the host has taken that denial, the text as a steer
+of the run through the composer queue; otherwise the text is queued for the next turn. Text that cannot
+be staged (a request of the composer is pending, the queue is full) goes back to the composer draft. This works the
+same for every provider: none needs a deny message of its own.
+Unsupported permission payloads remain denied, this review flag alone leaves user input cancelled, and
+there is no Allow for Session option.
 Approval can execute a command with the host's privileges: discovery roots are not a sandbox.
 Changing selection does not cancel a pending permission or its original decision-response wait.
-Use **Observe retained decision** to check that response locally, labelled with its original session
-and complete handle; it does not contact the host or resend a decision. A pending observation does
-not unlock another decision. Explicitly observe a terminal response, then refresh for a fresh review
-before deciding again; merely displaying the result does not acknowledge it. Acceptance is not proof
-of execution, and rejection does not identify an earlier decision. Genuine uncertainty or epoch
-invalidation disables review across selections until renderer reload. Reload loses the local record;
-then manually refresh still-pending requests under the existing opt-in. An empty list cannot recover
-a lost decision, and host restart restores no old permission authority. No decision is replayed.
+The answer to a decision is acknowledged by the panel, which then reads the requests again; while
+the response is pending, no other decision can be sent. Acceptance is not proof of execution, and
+rejection does not identify an earlier decision. Genuine uncertainty or epoch invalidation disables
+review and the reads across selections until renderer reload, and the panel says so. Reload loses the
+local record; an empty list cannot recover a lost decision, and host restart restores no old
+permission authority. No decision is replayed.
 Aborting the owning submission or closing the application invalidates still-pending requests,
 but cannot revoke a decision already accepted by the backend.
 

@@ -202,6 +202,12 @@ public sealed record AgentTurnRequest
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the requested permission mode, one of the <see cref="AgentProviderProfile.PermissionModes"/>
+    /// of the provider. Null leaves the mode the provider is configured with.
+    /// </summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>
     /// Gets or initializes the maximum number of output tokens the provider should generate when supported.
     /// </summary>
     public int? MaxOutputTokens { get; init; }

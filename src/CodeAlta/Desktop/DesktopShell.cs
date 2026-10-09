@@ -291,6 +291,25 @@ internal sealed class DesktopShell
         preferences.Save(_dataRoot);
     }
 
+    /// <summary>
+    /// The user's setting: whether the commands and the file changes of a session are reviewed instead of being
+    /// approved automatically. Read at every send, so a change applies to the next one.
+    /// </summary>
+    internal bool ReviewPermissions { get { lock (_gate) return _preferences.ReviewPermissions; } }
+
+    /// <summary>Changes that setting and keeps it.</summary>
+    /// <param name="value">Whether commands and file changes are reviewed.</param>
+    internal void SetReviewPermissions(bool value)
+    {
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            if (_preferences.ReviewPermissions != value) preferences = _preferences = _preferences with { ReviewPermissions = value };
+        }
+
+        preferences?.Save(_dataRoot);
+    }
+
     /// <summary>The most sessions that are shown with a width of their own at a time.</summary>
     internal const int MaximumSessionWidths = 256;
 

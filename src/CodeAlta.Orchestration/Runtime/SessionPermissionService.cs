@@ -61,7 +61,7 @@ public sealed class SessionPermissionRegistration
 /// </summary>
 public sealed partial class SessionPermissionService : IAsyncDisposable
 {
-    private readonly bool _autoApproveOwnedPermissions;
+    private readonly Func<bool> _autoApproveOwnedPermissions;
 
     /// <summary>Creates a permission owner with deny-by-default owned callbacks.</summary>
     public SessionPermissionService() : this(false) { }
@@ -69,13 +69,41 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// <summary>Creates a permission owner with an explicit host-owned automatic approval policy.</summary>
     /// <remarks>Automatic approval grants AllowOnce, like the TUI, and is not a filesystem sandbox.
     /// Explicit per-operation command review still takes precedence.</remarks>
-    public SessionPermissionService(bool autoApproveOwnedPermissions)
+    public SessionPermissionService(bool autoApproveOwnedPermissions) : this(() => autoApproveOwnedPermissions) { }
+
+    /// <summary>
+    /// Creates a permission owner whose automatic approval policy is read again for every send, and for every
+    /// request outside a send, so a host whose user turns review on or off applies it to what comes next
+    /// without being restarted. A send keeps the policy it started with until it ends.
+    /// </summary>
+    /// <param name="autoApproveOwnedPermissions">Whether a request no explicit review takes is granted AllowOnce.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="autoApproveOwnedPermissions"/> is null.</exception>
+    public SessionPermissionService(Func<bool> autoApproveOwnedPermissions)
     {
+        ArgumentNullException.ThrowIfNull(autoApproveOwnedPermissions);
         _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
-        OwnedDefaultPermissionHandler = (_, token) => Task.FromResult(new AgentPermissionDecision(
+        OwnedDefaultPermissionHandler = (request, token) => Task.FromResult(new AgentPermissionDecision(
             token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
-            : autoApproveOwnedPermissions ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+            : ApprovedByDefault(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
     }
+
+    /// <summary>
+    /// Gets or sets the policy of a session by its identifier, for a host whose sessions have a permission mode of
+    /// their own. Null, the default, leaves every session the one policy of the host.
+    /// </summary>
+    internal Func<string, SessionPermissionPolicy>? SessionPolicy { get; set; }
+
+    // A request outside a send of the owner (a prompt the host queued, a session another session drives) has no
+    // review to wait in: it is granted when the policy of its session grants it, and denied otherwise.
+    private bool ApprovedByDefault(AgentPermissionRequest request)
+        => SessionPolicy is { } policy && !string.IsNullOrWhiteSpace(request.SessionId)
+            ? policy(request.SessionId) switch
+            {
+                SessionPermissionPolicy.Approve => true,
+                SessionPermissionPolicy.AcceptEdits => request is AgentFileChangePermissionRequest,
+                _ => false,
+            }
+            : _autoApproveOwnedPermissions();
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
     private readonly TaskCompletionSource _shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -124,6 +152,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         internal bool Bound { get; set; }
         internal bool Closed { get; set; }
         internal bool ReviewCommands { get; init; }
+        // Whether a request this send does not review is granted: read once when the send starts, like its review.
+        internal bool AutoApprove { get; init; }
+        // Whether the file changes of this send are granted while its commands are reviewed.
+        internal bool ApproveFileChanges { get; init; }
         internal bool EnableUserInput { get; init; }
         internal HashSet<PendingUserInput> InputDeliveries { get; } = [];
         internal HashSet<PendingPermission> Deliveries { get; } = [];
@@ -140,8 +172,28 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             if (_stopped || _ownedAdmissionClosed || token.IsCancellationRequested || operationId == Guid.Empty
                 || !ValidOwnedText(sessionId, OwnedIdentityLimit, required: true, identity: true)
                 || _ownedExecutions.Count >= OwnedExecutionLimit || _ownedExecutions.ContainsKey(operationId)) return null;
+            // A change of the policy applies to the next send: one that runs keeps asking, or approving, as it started.
             var execution = new OwnedPermissionExecution(this, operationId, sessionId, token)
-            { ReviewCommands = reviewCommands, EnableUserInput = enableUserInput };
+            { ReviewCommands = reviewCommands, AutoApprove = !reviewCommands && _autoApproveOwnedPermissions(), EnableUserInput = enableUserInput };
+            _ownedExecutions.Add(operationId, execution);
+            return execution;
+        }, null);
+
+    // The same for a send of a session that has a policy of its own, read once when the send starts.
+    internal ValueTask<OwnedPermissionExecution?> CreateOwnedExecutionAsync(Guid operationId, string sessionId,
+        CancellationToken token, SessionPermissionPolicy policy, bool enableUserInput)
+        => ExecuteAsync<OwnedPermissionExecution?>(() =>
+        {
+            if (_stopped || _ownedAdmissionClosed || token.IsCancellationRequested || operationId == Guid.Empty
+                || !ValidOwnedText(sessionId, OwnedIdentityLimit, required: true, identity: true)
+                || _ownedExecutions.Count >= OwnedExecutionLimit || _ownedExecutions.ContainsKey(operationId)) return null;
+            var execution = new OwnedPermissionExecution(this, operationId, sessionId, token)
+            {
+                ReviewCommands = policy != SessionPermissionPolicy.Approve,
+                AutoApprove = policy == SessionPermissionPolicy.Approve,
+                ApproveFileChanges = policy == SessionPermissionPolicy.AcceptEdits,
+                EnableUserInput = enableUserInput,
+            };
             _ownedExecutions.Add(operationId, execution);
             return execution;
         }, null);
@@ -198,16 +250,15 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
-            if (_autoApproveOwnedPermissions && !execution.ReviewCommands && CanUse(execution) && !cancellationToken.IsCancellationRequested
+            if ((execution.AutoApprove || (execution.ApproveFileChanges && request is AgentFileChangePermissionRequest))
+                && CanUse(execution) && !cancellationToken.IsCancellationRequested
                 && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
                 && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId))
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
             if (!execution.ReviewCommands || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
                 || !HasOwnedDeliveryCapacity(execution)) return null;
-            var command = (AgentCommandPermissionRequest)request;
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
-            var snapshot = new SessionPermissionSnapshot(handle, request.ProviderId, request.Timestamp, request.Kind,
-                command.Command, command.WorkingDirectory, command.Reason, null);
+            var snapshot = OwnedSnapshot(handle, request);
             var pending = new PendingPermission(snapshot,
                 new(TaskCreationOptions.RunContinuationsAsynchronously), cancellationToken, execution);
             _pending.Add(handle, pending);
@@ -352,17 +403,41 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private bool IsCanceled(PendingPermission pending)
         => pending.CancellationToken.IsCancellationRequested || (pending.OwnedExecution is { } execution && !CanUse(execution));
 
+    // A request the owned review can present: it is addressed to this execution, and it is one of the two kinds
+    // the review shows whole. A richer command prompt (parsed actions, network access, a policy amendment) is
+    // still refused rather than shown as less than it is.
     private static bool Eligible(OwnedPermissionExecution execution, AgentPermissionRequest request)
-        => request is AgentCommandPermissionRequest command
-            && request.Kind == "commandExecution" && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
+        => Addressed(execution, request) && request switch
+        {
+            AgentCommandPermissionRequest command => request.Kind == "commandExecution"
+                && ValidOwnedText(command.Command, OwnedCommandLimit, required: true)
+                && ValidOwnedText(command.WorkingDirectory, OwnedDirectoryLimit, required: true)
+                && ValidOwnedText(command.Reason, OwnedReasonLimit, required: false)
+                && command.ApprovalId is null && command.Actions is null && command.Network is null
+                && command.ProposedExecPolicyAmendment is null && command.ProposedNetworkPolicyAmendments is null,
+            AgentFileChangePermissionRequest change => request.Kind == "fileChange"
+                && ValidOwnedText(change.GrantRoot, OwnedDirectoryLimit, required: true)
+                && ValidOwnedText(change.Reason, OwnedReasonLimit, required: false),
+            _ => false,
+        };
+
+    private static bool Addressed(OwnedPermissionExecution execution, AgentPermissionRequest request)
+        => request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
             && ValidOwnedText(request.InteractionId, OwnedIdentityLimit, required: true, identity: true)
             && (request.RunId is null || ValidOwnedText(request.RunId.Value.Value, OwnedIdentityLimit, required: true, identity: true))
-            && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId)
-            && ValidOwnedText(command.Command, OwnedCommandLimit, required: true)
-            && ValidOwnedText(command.WorkingDirectory, OwnedDirectoryLimit, required: true)
-            && ValidOwnedText(command.Reason, OwnedReasonLimit, required: false)
-            && command.ApprovalId is null && command.Actions is null && command.Network is null
-            && command.ProposedExecPolicyAmendment is null && command.ProposedNetworkPolicyAmendments is null;
+            && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId);
+
+    // The presented form of an eligible request: a command carries its command line and folder, a file change
+    // carries the root it asks to write under. Only a kind <see cref="Eligible"/> accepted reaches this.
+    private static SessionPermissionSnapshot OwnedSnapshot(SessionPermissionHandle handle, AgentPermissionRequest request)
+        => request switch
+        {
+            AgentCommandPermissionRequest command => new(handle, request.ProviderId, request.Timestamp, request.Kind,
+                command.Command, command.WorkingDirectory, command.Reason, null),
+            AgentFileChangePermissionRequest change => new(handle, request.ProviderId, request.Timestamp, request.Kind,
+                null, null, change.Reason, change.GrantRoot),
+            _ => throw new InvalidOperationException($"A permission request of kind '{request.Kind}' is not presented by the owned review."),
+        };
 
     private static bool ValidOwnedText(string? value, int limit, bool required, bool identity = false)
     {

@@ -1,158 +1,178 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { SessionPermissionCommand } from "#neoastra";
-import type { createPermissionReviewer, PermissionDecisionObservation, PermissionReviewState } from "./sessionPermissions";
+import type { CommandDecision, createPermissionReviewer, PermissionReviewState } from "./sessionPermissions";
 import { useShellLanguage } from "./shellLanguage";
-import { createPaletteFocusRestoration } from "./paletteActions";
-import { keptOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
-export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }: {
+// How often the pending requests of a running session are read while none is shown.
+const pendingReadInterval = 1_500;
+// A request that just appeared takes the place the pointer may be about to click: its decisions wait this long.
+const armDelay = 400;
+
+/**
+ * The requests of a session that wait for the user's permission, above its composer. It shows the first one with its
+ * decisions while one waits, and a line while a decision is sent or reading them failed. It reads them by itself
+ * while the session runs and none is shown, once more when the run ends with some shown, and after the answer to a
+ * decision, which it acknowledges itself.
+ */
+export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus, onAnswered, visible = true }: {
   reviewer: ReturnType<typeof createPermissionReviewer>; epoch: string; sessionId: string;
   canReview: () => boolean;
+  /** Whether the session has a run that may ask for permission. */
+  running: boolean;
+  /**
+   * Tells the agent what to do instead of a denied request: steered into the run when the denial was taken, queued
+   * for the next turn otherwise. Without it, the panel offers no such text.
+   */
+  instruct?: (kind: "Steer" | "Queue", text: string) => void;
+  /** Whether a request that appears may take the focus from the composer: it has no draft being written. */
+  takeFocus?: () => boolean;
+  /** Called when the user answered a request: the composer takes the focus back. */
+  onAnswered?: () => void;
+  /** Whether the session is the one on screen: a request that waits takes the focus when its session is shown. */
+  visible?: boolean;
 }) {
   const { t } = useShellLanguage();
   const [state, setState] = useState<PermissionReviewState>();
-  const [observation, setObservation] = useState<PermissionDecisionObservation | null>();
+  // The requests last read: a read in progress keeps them on screen.
+  const [shown, setShown] = useState<Extract<PermissionReviewState, { kind: "ready" }> | null>(null);
+  const [poll, setPoll] = useState(0);
+  const [armed, setArmed] = useState<string | null>(null);
+  const [instead, setInstead] = useState("");
+  const notAttempted = useRef({});
+  const attempted = useRef<PermissionReviewState | undefined | object>(notAttempted.current);
   const scope = useRef<ReturnType<typeof reviewer.forSelection> | null>(null);
   const currentState = useRef<PermissionReviewState | undefined>(undefined);
-  const currentView = useRef(canReview);
-  currentView.current = canReview;
-  type Review = { id: number; entry: SessionPermissionCommand; state: PermissionReviewState; scope: NonNullable<typeof scope.current>;
-    epoch: string; view: () => boolean; origin: HTMLButtonElement; valid: boolean };
-  const [review, setReview] = useState<Review | null>(null);
-  const activeReview = useRef<Review | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
-  const composing = useRef(false);
-  const generation = useRef(0);
-  const [focus] = useState(createPaletteFocusRestoration);
-  const [, renderInvalidation] = useState(0);
-  const current = (value: Review) => activeReview.current === value && value.valid && value.scope === scope.current
-    && currentState.current === value.state && value.view() && currentView.current()
-    && !!dialog.current?.open && dialog.current.isConnected && !dialog.current.closest("[inert]");
-  function close() {
-    const value = activeReview.current;
-    activeReview.current = null;
-    setReview(null);
-    if (dialog.current?.open) dialog.current.close();
-    if (value) focus.schedule(value.origin, () => scope.current === value.scope && value.view() && currentView.current(),
-      () => !!modalDialogOpen());
-  }
+  const card = useRef<HTMLElement>(null);
+  const choices = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const controller = new AbortController();
-    activeReview.current = null; setReview(null); currentState.current = undefined;
-    setState(undefined);
-    setObservation(undefined); // Presentation only; never acknowledge the App-owned record on mount/selection.
+    currentState.current = undefined;
+    setState(undefined); setShown(null); setArmed(null); attempted.current = notAttempted.current;
     scope.current = reviewer.forSelection({ expectedHostEpoch: epoch, sessionId }, controller.signal, value => {
       currentState.current = value; setState(value);
+      if (value.kind !== "loading") setShown(value.kind === "ready" ? value : null);
     });
-    return () => { activeReview.current = null; controller.abort(); scope.current = null; focus.cancel(); };
+    return () => { controller.abort(); scope.current = null; };
   }, [reviewer, epoch, sessionId]);
   useEffect(() => {
-    const transition = (event: Event) => {
-      if (!(event.target instanceof HTMLDialogElement) || !activeReview.current) return;
-      // Our initial showModal is presentation only. Every subsequent modal transition,
-      // including close/reopen in the same task, retires these particular controls.
-      if (event.target === dialog.current && (event as ToggleEvent).newState === "open" && !dialog.current.open) return;
-      activeReview.current.valid = false;
-      renderInvalidation(value => value + 1);
-    };
-    document.addEventListener("beforetoggle", transition, true);
-    return () => document.removeEventListener("beforetoggle", transition, true);
-  }, []);
-  useLayoutEffect(() => {
-    if (!review) return;
-    const element = dialog.current!;
-    composing.current = false;
-    element.showModal();
-    renderInvalidation(value => value + 1);
-    return () => { if (element.open) element.close(); };
-  }, [review]);
+    const current = scope.current;
+    if (!current || state?.kind === "loading" || state?.kind === "resolving"
+      || (state?.kind === "error" && state.reloadRequired)) return;
+    // The answer to a decision is final: acknowledging it lets the next read show what waits now.
+    if (state?.kind === "result") current.observeDecision();
+    // A request that is shown waits for the user: it is not read again before an answer or the end of the run.
+    else if (!running || !!shown?.entries.length) return;
+    // A selection or an answer is read at once, a read that could not start again later.
+    const immediate = (state === undefined || state.kind === "result") && attempted.current !== state;
+    const timer = setTimeout(() => {
+      attempted.current = state;
+      if (canReview()) void current.refresh();
+      setPoll(value => value + 1);
+    }, immediate ? 0 : pendingReadInterval);
+    return () => clearTimeout(timer);
+  }, [state, shown, running, poll]);
+  const wasRunning = useRef(running);
+  useEffect(() => {
+    // A run that ends takes its requests with it: one read shows what is left.
+    if (wasRunning.current && !running && shown?.entries.length && canReview()) void scope.current?.refresh();
+    wasRunning.current = running;
+  }, [running]);
+  const entry = shown?.entries[0];
+  const attempt = entry?.handle.attemptId ?? null;
+  useEffect(() => {
+    // A request that comes back after it was gone is a new one on screen: it arms again.
+    if (attempt === null) { setArmed(null); return; }
+    const timer = setTimeout(() => setArmed(attempt), armDelay);
+    return () => clearTimeout(timer);
+  }, [attempt]);
+  useEffect(() => {
+    if (armed === null || armed !== attempt || !visible) return;
+    // Answering with the keyboard alone: the first choice takes the focus when nothing else is being written, and
+    // Enter answers with it. It does so once the choices are armed, and a space typed at that moment answers nothing.
+    // A session that is shown while its request already waits is the same: the request is what it shows first.
+    const focused = document.activeElement;
+    const region = card.current?.closest(".composer-region") ?? card.current;
+    if ((focused === document.body || focused === null || !!region?.contains(focused)) && (takeFocus?.() ?? false))
+      choices.current?.querySelector<HTMLElement>("button[data-permission-choice]:not(:disabled)")?.focus();
+  }, [armed, visible]);
   const outcome = <>
-    {state?.kind === "resolving" && <p role="status">{t("Decision response pending; no retry. Use local observation after selection or remount.")}</p>}
-    {state?.kind === "error" && <p role="alert">{t("Command review unavailable ({code}).", { code: state.code })} {state.reloadRequired ? t("Reload the renderer, then refresh pending commands for the selected session. Until reload, refresh and review actions are disabled across selections. An uncertain response may already have committed. Reload does not revoke it.") : t("No permission was inferred. Refresh explicitly to retry the read.")}</p>}
-    {state?.kind === "result" && <p role="status">{t(state.code === "resolved" ? "Decision accepted — not proof of command execution or run completion." : "Decision rejected — the attempt may be stale, canceled or already resolved.")} {t("Live publication is not acknowledgment. Explicitly observe the retained decision, then refresh for a fresh review.")}</p>}
+    {state?.kind === "resolving" && <p role="status">{t("Sending your decision…")}</p>}
+    {state?.kind === "error" && <p role="alert">{t("Command review unavailable ({code}).", { code: state.code })} {state.reloadRequired && t("Reload the window to review requests again. A decision already sent stays sent.")}</p>}
   </>;
-  const details = (entry: SessionPermissionCommand) => <>
-    <dl>
-      <dt>{t("Provider")}</dt><dd>{entry.providerId}</dd>
-      <dt>{t("Session ID")}</dt><dd>{entry.handle.sessionId}</dd>
-      <dt>{t("Submission operation")}</dt><dd>{entry.handle.operationId}</dd>
-      <dt>{t("Runtime / attachment")}</dt><dd>{entry.handle.runtimeInstanceId} / {entry.handle.attachmentGeneration}</dd>
-      <dt>{t("Run")}</dt><dd>{entry.handle.runId ?? t("Not supplied by provider")}</dd>
-      <dt>{t("Interaction / attempt")}</dt><dd>{entry.handle.interactionId} / {entry.handle.attemptId}</dd>
-      <dt>{t("Working directory")}</dt><dd><pre data-permission-directory>{entry.workingDirectory}</pre></dd>
-    </dl>
-    <p>{t("Command (complete)")}</p><pre data-permission-command>{entry.command}</pre>
-    {entry.reason !== null && <><p>{t("Reason")}</p><pre data-permission-reason>{entry.reason}</pre></>}
-  </>;
-  return <section className="command-permission-panel" aria-label={t("Pending command permissions")}>
-    {review && <dialog key={review.id} ref={dialog} className="app-dialog permission-review-dialog" aria-modal="true" aria-labelledby="permission-review-title" {...keptOnOutsidePress}
-      onClose={() => { if (activeReview.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
-      onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
-      onKeyDown={event => {
-        event.stopPropagation();
-        if (event.defaultPrevented) return;
-        if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || composing.current || event.repeat) { event.preventDefault(); return; }
-        if (event.key === "Escape") { event.preventDefault(); close(); }
-        else if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement)) event.preventDefault();
+  if (!entry) return state?.kind === "resolving" || state?.kind === "error"
+    ? <section className="command-permission-panel" aria-label={t("Pending command permissions")}>{outcome}</section> : null;
+  const live = (target: HTMLElement) => target.isConnected && !target.closest("[inert]") && canReview() && currentState.current === shown
+    && armed === attempt && !!scope.current;
+  function decide(target: HTMLElement, value: SessionPermissionCommand, decision: CommandDecision, text = "") {
+    const current = scope.current;
+    if (!live(target) || !current) return;
+    void current.decide(value, decision).then(() => {
+      // Another selection has its own composer: the text never goes to it.
+      if (!text || !instruct || scope.current !== current) return;
+      const original = reviewer.readOriginal();
+      // A denial the agent took is followed by what to do instead; otherwise the text waits for the next turn.
+      instruct(original?.state === "resolved" && original.origin.handle.attemptId === value.handle.attemptId ? "Steer" : "Queue", text);
+    });
+    if (text) setInstead("");
+    // The request is answered: what the user writes next goes to the prompt.
+    onAnswered?.();
+  }
+  const ready = canReview() && state === shown && armed === attempt;
+  // Deny is the answer that means the same for every provider: the run goes on without the action. Stopping the run
+  // is the Stop button of the composer.
+  const decisions = [["allow_once", "Allow once"], ["deny", "Deny"]] as const;
+  // The choices are one list: the arrows move along it, Enter answers with the focused one, Escape denies.
+  function move(event: KeyboardEvent<HTMLElement>) {
+    const field = event.target instanceof HTMLInputElement;
+    if (event.key === "Escape") {
+      if (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      event.preventDefault();
+      // Escape first takes back the text being written, as in any field.
+      if (field && instead) setInstead("");
+      else choices.current?.querySelector<HTMLElement>("[data-permission-decision=deny]")?.click();
+      return;
+    }
+    const step = event.key === "ArrowDown" || (!field && event.key === "ArrowRight") ? 1
+      : event.key === "ArrowUp" || (!field && event.key === "ArrowLeft") ? -1 : 0;
+    const items = Array.from(choices.current?.querySelectorAll<HTMLElement>("[data-permission-choice]") ?? []);
+    const index = items.indexOf(event.target as HTMLElement);
+    const chosen = field || event.repeat ? -1 : ["1", "2"].indexOf(event.key);
+    if (chosen >= 0 && index >= 0) { event.preventDefault(); items[chosen].click(); return; }
+    if (!step) return;
+    // From the list itself, the arrows enter it at its first or its last choice.
+    if (index < 0 && event.target !== choices.current) return;
+    event.preventDefault();
+    items[index < 0 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length].focus();
+  }
+  return <section ref={card} className="command-permission-panel" aria-label={t("Pending command permissions")}>
+    <h3 id={`${sessionId}-permission-question`}>{t(entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
+    <p className="sr-only" role="status">{t("A request waits for your permission.")}</p>
+    {entry.kind === "commandExecution"
+      ? <><pre data-permission-command>{entry.command}</pre>
+        <p className="detail"><code data-permission-directory>{entry.workingDirectory}</code></p></>
+      : <pre data-permission-grant-root>{entry.grantRoot}</pre>}
+    {entry.reason !== null && entry.reason.trim() && <p className="detail" data-permission-reason>{entry.reason}</p>}
+    <div ref={choices} className="permission-choices" role="group" tabIndex={-1} aria-labelledby={`${sessionId}-permission-question`} onKeyDown={move}>
+      {decisions.map(([decision, label], index) => <button key={decision} type="button" data-permission-choice data-permission-decision={decision}
+        disabled={!ready} tabIndex={index === 0 ? 0 : -1}
+        // A key held down answers nothing, and neither does a space: it is typed in a text, not to answer.
+        onKeyDown={event => { if ((event.repeat && event.key === "Enter") || event.key === " ") event.preventDefault(); }}
+        onKeyUp={event => { if (event.key === " ") event.preventDefault(); }}
+        onClick={event => decide(event.currentTarget, entry, decision)}>
+        <span className="permission-choice-index" aria-hidden="true">{index + 1}</span>{t(label)}</button>)}
+      {instruct && <form className="permission-instead" onSubmit={event => {
+        event.preventDefault();
+        const text = instead.trim();
+        if (text) decide(event.currentTarget, entry, "deny", text);
       }}>
-      <header><h2 id="permission-review-title">{t("Review command permission")}</h2><button autoFocus type="button" onClick={close}>{t("Close")}</button></header>
-      <p>{t("Closing this dialog is not the Cancel decision. This is a manually observed pending command, not proof it is still pending.")}</p>
-      <p>{t("Allow once can execute with the host's privileges. No session grant or sandbox is provided. Deny and Cancel resolve only this permission, not the run.")}</p>
-      <dl><dt>{t("Host epoch")}</dt><dd>{review.epoch}</dd></dl>
-      {details(review.entry)}
-      {outcome}
-      {!current(review) && (!state || state.kind === "ready" || state.kind === "loading") && <p role="status">{t("This review changed. Close and review a current entry; no decision was sent by dismissal.")}</p>}
-      <footer>{(["allow_once", "deny", "cancel"] as const).map(decision => <button key={decision} type="button" data-permission-decision={decision}
-        disabled={!current(review)} onClick={event => {
-          if (event.defaultPrevented || composing.current || !current(review)) return;
-          review.valid = false; setObservation(undefined);
-          void review.scope.decide(review.entry, decision);
-        }}>{t(decision === "allow_once" ? "Allow once" : decision === "deny" ? "Deny" : "Cancel")}</button>)}</footer>
-    </dialog>}
-    <h3>{t("Pending plain commands — explicit review enabled")}</h3>
-    <p className="detail">{t("Manual refresh only, at most four pending commands for this exact session. Review the complete command and directory before allowing it. Allow once can execute with the host's privileges; these roots are not a sandbox. Unsupported permission kinds/extensions remain denied. Only in-process built-in tools honor the per-send callback; other providers and custom tools are not implicitly rebound.")}</p>
-    <p className="detail">{t("Deny and Cancel resolve this permission, not the entire run. Switching sessions or closing the review does not cancel pending permissions or revoke an accepted decision. Use the exact submission's Abort control separately. There is no durable recovery or execution acknowledgment.")}</p>
-    <p className="detail">{t("One original decision response is retained in this renderer across selection and remount. Observe it explicitly before refreshing for another review; pending or uncertain decisions cannot be replaced or resent. Observation is local only. Renderer reload loses this record and permits only fresh manual pending reads in the same host; an empty list cannot recover a decision. Host restart recovers no old authority.")}</p>
-    <button type="button" data-permission-observe onClick={() => setObservation(scope.current?.observeDecision() ?? null)}>{t("Observe retained decision")}</button>
-    {observation === null && <p role="status">{t("No decision is retained in this renderer. No host state was read or inferred.")}</p>}
-    {observation && <section aria-label={t("Original permission decision observation")}>
-      <h4>{t("Original decision — last explicit local observation")}</h4>
-      <dl>
-        <dt>{t("Original session (not the selected review)")}</dt><dd>{observation.origin.handle.sessionId}</dd>
-        <dt>{t("Clicked decision")}</dt><dd>{observation.origin.decision}</dd>
-        <dt>{t("Host epoch")}</dt><dd>{observation.origin.expectedHostEpoch}</dd>
-        <dt>{t("Submission operation")}</dt><dd>{observation.origin.handle.operationId}</dd>
-        <dt>{t("Runtime / attachment")}</dt><dd>{observation.origin.handle.runtimeInstanceId} / {observation.origin.handle.attachmentGeneration}</dd>
-        <dt>{t("Run")}</dt><dd>{observation.origin.handle.runId ?? t("Not supplied by provider")}</dd>
-        <dt>{t("Interaction / attempt")}</dt><dd>{observation.origin.handle.interactionId} / {observation.origin.handle.attemptId}</dd>
-      </dl>
-      <p role="status">{observation.state === "pending" ? t("Original response still pending. This observation does not acknowledge a terminal result or enable another decision. Observe again explicitly to check local state.")
-        : observation.state === "error" ? t("Original response unavailable ({code}). Observation cannot clear uncertainty or epoch invalidation; review remains disabled until reload. Reload does not revoke a decision.", { code: String(observation.code) })
-        : observation.state === "resolved" ? t("Host accepted this original decision, not proof of command execution, run completion, rollback or revocation. Terminal response now explicitly observed; refresh the selected session for a fresh review.")
-        : t("Host rejected this original decision request; this does not identify an earlier decision. Terminal response now explicitly observed; refresh the selected session for a fresh review.")}</p>
-    </section>}
-    <h4>{t("Selected-session pending review: {session}", { session: sessionId })}</h4>
-    <button type="button" data-permission-refresh disabled={!canReview() || state?.kind === "resolving" || (state?.kind === "error" && state.reloadRequired)} onClick={() => { if (canReview()) void scope.current?.refresh(); }}>{t("Refresh pending commands")}</button>
-    {state?.kind === "loading" && <p role="status">{t("Reading pending commands…")}</p>}
+        <input className="bp6-input" data-permission-choice data-permission-instead value={instead} tabIndex={-1}
+          disabled={!canReview() || state !== shown} aria-label={t("Or deny, and tell the agent what to do instead")}
+          placeholder={t("Or deny, and tell the agent what to do instead")} onChange={event => setInstead(event.target.value)}
+          onKeyDown={event => { if (event.key === "Enter" && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat)) event.preventDefault(); }} />
+      </form>}
+    </div>
+    <p className="detail permission-keys">{t("Arrow keys choose, Enter answers, Escape denies.")}</p>
     {outcome}
-    {state?.kind === "ready" && <>
-      {state.entries.length === 0 && <p role="status">{t("No pending supported commands observed for this session. This does not mean the provider is idle.")}</p>}
-      {state.hasMore && <p role="status">{t("More commands are pending. Resolve entries and refresh to see the next window.")}</p>}
-      <ol className="history-records">{state.entries.map(entry => <li key={entry.handle.attemptId}>
-        {details(entry)}
-        <div className="history-controls">
-          <button type="button" data-permission-review disabled={!canReview()} onKeyDown={event => {
-            if ((event.key === "Enter" || event.key === " ") && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat)) event.preventDefault();
-          }} onClick={event => {
-            if (event.defaultPrevented || !event.currentTarget.isConnected || event.currentTarget.closest("[inert]")
-              || !canReview() || currentState.current !== state || !scope.current || activeReview.current
-              || modalDialogOpen()) return;
-            focus.cancel();
-            const value = { id: ++generation.current, entry, state, scope: scope.current, epoch, view: canReview, origin: event.currentTarget, valid: true };
-            activeReview.current = value; setReview(value);
-          }}>{t("Review command permission")}</button>
-        </div>
-      </li>)}</ol>
-    </>}
+    {(shown.entries.length > 1 || shown.hasMore) && <p className="detail" role="status">{t("More requests are waiting after this one.")}</p>}
   </section>;
 }

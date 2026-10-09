@@ -116,6 +116,12 @@ public sealed record AgentProviderProfile
     public bool SupportsReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the permission modes a session of the provider can be given, empty when the provider has
+    /// none (<see cref="AgentTurnRequest.PermissionMode"/>).
+    /// </summary>
+    public IReadOnlyList<string> PermissionModes { get; init; } = [];
+
+    /// <summary>
     /// Gets or initializes whether the provider supports parallel tool-call controls.
     /// </summary>
     public bool SupportsParallelToolCalls { get; init; } = true;

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using CodeAlta.Agent;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -21,10 +22,17 @@ public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<Agen
 }
 
 /// <summary>Session-scoped next-send choices; does not confer authority to mutate a running turn.</summary>
-/// <param name="Current">Persisted session selection.</param>
+/// <param name="Current">Persisted session selection. Its <see cref="OwnedSessionSelection.PermissionMode"/> is the mode chosen for the session, or null when it runs in the one of its provider.</param>
 /// <param name="Prompts">Effective prompts in the host-resolved project scope.</param>
 /// <param name="Models">Models exposed by the session provider.</param>
-public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadOnlyList<OwnedPromptChoice> Prompts, IReadOnlyList<OwnedModelChoice> Models);
+public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadOnlyList<OwnedPromptChoice> Prompts, IReadOnlyList<OwnedModelChoice> Models)
+{
+    /// <summary>Gets the permission modes a session of the provider can be given, empty when the provider has none.</summary>
+    public IReadOnlyList<string> PermissionModes { get; init; } = [];
+
+    /// <summary>Gets the permission mode the provider is configured with, or null when it leaves the mode to the provider itself.</summary>
+    public string? DefaultPermissionMode { get; init; }
+}
 
 public sealed partial class OwnedSessionCommandService
 {
@@ -74,15 +82,31 @@ public sealed partial class OwnedSessionCommandService
             .Where(m => m.Id.Length <= 256).Take(128).ToArray();
         // What the session runs with, never "a default": a session without a model shows the one it starts with.
         var (modelId, effort) = StartingModel(provider, session.ModelId, session.ReasoningEffort, models);
-        return new(new(provider, session.AgentPromptId ?? "default", modelId, effort), prompts,
+        var configured = SelectionProvider?.Invoke(new ModelProviderId(provider));
+        // The modes of the provider when it has some, as Claude Code does. Any other provider runs the tools of
+        // CodeAlta, whose requests the host answers: where the mode of a session decides that, it offers the modes of the host.
+        var modes = configured?.PermissionModes.Where(static mode => !ProviderOnlyPermissionModes.Contains(mode)).Take(16).ToArray() ?? [];
+        if (modes.Length == 0 && _runtime.SessionPermissionModes) modes = [.. SessionPermissionModes.HostModes];
+        return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode }, prompts,
             models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
-                { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort }).ToArray());
+                { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort }).ToArray())
+        {
+            PermissionModes = modes,
+            // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.
+            DefaultPermissionMode = _runtime.SessionPermissionModes ? _runtime.GetDefaultPermissionMode(provider) : configured?.DefaultPermissionMode,
+        };
     }
+
+    // Modes a session is not given by itself. The plan mode of Claude Code ends with an approval CodeAlta does not
+    // ask for: it stays a mode of the provider's configuration.
+    private static readonly FrozenSet<string> ProviderOnlyPermissionModes = FrozenSet.ToFrozenSet(["plan"], StringComparer.Ordinal);
 
     internal static bool IsValidSelection(OwnedSelectionChoices choices, OwnedSessionSelection selection)
     {
         if (!string.Equals(choices.Current.ProviderKey, selection.ProviderKey, StringComparison.Ordinal)
             || !choices.Prompts.Any(p => p.Id == selection.AgentPromptId)) return false;
+        if (selection.PermissionMode is { } mode && mode != OwnedSessionSelection.ProviderPermissionMode
+            && !choices.PermissionModes.Contains(mode, StringComparer.Ordinal)) return false;
         // No model keeps the session's own, which the send completes with a model of the provider.
         if (selection.ModelId is null) return selection.ReasoningEffort is null;
         var model = choices.Models.FirstOrDefault(m => m.Id == selection.ModelId);

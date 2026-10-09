@@ -733,6 +733,15 @@ native/frontend or real-provider behavior.
 
 #### Owned Desktop command review
 
+Whether an owned send is reviewed follows from the permission mode of its session
+(`SessionRuntimeService.GetPermissionPolicy`, when the host sets
+`CodeAltaHostOptions.SessionPermissionModes`): the mode chosen for the session, else the one its provider
+is configured with, else the policy of the host. `SessionPermissionModes.Policy` maps a mode to
+`Approve` (`bypassPermissions`), `AcceptEdits` (`acceptEdits`: file changes are granted, commands are
+reviewed) or `Review` (any other). The command owner reads it once per send, after preparation; the
+default handler reads it for a request outside an owned send. "Permission modes" in `desktop.md` has the
+whole behavior.
+
 The generated `sessionPermissions.list` and `sessionPermissions.resolve` RPCs use dedicated
 `ListOwnedCommandsAsync` / `ResolveOwnedCommandAsync` operations, never the trusted TUI list/resolve
 surface. The mailbox filters owned plain-command requests and validates the receipt operation,
@@ -753,10 +762,12 @@ reads, not that decision wait, pending permissions or the run. Resolution keeps 
 before obsolete presentation callbacks are suppressed. Epoch invalidation remains latched even
 when a late exact success arrives. Refresh/response races cannot restore actionable stale cards.
 
-**Observe retained decision** is synchronous and local-only: it reports the original session/handle
-and pending/result/error state without either RPC. Neither mounting nor live result publication
-acknowledges a terminal response; explicit terminal observation and fresh manual review are required
-before replacing the record. Pending observation grants no authority. Only an exact resolved/rejected
+Observing the retained decision (`observeDecision`) is synchronous and local-only: it reports the
+original session/handle and pending/result/error state without either RPC. Neither mounting nor live
+result publication acknowledges a terminal response; a terminal observation and a fresh list read are
+required before replacing the record. The desktop panel makes that observation itself once a terminal
+result is published, then reads the list again; it does not read again while an entry is shown and the run goes on. Pending
+observation grants no authority. Only an exact resolved/rejected
 response settles the decision: resolved means accepted, not executed, and rejected does not identify
 an earlier decision. The mailbox consumes attempts without replayable outcomes; pending-list absence
 cannot reconcile them. Transport failure, malformed/mismatched responses and genuine uncertainty

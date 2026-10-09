@@ -142,6 +142,17 @@ public static class ConfiguredModelProviderRegistryBuilder
     }
 
     /// <summary>
+    /// Gets the permission modes a provider of a type can be configured with and a session of it given: those of the
+    /// Claude Code CLI for a provider that runs it, none for any other type.
+    /// </summary>
+    /// <param name="providerType">The provider type of the configuration (<c>type</c>), such as <c>claude-code</c>.</param>
+    /// <returns>The modes, empty when the type has none.</returns>
+    public static IReadOnlyList<string> GetPermissionModes(string? providerType)
+        => string.Equals(providerType?.Trim(), ClaudeCodeModelProviderRuntime.ProviderType, StringComparison.OrdinalIgnoreCase)
+            ? ClaudeCodeModelProviderRuntimeOptions.PermissionModes
+            : [];
+
+    /// <summary>
     /// Tries to compose one provider descriptor and a lazy runtime factory without registering or invoking it.
     /// </summary>
     /// <param name="definition">The configured provider definition to convert.</param>

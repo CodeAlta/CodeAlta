@@ -468,11 +468,11 @@ The CLI only prompts for what the user's Claude Code settings neither allow nor 
 | `Edit`, `MultiEdit`, `Write`, `NotebookEdit` | `AgentFileChangePermissionRequest` | As for CodeAlta's own edit tools. |
 | `AskUserQuestion` | `AgentUserInputRequest` | Answered through the question form when the run takes live questions. The desktop application does not (it asks with `alta ask`): the tool is then refused with a message that names `mcp__codealta__alta` and `ask --stdin`, so that the model asks that way instead of concluding that nothing can be asked. |
 | `EnterPlanMode` | none | Refused by a `PreToolUse` hook (`codealta_plan_mode`): the plan mode of Claude Code ends with an approval of the user, which CodeAlta has no form for, and allowing it tells the model "User has approved your plan". The refusal names the plan mode of CodeAlta (`alta session set_agent --prompt-id plan`). |
-| `ExitPlanMode` | none | Refused when the provider is configured with `permission_mode = "plan"`: that session was made to plan and nobody approved anything. Allowed otherwise, so that a model that got into the mode another way is not kept in it. |
+| `ExitPlanMode` | none | Refused when the session runs in `plan` (its provider is configured with `permission_mode = "plan"` and the session has no mode of its own): that session was made to plan and nobody approved anything. Allowed otherwise, so that a model that got into the mode another way is not kept in it. |
 | `mcp__codealta__*` | none | The tool asks its own permission when the session runs it. |
 | any other | none (allowed) | CodeAlta gates commands and file changes only, as for its own tools. |
 
-"Allow for session" applies the rules the CLI proposed with the prompt (`updatedPermissions`). `permission_mode` of the provider sets the mode the CLI starts with.
+"Allow for session" applies the rules the CLI proposed with the prompt (`updatedPermissions`). `permission_mode` of the provider sets the mode the CLI starts with. It is edited in the configuration file, in the provider editor of the terminal UI, and in the **Permissions** field of the desktop Providers page, which is shown only for a provider that runs the CLI: `GlobalConfigRpc` lists the modes (`permissionModes` of the providers response), carries the value on `GlobalConfigProvider`/`GlobalConfigProviderEdit`, refuses a mode that is not one of the six, and writes none for a provider of any other type, which the configuration store rejects the field for.
 
 To show the change of an edit, `AgentSession` reads the file before and after the tool runs. The CLI does not wait for that by itself, so the answer of the `PreToolUse` hook (see "Tool calls of one message") waits, for an edit tool (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`), until the session starts the call. For any other tool it is answered at once. The hook never decides: it returns no decision, and the permissions of the CLI apply. The CLI may ask while the model still writes the message of the edit: the session has the call when the message ends, and the hook is released 20 seconds after that at the latest (5 minutes after it was asked, and 10 minutes on the side of the CLI, whatever happens).
 
@@ -486,7 +486,7 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 
 ### Robustness
 
-The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write (the background task messages are those of 2.1.292). `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code, and one in which a background command ends after the turn and the turn the CLI starts by itself is shown as a run), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
+The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. A permission answered with **Cancel** is denied with `interrupt: true`: the CLI then ends the turn with an error result of its own (`error_during_execution`, an `[ede_diagnostic]` text), which the session reads as the end of a turn the user stopped, not as a failure. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write (the background task messages are those of 2.1.292). `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code, and one in which a background command ends after the turn and the turn the CLI starts by itself is shown as a run), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
 
 On Windows the provider runs a native `claude.exe` and refuses a `.cmd`/`.bat` shim, whose arguments cannot be escaped reliably for `cmd.exe`.
 
@@ -504,6 +504,23 @@ args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 ```
 
 `single_model_id`, `models_include_regex` and `sort_models` apply as for other providers.
+
+The provider reports its permission modes (`ModelProviderDescriptor.PermissionModes`). A session can have a
+mode of its own (`AgentSessionCreateOptions.PermissionMode`, `AgentTurnRequest.PermissionMode`), chosen in the
+composer of the desktop application, which overrides `permission_mode` for that session; `plan` is not offered
+for a session. The CLI is launched with the session's mode, else the provider's. Before a turn whose mode
+differs from the one the running CLI has, the session sends `set_permission_mode`, and restarts the CLI with
+`--permission-mode` only when that request fails. A session that goes back to no mode returns the CLI to the
+mode of the user's settings, learned from `initialize` (`current_permission_mode`), else restarts it. The
+orchestration keeps the session's mode in its saved local state (`permission_mode`, also in the SQLite cache),
+reads it at every attach and clears it on a provider switch.
+
+The mode also decides what the desktop host does with what the CLI asks (`SessionPermissionModes.Policy`, see
+"Permission modes" in `desktop.md`): `bypassPermissions` approves, `acceptEdits` approves file changes and has
+commands reviewed, any other mode has every request reviewed. The other providers run the tools of CodeAlta and
+report no modes: the desktop host offers their sessions its own three (`default`, `acceptEdits`,
+`bypassPermissions`), which need nothing from the provider since the host answers the requests. The session
+keeps the mode the same way; `AgentSession` passes it in the turn request, which those providers ignore.
 
 ### Limits
 

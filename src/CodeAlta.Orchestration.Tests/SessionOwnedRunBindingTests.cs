@@ -55,6 +55,51 @@ public sealed class SessionOwnedRunBindingTests
         Assert.IsFalse(await f.Wait(f.Permissions.BindOwnedRunAsync(attached, new("run"), fresh.Token).AsTask()));
     });
 
+    [TestMethod]
+    public Task OwnedReview_PresentsAFileChangeByItsRoot_AndStillRefusesWhatItCannotShowWhole() => Fixture.Run(async f =>
+    {
+        var execution = await f.CreateExecution();
+        var callback = f.Permissions.CreateOwnedCommandHandler(execution);
+
+        // A file change is reviewed like a command: it carries the root it asks to write under, and nothing of
+        // the shape of a command.
+        var pending = f.Keep(callback(f.FileChange("edit", "inert-directory"), CancellationToken.None));
+        var entry = (await f.Wait(f.Permissions.ListOwnedCommandsAsync("session", CancellationToken.None).AsTask())).Entries.Single();
+        Assert.AreEqual("fileChange", entry.Request.Kind);
+        Assert.AreEqual("inert-directory", entry.Request.GrantRoot);
+        Assert.IsNull(entry.Request.Command);
+        Assert.IsNull(entry.Request.WorkingDirectory);
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Wait(pending)).Kind);
+
+        // A file change that does not say where it would write is not presented, and a command that carries
+        // more than the review shows whole is still refused rather than shown as less than it is.
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(callback(f.FileChange("rootless", null), CancellationToken.None)))).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(callback(f.Request("rich", null) with { ProposedExecPolicyAmendment = ["inert"] }, CancellationToken.None)))).Kind);
+    });
+
+    [TestMethod]
+    public Task OwnedPermission_KeepsTheApprovalPolicyItsSendStartedWith() => Fixture.Run(async f =>
+    {
+        // The user turns the review on and off while the host runs: the next send follows, with no restart, and
+        // a send that runs keeps what it started with. These executions review nothing, so the automatic-approval
+        // policy alone answers each request.
+        f.AutoApprove = true;
+        var started = f.Permissions.CreateOwnedCommandHandler(await f.CreateExecution(reviewCommands: false));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Wait(f.Keep(started(f.Request("approved", null), CancellationToken.None)))).Kind);
+
+        f.AutoApprove = false;
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Wait(f.Keep(started(f.Request("still-approved", null), CancellationToken.None)))).Kind,
+            "A send that started unreviewed is not denied when the review is turned on: it is approved until it ends.");
+        var next = f.Permissions.CreateOwnedCommandHandler(await f.CreateExecution(reviewCommands: false));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(next(f.Request("refused", null), CancellationToken.None)))).Kind);
+    });
+
     private sealed class Fixture
     {
         private readonly object _gate = new();
@@ -62,9 +107,12 @@ public sealed class SessionOwnedRunBindingTests
         private readonly List<CancellationTokenSource> _sources = [];
         private readonly List<Exception> _failures = [];
         private Task? _lifetime;
-        internal SessionPermissionService Permissions { get; } = new();
+        /// <summary>The host's automatic-approval policy, read again for every request.</summary>
+        internal bool AutoApprove { get; set; }
+        internal SessionPermissionService Permissions { get; }
         private readonly OwnedProviderEventForwarding.Attachment _attachment = new(new OwnedProviderEventForwarding(), 1,
             new("session", "inert-handle"), static () => Task.CompletedTask, static () => Task.CompletedTask);
+        internal Fixture() => Permissions = new SessionPermissionService(() => AutoApprove);
         internal Task Keep(Task task) { lock (_gate) _work.Add(task); return task; }
         internal Task<T> Keep<T>(Task<T> task) { Keep((Task)task); return task; }
         internal Task Wait(Task task) => Keep(Keep(task).WaitAsync(TimeSpan.FromSeconds(5)));
@@ -75,15 +123,18 @@ public sealed class SessionOwnedRunBindingTests
             lock (_gate) _sources.Add(source);
             return source;
         }
-        internal async Task<SessionPermissionService.OwnedPermissionExecution> CreateExecution()
+        internal Task<SessionPermissionService.OwnedPermissionExecution> CreateExecution() => CreateExecution(reviewCommands: true);
+        internal async Task<SessionPermissionService.OwnedPermissionExecution> CreateExecution(bool reviewCommands)
         {
-            var execution = await Wait(Permissions.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None).AsTask());
+            var execution = await Wait(Permissions.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None, reviewCommands, false).AsTask());
             Assert.IsNotNull(execution);
             Assert.IsTrue(await Wait(Permissions.BindOwnedExecutionAsync(execution, Guid.NewGuid(), _attachment, new("inert")).AsTask()));
             return execution;
         }
         internal AgentCommandPermissionRequest Request(string interaction, string? run) => new(new("inert"), "session", DateTimeOffset.UtcNow,
             run is null ? null : new AgentRunId(run), interaction, null, "inert text only", "inert-directory", null, "fixture", null, null, null);
+        internal AgentFileChangePermissionRequest FileChange(string interaction, string? grantRoot) => new(new("inert"), "session",
+            DateTimeOffset.UtcNow, null, interaction, grantRoot, "fixture");
         internal static async Task Run(Func<Fixture, Task> body)
         {
             var f = new Fixture();

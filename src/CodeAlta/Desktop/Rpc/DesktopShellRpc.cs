@@ -47,6 +47,19 @@ internal sealed class DesktopShellService
     }
 
     /// <summary>
+    /// Changes the user's setting for the review of permissions: whether the commands and the file changes of a
+    /// session are reviewed instead of being approved automatically. It is read at every send, so it applies to
+    /// what the sessions do next, not to what is already running.
+    /// </summary>
+    [NeoRpcMethod("setReviewPermissions")]
+    public DesktopShellPreferences SetReviewPermissions(DesktopShellReviewPermissionsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _shell?.SetReviewPermissions(request.Review);
+        return Current();
+    }
+
+    /// <summary>
     /// Changes the user's setting for the width of the conversations, in percent of the space of a session (40 to
     /// 100). A width out of range changes nothing. The session the user resized follows the setting again. Every
     /// page is told with <c>session-width</c> notices of <see cref="Watch"/>.
@@ -155,7 +168,8 @@ internal sealed class DesktopShellService
     private DesktopShellPreferences Current() => _shell is null
         ? new("unavailable", DesktopPreferences.Name(DesktopCloseBehavior.Ask), false, Platform, false)
         : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
-            [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable, _shell.Zoom);
+            [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable, _shell.Zoom,
+            _shell.ReviewPermissions);
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
@@ -201,9 +215,17 @@ internal sealed record DesktopShellRevealEntryResponse(string Status);
 /// <param name="SessionWidths">The sessions that are shown with a width of their own, set by an <c>alta appearance</c> command.</param>
 /// <param name="TrayIcon">The application has an icon in the notification area; without one on macOS it stays in the Dock.</param>
 /// <param name="Zoom">The zoom of the window's view, in percent.</param>
+/// <param name="ReviewPermissions">
+/// The user's setting: the commands and the file changes of a session are reviewed instead of being approved
+/// automatically.
+/// </param>
 internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded,
     int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null, bool TrayIcon = false,
-    int Zoom = DesktopPreferences.DefaultZoom);
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false);
+
+/// <summary>Asks to review the commands and the file changes of the sessions, or to approve them automatically.</summary>
+/// <param name="Review">Whether they are reviewed.</param>
+internal sealed record DesktopShellReviewPermissionsRequest(bool Review);
 
 /// <summary>The width one session is shown with instead of the user's setting.</summary>
 internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);

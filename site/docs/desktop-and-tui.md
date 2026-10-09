@@ -50,7 +50,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Worktrees: a session on its own branch, in its own folder</th><td>{{ alta_yes }} <small>Created, listed and removed in the app</small></td><td>{{ alta_part }} <small>Sessions run in theirs</small></td></tr>
     <tr><th scope="row">Agents that see and drive the app (UI tools)</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">MCP server for other applications</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-    <tr><th scope="row">Review each tool permission request</th><td>{{ alta_no }} <small>Always approved</small></td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Review each tool permission request</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
   </tbody>
   <tbody>
     <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Workspace</th></tr>
@@ -89,7 +89,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
 
 Use CodeAlta Desktop for daily work: it shows more at once, and it has features that the TUI does not have.
 
-Use CodeAlta TUI when you want to stay in a terminal, or when you want to review each tool permission request.
+Use CodeAlta TUI when you want to stay in a terminal.
 
 ## What is shared
 
@@ -228,8 +228,6 @@ When a new version is available, the desktop app shows a notice with **Update an
 | Queue every prompt, also when idle | **Enqueue until idle** in the Send options | **AlwaysQueue** checkbox |
 
 ## Current desktop limitations
-
-Tool permission requests are always approved automatically on the desktop. To review each request, use the TUI and turn off **Auto approve commands** in Workspace Settings.
 
 The `--no-plugins` and `--plugin-safe-mode` options belong to the TUI. Set `CODEALTA_DISABLE_PLUGINS=1` to start the desktop app without plugins.
 

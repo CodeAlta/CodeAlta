@@ -58,6 +58,28 @@ public sealed class CodeAltaHostOptions
     /// <remarks>This grants commands and file changes the host's privileges, not a sandbox. Explicit command review takes precedence.</remarks>
     public bool AutoApproveOwnedPermissions { get; init; }
 
+    /// <summary>
+    /// Gets a policy read again for every owned send, for a host whose user turns the review of commands and
+    /// file changes on and off while it runs. Null, the default, keeps the two fixed options above.
+    /// </summary>
+    /// <remarks>
+    /// When it is given it decides both: a send it answers true for is reviewed and grants nothing by itself,
+    /// and a send it answers false for is automatically approved. One send reads it once, so its setup and its
+    /// cleanup agree even when the policy changes while it runs.
+    /// </remarks>
+    public Func<bool>? ReviewOwnedPermissionsPolicy { get; init; }
+
+    /// <summary>
+    /// Gets whether the permission mode chosen for a session decides what the host does with its requests, before
+    /// the policy of the host: a session in the mode that bypasses permissions is approved automatically, one in a
+    /// mode that asks is reviewed. Default false: every session has the policy of the host.
+    /// </summary>
+    /// <remarks>
+    /// With it a provider without permission modes of its own offers those of the host
+    /// (<see cref="Runtime.SessionPermissionModes.HostModes"/>). A host that must review everything leaves it off.
+    /// </remarks>
+    public bool SessionPermissionModes { get; init; }
+
     /// <summary>Gets whether owned sends expose the restricted, operation-bound ask producer. Default is false.</summary>
     public bool EnableOwnedAsks { get; init; }
 

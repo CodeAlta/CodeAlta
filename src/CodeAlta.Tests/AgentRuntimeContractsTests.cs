@@ -39,12 +39,15 @@ public sealed class AgentRuntimeContractsTests
                 SupportsReasoningEffort = true,
                 MaxTokensFieldName = "max_completion_tokens",
                 ReasoningFieldNames = ["reasoning"],
+                PermissionModes = ["default", "plan"],
             },
             Compaction = AgentCompactionSettings.Default,
         };
 
         using var document = JsonDocument.Parse(descriptor.ToJson());
         var root = document.RootElement;
+
+        Assert.AreEqual("plan", root.GetProperty("profile").GetProperty("permissionModes")[1].GetString());
 
         Assert.AreEqual("openai", root.GetProperty("protocolFamily").GetString());
         Assert.IsFalse(root.TryGetProperty("ProviderId", out _));

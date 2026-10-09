@@ -42,6 +42,7 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime
             {
                 SupportsReasoningEffort = true,
                 SupportsToolResultImages = true,
+                PermissionModes = ClaudeCodeModelProviderRuntimeOptions.PermissionModes,
             },
             // The CLI keeps the context of a session and compacts it itself.
             Compaction = AgentCompactionSettings.Default with { Enabled = false },
@@ -77,6 +78,8 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime
             DefaultModelId = string.IsNullOrWhiteSpace(options.SingleModelId) ? options.DefaultModelId : options.SingleModelId,
             SortModels = options.SortModels,
             DefaultReasoningEffort = options.DefaultReasoningEffort,
+            PermissionModes = ClaudeCodeModelProviderRuntimeOptions.PermissionModes,
+            DefaultPermissionMode = string.IsNullOrWhiteSpace(options.PermissionMode) ? null : options.PermissionMode.Trim(),
         };
     }
 

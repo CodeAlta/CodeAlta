@@ -12,7 +12,6 @@ import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
 import { defaultRecentSessionCount, defaultSubAgentCount } from "./recentSessions";
 import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, type CloseBehavior } from "./desktopShell";
-
 /** The icon of each theme choice, shared with the title-bar switch. */
 export const themeIcons: Readonly<Record<Theme, IconName>> = { dark: "themeDark", light: "themeLight", system: "themeSystem" };
 

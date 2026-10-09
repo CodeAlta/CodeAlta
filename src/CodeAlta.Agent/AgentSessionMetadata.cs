@@ -60,7 +60,11 @@ public sealed record AgentSessionViewStateMetadata(
     bool Archived = false,
     int? MessageCount = null,
     string? ParentSessionId = null,
-    string? CreatedByJson = null);
+    string? CreatedByJson = null)
+{
+    /// <summary>Gets the permission mode chosen for the session, or <see langword="null"/> for the one of its provider.</summary>
+    public string? PermissionMode { get; init; }
+}
 
 /// <summary>
 /// Base type for provider/runtime-specific session metadata details.

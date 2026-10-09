@@ -54,6 +54,15 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private int _generation;
     private CancellationTokenSource? _idle;
 
+    // The permission mode CodeAlta asks for (null: the one of the user's settings), the one the running process is
+    // in, and the mode the user's settings give a process started without one, which a session that asks for none
+    // returns to.
+    private string? _permissionMode;
+    private string? _cliPermissionMode;
+    private string? _settingsPermissionMode;
+    // A switch was given up before its answer: the CLI may be in the mode asked for, or still in the other one.
+    private bool _cliPermissionModeUnknown;
+
     // What the CLI knows of the conversation of CodeAlta.
     private bool _conversationBound;
     private string? _claudeSessionId;
@@ -343,11 +352,20 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             string.IsNullOrWhiteSpace(request.WorkingDirectory) ? null : request.WorkingDirectory,
             ClaudeCodeLauncher.ToModelOption(request.ModelId),
             effort);
-        if (_connection is { IsClosed: false } && key == _launchKey)
+        var permissionMode = NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
+        lock (_gate)
+        {
+            _permissionMode = permissionMode;
+        }
+
+        if (_connection is { IsClosed: false } connection && key == _launchKey &&
+            await SwitchPermissionModeAsync(connection, permissionMode, cancellationToken).ConfigureAwait(false))
         {
             return;
         }
 
+        // Another process is started when what it starts with changed, or when the running one could not be
+        // switched to the mode: one started in it resumes the conversation.
         await CloseConnectionAsync().ConfigureAwait(false);
 
         var resolution = _options.ResolveCli?.Invoke() ?? ClaudeCodeCliLocator.Resolve(_options.Command);
@@ -403,6 +421,64 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
         _costTotal = 0;
     }
+
+    // Puts the running CLI in the permission mode of the turn, null being the one of the user's settings. Returns
+    // false when it cannot be: the CLI is then started again in that mode.
+    private async Task<bool> SwitchPermissionModeAsync(ClaudeCodeConnection connection, string? permissionMode, CancellationToken cancellationToken)
+    {
+        string? current;
+        string? target;
+        bool unknown;
+        lock (_gate)
+        {
+            current = _cliPermissionMode;
+            target = permissionMode ?? _settingsPermissionMode;
+            unknown = _cliPermissionModeUnknown;
+        }
+
+        if (target is null)
+        {
+            // The mode of the user's settings is not known: only a process started without a mode and never
+            // switched is in it.
+            return current is null && !unknown;
+        }
+
+        if (!unknown && string.Equals(current, target, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        lock (_gate)
+        {
+            _cliPermissionModeUnknown = true;
+        }
+
+        try
+        {
+            var response = await connection.RequestAsync(
+                    "set_permission_mode",
+                    writer => writer.WriteString("mode", target),
+                    _options.ControlTimeout,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            lock (_gate)
+            {
+                _cliPermissionMode = ClaudeCodeJson.GetString(response, "mode") ?? target;
+                _cliPermissionModeUnknown = false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is ClaudeCodeControlException or TimeoutException or IOException)
+        {
+            // An older CLI does not know the request, and one that was not started in `bypassPermissions` refuses
+            // to be put in it.
+            return false;
+        }
+    }
+
+    private static string? NormalizePermissionMode(string? permissionMode)
+        => string.IsNullOrWhiteSpace(permissionMode) ? null : permissionMode.Trim();
 
     private string CreateAppendSystemPrompt(AgentTurnRequest request)
     {
@@ -463,12 +539,14 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         bool hasGateway;
+        string? permissionMode;
         lock (_gate)
         {
             hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
+            permissionMode = _permissionMode;
         }
 
-        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning, delegatesToSessions: hasGateway, _withoutApiKey);
+        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning, delegatesToSessions: hasGateway, withoutApiKey: _withoutApiKey, permissionMode: permissionMode);
         var channel = Channel.CreateUnbounded<TurnEvent>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var generation = Interlocked.Increment(ref _generation);
         var transport = _transportFactory.Start(launch);
@@ -485,13 +563,15 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _stateEventsSeen = false;
             _cliRunning = false;
             _turnActive = false;
+            _cliPermissionMode = permissionMode;
+            _cliPermissionModeUnknown = false;
         }
 
         ForgetBackgroundTasks();
         ForgetOwnTurns();
         ResetRunState();
         connection.Start();
-        await connection.RequestAsync(
+        var initialized = await connection.RequestAsync(
                 "initialize",
                 writer =>
                 {
@@ -526,6 +606,19 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 cancellationToken)
             .ConfigureAwait(false);
 
+        // The CLI says which mode it is in: a process started without one is in the mode of the user's settings.
+        if (ClaudeCodeJson.GetString(initialized, "current_permission_mode") is { Length: > 0 } reported)
+        {
+            lock (_gate)
+            {
+                _cliPermissionMode = reported;
+                if (permissionMode is null)
+                {
+                    _settingsPermissionMode = reported;
+                }
+            }
+        }
+
         try
         {
             var usage = await connection.RequestAsync("get_context_usage", null, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
@@ -550,6 +643,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _eventWriter = null;
             _eventReader = null;
             _launchKey = null;
+            _cliPermissionMode = null;
+            _cliPermissionModeUnknown = false;
         }
 
         // What a process that is being replaced still writes is not listened to.

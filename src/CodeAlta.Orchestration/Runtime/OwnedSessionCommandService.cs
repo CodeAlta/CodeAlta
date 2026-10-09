@@ -26,7 +26,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private readonly ProjectCatalog _projects;
     private readonly CatalogOptions _catalog;
     private readonly int _capacity;
-    private readonly bool _reviewPermissions;
+    // Read once per send, into SendOperation.ReviewPermissions: the setup and the cleanup of one operation must
+    // agree even when the user turns review on or off while it runs.
+    private readonly Func<bool> _reviewPermissions;
+
+    // Whether any operation ever ran under review: shutdown closes the permission admission it opened.
+    private volatile bool _permissionsUsed;
     private readonly bool _enableUserInput;
     /// <summary>How many image-bearing sends the owner keeps the receipt, and so the images, of.</summary>
     internal const int MaximumImageReceipts = 8;
@@ -162,11 +167,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     }
 
     internal OwnedSessionCommandService(
-        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, bool reviewPermissions, bool enableAsks = false, bool enableUserInput = false)
+        SessionRuntimeService runtime, ProjectCatalog projects, CatalogOptions catalog, int capacity, Func<bool> reviewPermissions, bool enableAsks = false, bool enableUserInput = false)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(catalog);
+        ArgumentNullException.ThrowIfNull(reviewPermissions);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
         _runtime = runtime;
         _projects = projects;
@@ -368,7 +374,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             (string.IsNullOrWhiteSpace(selection.ProviderKey) || selection.ProviderKey.Length > 256
              || string.IsNullOrWhiteSpace(selection.AgentPromptId) || selection.AgentPromptId.Length > 256
              || selection.ModelId is { } model && (string.IsNullOrWhiteSpace(model) || model.Length > 256)
-             || selection.ReasoningEffort is { } effort && !Enum.IsDefined(effort)))
+             || selection.ReasoningEffort is { } effort && !Enum.IsDefined(effort)
+             || selection.PermissionMode is { } permissionMode && (string.IsNullOrWhiteSpace(permissionMode) || permissionMode.Length > 256)))
             throw new ArgumentException("Invalid next-send selection.", nameof(request));
         if (!string.Equals(request.SessionId, request.SessionId.Trim(), StringComparison.Ordinal))
             throw new ArgumentException("Session identities must not have leading or trailing whitespace.", nameof(request));
@@ -399,7 +406,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 return new(OwnedSessionCommandAdmissionKind.Busy);
 
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Send, request.SessionId);
-            operation = new SendOperation(request, receipt) { AskSubmission = askSubmission };
+            // The policy of this send, fixed here: every later step of it, setup and cleanup alike, reads this.
+            // Where a session has a policy of its own, it is known once the session is prepared: the send may then
+            // be reviewed, and is closed as one that is.
+            var review = _runtime.SessionPermissionModes || _reviewPermissions();
+            if (review) _permissionsUsed = true;
+            operation = new SendOperation(request, receipt) { AskSubmission = askSubmission, ReviewPermissions = review };
             Keep(new ReceiptEntry(receipt, request, Ask: askSubmission, Release: operation.ReleaseDecision));
             _operations.Add(receipt.OperationId, operation);
             _active.Add(request.SessionId, operation);
@@ -595,7 +607,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
-            operation = new(request, receipt);
+            // The policy of this queued send, fixed here as it is for a direct one.
+            var queueReview = _runtime.SessionPermissionModes || _reviewPermissions();
+            if (queueReview) _permissionsUsed = true;
+            operation = new(request, receipt) { ReviewPermissions = queueReview };
             Keep(new(receipt, Queue: request, Release: operation.ReleaseDecision));
             _queues.Add(receipt.OperationId, operation);
             _queueing.Add(request.SessionId);
@@ -647,7 +662,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         try
         {
             Task<OwnedSessionCommandResult>? runtimeOriginal = null;
-            operation.RuntimeInvocation.Launch(() => runtimeOriginal = _runtime.QueueOwnedCommandAsync(operation.Request, operation.Receipt, _reviewPermissions,
+            operation.RuntimeInvocation.Launch(() => runtimeOriginal = _runtime.QueueOwnedCommandAsync(operation.Request, operation.Receipt, operation.ReviewPermissions,
                 operation.Execution.Token, _enableUserInput));
             if (await operation.RuntimeInvocation.Outcome.ConfigureAwait(false) is { } failure) ExceptionDispatchInfo.Throw(failure);
             result = await runtimeOriginal!.ConfigureAwait(false);
@@ -846,10 +861,17 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 }
                 else
                 {
-                    if (_reviewPermissions || _enableUserInput)
-                        operation.PermissionExecution = await _runtime.Permissions.CreateOwnedExecutionAsync(
-                            operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, _reviewPermissions, _enableUserInput).ConfigureAwait(false);
-                    if ((_reviewPermissions || _enableUserInput) && operation.PermissionExecution is null)
+                    // The policy of the session, read once now that it is prepared: the mode a send chooses is saved
+                    // by then. A session whose requests are all approved needs no execution, unless it asks questions.
+                    SessionPermissionPolicy? policy = _runtime.SessionPermissionModes ? _runtime.GetPermissionPolicy(prepared.Session.SessionId) : null;
+                    var reviewed = policy is { } own ? own != SessionPermissionPolicy.Approve || _enableUserInput : operation.ReviewPermissions || _enableUserInput;
+                    if (reviewed)
+                        operation.PermissionExecution = policy is { } chosen
+                            ? await _runtime.Permissions.CreateOwnedExecutionAsync(
+                                operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, chosen, _enableUserInput).ConfigureAwait(false)
+                            : await _runtime.Permissions.CreateOwnedExecutionAsync(
+                                operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token, operation.ReviewPermissions, _enableUserInput).ConfigureAwait(false);
+                    if (reviewed && operation.PermissionExecution is null)
                     {
                         result = new(OwnedSessionCommandOutcome.Failed, Code: "permission_unavailable");
                     }
@@ -979,6 +1001,13 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
                 (options, input) = (augmented.ExecutionOptions, augmented.Input);
             }
+            // The mode is the session's until a send chooses another. It is given to the attachment, which keeps running.
+            if (selection?.PermissionMode is { } chosen)
+            {
+                var permissionMode = chosen == OwnedSessionSelection.ProviderPermissionMode ? null : chosen;
+                if (!string.Equals(permissionMode, session.PermissionMode, StringComparison.Ordinal))
+                    await _runtime.SetOwnedPermissionModeAsync(session, permissionMode).ConfigureAwait(false);
+            }
             if (selection is null)
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
             else
@@ -1004,7 +1033,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         {
             // StartControl already initiated source cancellation independently. Close this exact
             // operation before preparation/provider/cancellation joins, including provider None tokens.
-            if (_reviewPermissions || _enableUserInput)
+            if (operation.ReviewPermissions || _enableUserInput)
                 operation.PermissionInvalidationInvocation.Launch(() => _runtime.Permissions.InvalidateOwnedOperationAsync(operation.Receipt.OperationId));
         }
         catch (Exception ex)
@@ -1029,7 +1058,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         }
         try
         {
-            if (_reviewPermissions || _enableUserInput)
+            if (operation.ReviewPermissions || _enableUserInput)
             {
                 if (await operation.PermissionInvalidationInvocation.Outcome.ConfigureAwait(false) is { } permissionFailure)
                 {
@@ -1215,7 +1244,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     {
         await launch.ConfigureAwait(false);
         if (deleteWork is not null) await deleteWork.ConfigureAwait(false);
-        if (_reviewPermissions || _enableUserInput)
+        if (_permissionsUsed || _enableUserInput)
         {
             _permissionShutdown.Launch(() => _runtime.Permissions.CloseOwnedAdmissionAsync());
             if (await _permissionShutdown.Outcome.ConfigureAwait(false) is { } failure)
@@ -1311,6 +1340,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         internal OriginalInvocation CancellationInvocation { get; } = new();
         internal OwnedTextQueueRequest Request { get; } = request;
         internal OwnedSessionCommandReceipt Receipt { get; } = receipt;
+
+        /// <summary>Whether this queued send runs under explicit permission review, as its admission decided.</summary>
+        internal bool ReviewPermissions { get; init; }
         internal CancellationTokenSource Execution { get; } = new();
         internal TaskCompletionSource Launch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource CancelLaunch { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1388,6 +1420,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         internal SessionPermissionService.OwnedPermissionExecution? PermissionExecution { get; set; }
         internal OwnedSessionAskExecution? AskExecution { get; set; }
         internal OwnedAskSubmission? AskSubmission { get; init; }
+
+        /// <summary>Whether this send runs under explicit permission review, as its admission decided.</summary>
+        internal bool ReviewPermissions { get; init; }
         internal Task? Control { get; set; }
         internal Task? Cancellation { get; set; }
         internal bool CancelRequested { get; set; }

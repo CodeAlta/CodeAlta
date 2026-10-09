@@ -74,4 +74,14 @@ public sealed record ModelProviderDescriptor
     /// Gets the configured default reasoning effort, when any.
     /// </summary>
     public AgentReasoningEffort? DefaultReasoningEffort { get; init; }
+
+    /// <summary>
+    /// Gets the permission modes a session of this provider can be given, empty when the provider has none.
+    /// </summary>
+    public IReadOnlyList<string> PermissionModes { get; init; } = [];
+
+    /// <summary>
+    /// Gets the configured permission mode, when any: the mode of a session that is given none.
+    /// </summary>
+    public string? DefaultPermissionMode { get; init; }
 }

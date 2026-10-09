@@ -141,6 +141,8 @@ An agent can change the width of its own session when you ask it to, for example
   <figcaption class="small text-secondary mt-2">A conversation at 70% of the width: the timeline and the prompt stay centered.</figcaption>
 </figure>
 
+### Agent prompt, model and permissions
+
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
 In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
@@ -149,6 +151,23 @@ In the desktop app, the agent prompt, provider, model and reasoning effort are i
   <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
   <figcaption class="small text-secondary mt-2">Agent prompt, provider, model and reasoning effort for the next send.</figcaption>
 </figure>
+
+Beside that picker, a small button names the permission mode of the session and opens the list of modes:
+
+| Mode | What the session does |
+| --- | --- |
+| **Ask first** | Asks you before it runs a command or changes a file. |
+| **Accept edits** | Changes files without asking, and asks before it runs a command. |
+| **Bypass permissions** | Runs commands and changes files without asking. |
+| **Auto** ([Claude Code](model-providers.md#claude-code) only) | Claude Code decides for each request. |
+| **Don't ask** (Claude Code only) | Never asks: Claude Code runs what its own settings allow and refuses the rest. |
+
+The mode marked **Default** in the list is the one a session runs in when you choose none: the mode of
+its provider when it has one, otherwise the default mode of the application, which is **Bypass
+permissions** unless you change it in Settings > Permissions (see [Tool permissions](#tool-permissions)).
+A mode you choose applies from the next prompt you send, without restarting the session, and stays with
+the session when you reopen it. Switching the session to another provider takes it back to the default.
+A new session gets the choice once it has started.
 
 `Ctrl+Enter` steers a running provider session. If the provider cannot steer live, CodeAlta re-queues the prompt for the next normal turn. `F8` aborts the running turn.
 
@@ -568,7 +587,40 @@ The Workspace Settings dialog covers the navigator and the UI theme, and is sepa
 
 Agents ask for permission before running commands or changing files. **Auto approve commands** is enabled by default in the TUI Workspace Settings: requests are approved automatically. Turn it off to review each request with **Allow Once**, **Allow for Session**, or **Deny**.
 
-The desktop app always approves requests automatically.
+In the desktop app, each session has a [permission mode](#agent-prompt-model-and-permissions). Settings >
+Permissions sets the **Default mode**, for the sessions that have none of their own: **Bypass permissions**
+(the default: requests are approved automatically) or **Ask first**. A change applies to what the sessions
+do next, not to a turn that is already running. An agent runs with the privileges of CodeAlta: a mode
+decides what you are asked, it is not a sandbox.
+
+When a session asks, the request appears on top of its prompt, with the command and its folder, or the
+folder of the file change. **Allow once** has the focus: press `Enter` to allow, `2` or `Escape` to deny,
+or write in the field below what the agent should do instead. Once you answered, the focus goes back to
+the prompt.
+
+A session that waits for your answer is marked in the Explorer, on its project and on its tab. When it is
+not the session on screen, a message says so, with **Show** to go to it. It is also counted in the
+activity of its space.
+
+Only a turn you start from the window can ask. A turn that starts without you, such as a sub-agent that
+another session drives or the turn that receives the result of a background job, has nobody to ask: in a
+mode that asks, its commands and file changes are refused, and the agent is told so.
+
+A session in a mode that asks cannot start a [background job](sessions.md#background-jobs): the command of
+a job is one nobody would be asked about. While the default mode is **Ask first**, sessions cannot type in
+a terminal or give an automation a command either.
+
+A request appears on top of the prompt of its session, with the command it would run and its folder, or the
+folder it would write under, and what the agent says it is for. Answer with **Allow once** or **Deny**, or
+write in the last field what the agent should do instead and press Enter: the request is denied and your text
+is sent to the agent. A denied request does not stop the agent, which goes on without it: to stop it, use the
+Stop button of the prompt. The choices answer a moment after the request appears,
+so a click meant for something else does not answer it.
+
+When you have no prompt draft, the request takes the focus: press an arrow key to reach its choices, then
+Enter answers with the chosen one; 1 and 2 answer directly, and Escape denies. A key you were typing when the
+request appeared answers nothing. Nothing appears while no request
+waits.
 
 > [!CAUTION]
 > With automatic approval, commands and file changes run with your user privileges. They are not limited to the project folder.

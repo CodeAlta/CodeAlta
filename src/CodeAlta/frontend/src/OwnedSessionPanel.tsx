@@ -31,6 +31,8 @@ import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
+import { PermissionModeMenu } from "./PermissionModeMenu";
+import { chosenPermissionMode, offeredPermissionModes } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
@@ -406,6 +408,9 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
+  // The latest stagePrompt, for what an answer outside this render sends: the text of a denied permission.
+  const stageLatest = useRef(stagePrompt);
+  const editLatest = useRef<(value: string) => void>(() => {});
   // Above the composer and never refused: a queued prompt waits for the session to be idle, a steering prompt
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
@@ -813,7 +818,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
-  function select(field: "agentPromptId" | "modelId" | "reasoningEffort", value: string) {
+  function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
     if (!activeChoices || !selected || selectionDisabled) return;
     const next = changeSelection(activeChoices, selected, field, value);
     if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
@@ -822,6 +827,8 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     setChoicesNotice("");
   }
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;
+  // The permission mode is shown where the host offers modes.
+  const permissionModes = offeredPermissionModes(activeChoices);
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
   async function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
@@ -867,7 +874,16 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       inputRevision.current++;
       if (canEditImages() && imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index))) setImageNotice("");
     }} />;
+  stageLatest.current = stagePrompt;
+  editLatest.current = editText;
   return <>
+    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy}
+      instruct={(kind, value) => {
+        // Text that cannot be staged (a request is pending, the queue is full) goes back to the composer, never lost.
+        if (!stageLatest.current(kind, value, [])) editLatest.current(latestText.current.trim() ? `${latestText.current}
+${value}` : value);
+      }} takeFocus={() => !latestText.current.trim() && !images.length} onAnswered={() => promptInput.current?.focus()} visible={active} />}
     <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>
@@ -901,7 +917,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
            repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, steerFromComposer)) { event.preventDefault(); event.stopPropagation(); }
       } }}
-    options={<ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
+    options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selected?.providerKey ?? t("session provider"), providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
@@ -933,7 +949,10 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
         {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
       </HTMLSelect>}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
-        onChange={value => select("reasoningEffort", value)} />} />}>
+        onChange={value => select("reasoningEffort", value)} />} />
+      {activeChoices && selected && permissionModes.length > 0 && <PermissionModeMenu id={`composer-permission-${sessionId}`}
+        value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
+        disabled={selectionDisabled} onChange={value => select("permissionMode", value)} />}</>}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
       {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} />}
       {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
@@ -982,8 +1001,6 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     {pendingQueueCancellations.map(value => <Button key={value.intent.request.clientRequestId} icon={<AppIcon name="refresh" size={14} />}
       disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
       {t("Retry exact queued-operation cancellation")}</Button>)}
-    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
-      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} />}
     {pendingAborts.length > 0 && <div className="retained-send-recovery">
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>

@@ -191,6 +191,85 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task CancelledPermission_StopsTheTurnWithoutAFailure()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? decision = null;
+        var turns = 0;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            if (++turns == 2)
+            {
+                process.EmitResult("API Error: overloaded", user, isError: true, subtype: "error_during_execution");
+                return;
+            }
+
+            var input = new JsonObject { ["command"] = "echo light > light.txt" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            decision = await process.AskPermissionAsync("Bash", input, "toolu_1");
+            process.EmitToolResult("toolu_1", "The user doesn't want to proceed with this tool use. The tool use was rejected.", isError: true);
+            // What Claude Code writes for the turn it stopped on the interrupt of the answer.
+            process.Emit(new JsonObject
+            {
+                ["type"] = "result",
+                ["subtype"] = "error_during_execution",
+                ["is_error"] = true,
+                ["session_id"] = process.SessionId,
+                ["errors"] = new JsonArray("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"),
+                ["user_message_uuids"] = new JsonArray(user.GetProperty("uuid").GetString()),
+            });
+            process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "idle", ["session_id"] = process.SessionId });
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(
+            runtime,
+            directory,
+            onPermission: static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel)));
+        var events = Collect(session);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout);
+
+        Assert.AreEqual("deny", decision!.Value.GetProperty("behavior").GetString());
+        Assert.IsTrue(decision.Value.GetProperty("interrupt").GetBoolean());
+        Assert.IsTrue(events.Snapshot().OfType<AgentActivityEvent>().Any(static e => e.ActivityId == "toolu_1" && e.Phase == AgentActivityPhase.Failed));
+        Assert.IsFalse(events.Snapshot().OfType<AgentErrorEvent>().Any(), "The turn the user stopped did not fail.");
+
+        // The cancel is the one of its own turn: a failure of the next is one.
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout));
+        StringAssert.Contains(failure.Message, "overloaded");
+    }
+
+    [TestMethod]
+    public async Task CancelledPermission_DoesNotHideAnotherFailureOfTheTurn()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            var input = new JsonObject { ["command"] = "echo light > light.txt" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            await process.AskPermissionAsync("Bash", input, "toolu_1");
+            process.EmitToolResult("toolu_1", "The user doesn't want to proceed with this tool use.", isError: true);
+            // The turn ends on a limit, not on the stop the answer asked for.
+            process.EmitResult(null, user, isError: true, subtype: "error_max_turns");
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(
+            runtime,
+            directory,
+            onPermission: static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel)));
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "turn limit");
+    }
+
+    [TestMethod]
     public async Task EditTool_WaitsForTheSessionBeforeItEditsSoThatTheChangeIsShown()
     {
         using var directory = TestTempDirectory.Create();
@@ -516,6 +595,44 @@ public sealed class ClaudeCodeSessionTests
 
         // A model that got there another way is not kept in a mode in which it can change nothing.
         Assert.AreEqual("allow", exit!.Value.GetProperty("behavior").GetString());
+    }
+
+    [TestMethod]
+    [DataRow(null, "plan", "deny")]
+    [DataRow("plan", "default", "allow")]
+    public async Task PlanModeOfClaudeCode_IsLeftOrNot_ByThePermissionModeOfTheSession(string? providerMode, string sessionMode, string behavior)
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? exit = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "ExitPlanMode", new JsonObject { ["plan"] = "Do it." })));
+            exit = await process.AskPermissionAsync("ExitPlanMode", new JsonObject { ["plan"] = "Do it." }, "toolu_1");
+            process.EmitToolResult("toolu_1", "refused", isError: true);
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("the plan")));
+            process.EmitResult("the plan", user);
+        };
+        // The mode of the session is the one of its turns, whatever the provider is configured with.
+        var options = cli.CreateOptions();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            PermissionMode = providerMode,
+        });
+        await using var session = await CreateSessionAsync(runtime, directory, permissionMode: sessionMode);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("plan it") }).WaitAsync(Timeout);
+
+        Assert.AreEqual(sessionMode, SessionProcess(cli).LaunchPermissionMode);
+        Assert.AreEqual(behavior, exit!.Value.GetProperty("behavior").GetString());
+        if (behavior == "deny")
+        {
+            StringAssert.Contains(exit.Value.GetProperty("message").GetString(), "permission mode");
+        }
     }
 
     [TestMethod]
@@ -1287,13 +1404,15 @@ public sealed class ClaudeCodeSessionTests
         IReadOnlyList<AgentToolDefinition>? tools = null,
         string? model = null,
         AgentReasoningEffort? reasoningEffort = null,
-        string? developerInstructions = null)
+        string? developerInstructions = null,
+        string? permissionMode = null)
         => await runtime.CreateSessionAsync(new AgentSessionCreateOptions
         {
             ProviderKey = runtime.Descriptor.ProviderId.Value,
             WorkingDirectory = directory.Path,
             Model = model,
             ReasoningEffort = reasoningEffort,
+            PermissionMode = permissionMode,
             DeveloperInstructions = developerInstructions,
             Tools = tools,
             OnPermissionRequest = onPermission ?? (static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))),
