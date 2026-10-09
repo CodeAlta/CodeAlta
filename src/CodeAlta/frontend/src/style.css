@@ -944,6 +944,11 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-reasoning-slider .bp6-slider { min-width: 0; height: 36px; }
 .composer-reasoning-slider .bp6-slider-label { font-size: 11px; white-space: nowrap; }
 .composer-reasoning-static { color: var(--muted); font-size: 12px; }
+/* A mode in which Claude Code runs requests without CodeAlta's review is shown in the warning color, on the chip too. */
+.composer-permission-description { display: flex; align-items: flex-start; gap: 6px; margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.composer-permission-description svg { flex: 0 0 auto; margin-top: 1px; }
+.composer-permission-description code { font-size: 11px; opacity: .8; }
+.composer-permission-description[data-skips-review], .composer-selection-part.composer-permission-part[data-skips-review], .composer-selection-part.composer-permission-part[data-skips-review] svg { color: var(--yellow); }
 .composer-selection-links { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 -6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .composer-send-group.bp6-button-group { flex: 0 0 auto; }
 .composer-send-group .composer-send-options.bp6-button { min-width: 22px; padding: 0 3px; }

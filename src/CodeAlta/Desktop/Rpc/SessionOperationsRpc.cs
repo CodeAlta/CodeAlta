@@ -496,8 +496,8 @@ internal sealed class SessionOperationsService
     }
 
     // The modes in which Claude Code runs some of what the session does without asking: CodeAlta's review does
-    // not see it. dontAsk and bypassPermissions run everything; acceptEdits runs the file changes and auto lets a
-    // classifier of the CLI decide. The page shows them with a warning.
+    // not see it. bypassPermissions runs everything, dontAsk runs what the CLI's own settings allow and refuses the rest,
+    // acceptEdits runs the file changes and auto lets a classifier of the CLI decide. The page shows them with a warning.
     private static readonly FrozenSet<string> ReviewSkippingPermissionModes =
         FrozenSet.ToFrozenSet(["acceptEdits", "auto", "dontAsk", "bypassPermissions"], StringComparer.Ordinal);
 

@@ -67,7 +67,8 @@ function validSend(request: SessionSendRequest): boolean {
     && (request.references == null || identity(request.references.projectId, 256) && identity(request.references.projectPath, 4096))
     && (request.selection == null || identity(request.selection.providerKey, 256) && identity(request.selection.agentPromptId, 256)
       && (request.selection.modelId === null || identity(request.selection.modelId, 256))
-      && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32)));
+      && (request.selection.reasoningEffort === null || identity(request.selection.reasoningEffort, 32))
+      && (request.selection.permissionMode == null || identity(request.selection.permissionMode, 256)));
 }
 /** The key of the timeline echo a Send shows while the host has not reported its message yet. */
 export function outgoingKey(request: Pick<SessionSendRequest, "expectedEpoch" | "sessionId" | "clientRequestId">): string {
@@ -84,8 +85,9 @@ function freezeReferences(value: SessionReferenceScope | null): Readonly<Session
 }
 
 function freezeSelection(value: SessionSelection | null): Readonly<SessionSelection> | null {
+  // A selection without a mode keeps the session's: the field is left out, as the host leaves it out.
   return value == null ? null : Object.freeze({ providerKey: value.providerKey, agentPromptId: value.agentPromptId,
-    modelId: value.modelId, reasoningEffort: value.reasoningEffort });
+    modelId: value.modelId, reasoningEffort: value.reasoningEffort, ...(value.permissionMode != null ? { permissionMode: value.permissionMode } : {}) });
 }
 
 // Match the existing wire validation. Legacy outcome/code/run nullability is deliberately independent

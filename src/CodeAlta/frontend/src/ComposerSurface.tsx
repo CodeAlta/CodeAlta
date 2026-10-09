@@ -2,6 +2,7 @@ import { useContext, type ComponentProps, type ReactNode, type SyntheticEvent } 
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { modelBrand } from "./brands";
+import { PermissionChipPart } from "./PermissionModeSelect";
 import { ModelIcon, ProviderIcon, useProviderBrand } from "./ProviderIcon";
 import { ComposerChrome } from "./composerChrome";
 import { PromptEditor } from "./PromptEditor";
@@ -30,14 +31,18 @@ export function ComposerSurface({ status, busy = false, children, className, edi
  * Display names of the current next-Send selection, shown on the collapsed chip. A model without reasoning has none.
  * The key of the provider and the id of the model choose their logos.
  */
-export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null; providerKey?: string | null; modelId?: string | null }>;
+export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null; providerKey?: string | null; modelId?: string | null;
+  /** The permission mode the chip shows: one chosen for the session, or the provider's when Claude Code then skips the review. */
+  permission?: Readonly<{ id: string; skipsReview: boolean }> | null }>;
 
 // Both draft and owned composers present their selection as one chip that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, summary, locked = false }: {
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, permission, summary, locked = false }: {
   sessionId: string; onOpenCatalog?: (page: "prompts" | "models") => void;
   agent: ReactNode; provider: ReactNode; model: ReactNode; reasoning: ReactNode;
+  /** The permission mode of the session; none for a provider without modes. */
+  permission?: ReactNode;
   summary: ComposerSelectionSummary; locked?: boolean;
 }) {
   const { t } = useShellLanguage();
@@ -51,6 +56,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     <FormGroup label={<span className="composer-selection-label"><ProviderIcon providerKey={summary.providerKey} size={14} />{t("Provider")}</span>}>{provider}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
+    {permission && <FormGroup label={t("Permissions")} labelFor={`composer-permission-${sessionId}`}>{permission}</FormGroup>}
     <div className="composer-selection-links">
       <Button variant="minimal" size="small" icon={<AppIcon name="assistant" size={14} />} onClick={() => onOpenCatalog?.("prompts")}>{t("Browse agent prompts")}</Button>
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog?.("models")}>{t("Browse models")}</Button>
@@ -66,6 +72,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
         <span className="composer-selection-separator" aria-hidden="true">/</span>
         {ownModelLogo && <ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />}<span>{summary.model}</span></span>
       {summary.reasoning && <span className="composer-selection-part"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
+      {summary.permission && <PermissionChipPart id={summary.permission.id} skipsReview={summary.permission.skipsReview} />}
     </Button>
   </PopoverNext>;
 }

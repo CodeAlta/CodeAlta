@@ -31,6 +31,8 @@ import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
+import { PermissionModeSelect } from "./PermissionModeSelect";
+import { chosenPermissionMode, effectivePermissionMode, offeredPermissionModes } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
@@ -813,7 +815,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
-  function select(field: "agentPromptId" | "modelId" | "reasoningEffort", value: string) {
+  function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
     if (!activeChoices || !selected || selectionDisabled) return;
     const next = changeSelection(activeChoices, selected, field, value);
     if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
@@ -822,6 +824,10 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     setChoicesNotice("");
   }
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;
+  // Only a provider with permission modes shows the choice. The chip names a mode chosen for the session, and the
+  // provider's own one only when Claude Code then runs requests without CodeAlta's review.
+  const permissionModes = offeredPermissionModes(activeChoices);
+  const permission = activeChoices && selected && permissionModes.length ? effectivePermissionMode(activeChoices, selected) : null;
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
   async function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
@@ -905,7 +911,11 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selected?.providerKey ?? t("session provider"), providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
-        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null) }}
+        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null),
+        permission: permission?.id && (permission.chosen || permission.skipsReview) ? { id: permission.id, skipsReview: permission.skipsReview } : null }}
+      permission={activeChoices && selected && permissionModes.length ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
+        value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} providerMode={activeChoices.defaultPermissionMode ?? null}
+        disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
