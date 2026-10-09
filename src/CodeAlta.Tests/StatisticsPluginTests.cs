@@ -135,7 +135,7 @@ public sealed class StatisticsPluginTests
 
         var completed = await WaitForDynamicProjectionAsync(result.Single());
         StringAssert.Contains(completed.Markdown, "provider aggregate");
-        StringAssert.Contains(completed.Markdown, "1,354 in (provider aggregate) / 567 out (provider aggregate; ≈7 observed generated)");
+        StringAssert.Contains(completed.Markdown, "1,234 in (provider aggregate) / 567 out (provider aggregate; ≈7 observed generated)");
         StringAssert.Contains(completed.DetailSections.Single().Markdown, "Cached input (provider aggregate)");
     }
 
@@ -267,11 +267,11 @@ public sealed class StatisticsPluginTests
         var result = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
 
         var completed = await WaitForDynamicProjectionAsync(result.Single());
-        StringAssert.Contains(completed.Markdown, "130 in (provider aggregate) / 80 out (provider aggregate");
+        StringAssert.Contains(completed.Markdown, "110 in (provider aggregate) / 80 out (provider aggregate");
         var detailsMarkdown = completed.DetailSections.Single().Markdown;
         StringAssert.Contains(detailsMarkdown, "Provider operations | 2");
-        StringAssert.Contains(detailsMarkdown, "Input total (provider aggregate) | 130");
-        StringAssert.Contains(detailsMarkdown, "Fresh input (provider aggregate) | 110");
+        StringAssert.Contains(detailsMarkdown, "Input total (provider aggregate) | 110");
+        StringAssert.Contains(detailsMarkdown, "Fresh input (provider aggregate) | 90");
         StringAssert.Contains(detailsMarkdown, "Cached input (provider aggregate) | 20");
         StringAssert.Contains(detailsMarkdown, "Output total (provider aggregate) | 80");
         StringAssert.Contains(detailsMarkdown, "Non-reasoning output (provider aggregate) | 60");
@@ -299,7 +299,7 @@ public sealed class StatisticsPluginTests
             LastOperation: new AgentOperationUsageSnapshot(Model: "model-1", InputTokens: 6_909, OutputTokens: 13, CachedInputTokens: 0));
         static AgentSessionUsage Second(long? currentTokens = 7_400) => new(
             Window: new AgentWindowUsageSnapshot(currentTokens, 200_000, 4),
-            LastOperation: new AgentOperationUsageSnapshot(Model: "model-1", InputTokens: 300, OutputTokens: 40, CachedInputTokens: 6_922));
+            LastOperation: new AgentOperationUsageSnapshot(Model: "model-1", InputTokens: 7_222, OutputTokens: 40, CachedInputTokens: 6_922));
         var events = new AgentEvent[]
         {
             new AgentContentCompletedEvent(providerId, "session-1", startedAt, runId, AgentContentKind.User, "user-1", null, "prompt"),
@@ -587,7 +587,7 @@ public sealed class StatisticsPluginTests
                         Model: "model-1",
                         InputTokens: 1234,
                         OutputTokens: 567,
-                        CachedInputTokens: 120,
+                        CachedInputTokens: 100,
                         CacheReadTokens: 100,
                         CacheWriteTokens: 20,
                         ReasoningTokens: 89))));

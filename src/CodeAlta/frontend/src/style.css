@@ -1168,7 +1168,7 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 
 /* Context usage window: subject line, cards and the breakdown charts (context pressure, last operation, limits). */
 .context-usage-details { --usage-active: var(--accent); --usage-headroom: color-mix(in srgb, var(--text) 16%, transparent);
-  --usage-input: #4c90f0; --usage-output: #32a467; --usage-cacheRead: #13c9ba; --usage-cacheWrite: #ec9a3c; --usage-cachedInput: #9881f3; --usage-reasoning: #f0b726; gap: 12px; }
+  --usage-input: #4c90f0; --usage-output: #32a467; --usage-cacheWrite: #ec9a3c; --usage-cachedInput: #9881f3; --usage-reasoning: #f0b726; gap: 12px; }
 .context-usage-subject { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; }
 .context-usage-subject > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; font-size: 12px; }
 .context-usage-subject strong { font-size: 15px; }
@@ -1193,7 +1193,7 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 .usage-breakdown [data-segment="headroom"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="headroom"] { background: var(--usage-headroom); }
 .usage-breakdown [data-segment="input"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="input"] { background: var(--usage-input); }
 .usage-breakdown [data-segment="output"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="output"] { background: var(--usage-output); }
-.usage-breakdown [data-segment="cacheRead"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cacheRead"] { background: var(--usage-cacheRead); }
+.usage-breakdown [data-segment="uncachedInput"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="uncachedInput"] { background: var(--usage-input); }
 .usage-breakdown [data-segment="cacheWrite"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cacheWrite"] { background: var(--usage-cacheWrite); }
 .usage-breakdown [data-segment="cachedInput"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cachedInput"] { background: var(--usage-cachedInput); }
 .usage-breakdown [data-segment="reasoning"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="reasoning"] { background: var(--usage-reasoning); }

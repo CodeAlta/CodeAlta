@@ -118,11 +118,41 @@ export function contextSegments(usage: ContextUsage | null): UsageSegment[] {
   return usageSegments([["active", used.toString()], ["headroom", (limit - used).toString()]]);
 }
 
-/** The token categories of one operation that the TUI charts, in its order. */
+/** The input of one operation, split in the parts a provider bills apart: they add up to the total. */
+export type InputTokens = Readonly<{ total: string; uncached: string; cacheRead: string; cacheWrite: string }>;
+
+const count = (value: string | null | undefined) => value && /^\d+$/.test(value) ? BigInt(value) : null;
+
+/**
+ * Splits the input of an operation. The input holds what was read from and written to the prompt cache; a provider
+ * names the read part "cached input" or "cache read", never both to add. A record with less input than cache is an
+ * older one that counted the cache beside the input: there the input is what was not cached. Null when the operation
+ * reports no input and nothing of the cache.
+ */
+export function inputTokens(operation: Pick<SessionUsageOperation, "inputTokens" | "cachedInputTokens" | "cacheReadTokens" | "cacheWriteTokens"> | null | undefined): InputTokens | null {
+  if (!operation) return null;
+  const read = count(operation.cachedInputTokens) ?? count(operation.cacheReadTokens) ?? 0n;
+  const write = count(operation.cacheWriteTokens) ?? 0n;
+  const reported = count(operation.inputTokens);
+  if (reported === null && read + write === 0n) return null;
+  const whole = reported !== null && reported >= read + write;
+  const uncached = reported === null ? 0n : whole ? reported - read - write : reported;
+  return { total: (uncached + read + write).toString(), uncached: uncached.toString(), cacheRead: read.toString(), cacheWrite: write.toString() };
+}
+
+/**
+ * The token categories of one operation that the TUI charts, in its order. Each token is in one slice: the input is
+ * shown without its cached parts, and the output without its reasoning.
+ */
 export function operationSegments(operation: SessionUsageOperation | null | undefined): UsageSegment[] {
   if (!operation) return [];
-  return usageSegments([["input", operation.inputTokens], ["output", operation.outputTokens], ["cacheRead", operation.cacheReadTokens],
-    ["cacheWrite", operation.cacheWriteTokens], ["cachedInput", operation.cachedInputTokens], ["reasoning", operation.reasoningTokens]]);
+  const input = inputTokens(operation);
+  const cached = !!input && (input.cacheRead !== "0" || input.cacheWrite !== "0");
+  const reasoning = count(operation.reasoningTokens) ?? 0n;
+  const output = count(operation.outputTokens);
+  return usageSegments([[cached ? "uncachedInput" : "input", input?.uncached],
+    ["output", output === null ? null : (output > reasoning ? output - reasoning : 0n).toString()],
+    ["cacheWrite", input?.cacheWrite], ["cachedInput", input?.cacheRead], ["reasoning", operation.reasoningTokens]]);
 }
 
 /** "40% used · 300m window · resets 14:05:00", with only the parts that were reported. */
@@ -155,10 +185,13 @@ export function usageMarkdown(input: {
       window?.maxOutputTokens && `max output ${groupedTokens(window.maxOutputTokens)} tokens`].filter(Boolean);
     if (envelope.length) lines.push(`- Indicative model limits: ${envelope.join("; ")}`);
     if (operation) {
+      // The input holds what the cache read and wrote: "input 26,317 (cache 26,003 · cache write 312)".
+      const whole = inputTokens(operation);
+      const cache = whole ? [whole.cacheRead !== "0" && `cache ${groupedTokens(whole.cacheRead)}`,
+        whole.cacheWrite !== "0" && `cache write ${groupedTokens(whole.cacheWrite)}`].filter(Boolean) : [];
       const tokens = [operation.model, operation.reasoningEffort && `effort ${operation.reasoningEffort}`, operation.initiator && `initiator ${operation.initiator}`,
-        operation.inputTokens && `input ${groupedTokens(operation.inputTokens)}`, operation.outputTokens && `output ${groupedTokens(operation.outputTokens)}`,
-        operation.cacheReadTokens && `cache read ${groupedTokens(operation.cacheReadTokens)}`, operation.cacheWriteTokens && `cache write ${groupedTokens(operation.cacheWriteTokens)}`,
-        operation.cachedInputTokens && `cache ${groupedTokens(operation.cachedInputTokens)}`, operation.reasoningTokens && `reasoning ${groupedTokens(operation.reasoningTokens)}`,
+        whole && `input ${groupedTokens(whole.total)}${cache.length ? ` (${cache.join(" · ")})` : ""}`, operation.outputTokens && `output ${groupedTokens(operation.outputTokens)}`,
+        operation.reasoningTokens && `reasoning ${groupedTokens(operation.reasoningTokens)}`,
         operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
       if (tokens.length) lines.push(`- ${operation.label ?? "Last operation"}: ${tokens.join(" · ")}`);
     }

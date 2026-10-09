@@ -632,9 +632,10 @@ public sealed class ClaudeCodeTurnExecutorTests
         Assert.AreEqual(300, response.Usage.RateLimits.Primary.WindowDurationMinutes, "A window the CLI names says how long it is.");
         Assert.IsNull(response.Usage.RateLimits.Secondary);
         Assert.AreEqual(0.01, response.Usage.LastOperation!.Cost);
-        // The input that was not cached, what was read from and written to the cache, and the output of the whole
-        // message: the statistics of a turn add them up.
-        Assert.AreEqual(100, response.Usage.LastOperation.InputTokens);
+        // The input holds what was read from and written to the cache with the 100 tokens that were not cached, as
+        // for every provider.
+        Assert.AreEqual(2400, response.Usage.LastOperation.InputTokens);
+        Assert.AreEqual(new AgentInputTokenUsage(2400, 100, 2000, 300), AgentInputTokenUsage.From(response.Usage.LastOperation));
         Assert.AreEqual(2000, response.Usage.LastOperation.CacheReadTokens);
         Assert.AreEqual(300, response.Usage.LastOperation.CacheWriteTokens);
         Assert.AreEqual(2000, response.Usage.LastOperation.CachedInputTokens);

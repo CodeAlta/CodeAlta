@@ -4,7 +4,7 @@ import { providerUsage, sessionUsage, type SessionUsageObservation, type Session
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import { AppWindow } from "./AppWindow";
-import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
+import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, inputTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
   persistedOperation, persistedUsageFields, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
 import { UsageLimitList, usageNote, useProviderUsage } from "./UsageLimits";
 import { limitsMarkdown, liveLimitsAreCurrent, planLabel, providerLimits, sessionLimits } from "./subscriptionUsage";
@@ -14,8 +14,8 @@ import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 
 const minimumReadInterval = 4000;
-const segmentLabels: Record<string, MessageKey> = { active: "Active context", headroom: "Input headroom", input: "Input", output: "Output",
-  cacheRead: "Cache read", cacheWrite: "Cache write", cachedInput: "Cached input", reasoning: "Reasoning" };
+const segmentLabels: Record<string, MessageKey> = { active: "Active context", headroom: "Input headroom", input: "Input", uncachedInput: "Uncached input",
+  output: "Output", cacheWrite: "Cache write", cachedInput: "Cached input", reasoning: "Reasoning" };
 
 /** A proportional stacked bar with its legend (value and share per slice), the TUI's breakdown chart. */
 function UsageBreakdown({ segments, label }: { segments: readonly UsageSegment[]; label: string }) {
@@ -135,7 +135,10 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const updatedTime = updated && !Number.isNaN(new Date(updated).getTime()) ? new Date(updated).toLocaleTimeString([], { hour12: false }) : null;
   const envelope = [observation?.window?.totalContextEnvelope && t("context window {tokens} tokens", { tokens: groupedTokens(observation.window.totalContextEnvelope) }),
     observation?.window?.maxOutputTokens && t("max output {tokens} tokens", { tokens: groupedTokens(observation.window.maxOutputTokens) })].filter(Boolean).join("; ");
-  const operationFacts = operation ? [operation.reasoningEffort && t("effort {effort}", { effort: operation.reasoningEffort }),
+  // The slices show the input in its parts; their sum is said once, beside the title.
+  const wholeInput = inputTokens(operation);
+  const operationFacts = operation ? [wholeInput && wholeInput.uncached !== wholeInput.total && t("{count} input tokens", { count: groupedTokens(wholeInput.total) }),
+    operation.reasoningEffort && t("effort {effort}", { effort: operation.reasoningEffort }),
     operation.initiator && t("initiator {initiator}", { initiator: operation.initiator }),
     operation.durationMs && Number.isFinite(Number(operation.durationMs)) && t("duration {duration} ms", { duration: String(Math.round(Number(operation.durationMs))) }),
     operation.cost && t("cost {cost}", { cost: costText(operation) ?? operation.cost })].filter((value): value is string => !!value) : [];

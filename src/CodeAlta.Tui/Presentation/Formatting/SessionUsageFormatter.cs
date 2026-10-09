@@ -248,29 +248,27 @@ internal static class SessionUsageFormatter
             parts.Add(SR.T("initiator {0}", initiator));
         }
 
-        if (usage.InputTokens is not null)
+        // The input holds what the cache read and wrote: "input 26,317 (cache 26,003 · cache write 312)".
+        if (AgentInputTokenUsage.From(usage) is { } input)
         {
-            parts.Add(SR.T("input {0}", FormatNumber(usage.InputTokens)));
+            var cache = new List<string>();
+            if (input.CacheRead > 0)
+            {
+                cache.Add(SR.T("cache {0}", FormatNumber(input.CacheRead)));
+            }
+
+            if (input.CacheWrite > 0)
+            {
+                cache.Add(SR.T("cache write {0}", FormatNumber(input.CacheWrite)));
+            }
+
+            var total = SR.T("input {0}", FormatNumber(input.Total));
+            parts.Add(cache.Count == 0 ? total : $"{total} ({string.Join(" · ", cache)})");
         }
 
         if (usage.OutputTokens is not null)
         {
             parts.Add(SR.T("output {0}", FormatNumber(usage.OutputTokens)));
-        }
-
-        if (usage.CacheReadTokens is { } cacheRead)
-        {
-            parts.Add(SR.T("cache read {0}", FormatNumber(cacheRead)));
-        }
-
-        if (usage.CacheWriteTokens is { } cacheWrite)
-        {
-            parts.Add(SR.T("cache write {0}", FormatNumber(cacheWrite)));
-        }
-
-        if (usage.CachedInputTokens is { } cachedInput)
-        {
-            parts.Add(SR.T("cache {0}", FormatNumber(cachedInput)));
         }
 
         if (usage.ReasoningTokens is { } reasoningTokens)

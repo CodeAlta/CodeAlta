@@ -431,11 +431,12 @@ internal sealed class SessionUsagePresenter
         var chart = new BreakdownChart().ShowValues(true).ShowPercentages(true);
         var added = 0;
 
-        added += AddSegment(chart, usage.InputTokens, SR.T("Input"));
+        // The input holds what the cache read and wrote: the chart shows the three parts of it.
+        var input = AgentInputTokenUsage.From(usage);
+        added += AddSegment(chart, input?.Uncached, SR.T("Input"));
         added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningTokens), SR.T("Output"));
-        added += AddSegment(chart, usage.CacheReadTokens, SR.T("Cache Read"));
-        added += AddSegment(chart, usage.CacheWriteTokens, SR.T("Cache Write"));
-        added += AddSegment(chart, usage.CachedInputTokens, SR.T("Cache"));
+        added += AddSegment(chart, input?.CacheWrite, SR.T("Cache Write"));
+        added += AddSegment(chart, input?.CacheRead, SR.T("Cache"));
         added += AddSegment(chart, usage.ReasoningTokens, SR.T("Reasoning"));
 
         return added > 0
@@ -448,7 +449,8 @@ internal sealed class SessionUsagePresenter
         var chart = new BreakdownChart().ShowValues(true).ShowPercentages(true);
         var added = 0;
 
-        added += AddSegment(chart, usage.InputTokens, SR.T("Input"));
+        // The input of Codex holds its cached part.
+        added += AddSegment(chart, Math.Max(0, usage.InputTokens - usage.CachedInputTokens), SR.T("Input"));
         added += AddSegment(chart, GetNonReasoningOutputTokens(usage.OutputTokens, usage.ReasoningOutputTokens), SR.T("Output"));
         added += AddSegment(chart, usage.CachedInputTokens, SR.T("Cache"));
         added += AddSegment(chart, usage.ReasoningOutputTokens, SR.T("Reasoning"));

@@ -1408,9 +1408,10 @@ public sealed class StatisticsPlugin : PluginBase
 
             _last = usage;
             _operationCount++;
-            var cacheInputTokens = GetCacheInputTotal(usage);
-            Add(ref _inputTokens, Sum(usage.InputTokens, cacheInputTokens));
-            Add(ref _freshInputTokens, usage.InputTokens);
+            // The input of an operation holds what the cache read and wrote.
+            var input = AgentInputTokenUsage.From(usage);
+            Add(ref _inputTokens, input?.Total);
+            Add(ref _freshInputTokens, usage.InputTokens is null ? null : input?.Uncached);
             Add(ref _outputTokens, usage.OutputTokens);
             Add(ref _cachedInputTokens, usage.CachedInputTokens);
             Add(ref _cacheReadTokens, usage.CacheReadTokens);
@@ -1439,26 +1440,6 @@ public sealed class StatisticsPlugin : PluginBase
                usage.CacheWriteTokens is not null ||
                usage.ReasoningTokens is not null ||
                usage.DurationMs is not null;
-
-        private static long? GetCacheInputTotal(AgentOperationUsageSnapshot usage)
-        {
-            if (usage.CacheReadTokens is not null || usage.CacheWriteTokens is not null)
-            {
-                return Sum(usage.CacheReadTokens, usage.CacheWriteTokens);
-            }
-
-            return usage.CachedInputTokens;
-        }
-
-        private static long? Sum(long? left, long? right)
-        {
-            if (left is null && right is null)
-            {
-                return null;
-            }
-
-            return (left ?? 0) + (right ?? 0);
-        }
 
         private static void Add(ref long? target, long? value)
         {

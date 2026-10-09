@@ -2370,11 +2370,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
 
             operationCount++;
-            inputTokens += operation.InputTokens ?? 0;
+            // The input of an operation holds what the cache read and wrote: the cached and written counts are parts
+            // of the input, not counts to add to it.
+            var input = AgentInputTokenUsage.From(operation);
+            inputTokens += input?.Total ?? 0;
             outputTokens += operation.OutputTokens ?? 0;
-            cachedInputTokens += operation.CachedInputTokens ?? 0;
+            cachedInputTokens += input?.CacheRead ?? 0;
             reasoningTokens += operation.ReasoningTokens ?? 0;
-            cacheWriteTokens += operation.CacheWriteTokens ?? 0;
+            cacheWriteTokens += input?.CacheWrite ?? 0;
             // Costs add up in one unit: the unit of the first operation that reports one.
             if (operation.Cost is { } operationCost && (cost is null || string.Equals(costUnit, operation.CostUnit, StringComparison.Ordinal)))
             {

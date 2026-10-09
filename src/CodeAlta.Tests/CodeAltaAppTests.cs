@@ -2927,6 +2927,22 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
+    public void FormatOperationPopupText_SaysTheCachedPartsOfTheInputWhenNoChartShowsThem()
+    {
+        // Without a positive count there is no chart: the line gives the input with what the cache read of it.
+        var popupText = SessionUsageAggregator.FormatOperationPopupText(
+            new AgentOperationUsageSnapshot(Model: "gpt-test", InputTokens: 0, OutputTokens: 0));
+        var markdown = SessionUsageAggregator.BuildMarkdown(
+            new AgentSessionUsage(LastOperation: new AgentOperationUsageSnapshot(
+                Model: "gpt-test", InputTokens: 26_317, OutputTokens: 123, CacheWriteTokens: 312, CachedInputTokens: 26_003)),
+            "Copilot",
+            "gpt-test");
+
+        Assert.AreEqual("gpt-test · input 0 · output 0", popupText);
+        StringAssert.Contains(markdown, "input 26,317 (cache 26,003 · cache write 312) · output 123");
+    }
+
+    [TestMethod]
     public void FormatOperationPopupText_OmitsCodexTokenSummaryWhenChartExists()
     {
         var popupText = SessionUsageAggregator.FormatOperationPopupText(

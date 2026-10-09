@@ -66,11 +66,17 @@ public sealed record AgentWindowUsageSnapshot(
 /// Represents normalized usage for the most recent meaningful model operation.
 /// </summary>
 /// <param name="Model">The model that serviced the operation when known.</param>
-/// <param name="InputTokens">The number of fresh input tokens consumed.</param>
+/// <param name="InputTokens">
+/// The number of input tokens of the operation: all of them, the ones read from and written to the prompt cache
+/// included. <see cref="AgentInputTokenUsage"/> gives the parts.
+/// </param>
 /// <param name="OutputTokens">The number of output tokens produced.</param>
-/// <param name="CacheReadTokens">The number of tokens read from prompt cache when known.</param>
-/// <param name="CacheWriteTokens">The number of tokens written to prompt cache when known.</param>
-/// <param name="CachedInputTokens">The number of cached input tokens reused when known.</param>
+/// <param name="CacheReadTokens">
+/// The part of the input read from the prompt cache, for a provider that reports it under this name. It is the same
+/// count as <paramref name="CachedInputTokens"/>, never one to add to it.
+/// </param>
+/// <param name="CacheWriteTokens">The part of the input written to the prompt cache when known.</param>
+/// <param name="CachedInputTokens">The part of the input read from the prompt cache when known.</param>
 /// <param name="ReasoningTokens">The number of reasoning tokens consumed or produced when known.</param>
 /// <param name="Cost">The provider-reported cost when available.</param>
 /// <param name="DurationMs">The provider-reported duration in milliseconds when available.</param>
@@ -94,6 +100,41 @@ public sealed record AgentOperationUsageSnapshot(
     string? ReasoningEffort = null,
     string? Label = null,
     string? CostUnit = null);
+
+/// <summary>
+/// The input tokens of one operation, split by what the provider bills apart: the parts add up to the total.
+/// </summary>
+/// <param name="Total">All the input tokens of the operation.</param>
+/// <param name="Uncached">The input that was neither read from nor written to the prompt cache.</param>
+/// <param name="CacheRead">The input read from the prompt cache.</param>
+/// <param name="CacheWrite">The input written to the prompt cache.</param>
+public readonly record struct AgentInputTokenUsage(long Total, long Uncached, long CacheRead, long CacheWrite)
+{
+    /// <summary>Splits the input of an operation.</summary>
+    /// <param name="operation">The usage of the operation.</param>
+    /// <returns>The split, or null when the operation reports no input and nothing of the cache.</returns>
+    public static AgentInputTokenUsage? From(AgentOperationUsageSnapshot? operation)
+    {
+        if (operation is null)
+        {
+            return null;
+        }
+
+        var read = Math.Max(0, operation.CachedInputTokens ?? operation.CacheReadTokens ?? 0);
+        var write = Math.Max(0, operation.CacheWriteTokens ?? 0);
+        if (operation.InputTokens is not { } reported)
+        {
+            return read == 0 && write == 0 ? null : new(read + write, 0, read, write);
+        }
+
+        var input = Math.Max(0, reported);
+        // The input holds its cached part. A record with less input than cache is an older one, of a provider that
+        // counted the cache beside the input: there the input is what was not cached.
+        return input >= read + write
+            ? new(input, input - read - write, read, write)
+            : new(input + read + write, input, read, write);
+    }
+}
 
 /// <summary>
 /// Represents normalized rate-limit information for a session.

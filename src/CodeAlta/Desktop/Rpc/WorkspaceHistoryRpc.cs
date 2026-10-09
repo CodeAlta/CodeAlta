@@ -295,9 +295,11 @@ internal sealed partial class WorkspaceService
             if (usage.LastOperation is { } operation)
             {
                 if (!string.IsNullOrWhiteSpace(operation.Model)) text.Append("\n**Model:** ").AppendLine(operation.Model);
-                AppendMetric(text, "Input tokens", operation.InputTokens);
+                // The input is the whole input of the request; what the cache read and wrote is part of it.
+                var input = AgentInputTokenUsage.From(operation);
+                AppendMetric(text, "Input tokens", operation.InputTokens is null ? null : input?.Total);
                 AppendMetric(text, "Output tokens", operation.OutputTokens);
-                AppendMetric(text, "Cached input tokens", operation.CachedInputTokens);
+                AppendMetric(text, "Cached input tokens", operation.CachedInputTokens ?? operation.CacheReadTokens);
                 AppendMetric(text, "Cache write tokens", operation.CacheWriteTokens);
                 AppendMetric(text, "Reasoning tokens", operation.ReasoningTokens);
                 if (operation.Cost is { } cost)

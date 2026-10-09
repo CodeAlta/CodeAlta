@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionUsageObservation } from "#neoastra";
-import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
+import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, inputTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
   persistedOperation, persistedUsageFields, rateWindowSummary, usageIntent, usageMarkdown, usageSegments } from "./contextUsage";
 
 const record = "Idle\r\n\n**Context:** 124701 / 272000 tokens (45.8%)\r\n\n**Messages in context:** 145\r\n\n**Model:** gpt-test\r\n\n**Input tokens:** 88319\r\n\n**Output tokens:** 270\r\n\n**Cached input tokens:** 87936\r\n\n**Reasoning tokens:** 0\r\n\n**Duration:** 1500.5 ms\r\n\n**Usage scope/source:** CurrentWindow · ProviderUsage";
@@ -61,8 +61,8 @@ test("a cost is shown with the unit the provider names, and as reported without 
   assert.equal(costText({ ...operation, cost: "0.0613625", costUnit: "AI credits" }), "0.0614 AI credits");
   assert.equal(costText({ ...operation, cost: "12", costUnit: "AI credits" }), "12 AI credits");
   assert.match(usageMarkdown({ provider: "copilot", model: "claude-test", usage: null, messages: null, window: null,
-    operation: { ...operation, cacheWriteTokens: "300", cost: "0.1728", costUnit: "AI credits" }, rateLimits: null, sessionTotal: null }),
-    /cache write 300 · cache 5 · cost 0\.1728 AI credits/);
+    operation: { ...operation, inputTokens: "400", cacheWriteTokens: "300", cost: "0.1728", costUnit: "AI credits" }, rateLimits: null, sessionTotal: null }),
+    /input 400 \(cache 5 · cache write 300\) · output 20 · cost 0\.1728 AI credits/);
   // A saved record carries the unit in its cost line.
   const saved = persistedOperation("**Context:** 1 / 2 tokens\n\n**Cache write tokens:** 300\n\n**Cost:** 0.1728 AI credits")!;
   assert.equal(saved.cacheWriteTokens, "300");
@@ -81,9 +81,29 @@ test("breakdown slices keep only positive counts and sum to the whole", () => {
   assert.deepEqual(contextSegments(contextUsage("250", "1000")), [{ key: "active", tokens: "250", share: 25 }, { key: "headroom", tokens: "750", share: 75 }]);
   assert.deepEqual(contextSegments(contextUsage("2000", "1000")), [{ key: "active", tokens: "1000", share: 100 }]);
   assert.deepEqual(contextSegments(contextUsage("5", null)), []);
-  assert.deepEqual(operationSegments(observation().lastOperation).map(segment => [segment.key, segment.tokens]), [["input", "10"], ["output", "20"], ["cachedInput", "5"]]);
   assert.deepEqual(usageSegments([["a", "0"], ["b", null], ["c", "x"]]), []);
   assert.deepEqual(operationSegments(null), []);
+});
+
+test("the input of an operation holds what the cache read and wrote, and each token is in one slice", () => {
+  const operation = observation().lastOperation!;
+  const slices = (patch: Partial<typeof operation>) => operationSegments({ ...operation, ...patch }).map(segment => [segment.key, segment.tokens, segment.share]);
+  // A request of 26,317 input tokens of which 26,003 came from the cache is cached at 99%, not at half.
+  const cached = { inputTokens: "26317", cachedInputTokens: "26003", cacheWriteTokens: "312", outputTokens: "123" };
+  assert.deepEqual(inputTokens({ ...operation, ...cached }), { total: "26317", uncached: "2", cacheRead: "26003", cacheWrite: "312" });
+  assert.deepEqual(slices(cached), [["uncachedInput", "2", 0], ["output", "123", 0.5], ["cacheWrite", "312", 1.2], ["cachedInput", "26003", 98.3]]);
+  // "Cache read" is another name of the cached input, never a count to add to it.
+  assert.deepEqual(inputTokens({ ...operation, inputTokens: "2400", cachedInputTokens: "2000", cacheReadTokens: "2000", cacheWriteTokens: "300" }),
+    { total: "2400", uncached: "100", cacheRead: "2000", cacheWrite: "300" });
+  assert.deepEqual(inputTokens({ ...operation, inputTokens: "2400", cachedInputTokens: null, cacheReadTokens: "2000" })?.uncached, "400");
+  // An older record counted the cache beside the input: its input is what was not cached.
+  assert.deepEqual(inputTokens({ ...operation, inputTokens: "100", cachedInputTokens: "2000", cacheWriteTokens: "300" }),
+    { total: "2400", uncached: "100", cacheRead: "2000", cacheWrite: "300" });
+  // Without a cache the input is one slice under its plain name, and the reasoning is taken out of the output.
+  assert.deepEqual(slices({ cachedInputTokens: null, reasoningTokens: "15" }), [["input", "10", 33.3], ["output", "5", 16.7], ["reasoning", "15", 50]]);
+  assert.deepEqual(slices({}), [["uncachedInput", "5", 16.7], ["output", "20", 66.7], ["cachedInput", "5", 16.7]]);
+  assert.equal(inputTokens({ ...operation, inputTokens: null, cachedInputTokens: null }), null);
+  assert.equal(inputTokens(null), null);
 });
 
 test("fields accumulate across the events of one attachment; identity comes from the newest event", () => {
@@ -112,7 +132,7 @@ test("rate windows and the Markdown copy carry only what was reported", () => {
     sessionTotal: { totalTokens: "900", inputTokens: "500", outputTokens: "300", cachedInputTokens: "60", reasoningTokens: "40" } });
   assert.equal(markdown, ["# codex context usage", "", "- Model: gpt-test", "", "## Context usage: 145 messages", "",
     "- Compaction pressure: 124,701 / 272,000 input tokens (45.8%)", "- Indicative model limits: context window 400,000 tokens; max output 128,000 tokens",
-    "- Last operation: gpt-test · effort high · input 10 · output 20 · cache 5", "", "## Limits", "", "- Limits: Codex · plan unknown",
+    "- Last operation: gpt-test · effort high · input 10 (cache 5) · output 20", "", "## Limits", "", "- Limits: Codex · plan unknown",
     "- Primary: 40% used · 300m window", "", "## Provider-specific details", "",
     "- Session total: total 900 · input 500 · output 300 · cache 60 · reasoning 40"].join("\n"));
   assert.match(usageMarkdown({ provider: null, model: null, usage: null, messages: null, window: null, operation: null, rateLimits: null, sessionTotal: null }),

@@ -26,11 +26,11 @@ public readonly record struct SessionRuntimeUsageWindow(long? CurrentTokens, lon
     string? Label = null, long? TotalContextEnvelope = null, long? MaxOutputTokens = null);
 
 /// <summary>Provider-reported last-operation values from one typed usage event; no calculated totals.</summary>
-/// <param name="InputTokens">Fresh input tokens.</param>
+/// <param name="InputTokens">Input tokens, the ones read from and written to the prompt cache included.</param>
 /// <param name="OutputTokens">Output tokens.</param>
-/// <param name="CacheReadTokens">Cache read tokens.</param>
-/// <param name="CacheWriteTokens">Cache write tokens.</param>
-/// <param name="CachedInputTokens">Reused input tokens.</param>
+/// <param name="CacheReadTokens">The part of the input read from the cache, as some providers name it; the same count as the reused input.</param>
+/// <param name="CacheWriteTokens">The part of the input written to the cache.</param>
+/// <param name="CachedInputTokens">The part of the input read from the cache.</param>
 /// <param name="ReasoningTokens">Reasoning tokens.</param>
 /// <param name="Cost">Provider-reported nonnegative finite cost, without an inferred currency.</param>
 /// <param name="DurationMs">Provider-reported nonnegative finite duration in milliseconds.</param>
@@ -60,9 +60,9 @@ public sealed record SessionRuntimeUsageRateLimits(string? Name, string? PlanTyp
 
 /// <summary>Provider-reported cumulative session token totals from one typed usage event; never calculated here.</summary>
 /// <param name="TotalTokens">Total tokens.</param>
-/// <param name="InputTokens">Fresh input tokens.</param>
+/// <param name="InputTokens">Input tokens, the ones read from the prompt cache included.</param>
 /// <param name="OutputTokens">Output tokens.</param>
-/// <param name="CachedInputTokens">Reused input tokens.</param>
+/// <param name="CachedInputTokens">The part of the input read from the cache.</param>
 /// <param name="ReasoningTokens">Reasoning output tokens.</param>
 public readonly record struct SessionRuntimeUsageTotals(long TotalTokens, long InputTokens, long OutputTokens,
     long CachedInputTokens, long ReasoningTokens);

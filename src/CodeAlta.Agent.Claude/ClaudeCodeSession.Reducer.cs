@@ -685,12 +685,14 @@ internal sealed partial class ClaudeCodeSession
                 : new AgentSessionUsage(RateLimits: _rateLimits, Scope: AgentUsageScope.RateLimitOnly, Source: AgentUsageSource.ProviderUsage, UpdatedAt: DateTimeOffset.UtcNow);
         }
 
-        // `input_tokens` is what was not read from or written to the prompt cache: the request read all three.
-        var input = ClaudeCodeJson.GetInt64(usage, "input_tokens") ?? 0;
+        // `input_tokens` is what was not read from or written to the prompt cache: the request read all three, and
+        // the input of an operation is the three together.
+        var uncached = ClaudeCodeJson.GetInt64(usage, "input_tokens") ?? 0;
         var cacheRead = ClaudeCodeJson.GetInt64(usage, "cache_read_input_tokens") ?? 0;
         var cacheWrite = ClaudeCodeJson.GetInt64(usage, "cache_creation_input_tokens") ?? 0;
+        var input = uncached + cacheRead + cacheWrite;
         var output = _lastOutputTokens ?? ClaudeCodeJson.GetInt64(usage, "output_tokens") ?? 0;
-        var current = input + cacheRead + cacheWrite + output;
+        var current = input + output;
         var contextWindow = ResolveContextWindow();
         return new AgentSessionUsage(
             Window: new AgentWindowUsageSnapshot(
