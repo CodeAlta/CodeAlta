@@ -126,7 +126,7 @@ A session sends its whole conversation with every request. A provider bills the 
 | Codex | The id of the session as `prompt_cache_key` | Cached input |
 | Other OpenAI-compatible and Google endpoints | Nothing: the endpoint caches a repeated start by itself when it supports it | Cached input when the endpoint reports it |
 
-The [context usage](workspace.md#context-usage-popup) of a session shows the last request: its input, cached input and cache write tokens. For Copilot it also shows what GitHub billed for that request, in AI credits, as the Copilot endpoint reports it.
+The [context usage](workspace.md#context-usage-popup) of a session shows the last request: its input, and how much of it was read from the cache (cached input) and written to it (cache write). For Copilot it also shows what GitHub billed for that request, in AI credits, as the Copilot endpoint reports it.
 
 A cache is kept for a few minutes after the last request (five minutes for Anthropic models). The first request after a longer pause, a change of the tools of a session (a tool or an MCP server that is activated), and a compaction are paid at the full price, then cached again.
 

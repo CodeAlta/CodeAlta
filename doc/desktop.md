@@ -947,8 +947,9 @@ run produces events; until the host has observed usage (for example right after 
 session) it shows the last usage record of the loaded timeline. Clicking it opens the **Context usage**
 window with what the TUI popup shows: provider and model, the context window (percentage, used and
 limit, messages, active context against input headroom, indicative model limits), the last operation
-(input, output, cache read, cache write, cached input and reasoning tokens as a breakdown bar, with
-effort, initiator, duration and cost), rate limits (plan, primary and secondary windows with used
+(a breakdown bar in which each token is in one slice: uncached input, cache write, cached input,
+output without its reasoning, and reasoning; with the whole input, effort, initiator, duration and
+cost beside the title), rate limits (plan, primary and secondary windows with used
 percentage, window length and reset time) and the provider's session totals. **Copy as Markdown**
 copies the same content; **Refresh usage** reads again.
 

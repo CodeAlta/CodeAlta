@@ -513,6 +513,16 @@ error answer or an answer without limits is "not available". During a turn, `rat
 the two windows of the session usage from `unifiedWindows` (five hours first, the week second) when
 the CLI sends them, and the window that limits otherwise.
 
+## Token counts of a request
+
+`AgentOperationUsageSnapshot` is the usage of one request to the model, whatever the provider:
+
+- `InputTokens` is the whole input: what was read from the prompt cache and what was written to it are parts of it. It is what OpenAI, Codex and `Microsoft.Extensions.AI` report; a provider that reports the parts apart (the Claude Code CLI) adds them up.
+- `CachedInputTokens` is the part read from the cache, and `CacheWriteTokens` the part written to it. `CacheReadTokens` is the name some providers give the cached input: it is the same count, never one to add.
+- `OutputTokens` holds `ReasoningTokens`.
+
+`AgentInputTokenUsage.From` gives the parts (total, uncached, cache read, cache write) and is what every view uses, so that a token is counted once: the breakdown of the usage window and of the TUI, the saved usage text, `alta session metrics` and the Statistics plugin. A journal written before this rule by a provider that counted the cache beside the input holds less input than cache; `From` reads such a record as it was meant.
+
 ## Anthropic, Google, and Mistral providers
 
 `anthropic`, `google-genai`, `vertex-ai`, and `mistral` are implemented CodeAlta-runtime providers, not placeholders. They use `Microsoft.Extensions.AI.IChatClient`-based turn execution, list upstream models when supported, and can be constrained with `single_model_id`.
