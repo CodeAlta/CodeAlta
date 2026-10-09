@@ -81,6 +81,7 @@ internal static class SessionUsageAggregator
             CachedInputTokens = incoming.CachedInputTokens ?? current.CachedInputTokens,
             ReasoningTokens = incoming.ReasoningTokens ?? current.ReasoningTokens,
             Cost = incoming.Cost ?? current.Cost,
+            CostUnit = incoming.Cost is null ? current.CostUnit : incoming.CostUnit,
             DurationMs = incoming.DurationMs ?? current.DurationMs,
             Initiator = incoming.Initiator ?? current.Initiator,
             ParentToolCallId = incoming.ParentToolCallId ?? current.ParentToolCallId,

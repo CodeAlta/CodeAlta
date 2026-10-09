@@ -354,7 +354,7 @@ public sealed class DesktopHistoryTests
             new("default", "Default", ".alta/prompts/agents/default.prompt.md"));
         var usage = new AgentSessionUsage(
             new(6400, 128000, 12),
-            new("model-1", InputTokens: 100, OutputTokens: 25, ReasoningTokens: 8, Cost: .01, DurationMs: 1234, ReasoningEffort: "high"),
+            new("model-1", InputTokens: 100, OutputTokens: 25, CacheWriteTokens: 300, ReasoningTokens: 8, Cost: .01, DurationMs: 1234, ReasoningEffort: "high", CostUnit: "AI credits"),
             Scope: AgentUsageScope.CurrentWindow, Source: AgentUsageSource.ProviderUsage);
         var events = new AgentEvent[]
         {
@@ -378,6 +378,8 @@ public sealed class DesktopHistoryTests
         StringAssert.Contains(response.Entries[1].Text, "in progress");
         StringAssert.Contains(response.Entries[2].Text, "6400 / 128000 tokens");
         StringAssert.Contains(response.Entries[2].Text, "Reasoning tokens");
+        StringAssert.Contains(response.Entries[2].Text, "**Cache write tokens:** 300");
+        StringAssert.Contains(response.Entries[2].Text, "**Cost:** 0.01 AI credits");
         StringAssert.Contains(response.Entries[3].Details, "a.cs");
         Assert.IsFalse(response.Entries.Any(static value => value.BodyOmitted));
     }

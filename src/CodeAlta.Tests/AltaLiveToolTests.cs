@@ -1878,7 +1878,7 @@ public sealed class AltaLiveToolTests
                     "Usage updated.",
                     Usage: new AgentSessionUsage(
                         Window: new AgentWindowUsageSnapshot(321, 1000, 4, "test window"),
-                        LastOperation: new AgentOperationUsageSnapshot(Model: "gpt-metrics", InputTokens: 100, OutputTokens: 20, CachedInputTokens: 10),
+                        LastOperation: new AgentOperationUsageSnapshot(Model: "gpt-metrics", InputTokens: 100, OutputTokens: 20, CacheWriteTokens: 5, CachedInputTokens: 10, Cost: 0.25, CostUnit: "AI credits"),
                         Scope: AgentUsageScope.CurrentWindow,
                         Source: AgentUsageSource.ProviderUsage,
                         UpdatedAt: timestamp.AddMinutes(3))),
@@ -1934,6 +1934,11 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual(100, metricsPayload.GetProperty("currentUsage").GetProperty("lastOperation").GetProperty("inputTokens").GetInt64());
         Assert.AreEqual(20, metricsPayload.GetProperty("currentUsage").GetProperty("lastOperation").GetProperty("outputTokens").GetInt64());
         Assert.AreEqual(10, metricsPayload.GetProperty("currentUsage").GetProperty("lastOperation").GetProperty("cachedInputTokens").GetInt64());
+        Assert.AreEqual("AI credits", metricsPayload.GetProperty("currentUsage").GetProperty("lastOperation").GetProperty("costUnit").GetString());
+        // What the requests of the turn cost adds up, in the unit the provider names.
+        Assert.AreEqual(0.25, metricsPayload.GetProperty("providerOperations").GetProperty("cost").GetDouble());
+        Assert.AreEqual("AI credits", metricsPayload.GetProperty("providerOperations").GetProperty("costUnit").GetString());
+        Assert.AreEqual(5, metricsPayload.GetProperty("providerOperations").GetProperty("cacheWriteTokens").GetInt64());
 
         Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
         var resultPayload = ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.result");

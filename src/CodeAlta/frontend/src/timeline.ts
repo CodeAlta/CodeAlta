@@ -364,9 +364,11 @@ function usageSummary(text: string | null): string | null {
   const model = capture(text, /\*\*Model:\*\*\s*([^\n]+)/i);
   const input = capture(text, /\*\*Input tokens:\*\*\s*([^\n]+)/i);
   const output = capture(text, /\*\*Output tokens:\*\*\s*([^\n]+)/i);
+  const cached = capture(text, /\*\*Cached input tokens:\*\*\s*([^\n]+)/i);
   const cost = capture(text, /\*\*Cost:\*\*\s*([^\n]+)/i);
-  const tokens = [input ? `${input} in` : null, output ? `${output} out` : null].filter(Boolean).join(" · ");
-  return [model, tokens || null, cost ? `${cost} cost` : null].filter(Boolean).join(" · ") || null;
+  const tokens = [input ? `${input} in${cached && cached !== "0" ? ` (${cached} cached)` : ""}` : null, output ? `${output} out` : null].filter(Boolean).join(" · ");
+  // A cost that comes with its unit reads by itself: "0.0614 AI credits".
+  return [model, tokens || null, cost ? /[a-z]/i.test(cost) ? cost : `${cost} cost` : null].filter(Boolean).join(" · ") || null;
 }
 
 function modelPresentation(text: string | null, details: JsonObject | null) {

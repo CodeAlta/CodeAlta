@@ -53,7 +53,7 @@ internal sealed class SessionUsageService
                     || operation.ReasoningTokens is < 0 || operation.Cost is { } cost && (!double.IsFinite(cost) || cost < 0)
                     || operation.DurationMs is { } duration && (!double.IsFinite(duration) || duration < 0))
                 || usage.Window is { } envelope && (envelope.TotalContextEnvelope is <= 0 || envelope.MaxOutputTokens is <= 0 || !Label(envelope.Label))
-                || usage.LastOperation is { } labels && !(Label(labels.Model) && Label(labels.ReasoningEffort) && Label(labels.Initiator) && Label(labels.Label))
+                || usage.LastOperation is { } labels && !(Label(labels.Model) && Label(labels.ReasoningEffort) && Label(labels.Initiator) && Label(labels.Label) && Label(labels.CostUnit))
                 || usage.RateLimits is { } rates && !(Label(rates.Name) && Label(rates.PlanType) && ValidRate(rates.Primary) && ValidRate(rates.Secondary))
                 || usage.SessionTotal is { } totals && (totals.TotalTokens < 0 || totals.InputTokens < 0 || totals.OutputTokens < 0
                     || totals.CachedInputTokens < 0 || totals.ReasoningTokens < 0)))
@@ -66,7 +66,7 @@ internal sealed class SessionUsageService
                 usage.LastOperation is { } o ? new SessionUsageOperation(NullableDecimal(o.InputTokens), NullableDecimal(o.OutputTokens),
                     NullableDecimal(o.CacheReadTokens), NullableDecimal(o.CacheWriteTokens), NullableDecimal(o.CachedInputTokens),
                     NullableDecimal(o.ReasoningTokens), o.Cost?.ToString("R", CultureInfo.InvariantCulture),
-                    o.DurationMs?.ToString("R", CultureInfo.InvariantCulture), o.Model, o.ReasoningEffort, o.Initiator, o.Label) : null,
+                    o.DurationMs?.ToString("R", CultureInfo.InvariantCulture), o.Model, o.ReasoningEffort, o.Initiator, o.Label, o.CostUnit) : null,
                 usage.HadInvalidValues, usage.HadOmittedData,
                 usage.RateLimits is { } limits ? new SessionUsageRateLimits(limits.Name, limits.PlanType, RateWindow(limits.Primary), RateWindow(limits.Secondary)) : null,
                 usage.SessionTotal is { } total ? new SessionUsageTotals(Decimal(total.TotalTokens), Decimal(total.InputTokens),
@@ -130,7 +130,7 @@ internal sealed record SessionUsageWindow(string? CurrentTokens, string? TokenLi
     string? Label = null, string? TotalContextEnvelope = null, string? MaxOutputTokens = null);
 internal sealed record SessionUsageOperation(string? InputTokens, string? OutputTokens, string? CacheReadTokens,
     string? CacheWriteTokens, string? CachedInputTokens, string? ReasoningTokens, string? Cost, string? DurationMs,
-    string? Model = null, string? ReasoningEffort = null, string? Initiator = null, string? Label = null);
+    string? Model = null, string? ReasoningEffort = null, string? Initiator = null, string? Label = null, string? CostUnit = null);
 internal sealed record SessionUsageRateLimits(string? Name, string? PlanType, SessionUsageRateWindow? Primary, SessionUsageRateWindow? Secondary);
 internal sealed record SessionUsageRateWindow(int? UsedPercent, string? ResetsAt, string? WindowDurationMinutes);
 internal sealed record SessionUsageTotals(string TotalTokens, string InputTokens, string OutputTokens, string CachedInputTokens, string ReasoningTokens);

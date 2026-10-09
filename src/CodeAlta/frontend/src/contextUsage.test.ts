@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionUsageObservation } from "#neoastra";
-import { compactTokens, contextSegments, contextUsage, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
+import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
   persistedOperation, persistedUsageFields, rateWindowSummary, usageIntent, usageMarkdown, usageSegments } from "./contextUsage";
 
 const record = "Idle\r\n\n**Context:** 124701 / 272000 tokens (45.8%)\r\n\n**Messages in context:** 145\r\n\n**Model:** gpt-test\r\n\n**Input tokens:** 88319\r\n\n**Output tokens:** 270\r\n\n**Cached input tokens:** 87936\r\n\n**Reasoning tokens:** 0\r\n\n**Duration:** 1500.5 ms\r\n\n**Usage scope/source:** CurrentWindow · ProviderUsage";
@@ -9,7 +9,7 @@ const observation = (patch: Partial<SessionUsageObservation> = {}): SessionUsage
   scope: "CurrentWindow", source: "CodexTokenCountEvent", hadInvalidValues: false, hadOmittedData: false,
   window: { currentTokens: "100", tokenLimit: "1000", messageCount: 3, label: null, totalContextEnvelope: "1200", maxOutputTokens: null },
   lastOperation: { inputTokens: "10", outputTokens: "20", cacheReadTokens: null, cacheWriteTokens: null, cachedInputTokens: "5", reasoningTokens: null,
-    cost: null, durationMs: null, model: "gpt-test", reasoningEffort: "high", initiator: null, label: null },
+    cost: null, durationMs: null, model: "gpt-test", reasoningEffort: "high", initiator: null, label: null, costUnit: null },
   rateLimits: null, sessionTotal: null, ...patch });
 
 test("token counts are shortened or grouped without losing Int64 precision", () => {
@@ -52,6 +52,21 @@ test("a persisted usage record yields the context line, its other fields and the
   assert.equal(operation.reasoningTokens, "0");
   assert.equal(operation.durationMs, "1500.5");
   assert.equal(persistedOperation("**Context:** 1 / 2 tokens"), null);
+});
+
+test("a cost is shown with the unit the provider names, and as reported without one", () => {
+  const operation = observation().lastOperation!;
+  assert.equal(costText(operation), null);
+  assert.equal(costText({ ...operation, cost: "0.01" }), "0.01");
+  assert.equal(costText({ ...operation, cost: "0.0613625", costUnit: "AI credits" }), "0.0614 AI credits");
+  assert.equal(costText({ ...operation, cost: "12", costUnit: "AI credits" }), "12 AI credits");
+  assert.match(usageMarkdown({ provider: "copilot", model: "claude-test", usage: null, messages: null, window: null,
+    operation: { ...operation, cacheWriteTokens: "300", cost: "0.1728", costUnit: "AI credits" }, rateLimits: null, sessionTotal: null }),
+    /cache write 300 · cache 5 · cost 0\.1728 AI credits/);
+  // A saved record carries the unit in its cost line.
+  const saved = persistedOperation("**Context:** 1 / 2 tokens\n\n**Cache write tokens:** 300\n\n**Cost:** 0.1728 AI credits")!;
+  assert.equal(saved.cacheWriteTokens, "300");
+  assert.equal(costText(saved), "0.1728 AI credits");
 });
 
 test("the meter turns warning at 75% and danger at 90%, as in the TUI", () => {

@@ -52,7 +52,7 @@ export function validateUsage(target: UsageTarget, input: unknown): SessionUsage
     if (!object(usage.lastOperation) || !["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens",
       "cachedInputTokens", "reasoningTokens"].every(key => optionalDecimal((usage.lastOperation as Record<string, unknown>)[key])) ||
       !finiteText(usage.lastOperation.cost) || !finiteText(usage.lastOperation.durationMs) ||
-      !["model", "reasoningEffort", "initiator", "label"].every(key => label((usage.lastOperation as Record<string, unknown>)[key]))) return null;
+      !["model", "reasoningEffort", "initiator", "label", "costUnit"].every(key => label((usage.lastOperation as Record<string, unknown>)[key]))) return null;
   }
   if (usage.rateLimits != null) {
     if (!object(usage.rateLimits) || !label(usage.rateLimits.name) || !label(usage.rateLimits.planType) ||

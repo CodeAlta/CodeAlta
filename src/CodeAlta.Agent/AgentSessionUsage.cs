@@ -78,6 +78,7 @@ public sealed record AgentWindowUsageSnapshot(
 /// <param name="ParentToolCallId">The parent tool call identifier when this operation belongs to a sub-agent or tool request.</param>
 /// <param name="ReasoningEffort">The reasoning-effort setting used for the operation when reported.</param>
 /// <param name="Label">The UI label describing the operation snapshot.</param>
+/// <param name="CostUnit">The unit of <paramref name="Cost"/> when the provider names one, such as <c>AI credits</c>.</param>
 public sealed record AgentOperationUsageSnapshot(
     string? Model = null,
     long? InputTokens = null,
@@ -91,7 +92,8 @@ public sealed record AgentOperationUsageSnapshot(
     string? Initiator = null,
     string? ParentToolCallId = null,
     string? ReasoningEffort = null,
-    string? Label = null);
+    string? Label = null,
+    string? CostUnit = null);
 
 /// <summary>
 /// Represents normalized rate-limit information for a session.

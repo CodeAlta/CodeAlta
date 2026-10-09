@@ -298,8 +298,11 @@ internal sealed partial class WorkspaceService
                 AppendMetric(text, "Input tokens", operation.InputTokens);
                 AppendMetric(text, "Output tokens", operation.OutputTokens);
                 AppendMetric(text, "Cached input tokens", operation.CachedInputTokens);
+                AppendMetric(text, "Cache write tokens", operation.CacheWriteTokens);
                 AppendMetric(text, "Reasoning tokens", operation.ReasoningTokens);
-                if (operation.Cost is { } cost) text.Append("\n**Cost:** ").AppendLine(cost.ToString(CultureInfo.InvariantCulture));
+                if (operation.Cost is { } cost)
+                    text.Append("\n**Cost:** ").AppendLine(string.IsNullOrWhiteSpace(operation.CostUnit) ? cost.ToString(CultureInfo.InvariantCulture)
+                        : $"{cost.ToString("0.####", CultureInfo.InvariantCulture)} {operation.CostUnit}");
                 if (operation.DurationMs is { } duration) text.Append("\n**Duration:** ").Append(duration.ToString("0.##", CultureInfo.InvariantCulture)).AppendLine(" ms");
                 if (!string.IsNullOrWhiteSpace(operation.ReasoningEffort)) text.Append("\n**Reasoning effort:** ").AppendLine(operation.ReasoningEffort);
             }

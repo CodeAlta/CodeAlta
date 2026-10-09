@@ -1,4 +1,5 @@
 import type { SessionRuntimeScopedResponse, SessionUsageRequest, SessionUsageResponse } from "#neoastra";
+import { costText } from "./contextUsage";
 import { projectRuntimeObservation, type RuntimeTarget } from "./runtimeObservations";
 import { validateUsage, usageMessage } from "./sessionUsage";
 import { correlatedIdentity } from "./runtimeState";
@@ -58,7 +59,7 @@ export async function readSessionInfoObservations(target: RuntimeTarget, readRun
     ["Reported window tokens / limit / messages", `${show(observation.window?.currentTokens)} / ${show(observation.window?.tokenLimit)} / ${show(observation.window?.messageCount)}`],
     ["Last-operation input / output", `${show(observation.lastOperation?.inputTokens)} / ${show(observation.lastOperation?.outputTokens)}`],
     ["Cache read / write / reused input / reasoning", `${show(observation.lastOperation?.cacheReadTokens)} / ${show(observation.lastOperation?.cacheWriteTokens)} / ${show(observation.lastOperation?.cachedInputTokens)} / ${show(observation.lastOperation?.reasoningTokens)}`],
-    ["Reported cost (currency unspecified) / duration (ms)", `${show(observation.lastOperation?.cost)} / ${show(observation.lastOperation?.durationMs)}`],
+    ["Reported cost (currency unspecified) / duration (ms)", `${show(costText(observation.lastOperation))} / ${show(observation.lastOperation?.durationMs)}`],
     ["Invalid values / omitted data", `${observation.hadInvalidValues ? "Yes" : "No"} / ${observation.hadOmittedData ? "Yes" : "No"}`]);
   return { runtime, identity, usage: fields };
 }

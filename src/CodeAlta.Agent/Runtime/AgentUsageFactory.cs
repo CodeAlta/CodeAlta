@@ -12,7 +12,8 @@ internal static class AgentUsageFactory
         long? totalTokens,
         long? cachedInputTokens,
         long? reasoningTokens,
-        DateTimeOffset updatedAt)
+        DateTimeOffset updatedAt,
+        long? cacheWriteTokens = null)
     {
         var currentTokens = totalTokens ?? Sum(inputTokens, outputTokens);
         var budget = GetModelTokenBudget(modelInfo);
@@ -33,6 +34,7 @@ internal static class AgentUsageFactory
                 Model: string.IsNullOrWhiteSpace(modelId) ? modelInfo?.Id : modelId,
                 InputTokens: inputTokens,
                 OutputTokens: outputTokens,
+                CacheWriteTokens: cacheWriteTokens,
                 CachedInputTokens: cachedInputTokens,
                 ReasoningTokens: reasoningTokens,
                 Label: string.IsNullOrWhiteSpace(modelId)
@@ -233,6 +235,7 @@ internal static class AgentUsageFactory
             CachedInputTokens = incoming.CachedInputTokens ?? current.CachedInputTokens,
             ReasoningTokens = incoming.ReasoningTokens ?? current.ReasoningTokens,
             Cost = incoming.Cost ?? current.Cost,
+            CostUnit = incoming.Cost is null ? current.CostUnit : incoming.CostUnit,
             DurationMs = incoming.DurationMs ?? current.DurationMs,
             Initiator = incoming.Initiator ?? current.Initiator,
             ParentToolCallId = incoming.ParentToolCallId ?? current.ParentToolCallId,

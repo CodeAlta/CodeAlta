@@ -2351,6 +2351,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         long outputTokens = 0;
         long cachedInputTokens = 0;
         long reasoningTokens = 0;
+        long cacheWriteTokens = 0;
+        double? cost = null;
+        string? costUnit = null;
         var operationCount = 0;
 
         foreach (var usage in usageUpdates)
@@ -2371,9 +2374,16 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             outputTokens += operation.OutputTokens ?? 0;
             cachedInputTokens += operation.CachedInputTokens ?? 0;
             reasoningTokens += operation.ReasoningTokens ?? 0;
+            cacheWriteTokens += operation.CacheWriteTokens ?? 0;
+            // Costs add up in one unit: the unit of the first operation that reports one.
+            if (operation.Cost is { } operationCost && (cost is null || string.Equals(costUnit, operation.CostUnit, StringComparison.Ordinal)))
+            {
+                cost = (cost ?? 0) + operationCost;
+                costUnit = operation.CostUnit;
+            }
         }
 
-        return new ProviderOperationTotals(operationCount, inputTokens, outputTokens, cachedInputTokens, reasoningTokens);
+        return new ProviderOperationTotals(operationCount, inputTokens, outputTokens, cachedInputTokens, reasoningTokens, cacheWriteTokens, cost, costUnit);
     }
 
     private static int CountWords(string text)
@@ -4980,6 +4990,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 usage.LastOperation.ReasoningTokens,
                 usage.LastOperation.DurationMs,
                 usage.LastOperation.Cost,
+                usage.LastOperation.CostUnit,
                 usage.LastOperation.Initiator,
                 usage.LastOperation.ParentToolCallId,
                 usage.LastOperation.ReasoningEffort,
@@ -4998,6 +5009,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             totals.OutputTokens,
             totals.CachedInputTokens,
             totals.ReasoningTokens,
+            totals.CacheWriteTokens,
+            totals.Cost,
+            totals.CostUnit,
         };
 
     private static double? ToMilliseconds(TimeSpan? value)
@@ -5672,7 +5686,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         long InputTokens,
         long OutputTokens,
         long CachedInputTokens,
-        long ReasoningTokens);
+        long ReasoningTokens,
+        long CacheWriteTokens = 0,
+        double? Cost = null,
+        string? CostUnit = null);
 
     private sealed record ProviderCapability(
         string ProviderKey,

@@ -11,7 +11,7 @@ const base: SessionUsageResponse = { status: "ok", hostEpoch: target.epoch, sess
     sourceUpdatedAt: null, eventTimestamp: "2026-09-25T10:00:00Z", hadInvalidValues: true, hadOmittedData: true,
     window: { currentTokens: "0", tokenLimit: "9223372036854775807", messageCount: null, label: null, totalContextEnvelope: null, maxOutputTokens: null },
     lastOperation: { inputTokens: null, outputTokens: "0", cacheReadTokens: null, cacheWriteTokens: null,
-      cachedInputTokens: null, reasoningTokens: null, cost: "0.01", durationMs: null, model: null, reasoningEffort: null, initiator: null, label: null },
+      cachedInputTokens: null, reasoningTokens: null, cost: "0.01", durationMs: null, model: null, reasoningEffort: null, initiator: null, label: null, costUnit: null },
     rateLimits: null, sessionTotal: null } };
 
 test("usage validates exact bounded decimal strings, zero, unknown, flags and attachment replacement", () => {
@@ -41,7 +41,7 @@ test("usage refuses foreign identity, malformed/overflow values, status pollutio
   const empty = { ...base, status: "no_observation", observation: null };
   const rich = { ...base, observation: { ...base.observation!,
     window: { ...base.observation!.window!, label: "Active context window", totalContextEnvelope: "400000", maxOutputTokens: "128000" },
-    lastOperation: { ...base.observation!.lastOperation!, model: "gpt-test", reasoningEffort: "high", initiator: "agent", label: "Last turn" },
+    lastOperation: { ...base.observation!.lastOperation!, model: "gpt-test", reasoningEffort: "high", initiator: "agent", label: "Last turn", costUnit: "AI credits" },
     rateLimits: { name: "Codex", planType: "pro", primary: { usedPercent: 40, resetsAt: "2026-09-25T12:00:00.0000000+00:00", windowDurationMinutes: "300" }, secondary: null },
     sessionTotal: { totalTokens: "900", inputTokens: "500", outputTokens: "300", cachedInputTokens: "60", reasoningTokens: "40" } } };
   assert.equal(validateUsage(target, rich)?.observation?.rateLimits?.primary?.usedPercent, 40);

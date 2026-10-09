@@ -4,7 +4,7 @@ import { providerUsage, sessionUsage, type SessionUsageObservation, type Session
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import { AppWindow } from "./AppWindow";
-import { compactTokens, contextSegments, contextUsage, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
+import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
   persistedOperation, persistedUsageFields, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
 import { UsageLimitList, usageNote, useProviderUsage } from "./UsageLimits";
 import { limitsMarkdown, liveLimitsAreCurrent, planLabel, providerLimits, sessionLimits } from "./subscriptionUsage";
@@ -138,7 +138,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const operationFacts = operation ? [operation.reasoningEffort && t("effort {effort}", { effort: operation.reasoningEffort }),
     operation.initiator && t("initiator {initiator}", { initiator: operation.initiator }),
     operation.durationMs && Number.isFinite(Number(operation.durationMs)) && t("duration {duration} ms", { duration: String(Math.round(Number(operation.durationMs))) }),
-    operation.cost && t("cost {cost}", { cost: operation.cost })].filter((value): value is string => !!value) : [];
+    operation.cost && t("cost {cost}", { cost: costText(operation) ?? operation.cost })].filter((value): value is string => !!value) : [];
   // What the turns of the session reported is shown while it is recent; otherwise the provider is asked.
   const live = useMemo(() => sessionLimits(limits), [limits]);
   const liveCurrent = liveLimitsAreCurrent(live, updated, Date.now());

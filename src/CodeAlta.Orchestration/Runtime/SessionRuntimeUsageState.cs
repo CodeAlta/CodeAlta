@@ -38,10 +38,11 @@ public readonly record struct SessionRuntimeUsageWindow(long? CurrentTokens, lon
 /// <param name="ReasoningEffort">Reported bounded reasoning-effort setting.</param>
 /// <param name="Initiator">Reported bounded initiator of the operation.</param>
 /// <param name="Label">Reported bounded operation label.</param>
+/// <param name="CostUnit">Reported bounded unit of the cost, such as AI credits; null when the provider names none.</param>
 public readonly record struct SessionRuntimeUsageOperation(long? InputTokens, long? OutputTokens,
     long? CacheReadTokens, long? CacheWriteTokens, long? CachedInputTokens, long? ReasoningTokens,
     double? Cost, double? DurationMs, string? Model = null, string? ReasoningEffort = null,
-    string? Initiator = null, string? Label = null);
+    string? Initiator = null, string? Label = null, string? CostUnit = null);
 
 /// <summary>One provider-reported rate-limit window from one typed usage event.</summary>
 /// <param name="UsedPercent">Consumed share of the window, 0 to 100.</param>
@@ -117,7 +118,7 @@ public sealed record SessionRuntimeUsageObservation(long Sequence, DateTimeOffse
             ? new SessionRuntimeUsageOperation(nonnegative(o.InputTokens), nonnegative(o.OutputTokens),
                 nonnegative(o.CacheReadTokens), nonnegative(o.CacheWriteTokens), nonnegative(o.CachedInputTokens),
                 nonnegative(o.ReasoningTokens), finite(o.Cost), finite(o.DurationMs),
-                text(o.Model), text(o.ReasoningEffort), text(o.Initiator), text(o.Label))
+                text(o.Model), text(o.ReasoningEffort), text(o.Initiator), text(o.Label), text(o.CostUnit))
             : null;
         var rateLimits = usage.RateLimits is { } r
             ? new SessionRuntimeUsageRateLimits(text(r.Name), text(r.PlanType), rateWindow(r.Primary), rateWindow(r.Secondary))

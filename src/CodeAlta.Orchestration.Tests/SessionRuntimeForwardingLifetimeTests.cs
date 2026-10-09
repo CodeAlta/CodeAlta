@@ -327,7 +327,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         var reset = new DateTimeOffset(2026, 9, 25, 12, 0, 0, TimeSpan.Zero);
         await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null, usage: new AgentSessionUsage(
             Window: new AgentWindowUsageSnapshot(100, 1000, 3, "Active context window", 1200, 200),
-            LastOperation: new AgentOperationUsageSnapshot("gpt-test", 10, 20, ReasoningEffort: "high", Initiator: "agent", Label: "Last turn"),
+            LastOperation: new AgentOperationUsageSnapshot("gpt-test", 10, 20, Cost: 0.25, ReasoningEffort: "high", Initiator: "agent", Label: "Last turn", CostUnit: "AI credits"),
             RateLimits: new AgentRateLimitSummary("Codex", "pro", new AgentRateLimitWindow(40, reset, 300), new AgentRateLimitWindow(140, null, -1)),
             Details: new CodexSessionUsageDetails(TotalUsage: new CodexTokenUsage(60, 500, 300, 40, 900))), timestamp: DateTimeOffset.UnixEpoch);
         var observation = (await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId))).Observation!;
@@ -338,6 +338,8 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         Assert.AreEqual("high", observation.LastOperation?.ReasoningEffort);
         Assert.AreEqual("agent", observation.LastOperation?.Initiator);
         Assert.AreEqual("Last turn", observation.LastOperation?.Label);
+        Assert.AreEqual(0.25, observation.LastOperation?.Cost);
+        Assert.AreEqual("AI credits", observation.LastOperation?.CostUnit);
         Assert.AreEqual("Codex", observation.RateLimits?.Name);
         Assert.AreEqual("pro", observation.RateLimits?.PlanType);
         Assert.AreEqual(new SessionRuntimeUsageRateWindow(40, reset, 300), observation.RateLimits?.Primary);

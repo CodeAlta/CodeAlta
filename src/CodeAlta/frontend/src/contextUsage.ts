@@ -62,9 +62,9 @@ export function persistedOperation(text: string | null | undefined): SessionUsag
   const fields = new Map(persistedUsageFields(text).map(field => [field.label.toLowerCase(), field.value]));
   const tokens = (label: string) => { const value = fields.get(label); return value && /^\d+$/.test(value) ? value : null; };
   const operation: SessionUsageOperation = { inputTokens: tokens("input tokens"), outputTokens: tokens("output tokens"), cacheReadTokens: null,
-    cacheWriteTokens: null, cachedInputTokens: tokens("cached input tokens"), reasoningTokens: tokens("reasoning tokens"),
+    cacheWriteTokens: tokens("cache write tokens"), cachedInputTokens: tokens("cached input tokens"), reasoningTokens: tokens("reasoning tokens"),
     cost: fields.get("cost") ?? null, durationMs: fields.get("duration")?.replace(/\s*ms$/i, "") ?? null,
-    model: fields.get("model") ?? null, reasoningEffort: fields.get("reasoning effort") ?? null, initiator: null, label: null };
+    model: fields.get("model") ?? null, reasoningEffort: fields.get("reasoning effort") ?? null, initiator: null, label: null, costUnit: null };
   return Object.values(operation).some(value => value !== null) ? operation : null;
 }
 
@@ -89,6 +89,14 @@ export function mergeUsageObservation(current: SessionUsageObservation | null, i
   } : incoming.rateLimits ?? current.rateLimits ?? null;
   return { ...incoming, window: fields(current.window, incoming.window), lastOperation: fields(current.lastOperation, incoming.lastOperation),
     rateLimits: limits, sessionTotal: incoming.sessionTotal ?? current.sessionTotal ?? null };
+}
+
+/** The cost of an operation with its unit when the provider names one ("0.0614 AI credits"), the reported number otherwise. */
+export function costText(operation: Pick<SessionUsageOperation, "cost" | "costUnit"> | null | undefined): string | null {
+  if (!operation?.cost) return null;
+  if (!operation.costUnit) return operation.cost;
+  const value = Number(operation.cost);
+  return `${Number.isFinite(value) ? String(Number(value.toFixed(4))) : operation.cost} ${operation.costUnit}`;
 }
 
 /** A proportional slice of a breakdown bar. */
@@ -151,7 +159,7 @@ export function usageMarkdown(input: {
         operation.inputTokens && `input ${groupedTokens(operation.inputTokens)}`, operation.outputTokens && `output ${groupedTokens(operation.outputTokens)}`,
         operation.cacheReadTokens && `cache read ${groupedTokens(operation.cacheReadTokens)}`, operation.cacheWriteTokens && `cache write ${groupedTokens(operation.cacheWriteTokens)}`,
         operation.cachedInputTokens && `cache ${groupedTokens(operation.cachedInputTokens)}`, operation.reasoningTokens && `reasoning ${groupedTokens(operation.reasoningTokens)}`,
-        operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${operation.cost}`].filter(Boolean);
+        operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
       if (tokens.length) lines.push(`- ${operation.label ?? "Last operation"}: ${tokens.join(" · ")}`);
     }
   }
