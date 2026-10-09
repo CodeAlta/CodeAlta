@@ -1004,6 +1004,63 @@ public sealed class AgentRuntimeTests
             .Count(line => line.StartsWith(prefix) &&
                            !line.StartsWith(new string(prefix, 3), StringComparison.Ordinal));
 
+    [TestMethod]
+    public async Task PermissionModeSetOnASession_ReachesItsNextRuns_AndARunKeepsTheOneItStartedWith()
+    {
+        using var temp = TestTempDirectory.Create();
+        var executor = new ModeRecordingTurnExecutor();
+        var agentRuntime = CreateAgentRuntime(temp.Path, executor);
+        await using var session = await agentRuntime.CreateSessionAsync(
+                new AgentSessionCreateOptions
+                {
+                    ProviderKey = "openai",
+                    Model = "gpt-5.4",
+                    WorkingDirectory = "C:\\repo\\modes",
+                    PermissionMode = " acceptEdits ",
+                    OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                })
+            .ConfigureAwait(false);
+        var modes = (IAgentPermissionModeProvider)session;
+        Assert.AreEqual("acceptEdits", modes.PermissionMode);
+
+        // The mode changes while the first run goes on: its second turn keeps the mode it started with.
+        executor.DuringFirstTurn = () => modes.SetPermissionMode("dontAsk");
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("one") }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("two") }).ConfigureAwait(false);
+        modes.SetPermissionMode(null);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("three") }).ConfigureAwait(false);
+
+        CollectionAssert.AreEqual(
+            new[] { "acceptEdits", "acceptEdits", "dontAsk", null },
+            executor.Requests.Select(static request => request.PermissionMode).ToArray());
+    }
+
+    private sealed class ModeRecordingTurnExecutor : IModelProviderTurnExecutor
+    {
+        public List<AgentTurnRequest> Requests { get; } = [];
+
+        public Action? DuringFirstTurn { get; set; }
+
+        public Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            var first = Requests.Count == 1;
+            if (first)
+            {
+                DuringFirstTurn?.Invoke();
+            }
+
+            return Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text($"Turn #{Requests.Count}")]),
+                RequiresProviderFollowUp = first,
+            });
+        }
+    }
+
     private sealed class RecordingTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
     {
         public List<AgentTurnRequest> Requests { get; } = [];

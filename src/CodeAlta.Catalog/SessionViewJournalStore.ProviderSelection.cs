@@ -43,6 +43,8 @@ public sealed partial class SessionViewJournalStore
         local.ProviderKey = target.ProviderId.Value;
         local.ModelId = null;
         local.ReasoningEffort = null;
+        // The modes are those of a provider: the session starts on the new one with its configured mode.
+        local.PermissionMode = null;
         var selected = SessionViewJournalHeader.FromDescriptor(session).ToDescriptor();
         selected.ProviderId = target.ProviderId.Value;
         selected.ProviderKey = target.ProviderId.Value;

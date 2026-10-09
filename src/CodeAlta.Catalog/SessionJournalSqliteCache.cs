@@ -263,6 +263,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                             local_model_id = $local_model_id,
                             local_reasoning_effort = $local_reasoning_effort,
                             local_agent_prompt_id = $local_agent_prompt_id,
+                            local_permission_mode = $local_permission_mode,
                             archived = $archived,
                             message_count = $message_count,
                             local_parent_session_id = $local_parent_session_id,
@@ -279,6 +280,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     AddParameter(command, "$local_model_id", NormalizeOptionalText(state.ModelId));
                     AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(state.ReasoningEffort));
                     AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(state.AgentPromptId));
+                    AddParameter(command, "$local_permission_mode", NormalizeOptionalText(state.PermissionMode));
                     AddParameter(command, "$archived", state.Archived ? 1 : 0);
                     AddParameter(command, "$message_count", state.MessageCount);
                     AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
@@ -646,6 +648,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     local_model_id TEXT,
                     local_reasoning_effort TEXT,
                     local_agent_prompt_id TEXT,
+                    local_permission_mode TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
                     message_count INTEGER,
                     local_parent_session_id TEXT,
@@ -667,10 +670,51 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        await AddPermissionModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_updated ON session_projection_cache(updated_at_utc_ticks DESC);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE UNIQUE INDEX IF NOT EXISTS ux_session_projection_cache_journal_path ON session_projection_cache(journal_path COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
+    }
+
+    // A cache written before the permission mode of a session was kept has no column for it, and rows that do not
+    // say it: the column is added and the rows are read again from the journals.
+    private static async Task AddPermissionModeColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_permission_mode';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                ALTER TABLE session_projection_cache ADD COLUMN local_permission_mode TEXT;
+                DELETE FROM session_projection_cache;
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO session_projection_cache_metadata (key, value)
+                VALUES ($key, $value)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                """;
+            AddParameter(command, "$key", CacheCompleteMetadataKey);
+            AddParameter(command, "$value", CacheIncompleteValue);
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ExecuteSchemaCommandAsync(
@@ -754,6 +798,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_model_id,
                 local_reasoning_effort,
                 local_agent_prompt_id,
+                local_permission_mode,
                 archived,
                 message_count,
                 local_parent_session_id,
@@ -789,6 +834,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_model_id,
                 $local_reasoning_effort,
                 $local_agent_prompt_id,
+                $local_permission_mode,
                 $archived,
                 $message_count,
                 $local_parent_session_id,
@@ -823,6 +869,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_model_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_model_id ELSE session_projection_cache.local_model_id END,
                 local_reasoning_effort = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_reasoning_effort ELSE session_projection_cache.local_reasoning_effort END,
                 local_agent_prompt_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_agent_prompt_id ELSE session_projection_cache.local_agent_prompt_id END,
+                local_permission_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_permission_mode ELSE session_projection_cache.local_permission_mode END,
                 archived = CASE WHEN excluded.local_state_cached = 1 THEN excluded.archived ELSE session_projection_cache.archived END,
                 message_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.message_count ELSE session_projection_cache.message_count END,
                 local_parent_session_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_parent_session_id ELSE session_projection_cache.local_parent_session_id END,
@@ -862,6 +909,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_model_id", NormalizeOptionalText(localState?.ModelId));
         AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(localState?.ReasoningEffort));
         AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(localState?.AgentPromptId));
+        AddParameter(command, "$local_permission_mode", NormalizeOptionalText(localState?.PermissionMode));
         AddParameter(command, "$archived", localState?.Archived == true ? 1 : 0);
         AddParameter(command, "$message_count", localState?.MessageCount);
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(localState?.ParentSessionId));
@@ -947,7 +995,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 Archived: GetInt64(reader, "archived") != 0,
                 MessageCount: GetNullableInt32(reader, "message_count"),
                 ParentSessionId: GetString(reader, "local_parent_session_id"),
-                CreatedByJson: GetString(reader, "created_by_json"));
+                CreatedByJson: GetString(reader, "created_by_json"))
+            {
+                PermissionMode = GetString(reader, "local_permission_mode"),
+            };
         }
 
         return new SqliteSessionProjectionRow(
@@ -1002,7 +1053,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             Archived: state.Archived,
             MessageCount: state.MessageCount,
             ParentSessionId: NormalizeOptionalText(state.ParentSessionId),
-            CreatedByJson: SerializeCreatedBy(state.CreatedBy));
+            CreatedByJson: SerializeCreatedBy(state.CreatedBy))
+        {
+            PermissionMode = NormalizeOptionalText(state.PermissionMode),
+        };
     }
 
     private static string? SerializeCreatedBy(AltaActorProvenance? createdBy)

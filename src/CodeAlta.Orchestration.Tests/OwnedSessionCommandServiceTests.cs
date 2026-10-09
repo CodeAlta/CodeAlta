@@ -402,6 +402,86 @@ public sealed class OwnedSessionCommandServiceTests
     }
 
     [TestMethod]
+    public void PermissionMode_IsOneOfTheModesTheProviderOffersASession()
+    {
+        var selection = new OwnedSessionSelection("provider", "default", "model", null);
+        var choices = new OwnedSelectionChoices(selection, [new("default", "Default")], [new("model", "Model", [])])
+            { PermissionModes = ["default", "acceptEdits"] };
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection), "No mode keeps the one of the session.");
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection with { PermissionMode = "acceptEdits" }));
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection with { PermissionMode = OwnedSessionSelection.ProviderPermissionMode }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { PermissionMode = "plan" }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { PermissionMode = "AcceptEdits" }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { PermissionMode = "unknown" }));
+
+        // A provider without modes is only sent back to its own.
+        var none = choices with { PermissionModes = [] };
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(none, selection with { PermissionMode = "default" }));
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(none, selection with { PermissionMode = OwnedSessionSelection.ProviderPermissionMode }));
+    }
+
+    [TestMethod]
+    public Task ChosenPermissionMode_IsGivenToTheAttachedSessionWithoutAttachingItAgain_AndKept() => Fixture.RunAsync(async f =>
+    {
+        f.Host.ModelProviderRegistry.RegisterOrReplace(
+            f.Provider.Descriptor with { PermissionModes = ["default", "acceptEdits", "plan"], DefaultPermissionMode = "plan" }, f.Provider.CreateRuntime);
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAll();
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        // The plan mode stays one of the configuration of the provider, which a session without a mode of its own keeps.
+        CollectionAssert.AreEqual(new[] { "default", "acceptEdits" }, choices.PermissionModes.ToArray());
+        Assert.AreEqual("plan", choices.DefaultPermissionMode);
+        Assert.IsNull(choices.Current.PermissionMode);
+        var current = choices.Current;
+
+        // Each send ends with the idle state of its run, as a provider tells it: the attachment is then free to change.
+        async Task<OwnedSessionCommandResult> SendAsync(string requestId, OwnedSessionSelection? selection)
+        {
+            var result = await f.Observe(f.Accept(f.AdmitSend(new OwnedTextSendRequest(requestId, f.SessionId, "input") { Selection = selection })).Completion);
+            if (result.Outcome != OwnedSessionCommandOutcome.Completed) return result;
+            var marker = Guid.NewGuid().ToString("N");
+            f.Provider.RecordIdle(marker);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await f.Track(Committed());
+            return result;
+
+            async Task Committed()
+            {
+                await foreach (var value in f.Host.RuntimeService.StreamEventsAsync(timeout.Token))
+                    if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent update }
+                        && update.Kind == AgentSessionUpdateKind.Idle && update.Message == marker) return;
+                Assert.Fail("Runtime closed before the idle event committed.");
+            }
+        }
+
+        async Task<string?> CurrentModeAsync() => (await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId)))!.Current.PermissionMode;
+
+        // The first send attaches the session in the chosen mode.
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await SendAsync("attach", current with { PermissionMode = "acceptEdits" })).Outcome);
+        Assert.AreEqual("acceptEdits", f.Provider.Options!.PermissionMode);
+        var attachments = f.Provider.Creates + f.Provider.Resumes;
+        Assert.AreEqual("acceptEdits", await CurrentModeAsync());
+
+        // A send that chooses nothing keeps it; one that chooses another gives it to the running attachment.
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await SendAsync("keep", null)).Outcome);
+        Assert.AreEqual("acceptEdits", f.Provider.SessionPermissionMode);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await SendAsync("switch", current with { PermissionMode = "default" })).Outcome);
+        Assert.AreEqual("default", f.Provider.SessionPermissionMode);
+        Assert.AreEqual("default", await CurrentModeAsync());
+
+        // The mode of the provider is chosen by its reserved value; plan is refused before anything changes.
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, (await SendAsync("plan", current with { PermissionMode = "plan" })).Outcome);
+        Assert.AreEqual("default", f.Provider.SessionPermissionMode);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed,
+            (await SendAsync("provider", current with { PermissionMode = OwnedSessionSelection.ProviderPermissionMode })).Outcome);
+        Assert.IsNull(f.Provider.SessionPermissionMode);
+        Assert.IsNull(await CurrentModeAsync());
+        Assert.AreEqual(attachments, f.Provider.Creates + f.Provider.Resumes, "A change of mode does not attach the session again.");
+        Assert.AreEqual(0, f.Provider.Aborts);
+    });
+
+    [TestMethod]
     public Task DifferentProviderSelection_IsAdmittedThenFailsPreparationWithoutReplacingSource() => Fixture.RunAsync(async f =>
     {
         // This helper completes a real owned Send and commits the fake idle event; it does not compact.
@@ -1978,6 +2058,7 @@ public sealed class OwnedSessionCommandServiceTests
         internal int EarlyDisposals => Volatile.Read(ref _earlyDisposals);
         internal string? LastSessionId { get; private set; }
         internal AgentSessionCreateOptions? Options { get; private set; }
+        internal string? SessionPermissionMode { get; private set; }
         internal AgentInput? Input { get; private set; }
         internal CancellationToken SendToken { get; private set; }
         internal AgentPermissionDecisionKind? PermissionDecision { get; private set; }
@@ -2021,6 +2102,7 @@ public sealed class OwnedSessionCommandServiceTests
             {
                 LastSessionId = sessionId;
                 Options = options;
+                SessionPermissionMode = options.PermissionMode;
                 if (RequestPreparationPermission)
                     PreparationDecision = (await options.OnPermissionRequest(CommandRequest(), CancellationToken.None).ConfigureAwait(false)).Kind;
                 PreparationStarted.TrySetResult();
@@ -2067,9 +2149,11 @@ public sealed class OwnedSessionCommandServiceTests
             public ValueTask DisposeAsync() => owner.DisposeAsync();
         }
 
-        private class Session(ControlledProvider owner, string sessionId) : IAgentSession
+        private class Session(ControlledProvider owner, string sessionId) : IAgentSession, IAgentPermissionModeProvider
         {
             public ModelProviderId ProviderId => owner.Descriptor.ProviderId;
+            public string? PermissionMode => owner.SessionPermissionMode;
+            public void SetPermissionMode(string? permissionMode) => owner.SessionPermissionMode = permissionMode;
             public string SessionId => sessionId;
             public string? WorkspacePath => owner.Options?.WorkingDirectory;
             public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)

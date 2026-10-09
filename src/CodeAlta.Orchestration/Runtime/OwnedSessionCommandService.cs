@@ -374,7 +374,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             (string.IsNullOrWhiteSpace(selection.ProviderKey) || selection.ProviderKey.Length > 256
              || string.IsNullOrWhiteSpace(selection.AgentPromptId) || selection.AgentPromptId.Length > 256
              || selection.ModelId is { } model && (string.IsNullOrWhiteSpace(model) || model.Length > 256)
-             || selection.ReasoningEffort is { } effort && !Enum.IsDefined(effort)))
+             || selection.ReasoningEffort is { } effort && !Enum.IsDefined(effort)
+             || selection.PermissionMode is { } permissionMode && (string.IsNullOrWhiteSpace(permissionMode) || permissionMode.Length > 256)))
             throw new ArgumentException("Invalid next-send selection.", nameof(request));
         if (!string.Equals(request.SessionId, request.SessionId.Trim(), StringComparison.Ordinal))
             throw new ArgumentException("Session identities must not have leading or trailing whitespace.", nameof(request));
@@ -990,6 +991,13 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, operation.Execution.Token).ConfigureAwait(false);
                 if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
                 (options, input) = (augmented.ExecutionOptions, augmented.Input);
+            }
+            // The mode is the session's until a send chooses another. It is given to the attachment, which keeps running.
+            if (selection?.PermissionMode is { } chosen)
+            {
+                var permissionMode = chosen == OwnedSessionSelection.ProviderPermissionMode ? null : chosen;
+                if (!string.Equals(permissionMode, session.PermissionMode, StringComparison.Ordinal))
+                    await _runtime.SetOwnedPermissionModeAsync(session, permissionMode).ConfigureAwait(false);
             }
             if (selection is null)
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);

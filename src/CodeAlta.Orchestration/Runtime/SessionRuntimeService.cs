@@ -592,6 +592,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             session.ReasoningEffort = reasoningEffort;
         }
 
+        // Only the local state says it, and none is a choice too: the mode of the provider.
+        session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
+
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
         {
             session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory);
@@ -621,6 +624,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = localState.ProviderKey,
             ModelId = localState.ModelId,
             ReasoningEffort = localState.ReasoningEffort,
+            PermissionMode = localState.PermissionMode,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
             MessageCount = localState.MessageCount,
@@ -1229,6 +1233,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             instructionsAlreadyComposed = instructionTransformations.Count > 0;
         }
 
+        // The permission mode is the one saved with the session: what attaches it does not have to know it.
+        var permissionMode = NormalizeOptionalText(startNewSession
+            ? session.PermissionMode
+            : (await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false))?.PermissionMode);
         var sessionOptions = new AgentSessionResumeOptions
         {
             SessionId = requestedSessionId,
@@ -1240,6 +1248,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
+            PermissionMode = permissionMode,
             Streaming = true,
             WorkingDirectory = options.WorkingDirectory,
             WorktreeDirectory = worktree,
@@ -1292,6 +1301,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.WorktreeDirectory = worktree;
         session.ModelId = options.Model;
         session.ReasoningEffort = options.ReasoningEffort;
+        session.PermissionMode = permissionMode;
         session.AgentPromptId = effectiveAgentPromptId ?? session.AgentPromptId;
         await UpsertSessionMetadataAsync(session, options, title, cancellationToken).ConfigureAwait(false);
         var actor = GetActorForWork(session.SessionId);
@@ -1603,6 +1613,55 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         OwnedSessionAskExecution? askExecution = null, OwnedAskSubmission? askSubmission = null)
         => AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None, permissionExecution,
             ownedCommand: true, askExecution: askExecution, askSubmission: askSubmission), CancellationToken.None);
+
+    /// <summary>
+    /// Saves the permission mode of an owned session and gives it to its attachment, which is not attached again:
+    /// its next run requests the mode.
+    /// </summary>
+    /// <param name="session">The session, resolved by the owner.</param>
+    /// <param name="permissionMode">One of the permission modes of its provider, or null for the one the provider is configured with.</param>
+    /// <exception cref="InvalidOperationException">The attachment runs, drains its queue, or is not owned.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    internal Task SetOwnedPermissionModeAsync(SessionViewDescriptor session, string? permissionMode)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        permissionMode = NormalizeOptionalText(permissionMode);
+        return AdmitAsync(async () =>
+        {
+            while (true)
+            {
+                ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
+                var transition = await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
+                {
+                    // An attachment that is being made reads the saved mode: it is waited for, then given the new one.
+                    if (_transitions.TryGetValue(session.SessionId, out var pending)) return (Task?)pending;
+                    if (_entries.TryGetValue(session.SessionId, out var entry) && (entry.IsTerminated || entry.Attachment.IsRetiring)) entry = null;
+                    if (entry is not null && (entry.HasActiveRun || entry.QueueDrainInProgress || !HasOwnedCommandDefaults(entry)))
+                        throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
+                    if (entry is not null)
+                        await _agentHub.SetPermissionModeAsync(entry.SessionHandleId, permissionMode, actorCancellationToken).ConfigureAwait(false);
+                    var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
+                    if (!string.Equals(NormalizeOptionalText(localState?.PermissionMode), permissionMode, StringComparison.Ordinal))
+                    {
+                        if (localState is null)
+                        {
+                            localState = new SessionViewLocalState();
+                            CopySessionMetadata(session, localState);
+                        }
+
+                        localState.PermissionMode = permissionMode;
+                        await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, actorCancellationToken).ConfigureAwait(false);
+                    }
+
+                    session.PermissionMode = permissionMode;
+                    return (Task?)null;
+                }, CancellationToken.None).ConfigureAwait(false);
+                if (transition is null) return;
+                // Its failure belongs to the one that attaches.
+                await transition.ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).ConfigureAwait(false);
+            }
+        }, CancellationToken.None);
+    }
 
     // Fixed default-policy check only; per-operation association remains in the permission mailbox.
     private bool HasOwnedCommandDefaults(RuntimeSessionEntry candidate)
@@ -3513,6 +3572,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             LatestSummary = session.LatestSummary,
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort,
+            PermissionMode = session.PermissionMode,
             AgentPromptId = session.AgentPromptId,
             MessageCount = session.MessageCount,
             SourcePath = session.SourcePath,

@@ -39,7 +39,21 @@ public sealed record OwnedProjectReferenceScope(string ProjectId, string Project
 /// <param name="AgentPromptId">Effective prompt identifier.</param>
 /// <param name="ModelId">Selected model, or null for the provider default.</param>
 /// <param name="ReasoningEffort">Supported effort, or null for the model default.</param>
-public sealed record OwnedSessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, AgentReasoningEffort? ReasoningEffort);
+public sealed record OwnedSessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, AgentReasoningEffort? ReasoningEffort)
+{
+    /// <summary>
+    /// The <see cref="PermissionMode"/> that takes the session back to the mode its provider is configured with. It is
+    /// never the identifier of a mode.
+    /// </summary>
+    public const string ProviderPermissionMode = "provider";
+
+    /// <summary>
+    /// Gets the permission mode chosen for the session from <see cref="OwnedSelectionChoices.PermissionModes"/>,
+    /// <see cref="ProviderPermissionMode"/> for the one of its provider, or null to keep the one it has. The session
+    /// keeps the choice for its next sends.
+    /// </summary>
+    public string? PermissionMode { get; init; }
+}
 
 /// <summary>Immutable abort input targeting one send, never a later send on the same session.</summary>
 /// <param name="ClientRequestId">Ordinal owner-lifetime retry key.</param>

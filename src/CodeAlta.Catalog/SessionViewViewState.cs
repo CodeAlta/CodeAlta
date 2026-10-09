@@ -280,6 +280,13 @@ public sealed class SessionViewLocalState
     public AgentReasoningEffort? ReasoningEffort { get; set; }
 
     /// <summary>
+    /// Gets or sets the permission mode chosen for the session, or <see langword="null"/> for the one its provider is
+    /// configured with. A journal written before the choice existed has none.
+    /// </summary>
+    [JsonPropertyName("permission_mode")]
+    public string? PermissionMode { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]

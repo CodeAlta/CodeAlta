@@ -298,6 +298,21 @@ public sealed class AgentHub : IAsyncDisposable
         finally { entry.ReleaseReference(); }
     }
 
+    /// <summary>Sets the permission mode the next runs of an attached session request, without attaching it again.</summary>
+    /// <param name="sessionHandleId">Existing attachment identity.</param>
+    /// <param name="permissionMode">One of the permission modes of the provider, or null for the one it is configured with.</param>
+    /// <param name="cancellationToken">Cancels admission.</param>
+    /// <returns>Whether the session took the mode; false for a session that does not take one.</returns>
+    /// <exception cref="InvalidOperationException">The handle no longer admits references.</exception>
+    /// <exception cref="OperationCanceledException">Admission was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or provider is disposed.</exception>
+    public async Task<bool> SetPermissionModeAsync(AgentSessionHandleId sessionHandleId, string? permissionMode, CancellationToken cancellationToken = default)
+    {
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        try { return entry.Coordinator.SetPermissionMode(permissionMode); }
+        finally { entry.ReleaseReference(); }
+    }
+
     /// <summary>Signals only the expected run on an existing attachment and joins original cancellation work.</summary>
     /// <param name="sessionHandleId">Existing attachment identity; never acquired from a catalog or replaced.</param>
     /// <param name="expectedRunId">Immutable original provider run identity.</param>
@@ -750,6 +765,13 @@ public sealed class AgentHub : IAsyncDisposable
 
         public Task<bool> StopBackgroundTaskAsync(string taskId, CancellationToken cancellationToken)
             => _session is IAgentBackgroundTaskProvider provider ? provider.StopBackgroundTaskAsync(taskId, cancellationToken) : Task.FromResult(false);
+
+        public bool SetPermissionMode(string? permissionMode)
+        {
+            if (_session is not IAgentPermissionModeProvider provider) return false;
+            provider.SetPermissionMode(permissionMode);
+            return true;
+        }
 
         public Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken)
             => _session is IAgentTargetedAbortProvider provider

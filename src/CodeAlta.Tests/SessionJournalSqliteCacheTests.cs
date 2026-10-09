@@ -216,6 +216,65 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
+    public async Task PermissionModeOfASession_IsKeptInTheJournalAndTheCache_AndAnOlderStateHasNone()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var session = CreateSummary("session-permission-mode", updatedAt: "2026-06-18T16:00:00+00:00");
+        await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(session).ConfigureAwait(false);
+        var descriptor = CreateDescriptor(session);
+        await catalog.JournalStore.AppendStateAsync(descriptor, new SessionViewLocalState { ProviderKey = "openai", PermissionMode = "acceptEdits" })
+            .ConfigureAwait(false);
+
+        // Read twice: the second read is the copy the store keeps of the last state.
+        Assert.AreEqual("acceptEdits", (await catalog.JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false))!.PermissionMode);
+        Assert.AreEqual("acceptEdits", (await catalog.JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false))!.PermissionMode);
+        Assert.AreEqual("acceptEdits", (await ListSingleAsync()).ViewState!.PermissionMode);
+
+        // A cache rebuilt from the journals reads it there.
+        File.Delete(options.SessionCacheDatabasePath);
+        Assert.AreEqual("acceptEdits", (await ListSingleAsync()).ViewState!.PermissionMode);
+
+        // A state written before the choice existed names no mode: the session runs in the one of its provider.
+        await catalog.JournalStore.AppendStateAsync(descriptor, new SessionViewLocalState { ProviderKey = "openai" }).ConfigureAwait(false);
+        var journalPath = new AgentRuntimePathLayout(temp.Path).GetSessionFilePath(session.SessionId, session.CreatedAt);
+        var older = System.Text.RegularExpressions.Regex.Replace(File.ReadAllLines(journalPath)[^1], ",?\"permission_mode\":null", string.Empty);
+        Assert.IsFalse(older.Contains("permission_mode", StringComparison.Ordinal));
+        await File.AppendAllTextAsync(journalPath, older + Environment.NewLine).ConfigureAwait(false);
+        Assert.IsNull((await new SessionViewCatalog(options).JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false))!.PermissionMode);
+
+        async Task<AgentSessionMetadata> ListSingleAsync()
+            => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
+    }
+
+    [TestMethod]
+    public async Task CacheWrittenBeforeThePermissionMode_IsGivenItsColumnAndReadAgainFromTheJournals()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var session = CreateSummary("session-cache-migration", updatedAt: "2026-06-18T17:00:00+00:00");
+        await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(session).ConfigureAwait(false);
+        await catalog.JournalStore.AppendStateAsync(CreateDescriptor(session), new SessionViewLocalState { ProviderKey = "openai", PermissionMode = "dontAsk" })
+            .ConfigureAwait(false);
+        Assert.AreEqual(1, (await catalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+
+        // The cache of a version that did not keep the mode: no column, and a row without it.
+        await using (var connection = new SqliteConnection($"Data Source={options.SessionCacheDatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE session_projection_cache DROP COLUMN local_permission_mode;";
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        var sessions = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual("dontAsk", sessions.Single().ViewState!.PermissionMode);
+    }
+
+    [TestMethod]
     public async Task ListSessionsAsync_ToleratesCorruptJournalsDuringRebuild()
     {
         using var temp = TestTempDirectory.Create();
