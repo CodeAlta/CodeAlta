@@ -377,7 +377,7 @@ that key (`dismissDialogsOnOutsidePress` in `modalDialogs.ts`, one pair of liste
 of the page). The press and its release are both outside, so a selection or a window dragged out of its
 dialog closes nothing; with a menu or a popover open in the window, the click closes that alone. A
 window that asks something, or holds what is being typed, stays open and is closed by its own buttons
-or Escape: the review of a command permission, the input a provider asks for, the dialog of a plugin
+or Escape: the input a provider asks for, the dialog of a plugin
 other than a message, the editor of an automation and **New space**. Such a `dialog` carries
 `data-outside-press="keep"` (`keptOnOutsidePress`, or `keepOnOutsidePress` of `AppWindow`). The
 questions that are Blueprint dialogs (unsaved changes, closing the window, exiting) already ignore a
@@ -3310,15 +3310,21 @@ the complete root it asks to write under and its optional reason, with **Allow o
 Each kind is held to its own whole shape: a command that carries parsed actions, network access or a
 policy amendment is refused rather than shown as less than it is, and a request that arrives with the
 fields of the other kind, or without its own, is refused with the window it came in.
-The panel (**Waiting for your permission**, under the timeline) is shown only while a request waits,
-a decision is being sent or reading the requests failed. It reads the pending requests of its session by
-itself: at once when the session is selected, then every 1.5 seconds while the session runs and no request
-is shown. A request that is shown is not read again while the run goes on, and never while a review
-dialog is open, so the entry being reviewed is not replaced under the user; the end of the run reads
-once more what is left. Each entry shows the command line or the root of the file change; choose
-**Review command permission** to open the native HTML dialog for that exact entry, with its complete
-details. Opening or dismissing it performs no read or decision; Close/Escape dismisses presentation,
-unlike the explicit **Cancel** permission decision.
+The panel (`CommandPermissionPanel`, on top of the composer of the session) is shown only while a
+request waits, a decision is being sent or reading the requests failed. It reads the pending requests of
+its session by itself: at once when the session is selected, then every 1.5 seconds while the session runs
+and no request is shown. A request that is shown is not read again while the run goes on, so the entry
+being answered is not replaced under the user; the end of the run reads once more what is left. It shows
+the first waiting entry, its command line and working directory or the root of the file change, and its
+reason, then its choices as one list: **Allow once**, **Deny**, **Cancel this request** and a text field.
+The choices are disabled for 400 ms after an entry appears (and after a selection shows it again), so a
+click aimed at what was there does not answer it. The arrow keys move along the list (Left and Right
+move the caret in the text field), Enter answers with the focused choice, and 1-3 answer directly; a
+held key answers nothing. When the entry arms, its first choice takes the focus if the focus is nowhere,
+in the composer region or in the card, and the composer has no draft text or image.
+Text in the field and Enter send **Deny** and, once the host has taken that denial, the text as a steer
+of the run through the composer queue; otherwise the text is queued for the next turn. This works the
+same for every provider: none needs a deny message of its own.
 Unsupported permission payloads remain denied, this review flag alone leaves user input cancelled, and
 there is no Allow for Session option.
 Approval can execute a command with the host's privileges: discovery roots are not a sandbox.

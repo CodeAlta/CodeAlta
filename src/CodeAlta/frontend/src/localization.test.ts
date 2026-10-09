@@ -62,7 +62,7 @@ test("inventory labels translate in six languages while status codes and English
 test("provider and timeline UI labels translate without translating literal content or decision tokens", () => {
   const literal = "  Settings Copy failed Allow once <script>日本語</script>  ";
   for (const locale of locales) {
-    for (const key of ["Nonsecret provider input", "Review provider input", "Local input draft discarded. No answer or cancellation was sent by dismissal.", "Pending command permissions", "Waiting for your permission","Submit literal answers", "Session timeline","Jump to latest visible", "Show full message", "Copy failed"] as const) {
+    for (const key of ["Nonsecret provider input", "Review provider input", "Local input draft discarded. No answer or cancellation was sent by dismissal.", "Pending command permissions", "Allow this command?","Submit literal answers", "Session timeline","Jump to latest visible", "Show full message", "Copy failed"] as const) {
       assert.ok(translate(locale, key));
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }

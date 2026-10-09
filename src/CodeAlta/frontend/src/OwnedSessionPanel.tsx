@@ -408,6 +408,8 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const mcpPlugin = configuration?.plugins.find(plugin => `${plugin.id} ${plugin.name}`.toLowerCase().includes("mcp"));
   const availableCompact = captureCompaction(epoch, sessionId, observedTarget, "availability");
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
+  // The latest stagePrompt, for what an answer outside this render sends: the text of a denied permission.
+  const stageLatest = useRef(stagePrompt);
   // Above the composer and never refused: a queued prompt waits for the session to be idle, a steering prompt
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
@@ -873,7 +875,11 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       inputRevision.current++;
       if (canEditImages() && imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index))) setImageNotice("");
     }} />;
+  stageLatest.current = stagePrompt;
   return <>
+    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy}
+      instruct={(kind, value) => { stageLatest.current(kind, value, []); }} takeFocus={() => !latestText.current.trim() && !images.length} />}
     <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>
@@ -992,8 +998,6 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     {pendingQueueCancellations.map(value => <Button key={value.intent.request.clientRequestId} icon={<AppIcon name="refresh" size={14} />}
       disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
       {t("Retry exact queued-operation cancellation")}</Button>)}
-    {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
-      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy} />}
     {pendingAborts.length > 0 && <div className="retained-send-recovery">
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>

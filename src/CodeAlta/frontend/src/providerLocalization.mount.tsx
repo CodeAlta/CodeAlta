@@ -18,6 +18,7 @@ const decisions = transport<Parameters<Parameters<typeof createPermissionReviewe
 const inputs = transport<Parameters<Parameters<typeof createUserInputReviewer>[0]>[0], unknown>();
 const answers = transport<Parameters<Parameters<typeof createUserInputReviewer>[1]>[0], unknown>();
 const cancels = transport<Parameters<Parameters<typeof createUserInputReviewer>[2]>[0], unknown>();
+const instructions: ["Steer" | "Queue", string][] = [];
 const permission = createPermissionReviewer(permissions.invoke, decisions.invoke);
 const input = createUserInputReviewer(inputs.invoke, answers.invoke, cancels.invoke);
 const capability = createMutationCapability(epoch);
@@ -34,12 +35,14 @@ function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [sessionId, select] = useState("Settings");
   const [running, run] = useState(true);
-  useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, run, epoch, handle, inputPage, permissionPage,
+  const [focusable, focus] = useState(false);
+  useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, run, focus, epoch, handle, inputPage, permissionPage,
     permissions: permissions.calls, decisions: decisions.calls, inputs: inputs.calls, answers: answers.calls, cancels: cancels.calls,
-    permission, input, capability } }); }, []);
+    instructions, permission, input, capability } }); }, []);
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => {} }}>
     <main className="configuration-page">
-      <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} running={running} />
+      <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} running={running}
+        instruct={(kind, text) => instructions.push([kind, text])} takeFocus={() => focusable} />
       <UserInputPanel reviewer={input} capability={capability} epoch={epoch} sessionId={sessionId} />
     </main>
   </ShellLanguageContext>;

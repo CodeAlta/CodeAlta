@@ -757,7 +757,7 @@ Observing the retained decision (`observeDecision`) is synchronous and local-onl
 original session/handle and pending/result/error state without either RPC. Neither mounting nor live
 result publication acknowledges a terminal response; a terminal observation and a fresh list read are
 required before replacing the record. The desktop panel makes that observation itself once a terminal
-result is published, then reads the list again; it never reads while a review dialog is open. Pending
+result is published, then reads the list again; it does not read again while an entry is shown and the run goes on. Pending
 observation grants no authority. Only an exact resolved/rejected
 response settles the decision: resolved means accepted, not executed, and rejected does not identify
 an earlier decision. The mailbox consumes attempts without replayable outcomes; pending-list absence

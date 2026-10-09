@@ -575,10 +575,14 @@ not to what is already running, and covers commands and file changes alike. A pe
 provider still decides what that provider resolves by itself before anything is asked here. A session that
 is waiting for you is counted in the activity of its space.
 
-A request appears under the timeline of its session, under **Waiting for your permission**, with the command
-it would run or the folder it would write under. **Review command permission** shows everything about it and
-answers with **Allow once**, **Deny** or **Cancel**. Closing that dialog does not answer: the session goes on
-waiting. Nothing appears while no request waits.
+A request appears on top of the prompt of its session, with the command it would run and its folder, or the
+folder it would write under, and what the agent says it is for. Answer with **Allow once**, **Deny** or
+**Cancel this request**, or write in the last field what the agent should do instead and press Enter: the
+request is denied and your text is sent to the agent. The choices answer a moment after the request appears,
+so a click meant for something else does not answer it.
+
+When you have no prompt draft, the request takes the focus: the arrow keys move between its choices, Enter
+answers with the chosen one, and 1, 2 and 3 answer directly. Nothing appears while no request waits.
 
 > [!CAUTION]
 > With automatic approval, commands and file changes run with your user privileges. They are not limited to the project folder.
