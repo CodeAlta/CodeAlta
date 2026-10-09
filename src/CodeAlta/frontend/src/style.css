@@ -645,7 +645,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 @media (max-width: 875px) {
   .ide-shell .workspace-shell, .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "content" "content"; height: 100%; }
   .ide-shell .project-rail { position: static; width: 100%; height: 100%; background: var(--panel); }
-  .ide-shell .session-content-rail-slot { position: absolute; z-index: 30; top: var(--titlebar-height); bottom: 0; height: auto; left: 0; width: min(320px, 100%); background: var(--panel); box-shadow: var(--shadow); }
+  /* The Explorer has no column here: it opens over the content, against the window and not a grid area. */
+  .ide-shell .session-content-rail-slot { grid-area: auto; position: absolute; z-index: 30; top: var(--titlebar-height); bottom: 0; height: auto; left: 0; width: min(320px, 100%); background: var(--panel); box-shadow: var(--shadow); }
   .ide-shell .session-rail { height: auto; }
   .ide-shell .prompt-options { max-width: calc(100vw - 155px); }
 }
@@ -1459,6 +1460,11 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 /* Without the Explorer the mark keeps its name and the first tab strip starts after it. */
 .ide-shell .workspace-shell:not(.project-rail-open) .window-brand { position: absolute; z-index: 2; top: 0; left: 0; width: var(--brand-width); height: var(--titlebar-height); }
 .ide-shell .workspace-shell:not(.project-rail-open) .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: var(--brand-width); }
+/* In a narrow window the Explorer opens over the content, so the mark and the first tab strip are the same with it. */
+@media (max-width: 875px) {
+  .ide-shell .workspace-shell .window-brand { grid-area: auto; position: absolute; z-index: 2; top: 0; left: 0; width: var(--brand-width); height: var(--titlebar-height); }
+  .ide-shell .workspace-shell .flexlayout__tabset_tabbar_outer[data-titlebar-start] { padding-left: var(--brand-width); }
+}
 .window-controls { position: absolute; z-index: 40; top: 0; right: 0; display: flex; height: var(--titlebar-height); }
 .window-controls > button { display: grid; place-items: center; width: 46px; height: 100%; padding: 0; border: 0; color: var(--text); background: transparent; }
 .window-controls > button:hover { background: color-mix(in srgb, var(--text) 10%, transparent); }

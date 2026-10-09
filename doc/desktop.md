@@ -339,8 +339,9 @@ The divider between the Explorer and the tabs (**Resize Explorer**) is dragged, 
 Right by 16 pixels; Home or a double-click returns to the default, 272 pixels. The width is kept in
 `codealta.desktop.ide-width.v1` (`ideWidth.ts`); when it cannot be saved, a notice says so and the
 layout stays as it is. In a window of 875 pixels or less the Explorer has no column of its own: the
-Explorer button shows it over the tabs, at most 320 pixels wide and without its divider, and that
-reveal is not saved (it ends when the window crosses that width). The frame is a CSS grid
+Explorer button shows it over the content, under the title bar, at most 320 pixels wide and without its
+divider, and that reveal is not saved (it ends when the window crosses that width). The title bar is
+the same with it and without it. The frame is a CSS grid
 (`.workspace-shell` in `style.css`); `SessionContentLayout.tsx` gives it three slots, the Explorer, the
 divider and the content, which stay mounted while the Explorer is hidden.
 The search of the window, the automations and Settings are the buttons next to it, right after the CodeAlta mark. Notes belong
