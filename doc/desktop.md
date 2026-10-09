@@ -335,6 +335,14 @@ Drag a tab along the tab strip to reorder it, to a pane edge to create a split v
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
 stable content slots and one vertical Explorer with Projects above Sessions. Its width is locally
 saved (220–720 pixels, never more than 60% of the window); the Explorer button in the title bar hides it without discarding the width.
+The divider between the Explorer and the tabs (**Resize Explorer**) is dragged, or moved with Left and
+Right by 16 pixels; Home or a double-click returns to the default, 272 pixels. The width is kept in
+`codealta.desktop.ide-width.v1` (`ideWidth.ts`); when it cannot be saved, a notice says so and the
+layout stays as it is. In a window of 875 pixels or less the Explorer has no column of its own: the
+Explorer button shows it over the tabs, at most 320 pixels wide and without its divider, and that
+reveal is not saved (it ends when the window crosses that width). The frame is a CSS grid
+(`.workspace-shell` in `style.css`); `SessionContentLayout.tsx` gives it three slots, the Explorer, the
+divider and the content, which stay mounted while the Explorer is hidden.
 The search of the window, the automations and Settings are the buttons next to it, right after the CodeAlta mark. Notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
 at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
