@@ -1922,8 +1922,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             var handle = await actor.QueryAsync(_ =>
             {
+                // A queue drain is no refusal: a provider returns from its send when the run ends, so the run a
+                // drain started (the answer of a child session, a queued prompt) is draining for as long as it runs.
                 if (_transitions.ContainsKey(request.SessionId) || !_entries.TryGetValue(request.SessionId, out var entry)
-                    || entry.IsTerminated || entry.QueueDrainInProgress || entry.Attachment.Ordinal != request.ExpectedAttachmentGeneration
+                    || entry.IsTerminated || entry.Attachment.Ordinal != request.ExpectedAttachmentGeneration
                     || !HasOwnedCommandDefaults(entry)) return ValueTask.FromResult<AgentSessionHandleId?>(null);
                 handleUse = entry.Attachment.TryAcquireHandleUse();
                 return ValueTask.FromResult(handleUse is null ? (AgentSessionHandleId?)null : entry.SessionHandleId);

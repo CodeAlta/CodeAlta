@@ -1027,8 +1027,10 @@ The original hub entry reference remains retained until the provider task settle
 
 `OwnedAbortRunRequest` captures immutable session/runtime/positive attachment/run/retry identity.
 The runtime captures only an existing matching actor/owned attachment, refusing transition,
-termination, retirement and queue drain. It acquires handle use atomically, leaves the mailbox,
-then forwards the original expected run unchanged. Recorded `ActiveRunId` is not authority.
+termination and retirement. A queue drain is not refused: a provider returns from its send when the
+run ends, so the run a drain started (the answer of a child session, a queued prompt) is draining
+for as long as it runs, and is cancelled like any other. It acquires handle use atomically, leaves
+the mailbox, then forwards the original expected run unchanged. Recorded `ActiveRunId` is not authority.
 There is no discovery, acquisition, replacement, recapture or attachment-wide permission invalidation.
 Provider-bound execution cancellation supplies the permission authority. Original provider work and
 forwarding registration disposal settle before destination source and handle-use release.

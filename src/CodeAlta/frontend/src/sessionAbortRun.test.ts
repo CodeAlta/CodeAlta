@@ -27,9 +27,14 @@ test("abort-run freezes only an explicit eligible observation, including the ori
   for (const unavailable of [undefined, { ...observation, hostEpoch: "old" }, { ...observation, sessionId: "other" },
     { ...observation, status: "unavailable" }, { ...observation, coordinatorTransitionInProgress: true }, { ...observation, entry: null },
     { ...observation, entry: { ...observation.entry!, activeRunId: null } }, { ...observation, entry: { ...observation.entry!, activeRunId: " " } },
-    { ...observation, entry: { ...observation.entry!, queueDrainInProgress: true } },
+    { ...observation, entry: { ...observation.entry!, activeRunId: null, queueDrainInProgress: true } },
     { ...observation, entry: { ...observation.entry!, isRetiring: true } }, { ...observation, entry: { ...observation.entry!, isTerminated: true } }])
     assert.equal(captureAbortRun("epoch", "session", unavailable, "key"), null);
+});
+
+test("abort-run targets the run a queue drain started, which drains for as long as it runs", () => {
+  const draining = { ...observation, entry: { ...observation.entry!, queueDrainInProgress: true } };
+  assert.equal(captureAbortRun("epoch", "session", draining, "key")?.expectedRunId, "run-A");
 });
 
 test("abort-run remount retains exact object despite new observation; only its AbortRun row reconciles", async () => {

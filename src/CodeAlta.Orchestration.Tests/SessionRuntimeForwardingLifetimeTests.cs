@@ -634,7 +634,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
     });
 
     [TestMethod]
-    public async Task AbortRun_ExistingOnlyCaptureRefusesAbsentUnownedStaleTerminatedAndDrain()
+    public async Task AbortRun_ExistingOnlyCaptureRefusesAbsentUnownedStaleAndTerminated()
     {
         await Fixture.Run(async f =>
         {
@@ -667,12 +667,45 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             await f.EmitAndObserve(AgentSessionUpdateKind.Idle, null);
             await f.Ready(f.Provider.SendStarted.Task);
             Assert.IsTrue((await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId))).Entry!.QueueDrainInProgress);
-            Assert.IsNull(await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
+            // A drain lasts as long as the run it started: the provider is asked, as for any other run.
+            await f.Expect<NotSupportedException>(f.Track(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
             await f.EmitAndObserve(AgentSessionUpdateKind.Shutdown, null);
             Assert.IsNull(await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
             Assert.AreEqual(1, f.Provider.AttachmentCount);
         });
     }
+
+    // What a child session answers waits in the queue of its parent and is run when the parent is idle. The
+    // provider returns from that send when the run ends, so the drain is in progress for the whole run.
+    [TestMethod]
+    public Task AbortRun_CancelsTheRunAQueueDrainStarted() => Fixture.Run(async f =>
+    {
+        f.Provider.SupportExactAbort = true;
+        await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+        await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "inert child answer", "parent-notify", null));
+        await f.EmitAndObserve(AgentSessionUpdateKind.Idle, null);
+        await f.Ready(f.Provider.SendStarted.Task);
+        await f.EmitAndObserve(AgentSessionUpdateKind.Warning, new AgentRunId("fixture-1"));
+        var running = await f.Wait(f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        Assert.IsTrue(running.Entry!.QueueDrainInProgress);
+        Assert.AreEqual("fixture-1", running.Entry.ActiveRunId);
+        var request = new OwnedAbortRunRequest("abort-run", f.Session.SessionId, running.RuntimeInstanceId,
+            running.Entry.AttachmentGeneration, "fixture-1");
+        Assert.AreEqual(AgentTargetedAbortOutcome.TargetNotActive,
+            await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request with { ExpectedRunId = "another-run" }, CancellationToken.None)));
+        Assert.AreEqual(0, f.Provider.ExactAborts);
+        Assert.AreEqual(AgentTargetedAbortOutcome.CancellationSignalled,
+            await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
+        Assert.AreEqual(1, f.Provider.ExactAborts);
+        // The drain ends with its run, and the session is idle again.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (true)
+        {
+            var settled = await f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId, timeout.Token));
+            if (settled.Entry is { QueueDrainInProgress: false, ActiveRunId: null }) break;
+            await Task.Delay(10, timeout.Token);
+        }
+    });
 
     [TestMethod]
     public Task OwnedCompact_RecordedRunAndQueueDrainRefuseBeforeProvider() => Fixture.Run(async f =>
@@ -1350,6 +1383,10 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal TaskCompletionSource ReleaseIdleCompact { get; } = NewGate();
         private int _idleCompactions;
         internal int IdleCompactions => Volatile.Read(ref _idleCompactions);
+        // Whether the sessions of this provider stop a run that is named exactly.
+        internal bool SupportExactAbort { get; set; }
+        private int _exactAborts;
+        internal int ExactAborts => Volatile.Read(ref _exactAborts);
         internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("forwarding-fixture"), "Forwarding fixture") { DefaultModelId = "fixture-model" };
         internal Session Latest { get { lock (_gate) return _sessions[^1]; } }
         internal int AttachmentCount { get { lock (_gate) return _sessions.Count; } }
@@ -1385,7 +1422,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                 owner.PreparationStarted.TrySetResult();
                 if (owner.AttachmentCount > 0) owner.ReplacementPreparationStarted.TrySetResult();
                 if (owner.HoldPreparation) await owner.ReleasePreparation.Task.ConfigureAwait(false);
-                _session = new Session(owner, id, options);
+                _session = owner.SupportExactAbort ? new ExactSession(owner, id, options) : new Session(owner, id, options);
                 lock (owner._gate) owner._sessions.Add(_session);
                 return _session;
             }
@@ -1396,12 +1433,13 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             }
         }
 
-        internal sealed class Session(Provider owner, string id, AgentSessionCreateOptions options) : IAgentSession, IAgentIdleCompactionProvider
+        internal class Session(Provider owner, string id, AgentSessionCreateOptions options) : IAgentSession, IAgentIdleCompactionProvider
         {
             private readonly object _gate = new();
             private Action<AgentEvent>? _handler;
             internal Action<AgentEvent> CapturedCallback { get { lock (_gate) return _handler!; } }
             private int _active;
+            private string? _run;
             internal int Active => Volatile.Read(ref _active);
             internal TaskCompletionSource SendStarted { get; } = NewGate();
             internal TaskCompletionSource SendFinished { get; } = NewGate();
@@ -1434,6 +1472,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                 try
                 {
                     var count = Interlocked.Increment(ref owner._sends);
+                    Volatile.Write(ref _run, "fixture-" + count);
                     LastSend = send;
                     (count == 1 ? owner.SendStarted : owner.SecondSendStarted).TrySetResult();
                     SendStarted.TrySetResult();
@@ -1442,7 +1481,15 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                     EmitIdle();
                     return new AgentRunId("fixture-" + count);
                 }
-                finally { Interlocked.Decrement(ref _active); SendFinished.TrySetResult(); }
+                finally { Volatile.Write(ref _run, null); Interlocked.Decrement(ref _active); SendFinished.TrySetResult(); }
+            }
+            // The send of the fixture ends when its run is stopped, as the send of an actual provider does.
+            protected AgentTargetedAbortOutcome AbortRun(AgentRunId expectedRunId)
+            {
+                if (Volatile.Read(ref _run) != expectedRunId.Value) return AgentTargetedAbortOutcome.TargetNotActive;
+                Interlocked.Increment(ref owner._exactAborts);
+                owner.ReleaseSend.TrySetResult();
+                return AgentTargetedAbortOutcome.CancellationSignalled;
             }
             public async Task AbortAsync(CancellationToken cancellationToken = default)
             {
@@ -1492,6 +1539,12 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             }
             private sealed class Subscription(Session session) : IDisposable
             { public void Dispose() => session.Unsubscribe(); }
+        }
+
+        private sealed class ExactSession(Provider owner, string id, AgentSessionCreateOptions options) : Session(owner, id, options), IAgentTargetedAbortProvider
+        {
+            public Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken = default)
+                => Task.FromResult(AbortRun(expectedRunId));
         }
     }
 }

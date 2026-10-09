@@ -148,8 +148,9 @@ audited source and complete fixtures before execution, owns documentation and in
 returned corrections to that writer without adding another implementation writer.
 
 - Exact session/runtime/attachment/run identity is retained through original provider work, never
-  rediscovered, replaced, recaptured or retargeted. Unsupported, stale, transitioning, retiring,
-  terminated and draining targets fail closed. Event-derived run state is not cancellation authority.
+  rediscovered, replaced, recaptured or retargeted. Unsupported, stale, transitioning, retiring
+  and terminated targets fail closed; the run a queue drain started is a target like any other.
+  Event-derived run state is not cancellation authority.
 - Only exact-capability providers bypass hub run/control gates for exact and trusted cancellation.
   Their concurrent cancellation and independent callback control reads avoid a retirement/control-gate
   cycle. Legacy trusted serialization remains. Original references, registration disposal and

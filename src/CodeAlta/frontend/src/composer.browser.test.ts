@@ -171,6 +171,17 @@ test("a prompt sent while the session works is queued or steers, and is never re
     await evaluate("fixture.finishRun()");
     assert.equal(await wait(idle), true);
 
+    // A run the host starts from its own queue (the answer of a child session) drains for as long as it runs:
+    // it is stopped like a run of a prompt sent here.
+    const stop = "document.querySelector('.composer-toolbar [aria-label=\"Cancel observed run\"]')";
+    await evaluate("fixture.startDrainedRun()");
+    assert.equal(await wait(`${running} && !${stop}.disabled`), true);
+    await evaluate(`${stop}.click()`);
+    assert.equal(await wait("fixture.abortRunCalls.length===1"), true);
+    assert.equal(await evaluate("fixture.abortRunCalls[0].expectedRunId===fixture.run() && fixture.abortRunCalls[0].expectedAttachmentGeneration==='12'"), true);
+    await evaluate("fixture.finishRun()");
+    assert.equal(await wait(idle), true);
+
     // Another refusal keeps the prompt in the composer and says why in the status line, without a toast.
     await evaluate("fixture.sendMode('refuse')");
     await write("not taken"); await enter();

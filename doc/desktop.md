@@ -3234,8 +3234,10 @@ only for an eligible point-in-time runtime observation or a retained exact cance
 Send and exact Send recovery remain separate. This action is distinct from **Abort original Send
 operation**, which controls its receipt, not the running provider. The observed target names the
 exact epoch, session, runtime, attachment and run; it is not inferred from host availability or
-display state. Unsupported, stale, retiring, transitioning and draining targets fail closed
-without fallback. Refresh submissions
+display state. Unsupported, stale, retiring and transitioning targets fail closed
+without fallback. A run the host started from its queue, such as the answer of a child session, is
+cancelled like a run of a prompt sent from the composer, although its queue drain lasts as long as
+the run. Refresh submissions
 for the result: **Cancellation signalled; run completion is not confirmed.** Failure can occur
 after signalling; neither failure nor success promises rollback of accepted decisions or effects.
 An uncertain request retains its original target/key across selection changes and remounts.

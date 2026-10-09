@@ -7,12 +7,14 @@ type WaitOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 type Pending = { request: SessionAbortRunRequest; inFlight: boolean };
 
 // Explicit observation supplies a target, not run/permission authority. Only the provider admits cancellation.
+// A queue drain does not withhold the target: the run a drain started (the answer of a child session, a queued
+// prompt) is draining for as long as it runs.
 export function captureAbortRun(epoch: string, sessionId: string, observation: SessionRuntimeStateResponse | undefined,
   key: string): SessionAbortRunRequest | null {
   const entry = observation?.entry;
   if (observation?.status !== "ok" || observation.hostEpoch !== epoch || observation.sessionId !== sessionId
     || !observation.runtimeInstanceId || observation.coordinatorTransitionInProgress !== false
-    || !entry || entry.isRetiring || entry.isTerminated || entry.queueDrainInProgress || !entry.activeRunId?.trim()) return null;
+    || !entry || entry.isRetiring || entry.isTerminated || !entry.activeRunId?.trim()) return null;
   return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, expectedRuntimeInstanceId: observation.runtimeInstanceId,
     expectedAttachmentGeneration: entry.attachmentGeneration, expectedRunId: entry.activeRunId });
 }

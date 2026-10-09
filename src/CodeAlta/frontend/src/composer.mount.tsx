@@ -11,13 +11,14 @@ import { createQueueSubmissions } from "./sessionQueue";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
-import type { SessionAdmission, SessionRuntimeStateResponse, SessionSendRequest, SessionSteerRequest } from "#neoastra";
+import type { SessionAbortRunRequest, SessionAdmission, SessionRuntimeStateResponse, SessionSendRequest, SessionSteerRequest } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("The composer fixture does not offer this operation"); };
 const epoch = "fixture-epoch";
 const sessionId = "fixture-session";
 const runtime = "11111111-1111-4111-8111-111111111111";
 let run: string | null = null;
+let draining = false;
 let runs = 0;
 let operations = 0;
 let sendMode: "accept" | "busy" | "refuse" = "accept";
@@ -41,15 +42,24 @@ const steering = createSteeringSubmissions(async (request): Promise<SessionAdmis
     sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "terminal", outcome: "Completed", code: null,
     runId: request.expectedRunId, queueInsertion: null } };
 });
+const abortRuns = createAbortRunSubmissions(async (request): Promise<SessionAdmission> => {
+  fixture.abortRunCalls.push(request);
+  return { status: "accepted", epoch: request.expectedEpoch, receipt: { kind: "AbortRun", clientRequestId: request.clientRequestId,
+    sessionId: request.sessionId, operationId: operationId(), targetOperationId: null, state: "terminal", outcome: "Completed",
+    code: "cancellation_signalled", runId: null, queueInsertion: null } };
+});
 
 const fixture = {
   sendCalls: [] as SessionSendRequest[],
   steerCalls: [] as SessionSteerRequest[],
+  abortRunCalls: [] as SessionAbortRunRequest[],
   sendMode(value: typeof sendMode) { sendMode = value; },
   steerMode(value: typeof steerMode) { steerMode = value; },
   /** The run a session already has when the composer opens on it. */
   startRun() { run = `run-${++runs}`; return run; },
-  finishRun() { run = null; },
+  /** The run the host starts from its own queue (the answer of a child session): it drains for as long as it runs. */
+  startDrainedRun() { draining = true; return fixture.startRun(); },
+  finishRun() { run = null; draining = false; },
   run: () => run,
   /** What the timeline would echo for the prompts sent from this window. */
   echoes: () => submissions.outgoing(epoch, sessionId).map(echo => `${echo.state}:${echo.text}`),
@@ -59,11 +69,11 @@ Object.assign(window, { fixture });
 
 const props = {
   epoch, sessionId, submissions, steering, queue,
-  compaction: createCompactionSubmissions(unavailable), abortRuns: createAbortRunSubmissions(unavailable),
+  compaction: createCompactionSubmissions(unavailable), abortRuns,
   capability: createMutationCapability(epoch), draftIndicators: createDraftIndicators(), permissionReviewer: null,
   selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),
   runtimeReader: createRuntimeStateReader(async request => ({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
-    entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: [], queueDrainInProgress: false,
+    entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: [], queueDrainInProgress: draining,
       providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null, reasoningEffort: null, agentPromptId: null,
       pendingAgentPromptId: null, activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
