@@ -13,18 +13,20 @@ internal sealed class SessionPermissionsService
     private readonly Func<string, CancellationToken, ValueTask<SessionOwnedPermissionPage>> _list;
     private readonly Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, CancellationToken, ValueTask<bool>> _resolve;
     private readonly string _epoch;
-    private readonly bool _enabled;
+    // Read at every call: the user turns the review on and off while the host runs.
+    private readonly Func<bool> _enabled;
 
-    internal SessionPermissionsService(SessionPermissionService permissions, string epoch, bool enabled)
+    internal SessionPermissionsService(SessionPermissionService permissions, string epoch, Func<bool> enabled)
         : this(permissions.ListOwnedCommandsAsync, permissions.ResolveOwnedCommandAsync, epoch, enabled) { }
 
     // Mandatory inert transport-test adapters; never constructs a host, provider or native surface.
     internal SessionPermissionsService(Func<string, CancellationToken, ValueTask<SessionOwnedPermissionPage>> list,
         Func<SessionOwnedPermissionHandle, AgentPermissionDecisionKind, CancellationToken, ValueTask<bool>> resolve,
-        string epoch, bool enabled)
+        string epoch, Func<bool> enabled)
     {
         ArgumentNullException.ThrowIfNull(list);
         ArgumentNullException.ThrowIfNull(resolve);
+        ArgumentNullException.ThrowIfNull(enabled);
         if (!GuidValue(epoch, out _)) throw new ArgumentException("A canonical host epoch is required.", nameof(epoch));
         _list = list;
         _resolve = resolve;
@@ -38,7 +40,7 @@ internal sealed class SessionPermissionsService
         SessionPermissionsPage Error(string status) => new(status, _epoch, request?.SessionId, [], false);
         if (request is null || !Identity(request.SessionId)) return new("invalid_request", _epoch, null, [], false);
         if (request.ExpectedHostEpoch != _epoch) return Error("stale_epoch");
-        if (!_enabled) return Error("disabled");
+        if (!_enabled()) return Error("disabled");
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
@@ -80,7 +82,7 @@ internal sealed class SessionPermissionsService
         if (request is null || !TryHandle(request.Handle, out var handle)
             || request.Decision is not ("allow_once" or "deny" or "cancel")) return new("invalid_request", _epoch, null);
         if (request.ExpectedHostEpoch != _epoch) return new("stale_epoch", _epoch, request.Handle);
-        if (!_enabled) return new("disabled", _epoch, request.Handle);
+        if (!_enabled()) return new("disabled", _epoch, request.Handle);
         cancellationToken.ThrowIfCancellationRequested();
         var decision = request.Decision switch
         {

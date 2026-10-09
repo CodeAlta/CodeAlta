@@ -345,6 +345,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 ReviewOwnedCommandPermissions = options.ReviewOwnedCommandPermissions,
                 AutoApproveOwnedPermissions = !options.ReviewOwnedCommandPermissions,
+                // The user's setting decides, read at every send. The launch flag of the isolated-roots mode
+                // still forces the review on for a host started with it.
+                ReviewOwnedPermissionsPolicy = () => options.ReviewOwnedCommandPermissions || shell.ReviewPermissions,
                 EnableOwnedAsks = true,
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
                 // Source plugins are the same build as in the terminal application; the start-up screen
@@ -568,7 +571,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }));
                     chrome.AddHandlers(builder);
                     var configStore = new CodeAltaConfigStore(catalog);
-                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions, options.EnableOwnedUserInput, options.Developer)
+                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions || shell.ReviewPermissions, options.EnableOwnedUserInput, options.Developer)
                     {
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
@@ -651,7 +654,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
                     builder.AddSessionUsageService(new SessionUsageService(host.RuntimeService, epoch));
-                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, options.ReviewOwnedCommandPermissions));
+                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch,
+                        () => options.ReviewOwnedCommandPermissions || shell.ReviewPermissions));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
                     if (!closeRequested.Task.IsCompleted)

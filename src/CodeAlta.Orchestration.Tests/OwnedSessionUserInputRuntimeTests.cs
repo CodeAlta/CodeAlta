@@ -254,7 +254,7 @@ public sealed class OwnedSessionUserInputRuntimeTests
             _metadataLocator = new Locator(_root);
             _runtime = new(_hub, new AgentSessionCatalog(catalog.JournalStore.CreateSessionStore()), projects, catalog, template, options, skills)
             { PromptCatalog = new AgentPromptCatalog(_metadataLocator) };
-            _commands = new(_runtime, projects, options, 16, reviewPermissions: false, enableAsks: _route == "ask-response", enableUserInput: true);
+            _commands = new(_runtime, projects, options, 16, reviewPermissions: static () => false, enableAsks: _route == "ask-response", enableUserInput: true);
             _setupDone.TrySetResult();
             var session = new SessionViewDescriptor { SessionId = "input-session", ProviderId = "input-inert", ProviderKey = "input-inert", Kind = SessionViewKind.GlobalSession,
                 Status = SessionViewStatus.Active, Title = "Input fixture", WorkingDirectory = work, CreatedAt = DateTimeOffset.UnixEpoch, UpdatedAt = DateTimeOffset.UnixEpoch, LastActiveAt = DateTimeOffset.UnixEpoch };

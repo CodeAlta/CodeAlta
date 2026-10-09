@@ -94,7 +94,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         AgentHub agentHub, IAgentSessionCatalog agentSessionCatalog, ProjectCatalog projectCatalog,
         SessionViewCatalog sessionViewCatalog, AgentInstructionTemplateProvider instructionTemplateProvider,
         CatalogOptions catalogOptions, SkillCatalog? skillCatalog, bool autoApproveOwnedPermissions)
+        : this(agentHub, agentSessionCatalog, projectCatalog, sessionViewCatalog, instructionTemplateProvider,
+            catalogOptions, skillCatalog, () => autoApproveOwnedPermissions)
     {
+    }
+
+    /// <summary>
+    /// Initializes a runtime whose owned automatic-permission policy is read again for every request, so a host
+    /// whose user turns review on or off applies it to what comes next without being restarted.
+    /// </summary>
+    /// <remarks>Automatic approval grants tools the host's privileges; roots are not a sandbox.</remarks>
+    /// <exception cref="ArgumentNullException">A required runtime dependency is null.</exception>
+    public SessionRuntimeService(
+        AgentHub agentHub, IAgentSessionCatalog agentSessionCatalog, ProjectCatalog projectCatalog,
+        SessionViewCatalog sessionViewCatalog, AgentInstructionTemplateProvider instructionTemplateProvider,
+        CatalogOptions catalogOptions, SkillCatalog? skillCatalog, Func<bool> autoApproveOwnedPermissions)
+    {
+        ArgumentNullException.ThrowIfNull(autoApproveOwnedPermissions);
         ArgumentNullException.ThrowIfNull(agentHub);
         ArgumentNullException.ThrowIfNull(agentSessionCatalog);
         ArgumentNullException.ThrowIfNull(projectCatalog);

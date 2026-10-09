@@ -33,8 +33,12 @@ internal enum DesktopCloseBehavior
 /// The zoom of the window's view, in percent: the host keeps it because it applies it to the view before the page
 /// loads.
 /// </param>
+/// <param name="ReviewPermissions">
+/// Whether the commands and the file changes of a session are reviewed instead of being approved automatically.
+/// The host keeps it because it is the permission policy of every session it owns, read at every send.
+/// </param>
 internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true, int SessionWidth = DesktopPreferences.DefaultSessionWidth,
-    int Zoom = DesktopPreferences.DefaultZoom)
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false)
 {
     /// <summary>The least width of a conversation, in percent.</summary>
     internal const int MinimumSessionWidth = CodeAlta.LiveTool.IAltaAppearance.MinimumSessionWidth;
@@ -89,14 +93,16 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             // The whole space unless the file says otherwise, with a width that is one.
             var width = root.TryGetProperty("sessionWidth", out var wide) && wide.ValueKind == JsonValueKind.Number && wide.TryGetInt32(out var percent) && IsSessionWidth(percent)
                 ? percent : DefaultSessionWidth;
+            // Approved automatically unless the file says otherwise: only the choice to review is written.
+            var review = root.TryGetProperty("reviewPermissions", out var reviewed) && reviewed.ValueKind == JsonValueKind.True;
             var zoom = root.TryGetProperty("zoom", out var zoomed) && zoomed.ValueKind == JsonValueKind.Number && zoomed.TryGetInt32(out var factor) && IsZoom(factor)
                 ? factor : DefaultZoom;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server, width, zoom);
+                return new(behavior, server, width, zoom, review);
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var kept) && kept.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom)
-                : Default with { McpServer = server, SessionWidth = width, Zoom = zoom };
+                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review)
+                : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -116,7 +122,8 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             // The server runs unless the file says otherwise: only the choice to turn it off is written.
             File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
                 + (SessionWidth == DefaultSessionWidth ? "" : ",\"sessionWidth\":" + SessionWidth.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)) + "}");
+                + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + "}");
             File.Move(temporary, path, overwrite: true);
             return true;
         }

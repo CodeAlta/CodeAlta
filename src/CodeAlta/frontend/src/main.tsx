@@ -1158,6 +1158,13 @@ function App() {
       .catch(() => { /* The window shows what was asked. */ });
   });
   const sessionWidthControl = useMemo<SessionWidthControl>(() => ({ width: sessionWidth, widths: sessionWidths, setWidth: setSessionWidth }), [sessionWidth, sessionWidths, setSessionWidth]);
+  function setReviewPermissions(review: boolean) {
+    setShellPreferences(current => current && { ...current, reviewPermissions: review });
+    // The review the sessions show follows the setting at once: the boot flag said what the host started with.
+    writeStatus(current => current && { ...current, commandReviewEnabled: review });
+    void desktopShell.setReviewPermissions({ review }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
+  }
   function setOnClose(onClose: CloseBehavior) {
     setShellPreferences(current => current && { ...current, onClose });
     void desktopShell.setOnClose({ onClose }, { timeoutMilliseconds: 8_000 })
@@ -2909,6 +2916,7 @@ function App() {
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
         sessionWidth, setSessionWidth, confirms: { ...confirms, set: setConfirm },
+        permissions: owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions } : null,
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />

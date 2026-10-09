@@ -31,7 +31,7 @@ function SessionWidthSlider({ value, label, onChange }: { value: number; label: 
   </div>;
 }
 
-export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, sessionWidth, setSessionWidth, closing, confirms }: {
+export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, sessionWidth, setSessionWidth, permissions, closing, confirms }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
   /** Whether the dark theme is the darker one. */
@@ -55,6 +55,8 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
   closing?: { behavior: CloseBehavior; platform: string; trayIcon?: boolean; set: (value: CloseBehavior) => void } | null;
   /** What asks before it is done: the answer "do not ask again" of a question is taken back here. */
   confirms?: Readonly<Record<Confirmation, boolean>> & { set: (confirmation: Confirmation, ask: boolean) => void };
+  /** The review of what the sessions do; null where the window does not own the host. */
+  permissions?: { review: boolean; set: (value: boolean) => void } | null;
   notices: PreferenceNotices;
 }) {
   const { t, locale, choice, issue, setLanguage } = useShellLanguage();
@@ -116,6 +118,13 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
         <Switch id="settings-confirm-project-archive" className="settings-checkbox" checked={confirms.projectArchive} onChange={event => confirms.set("projectArchive", event.currentTarget.checked)} />
       </Field>
     </>}
+    {permissions && <Field label={t("Review what the sessions do")} htmlFor="settings-review-permissions"
+      notice={<p className="settings-field-help">{t(permissions.review
+        ? "Commands and file changes wait for you. The permission modes of a provider still decide what it resolves by itself."
+        : "Commands and file changes run without asking. They have the privileges of CodeAlta: this is not a sandbox.")}</p>}>
+      <Switch id="settings-review-permissions" className="settings-checkbox" checked={permissions.review}
+        onChange={event => permissions.set(event.currentTarget.checked)} />
+    </Field>}
     {closing && <Field label={t("When the window is closed")} htmlFor="settings-on-close"
       notice={closing.behavior === "keep" && <p className="settings-field-help">{t(keepRunningPlace(closing.platform, closing.trayIcon))}</p>}>
       <HTMLSelect id="settings-on-close" value={closing.behavior} onChange={event => closing.set(closeBehavior(event.target.value))}>

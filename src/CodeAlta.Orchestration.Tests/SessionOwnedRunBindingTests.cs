@@ -80,6 +80,25 @@ public sealed class SessionOwnedRunBindingTests
             (await f.Wait(f.Keep(callback(f.Request("rich", null) with { ProposedExecPolicyAmendment = ["inert"] }, CancellationToken.None)))).Kind);
     });
 
+    [TestMethod]
+    public Task OwnedPermission_ReadsTheApprovalPolicyAgainForEveryRequest() => Fixture.Run(async f =>
+    {
+        // The user turns the review on and off while the host runs: the next request follows, with no restart.
+        // This execution reviews nothing, so the automatic-approval policy alone answers each request.
+        f.AutoApprove = true;
+        var execution = await f.CreateExecution(reviewCommands: false);
+        var callback = f.Permissions.CreateOwnedCommandHandler(execution);
+
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Wait(f.Keep(callback(f.Request("approved", null), CancellationToken.None)))).Kind);
+        f.AutoApprove = false;
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(callback(f.Request("refused", null), CancellationToken.None)))).Kind);
+        f.AutoApprove = true;
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Wait(f.Keep(callback(f.Request("approved-again", null), CancellationToken.None)))).Kind);
+    });
+
     private sealed class Fixture
     {
         private readonly object _gate = new();
@@ -87,9 +106,12 @@ public sealed class SessionOwnedRunBindingTests
         private readonly List<CancellationTokenSource> _sources = [];
         private readonly List<Exception> _failures = [];
         private Task? _lifetime;
-        internal SessionPermissionService Permissions { get; } = new();
+        /// <summary>The host's automatic-approval policy, read again for every request.</summary>
+        internal bool AutoApprove { get; set; }
+        internal SessionPermissionService Permissions { get; }
         private readonly OwnedProviderEventForwarding.Attachment _attachment = new(new OwnedProviderEventForwarding(), 1,
             new("session", "inert-handle"), static () => Task.CompletedTask, static () => Task.CompletedTask);
+        internal Fixture() => Permissions = new SessionPermissionService(() => AutoApprove);
         internal Task Keep(Task task) { lock (_gate) _work.Add(task); return task; }
         internal Task<T> Keep<T>(Task<T> task) { Keep((Task)task); return task; }
         internal Task Wait(Task task) => Keep(Keep(task).WaitAsync(TimeSpan.FromSeconds(5)));
@@ -100,9 +122,10 @@ public sealed class SessionOwnedRunBindingTests
             lock (_gate) _sources.Add(source);
             return source;
         }
-        internal async Task<SessionPermissionService.OwnedPermissionExecution> CreateExecution()
+        internal Task<SessionPermissionService.OwnedPermissionExecution> CreateExecution() => CreateExecution(reviewCommands: true);
+        internal async Task<SessionPermissionService.OwnedPermissionExecution> CreateExecution(bool reviewCommands)
         {
-            var execution = await Wait(Permissions.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None).AsTask());
+            var execution = await Wait(Permissions.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None, reviewCommands, false).AsTask());
             Assert.IsNotNull(execution);
             Assert.IsTrue(await Wait(Permissions.BindOwnedExecutionAsync(execution, Guid.NewGuid(), _attachment, new("inert")).AsTask()));
             return execution;

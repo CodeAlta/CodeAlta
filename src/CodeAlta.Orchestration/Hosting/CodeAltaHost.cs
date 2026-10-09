@@ -42,7 +42,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         bool ownsLogging,
         ProjectDescriptor currentProject,
         int ownedCommandReceiptCapacity,
-        bool reviewOwnedCommandPermissions,
+        Func<bool> reviewOwnedCommandPermissions,
         bool enableOwnedAsks,
         bool enableOwnedUserInput)
     {
@@ -298,6 +298,13 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 await eventFailurePolicy(envelope, failure).ConfigureAwait(false);
                 if (OwnedProviderEventForwarding.HasRetention(failure)) ExceptionDispatchInfo.Throw(failure);
             });
+            // The review of commands and file changes, and the automatic approval that is its opposite: one
+            // policy when the host has a live one, the two fixed options otherwise.
+            var reviewOwnedPermissions = options.ReviewOwnedPermissionsPolicy
+                ?? (() => options.ReviewOwnedCommandPermissions);
+            Func<bool> autoApproveOwnedPermissions = options.ReviewOwnedPermissionsPolicy is { } live
+                ? () => !live()
+                : () => options.AutoApproveOwnedPermissions && !options.ReviewOwnedCommandPermissions;
             runtimeService = new SessionRuntimeService(
                 agentHub,
                 agentSessionCatalog,
@@ -306,7 +313,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 instructionTemplateProvider,
                 catalogOptions,
                 skillCatalog,
-                options.AutoApproveOwnedPermissions && !options.ReviewOwnedCommandPermissions)
+                autoApproveOwnedPermissions)
             {
                 FileSearchCache = projectFileSnapshotCache,
                 PluginEventObserver = eventObserver,
@@ -333,7 +340,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ownsLogging,
                 currentProject,
                 options.OwnedCommandReceiptCapacity,
-                options.ReviewOwnedCommandPermissions,
+                reviewOwnedPermissions,
                 options.EnableOwnedAsks,
                 options.EnableOwnedUserInput);
         }

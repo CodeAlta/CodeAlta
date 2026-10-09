@@ -61,7 +61,7 @@ public sealed class SessionPermissionRegistration
 /// </summary>
 public sealed partial class SessionPermissionService : IAsyncDisposable
 {
-    private readonly bool _autoApproveOwnedPermissions;
+    private readonly Func<bool> _autoApproveOwnedPermissions;
 
     /// <summary>Creates a permission owner with deny-by-default owned callbacks.</summary>
     public SessionPermissionService() : this(false) { }
@@ -69,12 +69,21 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// <summary>Creates a permission owner with an explicit host-owned automatic approval policy.</summary>
     /// <remarks>Automatic approval grants AllowOnce, like the TUI, and is not a filesystem sandbox.
     /// Explicit per-operation command review still takes precedence.</remarks>
-    public SessionPermissionService(bool autoApproveOwnedPermissions)
+    public SessionPermissionService(bool autoApproveOwnedPermissions) : this(() => autoApproveOwnedPermissions) { }
+
+    /// <summary>
+    /// Creates a permission owner whose automatic approval policy is read again for every request, so a host
+    /// whose user turns review on or off applies it to what comes next without being restarted.
+    /// </summary>
+    /// <param name="autoApproveOwnedPermissions">Whether a request no explicit review takes is granted AllowOnce.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="autoApproveOwnedPermissions"/> is null.</exception>
+    public SessionPermissionService(Func<bool> autoApproveOwnedPermissions)
     {
+        ArgumentNullException.ThrowIfNull(autoApproveOwnedPermissions);
         _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
         OwnedDefaultPermissionHandler = (_, token) => Task.FromResult(new AgentPermissionDecision(
             token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
-            : autoApproveOwnedPermissions ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+            : autoApproveOwnedPermissions() ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
     }
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
@@ -198,7 +207,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
-            if (_autoApproveOwnedPermissions && !execution.ReviewCommands && CanUse(execution) && !cancellationToken.IsCancellationRequested
+            if (_autoApproveOwnedPermissions() && !execution.ReviewCommands && CanUse(execution) && !cancellationToken.IsCancellationRequested
                 && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
                 && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId))
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
