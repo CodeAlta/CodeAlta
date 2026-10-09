@@ -12,29 +12,51 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
 {
     internal const int MaximumDetailResponseBytes = 96 * 1024;
+    /// <summary>The kind the record of a reminder given to a running turn has.</summary>
+    internal const string PromptKind = "reminder";
+    /// <summary>How many times a firing asks for its send while another command of the session is being admitted.</summary>
+    internal const int MaximumBusyAttempts = 10;
+    /// <summary>How long a firing waits between two of these attempts.</summary>
+    internal static readonly TimeSpan BusyRetryDelay = TimeSpan.FromSeconds(1);
     private readonly object _gate = new();
     private readonly string _epoch;
     private readonly Func<string, CancellationToken, Task<bool>> _exists;
     private readonly Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> _send;
+    private readonly Func<string, string, Task<string>> _running;
+    private readonly TimeProvider _clock;
+    private readonly CancellationTokenSource _closing = new();
+    // Read once: a firing that is still on its way when the service is disposed reads no disposed source.
+    private readonly CancellationToken _closingToken;
     private readonly AltaReminderService _reminders;
     private bool _closed;
 
-    internal ReminderService(OwnedSessionWorkspace reads, OwnedSessionCommandService commands, string epoch)
+    internal ReminderService(OwnedSessionWorkspace reads, OwnedSessionCommandService commands, SessionRuntimeService runtime, string epoch)
         : this(epoch, async (id, token) => (await reads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions
             .Any(session => string.Equals(session.SessionId, id, StringComparison.Ordinal)),
-            request => commands.AdmitSend(request)) { }
+            request => commands.AdmitSend(request),
+            (id, content) => runtime.DeliverHostPromptToRunningTurnAsync(id, content, PromptKind)) { }
 
     // Literal callbacks and clock let tests exercise admission and firing without a provider or profile writes.
     internal ReminderService(string epoch, Func<string, CancellationToken, Task<bool>> exists,
         Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send, TimeProvider? clock = null)
+        : this(epoch, exists, send, static (_, _) => Task.FromResult("idle"), clock) { }
+
+    // The same, with what a session that runs a turn is given: `steered` or `queued` when the turn has the reminder,
+    // `idle` when no turn runs.
+    internal ReminderService(string epoch, Func<string, CancellationToken, Task<bool>> exists,
+        Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send, Func<string, string, Task<string>> running, TimeProvider? clock = null)
     {
         if (!Identity(epoch)) throw new ArgumentException("A bounded host epoch is required.", nameof(epoch));
         ArgumentNullException.ThrowIfNull(exists);
         ArgumentNullException.ThrowIfNull(send);
+        ArgumentNullException.ThrowIfNull(running);
         _epoch = epoch;
         _exists = exists;
         _send = send;
-        _reminders = new AltaReminderService(new AltaServiceCollection(), clock ?? TimeProvider.System, this);
+        _running = running;
+        _clock = clock ?? TimeProvider.System;
+        _closingToken = _closing.Token;
+        _reminders = new AltaReminderService(new AltaServiceCollection(), _clock, this);
     }
 
     /// <summary>
@@ -216,17 +238,33 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
 
     public async Task<AltaReminderDeliveryResult> DeliverAsync(AltaReminderDescriptor reminder, string content)
     {
-        // A unique key per firing prevents retries from targeting later reminders/runs.
         OwnedSessionCommandAdmission admission;
-        lock (_gate)
+        for (var attempt = 1; ; attempt++)
         {
-            if (_closed) return new(AltaExitCodes.Failure, "closed", string.Empty);
-            try
-            {
-                admission = _send(new OwnedTextSendRequest($"reminder:{reminder.ReminderId}:{reminder.FiredCount}",
-                    reminder.TargetSessionId, content));
-            }
+            lock (_gate) if (_closed) return new(AltaExitCodes.Failure, "closed", string.Empty);
+            // A session that runs a turn refuses a send: the turn is given the reminder, or keeps it for its end.
+            // What this answers is not asked again: a failure may have left the reminder with the session.
+            string turn;
+            try { turn = await _running(reminder.TargetSessionId, content).ConfigureAwait(false); }
             catch (Exception) { return new(AltaExitCodes.Failure, "send_failed", string.Empty); }
+            if (turn is "steered" or "queued") return new(AltaExitCodes.Success, null, string.Empty);
+
+            // A unique key per firing prevents retries from targeting later reminders/runs.
+            lock (_gate)
+            {
+                if (_closed) return new(AltaExitCodes.Failure, "closed", string.Empty);
+                try
+                {
+                    admission = _send(new OwnedTextSendRequest($"reminder:{reminder.ReminderId}:{reminder.FiredCount}",
+                        reminder.TargetSessionId, content));
+                }
+                catch (Exception) { return new(AltaExitCodes.Failure, "send_failed", string.Empty); }
+            }
+            // Busy without a turn that runs: another send of the session is being prepared, or just ended. A refused
+            // admission kept nothing, so the firing asks again: its turn runs by then, or its place is free.
+            if (admission.Kind != OwnedSessionCommandAdmissionKind.Busy || attempt == MaximumBusyAttempts) break;
+            try { await Task.Delay(BusyRetryDelay, _clock, _closingToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return new(AltaExitCodes.Failure, "closed", string.Empty); }
         }
         if (admission.Kind != OwnedSessionCommandAdmissionKind.Accepted || admission.Receipt is null)
             return new(AltaExitCodes.Failure, $"send_{admission.Kind.ToString().ToLowerInvariant()}", string.Empty);
@@ -240,8 +278,23 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
         catch (Exception) { return new(AltaExitCodes.Failure, "send_failed", string.Empty); }
     }
 
-    internal void CloseAdmission() { lock (_gate) _closed = true; }
-    public async ValueTask DisposeAsync() { CloseAdmission(); await _reminders.DisposeAsync().ConfigureAwait(false); }
+    internal void CloseAdmission()
+    {
+        lock (_gate)
+        {
+            if (_closed) return;
+            _closed = true;
+        }
+        // A firing that waits for its place is released: nothing is sent once the host closes.
+        _closing.Cancel();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        CloseAdmission();
+        await _reminders.DisposeAsync().ConfigureAwait(false);
+        _closing.Dispose();
+    }
 
     private string? Check(string? epoch, string? session)
     {

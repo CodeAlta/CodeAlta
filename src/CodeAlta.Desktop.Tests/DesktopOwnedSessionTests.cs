@@ -540,6 +540,39 @@ public sealed class DesktopOwnedSessionTests
         Assert.IsFalse(f.Provider.Sends.Reader.TryRead(out _));
     });
 
+    [TestMethod]
+    public Task ReminderFiring_DuringATurnOfTheSession_IsKeptForTheSessionAndNotRefused() => RealFixture.RunAsync(async f =>
+    {
+        using var clock = new ReminderRpcTests.LiteralClock();
+        await using var reminders = new ReminderService("fixture-epoch", (id, _) => Task.FromResult(id == f.SessionId),
+            request => f.Host.Commands.AdmitSend(request),
+            (id, content) => f.Host.RuntimeService.DeliverHostPromptToRunningTurnAsync(id, content, ReminderService.PromptKind), clock);
+        // A turn of the session runs: the provider has taken the prompt and has not said that it is idle.
+        var send = f.Retain(f.Host.Commands.AdmitSend(new("send", f.SessionId, "work")));
+        await f.Ready(send);
+        f.Provider.Release.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Wait(send.Completion)).Outcome);
+        Assert.AreEqual("work", ((AgentInputItem.Text)(await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask())).Options.Input.Items.Single()).Value);
+        var state = await f.Wait(f.Keep(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId)));
+        Assert.IsNotNull(state.Entry!.ActiveRunId);
+
+        var created = await f.Wait(reminders.Create(new("fixture-epoch", f.SessionId, "check the build", 60, 1), default));
+        Assert.AreEqual("ok", created.Status);
+        await f.Wait(clock.TimerCreated());
+        clock.Advance(TimeSpan.FromSeconds(60));
+        var done = await f.Wait(ReminderCount(reminders, f.SessionId, 1));
+        Assert.AreEqual(0, done.Reminders.Single().LastExitCode);
+        Assert.IsNull(done.Reminders.Single().LastError);
+
+        // The provider of the fixture takes nothing in a turn that runs, so the reminder waits for the end of the
+        // turn and starts the next one.
+        Assert.IsFalse(f.Provider.Sends.Reader.TryRead(out _));
+        f.Provider.EmitIdle!("the turn ended");
+        var next = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
+        Assert.AreEqual(f.SessionId, next.SessionId);
+        Assert.AreEqual("check the build", ((AgentInputItem.Text)next.Options.Input.Items.Single()).Value);
+    });
+
     private static async Task<ReminderListResponse> ReminderCount(ReminderService reminders, string sessionId, int count)
     {
         for (var attempt = 0; attempt < 100000; attempt++)

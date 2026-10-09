@@ -152,7 +152,7 @@ In CodeAlta Desktop, an agent can show you what changed with `alta diff show`: i
 
 Agents can also ask the live tool to schedule in-process reminder prompts with `alta reminder create --duration <seconds> --content ...`. Reminders default to the calling session, can target another session with `--session <session-id>`, can repeat with `--repeat <count>`, and can be inspected or removed with `alta reminder list` and `alta reminder delete <reminder-id>`. In the TUI, use the compact clock button in the prompt bar or `/reminder` (`Ctrl+G Ctrl+D`) to create, delete, and edit reminder messages for the selected session.
 
-An agent that waits for something that takes long, such as a CI run or a deployment, starts a background job when a command can do the waiting, or sets a reminder to come back and check it, and says so in its answer. The reminder is listed in **Reminders** until it fires. Reminders are not kept when CodeAlta restarts.
+An agent that waits for something that takes long, such as a CI run or a deployment, starts a background job when a command can do the waiting, or sets a reminder to come back and check it, and says so in its answer. The reminder is listed in **Reminders** until it fires. A reminder that fires while the session is working is given to the running turn in CodeAlta Desktop, and starts the next turn in CodeAlta TUI. Reminders are not kept when CodeAlta restarts.
 
 ### Background jobs
 

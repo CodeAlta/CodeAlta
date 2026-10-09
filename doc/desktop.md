@@ -991,9 +991,14 @@ Save blocks mutation/focus shortcuts; `Ctrl+R` remains read-only observation, ne
 still requires its explicit button; `Ctrl+Enter` is not mapped in this panel.
 Schedules and results are **in memory, not persisted**:
 closing/restarting the host loses them. The host
-owns the timers and attempts one normal owned Send per firing, with the same permission policy
-and host drain as other sends. Busy, unavailable or failed sends count as failed attempts; there
-is no automatic retry beyond the requested repeats. A completed reminder means all attempts
+owns the timers. A firing whose session runs a turn gives the reminder to that turn, as a steering
+message, or leaves it in the queue of the session for the end of the turn when the provider takes
+nothing during a turn; it does not attempt a Send, which a running session refuses. A firing whose
+session is idle attempts one normal owned Send, with the same permission policy and host drain as
+other sends. When that Send is refused as busy without a running turn (another Send of the session
+is being admitted), the firing asks again every second, at most 10 times, and the turn that runs by
+then is given the reminder. Unavailable or failed sends, and a session that stays busy, count as
+failed attempts; there is no other automatic retry beyond the requested repeats. A completed reminder means all attempts
 finished, not that the agent responded. A deletion cannot retract an already captured delivery
 or an admitted run. Counts are point-in-time as of Refresh; a lost mutation response is held as
 uncertain for that host/session, with no automatic retry. Catalog-only mode cannot schedule work.

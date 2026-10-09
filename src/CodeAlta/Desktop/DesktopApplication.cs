@@ -515,7 +515,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 workspace = new WorkspaceService(host, epoch, worktrees);
                 operations = new SessionOperationsService(host.Commands, epoch);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
-                reminders = new ReminderService(host.WorkspaceReads, host.Commands, epoch);
+                reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch);
                 changesView = new DesktopChangesView();
                 // The space the window shows, and what a command asks of it. A catalog that never had spaces
                 // gets its first ones before the page reads them.

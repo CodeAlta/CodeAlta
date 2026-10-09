@@ -36,13 +36,40 @@ public sealed partial class SessionRuntimeService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
-        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind), cancellationToken);
+        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, whenIdle: true), cancellationToken);
     }
 
-    private async Task<string> DeliverHostPromptBodyAsync(string sessionId, string prompt, string kind)
+    /// <summary>
+    /// Gives a session whose turn runs a prompt that comes from the host, as <see cref="DeliverHostPromptAsync"/>
+    /// does, and leaves a session that is idle alone: nothing is queued for it, and the caller sends the prompt as
+    /// a turn of its own (a reminder of the desktop, which is sent with the policy of the sends of its window).
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="prompt">The prompt.</param>
+    /// <param name="kind">What the prompt is, as its record says it (for example <c>reminder</c>).</param>
+    /// <param name="cancellationToken">Cancels the admission of the request, not a delivery that started.</param>
+    /// <returns>
+    /// <c>steered</c> when the running turn took the prompt, <c>queued</c> when that turn could not take it and
+    /// the prompt starts the next one, <c>idle</c> when no turn runs and nothing was done,
+    /// <c>missing_session</c> when the session is not known.
+    /// </returns>
+    /// <exception cref="ArgumentException">An argument is blank.</exception>
+    /// <exception cref="OperationCanceledException">The request was canceled before it was admitted.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public Task<string> DeliverHostPromptToRunningTurnAsync(string sessionId, string prompt, string kind, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, whenIdle: false), cancellationToken);
+    }
+
+    private async Task<string> DeliverHostPromptBodyAsync(string sessionId, string prompt, string kind, bool whenIdle)
     {
         var session = await TryResolveSessionForParentDeliveryAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         if (session is null) return "missing_session";
+        var running = await HasActiveRunOwnedBodyAsync(session, CancellationToken.None).ConfigureAwait(false);
+        if (!running && !whenIdle) return "idle";
         var submittedBy = new AltaActorProvenance
         {
             Kind = kind,
@@ -50,7 +77,7 @@ public sealed partial class SessionRuntimeService
             SourceProjectId = session.ProjectRef,
             CreatedAt = DateTimeOffset.UtcNow,
         };
-        if (await HasActiveRunOwnedBodyAsync(session, CancellationToken.None).ConfigureAwait(false))
+        if (running)
         {
             try
             {

@@ -3204,6 +3204,42 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task HostPrompt_ForARunningTurn_IsGivenToIt_AndAnIdleSessionIsLeftToItsCaller()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("host-prompt");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var executionOptions = new SessionExecutionOptions
+        {
+            ProviderId = providerId,
+            ProviderKey = providerId.Value,
+            WorkingDirectory = root.Path,
+            ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var session = await runtime.CreateGlobalSessionAsync(executionOptions, "Reminded").ConfigureAwait(false);
+
+        // No turn runs: nothing is given to the session and nothing waits for it. Its caller sends the prompt itself.
+        Assert.AreEqual("idle", await runtime.DeliverHostPromptToRunningTurnAsync(session.SessionId, "check the build", "reminder").ConfigureAwait(false));
+        Assert.AreEqual("missing_session", await runtime.DeliverHostPromptToRunningTurnAsync("no-such-session", "check the build", "reminder").ConfigureAwait(false));
+        Assert.AreEqual(0, providerRuntime.SentOptions.Count);
+        Assert.AreEqual(0, providerRuntime.SteeredOptions.Count);
+
+        // A turn runs: it is given the prompt at once, and the record says what the prompt was.
+        await runtime.SendAsync(session, executionOptions, new AgentSendOptions { Input = AgentInput.Text("work") }).ConfigureAwait(false);
+        Assert.AreEqual("steered", await runtime.DeliverHostPromptToRunningTurnAsync(session.SessionId, "check the build", "reminder").ConfigureAwait(false));
+        Assert.AreEqual("check the build", ExtractText(providerRuntime.SteeredOptions.Single().Input));
+        Assert.AreEqual(1, providerRuntime.SentOptions.Count);
+        var state = await ReadJournalStateAsync(sessionCatalog, session.SessionId).ConfigureAwait(false);
+        Assert.IsFalse(state.PromptProvenance.Single(static item => item.Kind == "reminder").Queued);
+        Assert.IsFalse(state.QueuedPrompts.Any(static item => item.Kind == "reminder"));
+    }
+
+    [TestMethod]
     public async Task Job_IsACommandOfEveryHost_WithItsHelp()
     {
         var dispatcher = CreateDispatcher();

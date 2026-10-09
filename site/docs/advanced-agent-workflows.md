@@ -60,7 +60,7 @@ The exact command set depends on the host, active plugins, and session context. 
 | `prompt` | List, inspect, create, edit, and select file-backed agent/system prompts. | “Create a project prompt named reviewer for read-only code reviews.” | Create/edit writes prompt files under global or project prompt roots. |
 | `ask` | Queue structured questions or approvals for the current session. | “Before changing files, ask me to approve the plan with Approve/Revise choices.” | The agent should yield after queuing an ask and wait for your answer. |
 | `notes` (`note`) | Get, replace, or clear session-scoped sticky Markdown notes. | “Keep a 5-item checklist visible in Notes while you work.” | Replaces the current session’s notes document; `note` is a compatibility alias. |
-| `reminder` | Schedule delayed prompt content for a session and list/delete reminders. | “Remind yourself in 5 minutes to check the child session result.” | Runs only while the CodeAlta host process remains active; delivered prompts use normal queue semantics. |
+| `reminder` | Schedule delayed prompt content for a session and list/delete reminders. | “Remind yourself in 5 minutes to check the child session result.” | Runs only while CodeAlta is running. A reminder that fires while its session works is not lost: see [Schedule a later check](#schedule-a-later-check). |
 | `job` | Start a shell command in the background of a session, list the jobs, read their output, cancel them. | “Start the full test run as a background job and continue with the docs; fix what fails when its result comes back.” | Runs a command with the rights of CodeAlta; the result is sent to the session when the command ends. Jobs end when CodeAlta exits. |
 | `provider` | Inspect registered/configured providers and provider model lists. | “List enabled providers that can run a high-reasoning model.” | Read-only; does not validate external billing or model cost. |
 | `model` | List, show, and resolve provider model references. | “Pick two available high-reasoning model refs for a comparison run and explain the tradeoff.” | Read-only selection metadata. |
@@ -145,7 +145,11 @@ Reminders are useful when a delegated session may take a few minutes or when you
 Start a read-only child session to inspect the build logs. Set a reminder for this parent session in 5 minutes to check whether the child has reported back.
 ```
 
-Reminders are delivered through normal session queue semantics while the current CodeAlta host is still running.
+A reminder is sent to its session as a prompt, as long as CodeAlta is still running:
+
+- When the session is idle, the reminder starts a turn.
+- When the session is working, CodeAlta Desktop gives the reminder to the running turn, as a steering message. With a provider that takes nothing during a turn, the reminder waits for the end of the turn and starts the next one.
+- CodeAlta TUI queues a reminder that fires while the session is working: it starts the next turn.
 
 ### Wait for a command without blocking
 

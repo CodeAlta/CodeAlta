@@ -20,7 +20,7 @@ public sealed class ReminderRpcTests
             await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id is "one" or "two" or "ONE"), request =>
             {
                 sends.Add(request);
-                return new(OwnedSessionCommandAdmissionKind.Busy);
+                return new(OwnedSessionCommandAdmissionKind.Capacity);
             }, clock);
             var created = await service.Create(new("epoch", "one", "original", 60, 1), default);
             var id = created.ReminderId!;
@@ -114,7 +114,7 @@ public sealed class ReminderRpcTests
         await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id is "one" or "two" or "ONE"), request =>
         {
             sends.Add(request);
-            return new(OwnedSessionCommandAdmissionKind.Busy);
+            return new(OwnedSessionCommandAdmissionKind.Capacity);
         }, clock);
         var content = "First 😀\r\nSecond\t" + new string('\\', 2000) + new string('"', 2000);
         var created = await service.Create(new("epoch", "one", content, 60, 1), default);
@@ -203,34 +203,125 @@ public sealed class ReminderRpcTests
     }
 
     [TestMethod]
-    public async Task ClockFiringUsesExactTargetAndRecordsFailedOwnerAdmissionWithoutRetry()
+    public async Task ClockFiringUsesExactTargetAndRecordsRefusedOwnerAdmissionWithoutRetry()
     {
         using var clock = new LiteralClock();
         var sends = new List<OwnedTextSendRequest>();
         await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id == "one"), request => {
             sends.Add(request);
-            return new(OwnedSessionCommandAdmissionKind.Busy);
+            return new(OwnedSessionCommandAdmissionKind.Capacity);
         }, clock);
         var created = await service.Create(new("epoch", "one", "message", 60, 1), CancellationToken.None);
         Assert.AreEqual("ok", created.Status);
         await clock.TimerCreated();
         clock.Advance(TimeSpan.FromSeconds(60));
-        ReminderListResponse? completed = null;
-        for (var attempt = 0; attempt < 200; attempt++)
-        {
-            completed = await service.List(new("epoch", "one"), CancellationToken.None);
-            if (completed.CompletedCount == 1) break;
-            await Task.Yield();
-        }
-        Assert.IsNotNull(completed);
+        var completed = await Completed(service, "one");
         Assert.AreEqual(0, completed.ActiveCount);
         Assert.AreEqual(1, completed.CompletedCount);
         Assert.AreEqual(1, completed.Reminders.Single().FiredCount);
-        Assert.AreEqual("send_busy", completed.Reminders.Single().LastError);
+        Assert.AreEqual("send_capacity", completed.Reminders.Single().LastError);
         Assert.HasCount(1, sends);
         Assert.AreEqual("one", sends[0].SessionId);
         Assert.AreEqual("message", sends[0].Text);
         Assert.AreEqual($"reminder:{created.ReminderId}:0", sends[0].ClientRequestId);
+    }
+
+    [TestMethod]
+    [DataRow("steered")]
+    [DataRow("queued")]
+    public async Task FiringDuringATurnGivesTheReminderToThatTurnWithoutASend(string given)
+    {
+        using var clock = new LiteralClock();
+        var turns = new List<(string SessionId, string Content)>();
+        await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id == "one"),
+            _ => throw new AssertFailedException("A session that runs a turn is not sent to: the send would be refused."),
+            (id, content) => { lock (turns) turns.Add((id, content)); return Task.FromResult(given); }, clock);
+        var created = await service.Create(new("epoch", "one", "check the build", 60, 1), CancellationToken.None);
+        Assert.AreEqual("ok", created.Status);
+        await clock.TimerCreated();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        var completed = await Completed(service, "one");
+        var row = completed.Reminders.Single();
+        Assert.AreEqual(1, row.FiredCount);
+        Assert.AreEqual(0, row.LastExitCode);
+        Assert.IsNull(row.LastError);
+        Assert.HasCount(1, turns);
+        Assert.AreEqual(("one", "check the build"), turns[0]);
+    }
+
+    [TestMethod]
+    public async Task FiringWhileAnotherSendIsBeingAdmittedAsksAgainAndReachesItsTurn()
+    {
+        using var clock = new LiteralClock();
+        var sends = new List<OwnedTextSendRequest>();
+        var asked = 0;
+        // The send of the user is admitted and its turn does not run yet; it runs when the firing asks again.
+        await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id == "one"), request =>
+        {
+            lock (sends) sends.Add(request);
+            return new(OwnedSessionCommandAdmissionKind.Busy);
+        }, (_, _) => Task.FromResult(Interlocked.Increment(ref asked) == 1 ? "idle" : "steered"), clock);
+        var created = await service.Create(new("epoch", "one", "message", 60, 1), CancellationToken.None);
+        await clock.TimerCreated();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        await clock.TimerCreated();
+        Assert.AreEqual(1, (await service.List(new("epoch", "one"), CancellationToken.None)).ActiveCount, "The firing waits for its place.");
+        clock.Advance(ReminderService.BusyRetryDelay);
+        var completed = await Completed(service, "one");
+        Assert.AreEqual(0, completed.Reminders.Single().LastExitCode);
+        Assert.IsNull(completed.Reminders.Single().LastError);
+        Assert.AreEqual(2, Volatile.Read(ref asked));
+        Assert.HasCount(1, sends);
+        Assert.AreEqual($"reminder:{created.ReminderId}:0", sends[0].ClientRequestId);
+    }
+
+    [TestMethod]
+    public async Task ASessionThatStaysBusyWithoutATurnEndsTheFiringAsBusy()
+    {
+        using var clock = new LiteralClock();
+        var sends = 0;
+        await using var service = new ReminderService("epoch", (id, _) => Task.FromResult(id == "one"), _ =>
+        {
+            Interlocked.Increment(ref sends);
+            return new(OwnedSessionCommandAdmissionKind.Busy);
+        }, clock);
+        await service.Create(new("epoch", "one", "message", 60, 1), CancellationToken.None);
+        await clock.TimerCreated();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        for (var attempt = 1; attempt < ReminderService.MaximumBusyAttempts; attempt++)
+        {
+            await clock.TimerCreated();
+            clock.Advance(ReminderService.BusyRetryDelay);
+        }
+        var completed = await Completed(service, "one");
+        Assert.AreEqual("send_busy", completed.Reminders.Single().LastError);
+        Assert.AreEqual(ReminderService.MaximumBusyAttempts, Volatile.Read(ref sends));
+    }
+
+    [TestMethod]
+    public async Task ClosingReleasesAFiringThatWaitsForItsPlace()
+    {
+        using var clock = new LiteralClock();
+        var service = new ReminderService("epoch", (id, _) => Task.FromResult(id == "one"),
+            _ => new(OwnedSessionCommandAdmissionKind.Busy), clock);
+        await service.Create(new("epoch", "one", "message", 60, 1), CancellationToken.None);
+        await clock.TimerCreated();
+        clock.Advance(TimeSpan.FromSeconds(60));
+        await clock.TimerCreated();
+        // No clock tick: only the closing of the service ends the wait.
+        await service.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private static async Task<ReminderListResponse> Completed(ReminderService service, string sessionId)
+    {
+        for (var attempt = 0; attempt < 100000; attempt++)
+        {
+            var list = await service.List(new("epoch", sessionId), CancellationToken.None);
+            if (list.CompletedCount == 1) return list;
+            await Task.Yield();
+        }
+        Assert.Fail("The reminder did not complete.");
+        throw new InvalidOperationException("Unreachable.");
     }
 
     [TestMethod]
