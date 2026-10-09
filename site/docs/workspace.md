@@ -408,6 +408,8 @@ The desktop app has one Settings window with a page per area: **Appearance**, **
 
 #### Files of the settings
 
+Like the other windows of the desktop app, Settings closes with `Esc`, with its close button, or with a click outside it. A window that asks you something stays open until you answer.
+
 Most settings are files on your disk. Each page shows where its files are, with three buttons beside every path:
 
 | Button | What it does |

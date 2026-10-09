@@ -3,7 +3,7 @@ import { type InputEntry, type InputPage, type createUserInputReviewer } from ".
 import type { createMutationCapability } from "./sessionOperations";
 import { useShellLanguage } from "./shellLanguage";
 import { createPaletteFocusRestoration } from "./paletteActions";
-import { modalDialogOpen } from "./modalDialogs";
+import { keptOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
 type Props = { epoch: string; sessionId: string; reviewer: ReturnType<typeof createUserInputReviewer>; capability: ReturnType<typeof createMutationCapability>;
   canReview?: () => boolean };
@@ -79,7 +79,7 @@ export function UserInputPanel({ epoch, sessionId, reviewer, capability, canRevi
     review.draft.values = { ...review.draft.values, [id]: value }; changed(n => n + 1);
   };
   return <section className="provider-input-panel" aria-label={t("Nonsecret provider input")}>
-    {review && <dialog ref={dialog} className="app-dialog provider-input-dialog" aria-modal="true" aria-labelledby="provider-input-title"
+    {review && <dialog ref={dialog} className="app-dialog provider-input-dialog" aria-modal="true" aria-labelledby="provider-input-title" {...keptOnOutsidePress}
       onClose={() => { if (active.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {

@@ -328,8 +328,8 @@ composer draft and timeline remain mounted underneath but cannot be interacted w
 open. Drag its title bar to move it and its edges or corners to resize it; the geometry is saved in
 this WebView's local storage and the title bar's restore button (or a double-click on the title bar)
 returns to the default. The expanded prompt editor (F6) is the same kind of window with its own saved
-geometry. Use the window's sections, Escape or Close settings to return. Configuration, Providers,
-Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs belong to the
+geometry. Use the window's sections, Escape, Close settings or a click beside the window to return.
+Configuration, Providers, Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs belong to the
 global workspace, not the selected project: sessions from different projects can stay open together.
 Drag a tab along the tab strip to reorder it, to a pane edge to create a split view, or to its center to merge
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
@@ -363,6 +363,17 @@ source, About, project details, the saved-session browser and the model/prompt c
 windows: drag the title bar to move them, drag an edge to resize them, and use the title bar's restore
 button (or double-click it) to return to the default size and position. Each kind of window remembers
 its own geometry. Closing Reminders does not cancel an admitted action or retry an uncertain Save.
+
+A click outside a window closes it, as Escape does: the window gets the `cancel` event it handles for
+that key (`dismissDialogsOnOutsidePress` in `modalDialogs.ts`, one pair of listeners for every `dialog`
+of the page). The press and its release are both outside, so a selection or a window dragged out of its
+dialog closes nothing; with a menu or a popover open in the window, the click closes that alone. A
+window that asks something, or holds what is being typed, stays open and is closed by its own buttons
+or Escape: the review of a command permission, the input a provider asks for, the dialog of a plugin
+other than a message, the editor of an automation and **New space**. Such a `dialog` carries
+`data-outside-press="keep"` (`keptOnOutsidePress`, or `keepOnOutsidePress` of `AppWindow`). The
+questions that are Blueprint dialogs (unsaved changes, closing the window, exiting) already ignore a
+click outside them.
 
 In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or

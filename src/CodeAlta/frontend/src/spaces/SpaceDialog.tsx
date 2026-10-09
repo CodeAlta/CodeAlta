@@ -62,7 +62,7 @@ export function SpaceDialog({ spaces, projects, selected, create, onCreated, onC
   return <AppWindow storageKey="codealta.desktop.window.space.v1" className="space-dialog" titleId="space-dialog-title"
     title={<><AppIcon name="space" size={14} /> {t("New space")}</>}
     preferredSize={viewport => ({ width: Math.min(560, viewport.width - 40), height: Math.min(600, viewport.height - 40) })} minimumSize={{ width: 380, height: 360 }}
-    onClose={onClose} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); onClose(); }}
+    onClose={onClose} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); onClose(); }} keepOnOutsidePress
     onKeyDown={event => {
       event.stopPropagation();
       if (event.key === "Escape" && !event.nativeEvent.isComposing) { event.preventDefault(); onClose(); }

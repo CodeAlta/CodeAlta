@@ -148,7 +148,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
 
   return <AppWindow storageKey="codealta.desktop.window.automation.v1" className="automation-editor-dialog" titleId="automation-editor-title"
     title={t(form.id ? "Edit automation" : "New automation")} preferredSize={viewport => ({ width: Math.min(760, viewport.width - 40), height: Math.min(820, viewport.height - 40) })}
-    minimumSize={{ width: 520, height: 420 }} onClose={onClose} closeLabel={t("Close")} onOpened={() => name.current?.focus()}
+    minimumSize={{ width: 520, height: 420 }} onClose={onClose} closeLabel={t("Close")} onOpened={() => name.current?.focus()} keepOnOutsidePress
     onCancel={event => { event.preventDefault(); if (!busy) onClose(); }} onKeyDown={event => event.stopPropagation()}>
     <form className="automation-editor" onSubmit={event => { event.preventDefault(); void save(false); }}>
       <div className="automation-editor-body">

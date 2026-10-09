@@ -201,7 +201,7 @@ import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
-import { modalDialogOpen } from "./modalDialogs";
+import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -215,6 +215,8 @@ function App() {
   const language = useLanguagePreference();
   const t = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(language.locale, key, parameters);
   // The spaces: the groups of projects the window shows one at a time. What is read of the catalog is kept
+  // A press outside a window dismisses it, as Escape does.
+  useEffect(() => dismissDialogsOnOutsidePress(document), []);
   // whole, and the window is given what the shown space has of it, so that everything it lists and opens
   // (the Explorer, the tabs, the search, the work items) is the space's.
   const [spacesHub] = useState(() => createSpacesHub(spacesApi));

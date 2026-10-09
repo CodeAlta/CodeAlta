@@ -155,6 +155,17 @@ test("the window of a tool call follows it: live output, then its record, with a
       fields: [{ path: "arguments", text: '{"path":"missing.txt"}', truncated: false }, { path: "result.content", text: "File 'missing.txt' was not found.", truncated: false }] }) });
     assert.equal(await wait(`${dialog}?.querySelector('.tool-error')?.textContent.includes("was not found")`), true);
     assert.equal(await evaluate(`!${dialog}.querySelector('.tool-output') && ${dialog}.querySelector('.tool-arguments dd').textContent`), "missing.txt");
+
+    // A press beside the window closes it, as Escape does. One that begins in the window and ends beside it, as a
+    // selection does, leaves it open.
+    const mouse = (type: string, x: number, y: number) => command("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+    const box = await evaluate<{ left: number; top: number }>(`(()=>{const box=${dialog}.querySelector('.app-window-body').getBoundingClientRect();return {left:box.left,top:box.top}})()`);
+    assert.ok(box.left > 40 && box.top > 40, "The window leaves room beside it.");
+    const closed = await evaluate<number>("toolFixture.state.closed");
+    await mouse("mousePressed", box.left + 30, box.top + 30); await mouse("mouseMoved", 12, 12); await mouse("mouseReleased", 12, 12);
+    assert.equal(await evaluate(`!!${dialog} && toolFixture.state.closed===${closed}`), true, "A press that began in the window does not close it.");
+    await mouse("mousePressed", 12, 12); await mouse("mouseReleased", 12, 12);
+    assert.equal(await wait(`toolFixture.state.closed===${closed + 1} && !document.querySelector('dialog.tool-call-dialog')`), true, "A press beside the window closes it.");
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
