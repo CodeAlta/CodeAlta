@@ -53,7 +53,7 @@ internal sealed class CopilotRequestUsage
                 {
                     if (detail.ValueKind != JsonValueKind.Object ||
                         !detail.TryGetProperty("token_type", out var type) || type.ValueKind != JsonValueKind.String ||
-                        !detail.TryGetProperty("token_count", out var count) || !count.TryGetInt64(out var tokens) || tokens < 0)
+                        !detail.TryGetProperty("token_count", out var count) || !TryGetCount(count, out var tokens))
                     {
                         continue;
                     }
@@ -69,7 +69,7 @@ internal sealed class CopilotRequestUsage
                 }
             }
 
-            long? total = usage.TryGetProperty("total_nano_aiu", out var nano) && nano.TryGetInt64(out var value) && value >= 0 ? value : null;
+            long? total = usage.TryGetProperty("total_nano_aiu", out var nano) && TryGetCount(nano, out var value) ? value : null;
             lock (_gate)
             {
                 // A request that is sent again reports again: the last answer is the one that is kept.
@@ -82,6 +82,13 @@ internal sealed class CopilotRequestUsage
         {
             // Not the usage: an event whose text holds the name.
         }
+    }
+
+    // What is not a count is left out: reading the usage never fails the answer it comes with.
+    private static bool TryGetCount(JsonElement element, out long count)
+    {
+        count = 0;
+        return element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out count) && count >= 0;
     }
 
     /// <summary>Reads one line of the stream; a line without the usage of Copilot is skipped.</summary>
@@ -172,7 +179,7 @@ internal sealed class CopilotUsageSseStream(Stream inner, CopilotRequestUsage us
     public override int Read(Span<byte> buffer)
     {
         var read = inner.Read(buffer);
-        Scan(buffer[..read], read == 0);
+        Scan(buffer[..read], read == 0 && !buffer.IsEmpty);
         return read;
     }
 
@@ -182,7 +189,7 @@ internal sealed class CopilotUsageSseStream(Stream inner, CopilotRequestUsage us
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         var read = await inner.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-        Scan(buffer.Span[..read], read == 0);
+        Scan(buffer.Span[..read], read == 0 && !buffer.IsEmpty);
         return read;
     }
 

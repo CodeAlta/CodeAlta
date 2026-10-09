@@ -1340,6 +1340,40 @@ public sealed class CopilotDirectProviderTests
         Assert.AreEqual(7L, billed.CacheWriteTokens);
     }
 
+    [TestMethod]
+    public void CopilotRequestUsage_LeavesOutWhatIsNotACount()
+    {
+        var response = new AgentTurnResponse
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("ok")]),
+            Usage = new AgentSessionUsage(LastOperation: new AgentOperationUsageSnapshot("gpt-test", InputTokens: 10, OutputTokens: 2)),
+        };
+
+        // The usage is not part of the protocol: a value of another kind is skipped, and the answer is not failed.
+        var usage = new CopilotRequestUsage();
+        usage.ObserveLine("data: {\"copilot_usage\":{\"total_nano_aiu\":null,\"token_details\":[{\"token_type\":\"cache_read\",\"token_count\":\"12\"},{\"token_type\":\"cache_write\",\"token_count\":null},{\"token_type\":\"cache_write\",\"token_count\":1.5}]}}");
+        Assert.AreSame(response, usage.Apply(response));
+
+        usage.ObserveLine("data: {\"copilot_usage\":{\"total_nano_aiu\":\"2500000000\",\"token_details\":[{\"token_type\":\"cache_read\",\"token_count\":12},{\"token_type\":\"cache_write\",\"token_count\":{}}]}}");
+        var billed = usage.Apply(response).Usage!.LastOperation!;
+        Assert.IsNull(billed.Cost);
+        Assert.IsNull(billed.CostUnit);
+        Assert.AreEqual(12L, billed.CachedInputTokens);
+        Assert.IsNull(billed.CacheWriteTokens);
+
+        // A read that asks for nothing is not the end of the stream: the line it falls in is still read whole.
+        var line = Encoding.UTF8.GetBytes("data: {\"copilot_usage\":{\"total_nano_aiu\":1000000000,\"token_details\":[]}}\n");
+        using var stream = new CopilotUsageSseStream(new MemoryStream(line), usage);
+        var buffer = new byte[16];
+        Assert.AreEqual(16, stream.Read(buffer));
+        Assert.AreEqual(0, stream.Read(Span<byte>.Empty));
+        while (stream.Read(buffer) > 0)
+        {
+        }
+
+        Assert.AreEqual(1d, usage.Apply(response).Usage!.LastOperation!.Cost);
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
