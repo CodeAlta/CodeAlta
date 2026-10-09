@@ -129,6 +129,13 @@ The question, like the questions of an exit, is shown in front of an open window
 (Settings, the session browser): those windows are modal dialogs in the browser's top layer, and a
 question added to the page itself would be behind them, out of reach (`frontLayer`).
 
+On Windows the taskbar button of the window shows an indeterminate progress while a session runs or sends
+its queued prompts (`DesktopWindowsTaskbarProgress`, `ITaskbarList3` through `NeoWindowPolishService`). The
+activity is read from the runtime twice a second (`SessionRuntimeService.ListOverview`) rather than observed:
+a session that only has background tasks does not count. A window that was hidden loses its taskbar button
+and the progress with it, so the progress is set again once the window is shown; a state the taskbar did not
+accept is set again at the next reading. The other desktops have no such progress and get nothing.
+
 Starting `alta` while CodeAlta already runs with the same profile does not start a second one: the
 running one shows its window and comes to the front. `alta --exit` asks the running one to exit, as
 **Exit** in the tray does (`alta --dev --exit` for the developer instance); with none running it does

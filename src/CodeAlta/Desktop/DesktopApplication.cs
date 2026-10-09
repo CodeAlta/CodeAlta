@@ -237,6 +237,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         Mcp.DesktopMcpServer? mcp = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
+        IAsyncDisposable? sessionTaskbarProgress = null;
         var bodyFailed = false;
         try
         {
@@ -502,6 +503,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
             if (DesktopPlugins.DescribeStartupFailures(host.PluginRuntime.Diagnostics) is { } pluginFailures) pluginUi.NotifyProblem(pluginFailures);
             shell.RunningSessions = host.RuntimeService.CountActiveRuns;
+            sessionTaskbarProgress = DesktopWindowsTaskbarProgress.StartIfAvailable(window, chrome.Services.WindowPolish, host.RuntimeService);
             shell.HasWorkspace = true;
             if (!closeRequested.Task.IsCompleted)
             {
@@ -700,13 +702,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(rpcLifetime);
             GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
+            GC.KeepAlive(sessionTaskbarProgress);
             GC.KeepAlive(window);
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
         }
         // The placement of the window for the next start, written while the window is still there.
         if (windowState is not null) await windowState.DisposeAsync();
         var nativeFailed = false;
-        foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, chromeLifetime, environmentLifetime })
+        foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, sessionTaskbarProgress, chromeLifetime, environmentLifetime })
         {
             if (resource is null) continue;
             try
@@ -727,6 +730,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(rpcLifetime);
             GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
+            GC.KeepAlive(sessionTaskbarProgress);
             GC.KeepAlive(window);
             return;
         }
