@@ -256,6 +256,13 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
+            {runsOwnCli(form.type) && <FormGroup label="ANTHROPIC_API_KEY" labelFor="provider-anthropic-key"
+              helperText={t("When this variable is set. Without an answer saved by Claude Code, sessions do not start.")}>
+              <HTMLSelect id="provider-anthropic-key" fill value={form.anthropicApiKey} disabled={busy} onChange={event => edit({ anthropicApiKey: event.target.value })}>
+                <option value="">{t("Follow the answer saved by Claude Code")}</option>
+                <option value="ignore">{t("Ignore it: use my Claude login")}</option>
+                <option value="use">{t("Use it: bill its API account")}</option>
+              </HTMLSelect></FormGroup>}
             {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
             {runsOwnCli(form.type)

@@ -9,6 +9,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
 {
     private readonly object _lock = new();
     private readonly Dictionary<string, Registration> _registrations = new(StringComparer.OrdinalIgnoreCase);
+    private long _lastVersion;
 
     /// <summary>
     /// Registers or replaces a provider runtime factory.
@@ -29,7 +30,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
                 DisposeRuntime(previous.Runtime);
             }
 
-            _registrations[key] = new Registration(descriptor, runtimeFactory, null);
+            _registrations[key] = new Registration(descriptor, runtimeFactory, null, ++_lastVersion);
         }
     }
 
@@ -57,6 +58,21 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
 
         DisposeRuntime(removed.Value.Runtime);
         return true;
+    }
+
+    /// <summary>
+    /// Gets the version of the registration of a provider. It changes each time the provider is registered or replaced:
+    /// a runtime created from an older version runs with the settings the provider had then.
+    /// </summary>
+    /// <param name="providerId">The provider identifier.</param>
+    /// <returns>The version; 0 when the provider is not registered.</returns>
+    public long GetRegistrationVersion(ModelProviderId providerId)
+    {
+        var key = ModelProviderId.NormalizeValue(providerId.Value);
+        lock (_lock)
+        {
+            return _registrations.TryGetValue(key, out var registration) ? registration.Version : 0;
+        }
     }
 
     /// <inheritdoc />
@@ -199,6 +215,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     private readonly record struct Registration(
         ModelProviderDescriptor Descriptor,
         Func<IModelProviderRuntime> Factory,
-        IModelProviderRuntime? Runtime);
+        IModelProviderRuntime? Runtime,
+        long Version);
 
 }

@@ -1657,6 +1657,10 @@ confirmation. When the configuration lacks some of the providers CodeAlta ships 
 its key, adapter type, endpoint, the variable of its key and what its service needs), disabled, and selects it so
 that its credential can be given. A configuration that has them all goes straight to the blank definition. **Save and apply** writes the global `config.toml` and re-registers the providers in
 the running host; it is refused as a conflict when the file changed on disk since the page read it.
+Each registration of a provider has a version (`ModelProviderRegistry.GetRegistrationVersion`), which an attachment
+records: an idle session whose provider was registered again since is attached again at its next send, as for a
+change of model, and runs with the saved settings (`SessionRuntimeService`, `UsesCurrentProvider`). A running turn,
+a draining queue, or an attachment another caller configured keeps the runtime it started with.
 A stored API key is never sent to the page: leaving the field blank keeps it, and **Remove the
 stored key** clears it. Settings the form does not show (timeouts, request overrides, compaction and
 so on) are preserved, but this structured save rewrites the file without its comments and blank
@@ -1672,7 +1676,10 @@ account, a button per sign-in method (**Sign in with the browser**, **Sign in wi
 and **Sign out**. A sign-in opens the provider's page in the system browser and shows the address,
 and the code to enter for a device flow, each with a copy button, until it completes or is canceled;
 a provider that was disabled is enabled when its sign-in succeeds. Save a new or edited provider
-before signing in.
+before signing in. A `claude-code` provider has no API field and no **Account** block; its form has
+**ANTHROPIC_API_KEY** instead (`anthropic_api_key` of `GlobalConfigProvider`/`GlobalConfigProviderEdit`): follow the
+answer Claude Code saved for the key (blank), ignore it and use the Claude login (`ignore`), or use it (`use`). See
+"`ANTHROPIC_API_KEY`" in [providers.md](providers.md). Another adapter type does not keep the setting.
 
 **The default provider.** `ModelProviderDescriptor.IsDefault` is true for every configured provider (it is
 the default option of its own definition), so it never says which provider a new session starts with.

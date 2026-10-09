@@ -48,7 +48,9 @@ public static class ClaudeCodeAccountUsage
             new ClaudeCodeLaunchKey(string.IsNullOrWhiteSpace(home) ? null : home, null, null),
             newSessionId: null,
             resumeSessionId: null,
-            withTools: false);
+            withTools: false,
+            // The process is only asked what it runs, which bills nothing: it loses the key only when a turn would.
+            withoutApiKey: ClaudeCodeApiKey.Decide(options) == ClaudeCodeApiKeyDecision.Ignore);
         launch = launch with { Arguments = [.. launch.Arguments, "--no-session-persistence"] };
 
         var connection = new ClaudeCodeConnection((options.TransportFactory ?? ClaudeCodeProcessTransportFactory.Instance).Start(launch), Silent.Instance);

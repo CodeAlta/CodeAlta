@@ -8,6 +8,8 @@ export type ProviderForm = Readonly<{
   apiUrl: string; apiKeyEnv: string; apiKey: string; clearApiKey: boolean; makeDefault: boolean;
   /** The id of the icon chosen for the provider, and the color it is drawn in; blank when they follow the provider. */
   icon: string; color: string;
+  /** For a provider that runs Claude Code: `use` or `ignore` for ANTHROPIC_API_KEY; blank follows the answer Claude Code saved. */
+  anthropicApiKey: string;
 }>;
 
 /** The form for an existing provider, or a blank form for a new one. */
@@ -15,9 +17,10 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
   return provider
     ? { key: provider.key, type: provider.type, enabled: provider.enabled, displayName: provider.displayName ?? "", model: provider.model ?? "",
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
-      clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "" }
+      clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
+      anthropicApiKey: provider.anthropicApiKey ?? "" }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "" };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "" };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -44,7 +47,7 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
   return { key: form.key.trim().toLowerCase(), type: form.type, enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model),
     reasoningEffort: optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
     apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey,
-    icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color) };
+    icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null };
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */
