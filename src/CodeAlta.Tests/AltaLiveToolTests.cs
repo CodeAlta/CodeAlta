@@ -3148,10 +3148,12 @@ public sealed class AltaLiveToolTests
 
         // A session whose commands the user reviews starts none of them this way: the host says it for each session,
         // or for all of them.
-        Assert.IsFalse(new AltaJobPolicy(AcceptsCommands: false).Accepts(sessionId));
-        Assert.IsTrue(new AltaJobPolicy(AcceptsCommands: true).Accepts(sessionId));
-        Assert.IsTrue(new AltaJobPolicy(AcceptsCommands: true) { AcceptsCommandsOf = static _ => false }.Accepts(null), "No session acts: the host decides.");
-        var reviewed = CreateDispatcher(services.Add(new AltaJobPolicy(AcceptsCommands: true)
+        Assert.IsFalse(new AltaCommandReviewPolicy(AcceptsCommands: false).Accepts(sessionId));
+        Assert.IsFalse(new AltaCommandReviewPolicy(AcceptsCommands: false) { AcceptsCommandsOf = static _ => true }.Accepts(sessionId), "A host that reviews every session.");
+        Assert.IsTrue(new AltaCommandReviewPolicy(AcceptsCommands: true).Accepts(sessionId));
+        // A caller that is no session is asked about too: the host answers for it with its own policy.
+        Assert.IsFalse(new AltaCommandReviewPolicy(AcceptsCommands: true) { AcceptsCommandsOf = static id => id is not null }.Accepts(null));
+        var reviewed = CreateDispatcher(services.Add(new AltaCommandReviewPolicy(AcceptsCommands: true)
             { AcceptsCommandsOf = id => !string.Equals(id, sessionId, StringComparison.OrdinalIgnoreCase) }));
         var denied = await reviewed.InvokeAsync(["job", "start", "--command", "echo", "--cwd", root.Path], caller: caller).ConfigureAwait(false);
         Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.ExitCode);

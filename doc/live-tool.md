@@ -424,7 +424,7 @@ alta job cancel <job-id>
 - **Delivery.** The prompt is given through `SessionRuntimeService.DeliverHostPromptAsync`, the way the answer of a child session reaches its parent: a turn that runs is steered with it when its provider takes it, otherwise the prompt is queued and starts the next turn (queue kind and provenance `job`). It starts with `[CodeAlta background job]`, names the job, its command and how it ended (`succeeded (exit code 0) after 3 min 12 s`, `failed (exit code 1) after 40 s`, `timed out and was stopped after 30 min 0 s`), says that it comes from CodeAlta and that the output is data, then quotes the last 60 lines of the output (at most 6000 characters) in a fence (`SessionJobService.FormatResult`). `resultPrompt` of a job says what became of it: `steered`, `queued`, `none`, `failed`.
 - **Reading and cancelling.** `job list` lists the jobs of the calling session (`--session` for another one, `--all` for every session; a caller that is no session sees them all): the ones that run, then the last that ended. `job status` adds the last line the command wrote. `job output` returns the last lines (`--lines`), within what one call returns, with `truncated`. `job cancel` ends the command and the processes it started (`Process.Kill(entireProcessTree: true)`) and waits a moment for them to be gone.
 - **Limits and lifetime.** A session runs at most 8 jobs at once and the host 32; the newest 512K characters of the output of a job are kept; the last 32 jobs that ended stay readable (`SessionJobService`). Jobs live in memory, in `SessionRuntimeService.Jobs`: they are ended when the host exits, without a prompt, and none is found again after a restart. CodeAlta Desktop counts a session whose job runs among the sessions at work in its question before exiting (`CountSessionsAtWork`).
-- **Review of commands.** `job start` is refused with `job.startDenied` (exit code 4) for a session whose commands the user reviews, as typing in a terminal is, because the command would be one nobody reviewed. The host says which sessions those are with `AltaJobPolicy`: all of them (`AcceptsCommands: false`, a CodeAlta Desktop started with `--review-owned-command-permissions`), or each by its permission mode (`AcceptsCommandsOf`: a session of CodeAlta Desktop starts a job only in the mode that bypasses permissions, see "Permission modes" in `desktop.md`). The session that calls is the one that counts, whichever session the job is for. The other subcommands stay.
+- **Review of commands.** `job start` is refused with `job.startDenied` (exit code 4) for a session whose commands the user reviews, as typing in a terminal is, because the command would be one nobody reviewed. The host says which callers those are with `AltaCommandReviewPolicy`: all of them (`AcceptsCommands: false`, a CodeAlta Desktop started with `--review-owned-command-permissions`), or each by its permission mode (`AcceptsCommandsOf`: a session of CodeAlta Desktop starts a job only in the mode that bypasses permissions, see "Permission modes" in `desktop.md`; it is given null for a caller that is no session). The session that calls is the one that counts, whichever session the job is for. The other subcommands stay. The same policy refuses the other commands that run what nobody reviews: typing in a terminal (`terminal.inputDenied`), an automation with a command trigger (`automation.commandDenied`), and creating, building, reloading or refreshing a plugin (`plugin.buildDenied`).
 - **What the user sees.** A job is one of the background tasks of its session (`SessionRuntimeCurrentEntry.BackgroundTasks`, with `IsJob`), beside the ones of its provider: see "Background tasks" in [desktop.md](desktop.md). CodeAlta TUI has the commands and the prompts, and shows nothing of a job but the prompt of its result.
 
 ## Delegated work and peer messages
@@ -606,9 +606,11 @@ What a call returns is bounded: when a text is longer than the output budget of 
 (`maxOutputBytes`), its last lines are kept and `truncated` (or `outputTruncated`) is true.
 
 `terminal.notFound` answers an id that is not a terminal, `terminal.ended` typing in a terminal whose
-program has ended, and `terminal.inputDenied` (exit code 4) typing on a host that has the user review
-the commands of its sessions (`--review-owned-command-permissions`): `send` and `create --command` are
-refused there, everything else works.
+program has ended, and `terminal.inputDenied` (exit code 4) typing for a caller whose commands the user
+reviews (`AltaCommandReviewPolicy`, see "Background jobs"; in CodeAlta Desktop a session whose permission
+mode asks before commands, or every session of a host started with
+`--review-owned-command-permissions`): `send` and `create --command` are refused for it, everything else
+works.
 
 Like `diff` and `editor`, the group exists only where a host registers its service (`IAltaTerminals`),
 which the desktop host does: in the terminal UI and the standalone tool it is not among the commands,
@@ -678,9 +680,10 @@ alta automation delete <automation-id>
 `automation.startedByAutomation` (exit code 4) answers `run`, `create`, `enable`, `disable` and `delete`
 called by a session that an automation started: such a session reads the automations and changes none.
 `automation.commandDenied` (exit code 4) answers `create` with a `command@` trigger, and `enable` of an
-automation that has a command trigger, in a host that has the user review the commands of its sessions
-(a CodeAlta Desktop started with `--review-owned-command-permissions`, or whose default permission mode
-asks first): the command of a trigger is one nobody reviews. The user creates such an automation in the Automations
+automation that has a command trigger, for a caller whose commands the user reviews
+(`AltaCommandReviewPolicy`: in CodeAlta Desktop a session whose permission mode asks before commands, or
+every session of a host started with `--review-owned-command-permissions`): the command of a trigger is
+one nobody reviews. The user creates such an automation in the Automations
 tab; `disable` and `delete` still work.
 
 The group exists only where a host registers its service (`IAltaAutomations`), which the desktop host
@@ -791,7 +794,7 @@ Without `--session`, a session activates the skill for itself. Activation uses t
 
 `<plugin>` is the id of a plugin (the folder name of a source plugin) or a runtime key. `--global` and `--project` choose between a global and a project plugin of the same id.
 
-`list`, `status` and `api` exist in every host. The other commands exist where the host registers an `AltaPluginWorkshop`: CodeAlta Desktop, when its plugins are started and the commands of its sessions are not reviewed by the user (building a plugin runs its code). `open` also needs the window. A project plugin is one of the folder CodeAlta was started in: `create --project` from a session of another project is refused with `plugin.otherProject`.
+`list`, `status` and `api` exist in every host. The other commands exist where the host registers an `AltaPluginWorkshop`: CodeAlta Desktop, when its plugins are started and it was not started with `--review-owned-command-permissions`. `create`, `build`, `reload` and `refresh` are refused with `plugin.buildDenied` (exit code 4) for a caller whose commands the user reviews (`AltaCommandReviewPolicy`: a session whose permission mode asks before commands), because building and starting a plugin runs its code. `open` also needs the window. A project plugin is one of the folder CodeAlta was started in: `create --project` from a session of another project is refused with `plugin.otherProject`.
 
 Records are `alta.plugin.refs` (list), `alta.plugin.item` and `alta.plugin.summary` (list `--detailed`), `alta.plugin.status`, `alta.plugin.created`, `alta.plugin.build`, `alta.plugin.reload`, `alta.plugin.refresh`, `alta.plugin.opened`, `alta.plugin.api` and `alta.plugin.api.index`. The record of a source plugin has:
 
@@ -805,7 +808,7 @@ Records are `alta.plugin.refs` (list), `alta.plugin.item` and `alta.plugin.summa
 
 `reload` exits with 0 only when the plugin runs, and `build` only when the source compiles. When a build fails, the plugin that ran keeps running. `create` exits with 0 once the files are written; its `change` says whether the plugin started. `refresh` lists the packages that changed with their `change`, and counts the others in `unchanged`.
 
-Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPlugin`, `usage.invalidPlugin`, `plugin.otherProject`, `plugin.noProject`, `plugin.writeFailed`, `plugin.unavailable`, `plugin.apiNotFound`, `file.notFound` and `view.unavailable`.
+Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPlugin`, `usage.invalidPlugin`, `plugin.otherProject`, `plugin.noProject`, `plugin.buildDenied`, `plugin.writeFailed`, `plugin.unavailable`, `plugin.apiNotFound`, `file.notFound` and `view.unavailable`.
 
 ## Plugin command roots
 

@@ -388,6 +388,33 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task ASessionWhoseCommandsAreReviewed_GivesAnAutomationNoCommand_WhileAnotherOfTheSameHostDoes()
+    {
+        // The host says it for each caller: the session of the fixture is reviewed, the others are not.
+        await using var fixture = await Fixture.CreateAsync(policy: new AltaCommandReviewPolicy(AcceptsCommands: true)
+            { AcceptsCommandsOf = static sessionId => sessionId != "session-of-the-user" });
+        var denied = await fixture.Run(["automation", "create", "--name", "Watch", "--chat", "--trigger", "daily@09:00", "--trigger", "Command @wait-for-it", "--content", "x"]);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.Code, denied.Text);
+        StringAssert.Contains(denied.Text, "automation.commandDenied");
+        Assert.AreEqual(0, fixture.Service.Snapshot.Entries.Count, "Nothing is written.");
+        // An automation without a command is one it may create.
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "create", "--name", "Daily", "--chat", "--trigger", "daily@09:00", "--content", "x"])).Code);
+
+        // One the user wrote: the session does not start its command, another session of the same host does, and
+        // the reviewed one may end it.
+        var input = Input("By the user") with { Enabled = false, Triggers = [new("command", 0, 1, [], [], null, "opened", "trusted", "wait-for-it", null)] };
+        var id = (await fixture.Rpc.SaveAsync(new(Epoch, input, null), default)).Id!;
+        var enable = await fixture.Run(["automation", "enable", id]);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+        StringAssert.Contains(enable.Text, "automation.commandDenied");
+        Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+        var other = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "another-session", SourceProjectId = fixture.Project.Id };
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: other)).Code);
+        Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+        Assert.AreEqual("False", Text(await fixture.One("alta.automation.changed", "automation", "disable", id), "enabled"));
+    }
+
+    [TestMethod]
     public void TriggerText_ReadsWhatItWrites_AndSaysWhatIsWrong()
     {
         foreach (var text in new[]
@@ -586,13 +613,14 @@ public sealed class AutomationHostTests
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy)
         {
             (_root, Project, Other) = (root, project, other);
             Service = new AutomationService(GlobalPath, token => projects.LoadAsync(token), new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false),
                 Runner, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc, commands: Commands);
             Rpc = new AutomationsService(Service, projects, Epoch);
             var services = new AltaServiceCollection().Add(projects).Add<IAltaAutomations>(new DesktopAltaAutomations(Service, projects, acceptsCommands));
+            if (policy is not null) services.Add(policy);
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -610,13 +638,13 @@ public sealed class AutomationHostTests
         public AltaCallerIdentity Session { get; }
 
         /// <param name="acceptsCommands">False for a host that has the user review the commands of its sessions.</param>
-        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true)
+        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null)
         {
             var root = Directory.CreateTempSubdirectory("codealta-automation-host-").FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
-            var fixture = new Fixture(root, projects, project, other, acceptsCommands);
+            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy);
             await fixture.Service.RefreshAsync();
             return fixture;
         }

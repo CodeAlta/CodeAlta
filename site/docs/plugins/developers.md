@@ -40,7 +40,7 @@ The agent reads the `codealta-plugin-runtime` skill, which ships with CodeAlta a
 
 The agent calls a tool its plugin adds in the same turn. With the [UI tools](../ui-tools.md), it also runs the command of the plugin in the window and checks what it shows.
 
-CodeAlta TUI loads plugins when it starts: there the agent writes the file and you restart. The commands that build a plugin are not given to the sessions of a CodeAlta Desktop that reviews their commands.
+CodeAlta TUI loads plugins when it starts: there the agent writes the file and you restart. A session whose [permission mode](../workspace.md#tool-permissions) asks before commands cannot create or build a plugin, since a plugin runs its code.
 
 ## Create a plugin
 

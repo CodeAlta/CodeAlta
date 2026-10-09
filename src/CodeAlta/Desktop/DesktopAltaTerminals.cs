@@ -17,14 +17,8 @@ internal sealed class DesktopAltaTerminals(DesktopTerminals terminals, bool acce
     /// <summary>The most lines of what a terminal showed since something was typed that are read.</summary>
     internal const int MaximumLines = 2000;
 
-    /// <summary>
-    /// Gets or initializes whether the user reviews the commands of the sessions now: the setting can change while
-    /// the host runs. Null when only <c>acceptsInput</c> decides.
-    /// </summary>
-    internal Func<bool>? Reviews { get; init; }
-
     /// <inheritdoc />
-    public bool AcceptsInput => acceptsInput && Reviews?.Invoke() != true;
+    public bool AcceptsInput => acceptsInput;
 
     /// <inheritdoc />
     public IReadOnlyList<AltaTerminalShell> ListShells()
@@ -69,7 +63,7 @@ internal sealed class DesktopAltaTerminals(DesktopTerminals terminals, bool acce
     public async Task<AltaTerminalSent> SendAsync(string id, AltaTerminalInput input, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
-        if (!AcceptsInput) return new AltaTerminalSent { Status = "denied" };
+        if (!acceptsInput) return new AltaTerminalSent { Status = "denied" };
         if (terminals.Find(id) is not { } terminal) return new AltaTerminalSent { Status = "not_found" };
         if (terminal.Keyboard(input.Text, input.Keys, input.Enter, out var unknown) is not { } keyboard) return new AltaTerminalSent { Status = "unknown_key", Key = unknown };
         var before = terminal.Describe();

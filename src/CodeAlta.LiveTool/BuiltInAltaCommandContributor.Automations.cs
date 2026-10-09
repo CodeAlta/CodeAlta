@@ -165,7 +165,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static int AutomationCommandDenied(AltaCommandContext context, string? message)
         => PermissionDenied(context, "automation.commandDenied",
-            message ?? "This host has the user review the commands of its sessions: a session cannot create or enable an automation that runs a command.");
+            message ?? "The user reviews the commands of this session: it cannot create or enable an automation that runs a command. The user creates it in the Automations tab.");
+
+    // A trigger that keeps a command running, `command@<command line>`: the name before the first `@`, as the host reads it.
+    private static bool IsCommandTrigger(string trigger)
+        => trigger.IndexOf('@') is >= 0 and var at && trigger.AsSpan(0, at).Trim().Equals("command", StringComparison.OrdinalIgnoreCase);
 
     private static int AutomationSessionDenied(AltaCommandContext context)
         => PermissionDenied(context, "automation.startedByAutomation",
@@ -390,6 +394,13 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.invalidStore", "`--store project` needs a project: a chat is kept in the configuration of the user.", "alta automation create");
         }
 
+        string[] triggers = [.. options.Triggers.Select(static trigger => trigger.Trim()).Where(static trigger => trigger.Length > 0)];
+        // The command of a trigger is one nobody reviews.
+        if (triggers.Any(IsCommandTrigger) && ReviewsCommands(context))
+        {
+            return AutomationCommandDenied(context, null);
+        }
+
         var change = await automations.CreateAsync(new AltaAutomationRequest(name, prompt)
         {
             ProjectId = projectId,
@@ -398,7 +409,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             Agent = NormalizeOptionalText(options.Agent),
             Enabled = !options.Disabled,
             CatchUp = options.CatchUp,
-            Triggers = [.. options.Triggers.Select(static trigger => trigger.Trim()).Where(static trigger => trigger.Length > 0)],
+            Triggers = triggers,
         }, context.CancellationToken).ConfigureAwait(false);
         if (change.Status == "denied")
         {
@@ -435,6 +446,12 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (FindAutomation(automations, reference) is not { } automation)
         {
             return AutomationNotFound(context, reference);
+        }
+
+        // Enabling it starts its command; disabling it, or removing it, only ends one.
+        if (verb == "enable" && automation.Triggers.Any(IsCommandTrigger) && ReviewsCommands(context))
+        {
+            return AutomationCommandDenied(context, null);
         }
 
         var result = await change(automations, automation.Id).ConfigureAwait(false);

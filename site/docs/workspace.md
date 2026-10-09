@@ -606,9 +606,9 @@ Only a turn you start from the window can ask. A turn that starts without you, s
 another session drives or the turn that receives the result of a background job, has nobody to ask: in a
 mode that asks, its commands and file changes are refused, and the agent is told so.
 
-A session in a mode that asks cannot start a [background job](sessions.md#background-jobs): the command of
-a job is one nobody would be asked about. While the default mode is **Ask first**, sessions cannot type in
-a terminal or give an automation a command either.
+A session in a mode that asks cannot do what would run a command without asking you: start a
+[background job](sessions.md#background-jobs), type in a terminal, give an automation a command to run, or
+create and build a plugin.
 
 A request appears on top of the prompt of its session, with the command it would run and its folder, or the
 folder it would write under, and what the agent says it is for. Answer with **Allow once** or **Deny**, or

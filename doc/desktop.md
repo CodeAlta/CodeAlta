@@ -2571,8 +2571,9 @@ pane of the sessions. The sources are in `Desktop/Terminals/` (host) and `fronte
 
 Agents use the same terminals with `alta terminal` (see `doc/live-tool.md`): they list them, create one,
 read its screen or its last lines, type in it and wait for the command to end, rename it, show its tab
-and close it. A host started with `--review-owned-command-permissions` lets no session type in a
-terminal, since what is typed in a shell is a command nobody reviewed.
+and close it. A session whose permission mode asks before commands does not type in a terminal, since
+what is typed in a shell is a command nobody reviewed (see "Permission modes"); a host started with
+`--review-owned-command-permissions` lets no session do it.
 
 ## Worktrees
 
@@ -3343,10 +3344,14 @@ whatever the modes are now.
 modes of the sessions (`CodeAltaHostOptions.SessionPermissionModes` is off) and offers none but those
 of Claude Code.
 
-What a session does without a request must not go round its mode. `alta job start` is refused
-(`job.startDenied`) for a session whose policy is not `Approve` (`AltaJobPolicy.AcceptsCommandsOf`).
-While the default mode asks first, a session cannot type in a terminal (`alta terminal`) or give an
-automation a command, as in a host started with the flag.
+What a session does without a request must not go round its mode. The `alta` commands that run a command
+nobody reviews are refused for a caller whose policy is not `Approve` (`AltaCommandReviewPolicy`, which the
+host registers with `AcceptsCommandsOf` over `GetPermissionPolicy`): `alta job start` (`job.startDenied`),
+typing in a terminal with `alta terminal send` or `create --command` (`terminal.inputDenied`), creating or
+enabling an automation that has a command trigger (`automation.commandDenied`), and creating, building,
+reloading or refreshing a plugin, which runs its code (`plugin.buildDenied`). The session that calls is
+the one that counts; a caller that is no session (a client of the MCP server) has the default mode of the
+application. A host started with the flag refuses them all.
 
 A session that waits for an answer counts among the sessions that wait for the user in the activity of
 its space (`SpaceSessionActivity.Waiting`). The page marks it with `WaitingBadge` in the Explorer (its

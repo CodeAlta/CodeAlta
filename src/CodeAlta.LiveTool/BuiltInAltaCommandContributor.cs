@@ -5670,6 +5670,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.PolicyDenied;
     }
 
+    // Whether the user reviews the commands of the caller, which then does nothing that runs a command nobody
+    // reviewed: a background job, what is typed in a terminal, the command of an automation, a plugin that is built.
+    // The session that calls is the one that acts; a command that names another session counts for a caller that is none.
+    private static bool ReviewsCommands(AltaCommandContext context, string? targetSessionId = null)
+        => context.Services.Get<AltaCommandReviewPolicy>() is { } policy
+            && !policy.Accepts(NormalizeOptionalText(context.Caller.SourceSessionId) ?? NormalizeOptionalText(targetSessionId));
+
     private static int Unsupported(AltaCommandContext context, string code, string message)
     {
         AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, code, AltaExitCodes.Unsupported, message);

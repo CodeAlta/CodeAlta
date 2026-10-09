@@ -547,15 +547,15 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The tasks and the plans of the projects: files of each project, and the sessions of this instance that proposed or run them.
                 var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(worktreeConfig, host.CatalogOptions.StateRoot);
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
-                    // What a session types in a terminal, and the command it gives an automation, is reviewed by nobody:
-                    // not while the setting of the user has the commands of the sessions reviewed.
-                    new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions) { Reviews = () => shell.ReviewPermissions },
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions) { Reviews = () => shell.ReviewPermissions }, worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
-                    // A command a session starts in the background is one nobody reviewed: only a session whose
-                    // requests are all approved starts one.
-                    new AltaJobPolicy(AcceptsCommands: !options.ReviewOwnedCommandPermissions)
+                    new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
+                    // A command a session starts in the background, what it types in a terminal, the command it gives an
+                    // automation and the plugin it builds are reviewed by nobody: only a session whose requests are all
+                    // approved does any of it. A caller that is no session (a client of the MCP server) has the policy
+                    // of the application.
+                    new AltaCommandReviewPolicy(AcceptsCommands: !options.ReviewOwnedCommandPermissions)
                     {
-                        AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId) == SessionPermissionPolicy.Approve,
+                        AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
                     });
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));

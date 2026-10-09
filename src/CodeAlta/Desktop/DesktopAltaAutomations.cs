@@ -18,14 +18,6 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
 {
     private const string CommandDenied = "This host has the user review the commands of its sessions: a session cannot create or enable an automation that runs a command. The user creates it in the Automations tab.";
 
-    /// <summary>
-    /// Gets or initializes whether the user reviews the commands of the sessions now: the setting can change while
-    /// the host runs. Null when only <c>acceptsCommands</c> decides.
-    /// </summary>
-    internal Func<bool>? Reviews { get; init; }
-
-    private bool AcceptsCommands => acceptsCommands && Reviews?.Invoke() != true;
-
     /// <inheritdoc />
     public IReadOnlyList<AltaAutomation> List() => [.. automations.Snapshot.Entries.Select(Automation)];
 
@@ -50,7 +42,7 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
         {
             if (!AutomationTriggerText.TryParse(text, out var trigger, out problem)) return new("refused", null, problem);
             // The command of a trigger is one nobody reviewed.
-            if (trigger!.IsCommand && !AcceptsCommands) return new("denied", null, CommandDenied);
+            if (trigger!.IsCommand && !acceptsCommands) return new("denied", null, CommandDenied);
             triggers.Add(trigger);
         }
 
@@ -85,7 +77,7 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
     {
         if (automations.Snapshot.Find(id) is not { } entry) return new("not_found");
         // Enabling it starts its command; disabling it, or removing it, only ends one.
-        if (enabled && !AcceptsCommands && entry.Definition.Triggers.Any(static trigger => trigger.IsCommand)) return new("denied", id, CommandDenied);
+        if (enabled && !acceptsCommands && entry.Definition.Triggers.Any(static trigger => trigger.IsCommand)) return new("denied", id, CommandDenied);
         return await automations.SetEnabledAsync(id, enabled, cancellationToken).ConfigureAwait(false) is { } refused ? new("refused", id, refused) : new("ok", id);
     }
 

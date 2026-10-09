@@ -271,7 +271,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             }
 
             // Before anything is created: a terminal that is not given its command is of no use to the caller.
-            if (!terminals.AcceptsInput)
+            if (!terminals.AcceptsInput || ReviewsCommands(context))
             {
                 return TerminalInputDenied(context);
             }
@@ -477,7 +477,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             wait = TimeSpan.FromSeconds(seconds);
         }
 
-        if (!terminals.AcceptsInput)
+        // What is typed in a terminal is a command nobody reviews.
+        if (!terminals.AcceptsInput || ReviewsCommands(context))
         {
             return TerminalInputDenied(context);
         }
@@ -613,7 +614,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         => NotFound(context, "terminal.notFound", $"Terminal '{id}' was not found. List the terminals with `alta terminal list`.");
 
     private static int TerminalInputDenied(AltaCommandContext context)
-        => PermissionDenied(context, "terminal.inputDenied", "This host has the user review the commands of its sessions: a session cannot type in a terminal.");
+        => PermissionDenied(context, "terminal.inputDenied", "The user reviews the commands of this session: it cannot type in a terminal. Run the command with your shell tool.");
 
     private static int TerminalFailure(AltaCommandContext context, string code, string message)
     {

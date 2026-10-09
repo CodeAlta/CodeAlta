@@ -17,7 +17,7 @@ public sealed class AltaTerminalCommandsTests
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsInput)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsInput, AltaCommandReviewPolicy? policy)
         {
             (_root, Project, Other) = (root, project, other);
             var shell = OperatingSystem.IsWindows() ? @"C:\shell\sh" : "/shell/sh";
@@ -30,6 +30,7 @@ public sealed class AltaTerminalCommandsTests
                 return program;
             }, TimeProvider.System);
             var services = new AltaServiceCollection().Add(projects).Add<IAltaTerminals>(new DesktopAltaTerminals(Terminals, acceptsInput));
+            if (policy is not null) services.Add(policy);
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -44,14 +45,14 @@ public sealed class AltaTerminalCommandsTests
         public List<FakeTerminalProgram> Programs { get; } = [];
         public List<PseudoTerminalStart> Starts { get; } = [];
 
-        public static async Task<Fixture> CreateAsync(bool acceptsInput = true)
+        public static async Task<Fixture> CreateAsync(bool acceptsInput = true, AltaCommandReviewPolicy? policy = null)
         {
             var root = Directory.CreateTempSubdirectory("codealta-alta-terminal-").FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
             Directory.CreateDirectory(Path.Combine(project.ProjectPath, "src"));
-            return new Fixture(root, projects, project, other, acceptsInput);
+            return new Fixture(root, projects, project, other, acceptsInput, policy);
         }
 
         // Runs a command as the session, in the folder of its project.
@@ -291,6 +292,33 @@ public sealed class AltaTerminalCommandsTests
         Assert.AreEqual("True", Text(await fixture.One("alta.terminal.closed", "terminal", "close", running), "wasRunning"));
         await Until(() => fixture.Terminals.List().Count == 0, "The end of the terminal");
         Assert.IsTrue(shell.Killed);
+    }
+
+    [TestMethod]
+    public async Task ASessionWhoseCommandsAreReviewed_DoesNotType_WhileAnotherOfTheSameHostDoes()
+    {
+        // The host says it for each caller: the session of the fixture is reviewed, the others are not.
+        await using var fixture = await Fixture.CreateAsync(policy: new AltaCommandReviewPolicy(AcceptsCommands: true)
+            { AcceptsCommandsOf = static sessionId => sessionId != "session-1" });
+        var (code, _, text) = await fixture.Run(["terminal", "create", "--command", "rm -rf ."]);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, code, text);
+        StringAssert.Contains(text, "terminal.inputDenied");
+        Assert.AreEqual(0, fixture.Starts.Count);
+
+        // It still creates a terminal for the user, and reads it; what it would type is a command nobody reviews.
+        var (id, program) = await fixture.Create();
+        (code, _, text) = await fixture.Run(["terminal", "send", id, "--text", "x", "--enter"]);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, code, text);
+        StringAssert.Contains(text, "terminal.inputDenied");
+        Assert.AreEqual(string.Empty, program.Typed);
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["terminal", "read", id])).Code);
+
+        // Another session of the same host, and a caller that is no session, type in it.
+        var other = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-2", SourceProjectId = fixture.Project.Id };
+        var typed = await fixture.Alta.InvokeAsync(["terminal", "send", id, "--text", "a"], null, other, fixture.Project.ProjectPath).AsTask().WaitAsync(Patience);
+        Assert.AreEqual(AltaExitCodes.Success, typed.ExitCode, typed.Stdout + typed.Stderr);
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["terminal", "send", id, "--text", "b"], session: false)).Code);
+        await Until(() => program.Typed == "ab", "What the two callers typed");
     }
 
     [TestMethod]

@@ -161,7 +161,7 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         // A session whose commands the user reviews starts none that nobody reviewed: the session that calls is the
         // one that acts, whichever session the job is for.
-        if (context.Services.Get<AltaJobPolicy>() is { } policy && !policy.Accepts(NormalizeOptionalText(context.Caller.SourceSessionId) ?? sessionId))
+        if (ReviewsCommands(context, sessionId))
         {
             return PermissionDenied(context, "job.startDenied", "The user reviews the commands of this session: it cannot start a command in the background. Run it with your shell tool.");
         }
@@ -421,24 +421,4 @@ internal sealed partial class BuiltInAltaCommandContributor
         public string? Timeout { get; set; }
         public string? SessionId { get; set; }
     }
-}
-
-/// <summary>What a host lets its sessions do with background jobs. A host that registers none lets them start commands.</summary>
-/// <param name="AcceptsCommands">
-/// Whether a session may start a command in the background. A host that has the user review the commands of its
-/// sessions does not let them: a command started this way is one nobody reviewed.
-/// </param>
-public sealed record AltaJobPolicy(bool AcceptsCommands)
-{
-    /// <summary>
-    /// Gets or initializes what decides for one session, by its identifier, in a host whose sessions do not all
-    /// have the same policy. Null, the default, leaves <see cref="AcceptsCommands"/> to decide for every session.
-    /// </summary>
-    public Func<string, bool>? AcceptsCommandsOf { get; init; }
-
-    /// <summary>Gets whether a session may start a command in the background.</summary>
-    /// <param name="sessionId">The session that acts, or null when no session does.</param>
-    /// <returns>False when the commands of that session are reviewed.</returns>
-    public bool Accepts(string? sessionId)
-        => AcceptsCommands && (sessionId is null || AcceptsCommandsOf?.Invoke(sessionId) != false);
 }

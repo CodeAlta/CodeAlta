@@ -292,6 +292,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         var commandPath = reload ? "alta plugin reload" : "alta plugin build";
         if (!TryGetPluginWorkshop(context, out var workshop)) return AltaExitCodes.ServiceUnavailable;
+        if (ReviewsCommands(context)) return PluginBuildDenied(context);
         if (string.IsNullOrWhiteSpace(target.Reference)) return UsageError(context, "usage.missingPlugin", "A plugin id is required.", commandPath);
         var packages = FindPluginPackages(workshop.Runtime, target);
         if (packages.Count == 0)
@@ -323,6 +324,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static async ValueTask<int> HandlePluginRefreshAsync(AltaCommandContext context)
     {
         if (!TryGetPluginWorkshop(context, out var workshop)) return AltaExitCodes.ServiceUnavailable;
+        if (ReviewsCommands(context)) return PluginBuildDenied(context);
         try
         {
             var results = await workshop.Runtime.RefreshPackagesAsync(context.CancellationToken).ConfigureAwait(false);
@@ -356,6 +358,8 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static async ValueTask<int> HandlePluginCreateAsync(AltaCommandContext context, string? id, bool project, string? name, string? description, bool noStart)
     {
         if (!TryGetPluginWorkshop(context, out var workshop)) return AltaExitCodes.ServiceUnavailable;
+        // Created without being started, it is still built and started by the next refresh.
+        if (ReviewsCommands(context)) return PluginBuildDenied(context);
         if (string.IsNullOrWhiteSpace(id)) return UsageError(context, "usage.missingPlugin", "A plugin id is required.", "alta plugin create");
         var scope = project ? PluginScope.Project : PluginScope.Global;
         if (workshop.Runtime.Roots.FirstOrDefault(root => root.Scope == scope) is not { } root)
@@ -464,6 +468,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         });
         return AltaExitCodes.Success;
     }
+
+    // Building and starting a plugin runs its code, which nobody reviews.
+    private static int PluginBuildDenied(AltaCommandContext context)
+        => PermissionDenied(context, "plugin.buildDenied",
+            "The user reviews the commands of this session: it cannot create, build or start a plugin, which runs its code.");
 
     private static bool TryGetPluginWorkshop(AltaCommandContext context, out AltaPluginWorkshop workshop)
     {
