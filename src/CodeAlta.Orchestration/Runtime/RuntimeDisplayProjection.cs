@@ -32,8 +32,8 @@ public sealed class RuntimeDisplayProjection
     public const int MaxIdentifierCharacters = 256;
     /// <summary>Maximum UTF-16 code units per status/configuration/lifecycle label.</summary>
     public const int MaxMetadataCharacters = 512;
-    /// <summary>Maximum simultaneous observations, each with one payload-free wakeup slot and no replay buffer.</summary>
-    public const int MaxSubscribers = 32;
+    /// <summary>Maximum simultaneous observations: 32 session views plus the desktop taskbar activity observer.</summary>
+    public const int MaxSubscribers = 33;
 
     private readonly object _gate = new();
     private readonly Guid _epoch = Guid.NewGuid();

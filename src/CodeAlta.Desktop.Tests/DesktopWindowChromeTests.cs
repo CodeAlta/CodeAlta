@@ -1,5 +1,7 @@
 using CodeAlta.Desktop;
+using CodeAlta.Orchestration.Runtime;
 using NeoAstra;
+using NeoAstra.Desktop.WindowState;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Tests;
@@ -85,5 +87,57 @@ public sealed class DesktopWindowChromeTests
         {
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
+    }
+
+    [TestMethod]
+    public async Task WindowsTaskbarProgress_TracksSimulatedSessionActivity()
+    {
+        var states = new List<NeoWindowProgressState>();
+        await using var progress = new DesktopWindowsTaskbarProgress((state, _) =>
+        {
+            states.Add(state);
+            return Task.CompletedTask;
+        });
+
+        // An idle runtime, one running session, another notification while it is running, then completion.
+        await progress.SetActivityAsync(hasRunningSessions: false);
+        await progress.SetActivityAsync(hasRunningSessions: true);
+        await progress.SetActivityAsync(hasRunningSessions: true);
+        await progress.SetActivityAsync(hasRunningSessions: false);
+
+        CollectionAssert.AreEqual(
+            new[] { NeoWindowProgressState.None, NeoWindowProgressState.Indeterminate, NeoWindowProgressState.None },
+            states);
+    }
+
+    [TestMethod]
+    public async Task WindowsTaskbarProgress_DisposalClearsAnActiveIndicator()
+    {
+        var states = new List<NeoWindowProgressState>();
+        var progress = new DesktopWindowsTaskbarProgress((state, _) =>
+        {
+            states.Add(state);
+            return Task.CompletedTask;
+        });
+
+        await progress.SetActivityAsync(hasRunningSessions: true);
+        await progress.DisposeAsync();
+        await progress.DisposeAsync();
+
+        CollectionAssert.AreEqual(
+            new[] { NeoWindowProgressState.Indeterminate, NeoWindowProgressState.None },
+            states);
+    }
+
+    [TestMethod]
+    public void WindowsTaskbarProgress_UsesRuntimeRunningStateAndIgnoresBackgroundTasksAlone()
+    {
+        // SessionRuntimeOverview.Running covers runs and queue drains; background tasks are reported separately.
+        var idleWithBackgroundTask = new SessionRuntimeOverview("background", null, "Background", false, 1, false);
+        var running = new SessionRuntimeOverview("running", null, "Running", true, 0, false);
+
+        Assert.IsFalse(DesktopWindowsTaskbarProgress.HasRunningSessions([idleWithBackgroundTask]));
+        Assert.IsTrue(DesktopWindowsTaskbarProgress.HasRunningSessions([idleWithBackgroundTask, running]));
+        Assert.IsFalse(DesktopWindowsTaskbarProgress.HasRunningSessions([]));
     }
 }
