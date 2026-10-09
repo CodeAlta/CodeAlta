@@ -2917,6 +2917,16 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
+    public void FormatOperationPopupText_ShowsTheCostWithTheUnitTheProviderNames()
+    {
+        static string? Format(string? unit) => SessionUsageAggregator.FormatOperationPopupText(
+            new AgentOperationUsageSnapshot(Model: "claude-test", InputTokens: 26_317, OutputTokens: 123, CachedInputTokens: 26_003, Cost: 0.0361, CostUnit: unit));
+
+        Assert.AreEqual("claude-test · cost 0.036 AI credits", Format("AI credits"));
+        Assert.AreEqual("claude-test · cost 0.036", Format(null));
+    }
+
+    [TestMethod]
     public void FormatOperationPopupText_OmitsCodexTokenSummaryWhenChartExists()
     {
         var popupText = SessionUsageAggregator.FormatOperationPopupText(

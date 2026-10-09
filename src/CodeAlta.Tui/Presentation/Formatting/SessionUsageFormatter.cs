@@ -307,6 +307,8 @@ internal static class SessionUsageFormatter
         if (usage.Cost is { } cost)
         {
             // A cost comes with its unit when the provider names one: "0.061 AI credits".
+            var amount = FormattableString.Invariant($"{cost:0.###}");
+            parts.Add(SR.T("cost {0}", string.IsNullOrWhiteSpace(usage.CostUnit) ? amount : $"{amount} {usage.CostUnit}"));
         }
 
         if (usage.ParentToolCallId is { Length: > 0 } parentToolCallId)

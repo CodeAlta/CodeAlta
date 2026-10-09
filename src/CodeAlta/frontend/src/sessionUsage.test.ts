@@ -46,9 +46,11 @@ test("usage refuses foreign identity, malformed/overflow values, status pollutio
     sessionTotal: { totalTokens: "900", inputTokens: "500", outputTokens: "300", cachedInputTokens: "60", reasoningTokens: "40" } } };
   assert.equal(validateUsage(target, rich)?.observation?.rateLimits?.primary?.usedPercent, 40);
   assert.equal(validateUsage(target, rich)?.observation?.sessionTotal?.totalTokens, "900");
+  assert.equal(validateUsage(target, rich)?.observation?.lastOperation?.costUnit, "AI credits");
   for (const value of [
     { ...rich, observation: { ...rich.observation, lastOperation: { ...rich.observation.lastOperation, model: "m".repeat(129) } } },
     { ...rich, observation: { ...rich.observation, window: { ...rich.observation.window, label: "two\nlines" } } },
+    { ...rich, observation: { ...rich.observation, lastOperation: { ...rich.observation.lastOperation, costUnit: "two\nlines" } } },
     { ...rich, observation: { ...rich.observation, window: { ...rich.observation.window, maxOutputTokens: "0" } } },
     { ...rich, observation: { ...rich.observation, rateLimits: { ...rich.observation.rateLimits, primary: { usedPercent: 101, resetsAt: null, windowDurationMinutes: null } } } },
     { ...rich, observation: { ...rich.observation, rateLimits: { ...rich.observation.rateLimits, planType: 5 } } },
