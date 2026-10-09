@@ -7,6 +7,19 @@ Desktop declares six non-musl RIDs; TUI retains eight. Normal no-argument startu
 owned host for the current directory and `~/.alta`, matching the TUI default; native WebView behavior
 and the owned-host integration below are still undergoing qualification.
 
+## Empty-profile startup layout (2026-10-09)
+
+Windows Release startup with fresh explicit data/catalog/project/discovery/instruction/builtin roots,
+no enabled provider and no session reproduced one `ResizeObserver loop completed with undelivered
+notifications.` error. Test-only callback tracing attributed it to FlexLayout repositioning an ancestor
+panel after the late title-bar marking changed a descendant strip from 34 to 38 pixels; the layout then
+settled, rather than cycling indefinitely. Marking the strip during its toolbar mount removes that change.
+The real-main Edge regression (`startupLayout.browser.test.ts`) fails before the fix and passes afterward,
+checking unsuppressed errors and stable geometry over multiple frames, asynchronous boot, the initial
+settings/guide, resizing and prompt input. A fresh native launch after the fix had no console errors during
+the three-step provider guide, a 520 × 720 window, settings closure and dark/light theme checks. This is
+Windows first-start layout evidence, not provider sign-in, session execution or cross-platform qualification.
+
 The later workspace browser adds explicit catalog-copy/cache-write opt-in; see its
 [operator constraints](desktop.md#browse-a-task-owned-catalog-copy). This has
 not been native-qualified by the historical boot/fixture runs below. Its managed/source
