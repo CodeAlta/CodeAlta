@@ -295,6 +295,7 @@ public sealed class ClaudeCodeTurnExecutorTests
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
             ResolveCli = options.ResolveCli,
+            GetEnvironmentVariable = options.GetEnvironmentVariable,
             IdleTimeout = TimeSpan.FromMilliseconds(50),
         });
         var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
@@ -333,6 +334,7 @@ public sealed class ClaudeCodeTurnExecutorTests
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
             ResolveCli = options.ResolveCli,
+            GetEnvironmentVariable = options.GetEnvironmentVariable,
             IdleTimeout = TimeSpan.FromMilliseconds(50),
         });
         await ExecuteAsync(executor, CreateRequest([User("run it in the background")]));

@@ -65,6 +65,8 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
             DisplayName = "Claude Code",
             TransportFactory = this,
             ResolveCli = static () => new ClaudeCodeCliResolution("/fake/bin/claude", null),
+            // Not the environment of the machine that runs the tests, where an API key may wait for an answer.
+            GetEnvironmentVariable = static _ => null,
             IdleTimeout = TimeSpan.Zero,
             StartupTimeout = TimeSpan.FromSeconds(10),
             InterruptTimeout = TimeSpan.FromSeconds(2),

@@ -64,6 +64,7 @@ public static class ConfiguredProviderUsage
                         ProviderKey = definition.ProviderKey,
                         Command = Text(definition.Command),
                         ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
+                        ApiKeyPolicy = ClaudeCodeModelProviderRuntimeOptions.ParseApiKeyPolicy(definition.AnthropicApiKey),
                     },
                     cancellationToken).ConfigureAwait(false);
             default:

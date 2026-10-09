@@ -471,6 +471,7 @@ public sealed class ClaudeCodeSessionTests
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
             ResolveCli = options.ResolveCli,
+            GetEnvironmentVariable = options.GetEnvironmentVariable,
             PermissionMode = "plan",
         });
         await using var session = await CreateSessionAsync(runtime, directory);
@@ -571,6 +572,42 @@ public sealed class ClaudeCodeSessionTests
         StringAssert.Contains(failure.Message, "/login");
         Assert.IsTrue(events.Snapshot().OfType<AgentErrorEvent>().Any());
         Assert.IsFalse(events.Snapshot().OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant), "The error is not an answer of the model.");
+    }
+
+    [TestMethod]
+    public async Task ApiKeyWithoutAnAnswer_StopsTheTurnBeforeTheCliStarts()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(WithApiKey(cli, ClaudeCodeApiKeyPolicy.FollowClaudeCode, savedAnswers: null));
+        await using var session = await CreateSessionAsync(runtime, directory);
+
+        // Started here, the CLI would bill the key without asking: nothing is started until the user said.
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "ANTHROPIC_API_KEY");
+        StringAssert.Contains(failure.Message, "anthropic_api_key");
+        Assert.IsFalse(cli.Processes.Any(static process => process.Launch.Arguments.Contains("--mcp-config")), "No session process was started.");
+    }
+
+    [TestMethod]
+    [DataRow(ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"customApiKeyResponses":{"approved":[],"rejected":["0123456789abcdefKLMN"]}}""", false)]
+    [DataRow(ClaudeCodeApiKeyPolicy.FollowClaudeCode, """{"customApiKeyResponses":{"approved":["0123456789abcdefKLMN"],"rejected":[]}}""", true)]
+    [DataRow(ClaudeCodeApiKeyPolicy.Ignore, """{"customApiKeyResponses":{"approved":["0123456789abcdefKLMN"],"rejected":[]}}""", false)]
+    [DataRow(ClaudeCodeApiKeyPolicy.Use, null, true)]
+    public async Task ApiKey_IsGivenToTheCliAsDecided(ClaudeCodeApiKeyPolicy policy, string? savedAnswers, bool given)
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(WithApiKey(cli, policy, savedAnswers));
+        await using var session = await CreateSessionAsync(runtime, directory);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+
+        // The process inherits the key unless it is removed from its environment.
+        var environment = SessionProcess(cli).Launch.Environment;
+        Assert.AreEqual(!given, environment.TryGetValue("ANTHROPIC_API_KEY", out var value) && value is null);
     }
 
     [TestMethod]
@@ -1222,6 +1259,21 @@ public sealed class ClaudeCodeSessionTests
 
     private static Func<AgentEvent, bool> Phase(string callId, AgentActivityPhase phase)
         => e => e is AgentActivityEvent activity && activity.ActivityId == callId && activity.Phase == phase;
+
+    // The options of a provider of that CLI started with an API key in its environment, and the answers Claude Code saved.
+    private static ClaudeCodeModelProviderRuntimeOptions WithApiKey(ClaudeCodeFakeCli cli, ClaudeCodeApiKeyPolicy policy, string? savedAnswers)
+    {
+        var options = cli.CreateOptions();
+        return new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            ApiKeyPolicy = policy,
+            GetEnvironmentVariable = static name => name == "ANTHROPIC_API_KEY" ? "sk-ant-api03-xxxx0123456789abcdefKLMN" : null,
+            ReadClaudeConfig = () => savedAnswers,
+        };
+    }
 
     private static ClaudeCodeFakeProcess SessionProcess(ClaudeCodeFakeCli cli)
         => cli.Processes.Last(static process => process.Launch.Arguments.Contains("--mcp-config"));

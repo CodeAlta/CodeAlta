@@ -157,7 +157,7 @@ Provider-type-specific fields and restrictions:
 | `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
-| `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `command`, `args`, `permission_mode`, `single_model_id`, `models_include_regex` |
+| `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `command`, `args`, `permission_mode`, `anthropic_api_key`, `single_model_id`, `models_include_regex` |
 
 For a recognized reasoning model through `openai-responses` against the official OpenAI endpoint, CodeAlta requests `summary: auto` and encrypted reasoning content even when effort is left to the service's model-specific default. The summary feeds the visible reasoning timeline, while the opaque encrypted item preserves stateless reasoning continuity between locally replayed calls. OpenAI-compatible custom endpoints retain their existing summary and encrypted-content request shape. Local replay preserves the relative order of assistant messages, opaque reasoning items, and tool calls.
 
@@ -170,6 +170,8 @@ The `claude-code` provider runs your sessions through the [Claude Code](https://
 3. Start a session with it. The models are the ones the CLI offers for your account, each under its own name. The first one is the model Claude Code recommends for the account.
 
 CodeAlta never sees your Claude credentials, and there is no API key, endpoint or sign-in for this provider in CodeAlta. Usage counts against the account the CLI is signed in to, with the limits of its plan.
+
+**`ANTHROPIC_API_KEY`**: when this variable is set, Claude Code started by another application uses it without asking, even if you answered **No** when `claude` asked about it in a terminal. Its usage is then billed to the API account of the key, not to your plan. CodeAlta does not let that happen silently. It follows the answer you gave Claude Code for that key: with **No**, it starts Claude Code without the variable, so your login is used. When Claude Code has no answer for the key, a session does not start, and its error says what to choose. Choose in the provider editor (**ANTHROPIC_API_KEY**: use it, or ignore it and use your Claude login), or with `anthropic_api_key` in the configuration. The variable is left alone when Claude Code uses a cloud provider (Bedrock, Vertex AI, Foundry).
 
 A session of this provider is a Claude Code session shown in CodeAlta:
 
@@ -191,6 +193,7 @@ model = "sonnet"                 # optional
 reasoning_effort = "high"        # optional: low, medium, high, xhigh, max
 command = "~/.local/bin/claude"  # optional: when `claude` is not on PATH
 permission_mode = "default"      # optional: default, acceptEdits, plan, auto, dontAsk, bypassPermissions
+anthropic_api_key = "ignore"     # optional: use or ignore ANTHROPIC_API_KEY (default: your answer in Claude Code)
 args = ["--add-dir", "/specs"]   # optional: more arguments for the CLI
 ```
 
