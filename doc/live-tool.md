@@ -434,6 +434,8 @@ alta model resolve --model-ref <provider-key>:<model-id>@high
 
 `model show` and `model resolve` validate exact refs when model metadata is available and report requested/effective reasoning so callers can see whether reasoning was applied, defaulted, or unsupported.
 
+A selection that names no model (`alta session create --provider <provider-key>`, `alta model resolve --provider <provider-key>`) is completed with the model a session of that provider starts with in the window: the model of the provider's configuration when the provider lists it, else the first model it lists, with the effort that was asked or inherited when that model has it, else the provider's configured effort, High, the model's default or its first effort (`StartingModel`, which follows `OwnedSessionCommandService`). A model is inherited with its provider only: a session of one provider that creates a session of another gives it the effort, not the model. A provider that lists no model and has none configured is refused (`usage.missingModel`); when its models cannot be read the session is created without one, with a `model.validationUnavailable` warning. `alta session send` completes the same way a session that was saved without a model, so that no request leaves without one while the provider lists models. A `codex` provider fails a turn that still has no model before anything is sent, with a message that says so, where the endpoint would answer "The 'None' model is not supported".
+
 ## Diff command
 
 `alta diff show` opens the Changes tab of a project in the CodeAlta Desktop window: the files its work

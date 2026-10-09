@@ -2259,6 +2259,122 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionCreate_GivesASessionWithoutAModelTheOneItsProviderStartsWith()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        AgentModelInfo[] models =
+        [
+            new("gpt-first", DefaultReasoningEffort: AgentReasoningEffort.Medium, SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.Medium]),
+            new("gpt-second", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High]),
+        ];
+        // "listed" has no model in its configuration, "configured" names its second one, "empty" lists nothing.
+        var listed = new StatefulProviderRuntime(new ModelProviderId("listed")) { Models = models };
+        var configured = new StatefulProviderRuntime(new ModelProviderId("configured")) { Models = models };
+        var empty = new StatefulProviderRuntime(new ModelProviderId("empty"));
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(listed.ProviderId, "Listed"), () => listed);
+        registry.RegisterOrReplaceSessionRuntime(
+            new ModelProviderDescriptor(configured.ProviderId, "Configured") { DefaultModelId = "gpt-second", DefaultReasoningEffort = AgentReasoningEffort.Low }, () => configured);
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(empty.ProviderId, "Empty"), () => empty);
+        var runtime = CreateRuntime(options, registry);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime)
+            .Add<IReadOnlyList<ModelProviderDescriptor>>(registry.ListProviders())
+            .Add<IModelProviderInitializationService>(new ModelProviderInitializationService(registry))
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+
+        async Task<(AltaCommandResult Result, JsonElement? Selection)> CreateAsync(AltaCallerIdentity caller, params string[] arguments)
+        {
+            var result = await dispatcher.InvokeAsync(["session", "create", "--global", .. arguments], caller: caller).ConfigureAwait(false);
+            var created = ReadJsonLines(result.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.created").ToArray();
+            return (result, created.Length == 0 ? null : created[0].GetProperty("modelSelection"));
+        }
+
+        // The first model the provider lists, with the effort that was asked.
+        var first = await CreateAsync(AltaCallerIdentity.Cli, "--provider", "listed", "--reasoning", "low").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, first.Result.ExitCode, first.Result.Stdout);
+        Assert.AreEqual("listed:gpt-first@low", first.Selection!.Value.GetProperty("modelRef").GetString());
+        Assert.AreEqual("gpt-first", listed.CreatedOptions.Last().Model);
+        Assert.AreEqual(AgentReasoningEffort.Low, listed.CreatedOptions.Last().ReasoningEffort);
+
+        // The model and the effort of the configuration of the provider.
+        var second = await CreateAsync(AltaCallerIdentity.Cli, "--provider", "configured").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, second.Result.ExitCode, second.Result.Stdout);
+        Assert.AreEqual("configured:gpt-second@low", second.Selection!.Value.GetProperty("modelRef").GetString());
+        Assert.AreEqual("gpt-second", configured.CreatedOptions.Last().Model);
+
+        // A session of one provider that creates one of another does not give it its own model.
+        var source = ReadJsonLines((await dispatcher.InvokeAsync(["session", "create", "--global", "--model-ref", "listed:gpt-first@medium"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout)
+            .Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var fromAnother = await CreateAsync(new AltaCallerIdentity { Kind = "agent", SourceSessionId = source }, "--provider", "configured").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, fromAnother.Result.ExitCode, fromAnother.Result.Stdout);
+        Assert.AreEqual("configured:gpt-second@low", fromAnother.Selection!.Value.GetProperty("modelRef").GetString());
+
+        // An effort the starting model does not have is refused, as for a model that was named.
+        var unsupported = await CreateAsync(AltaCallerIdentity.Cli, "--provider", "listed", "--reasoning", "high").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Usage, unsupported.Result.ExitCode);
+        StringAssert.Contains(unsupported.Result.Stdout, "usage.unsupportedReasoning");
+
+        // Nothing to start with: no session is created to fail at its first prompt.
+        var sessions = empty.CreatedOptions.Count;
+        var none = await CreateAsync(AltaCallerIdentity.Cli, "--provider", "empty").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Usage, none.Result.ExitCode);
+        StringAssert.Contains(none.Result.Stdout, "usage.missingModel");
+        StringAssert.Contains(none.Result.Stdout, "--model");
+        Assert.AreEqual(sessions, empty.CreatedOptions.Count);
+    }
+
+    [TestMethod]
+    public async Task SessionSend_CompletesTheModelOfASessionSavedWithoutOne()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var provider = new StatefulProviderRuntime(new ModelProviderId("send-starts"))
+        {
+            Models = [new AgentModelInfo("gpt-first", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High]), new AgentModelInfo("gpt-second")],
+        };
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(provider.ProviderId, "Send Starts"), () => provider);
+        var runtime = CreateRuntime(options, registry);
+        await using var _ = runtime.ConfigureAwait(false);
+        var services = new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime)
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService());
+        // Saved without a model, as a session created before the command gave it one.
+        var session = await runtime.CreateGlobalSessionAsync(new SessionExecutionOptions
+        {
+            ProviderId = provider.ProviderId,
+            ProviderKey = provider.ProviderId.Value,
+            WorkingDirectory = root.Path,
+            ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }, "No model").ConfigureAwait(false);
+        Assert.IsNull(provider.CreatedOptions.Last().Model);
+        var dispatcher = CreateDispatcher(services
+            .Add<IReadOnlyList<ModelProviderDescriptor>>(registry.ListProviders())
+            .Add<IModelProviderInitializationService>(new ModelProviderInitializationService(registry)));
+
+        var sent = await dispatcher.InvokeAsync(["session", "send", session.SessionId, "--message", "hello"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Stderr);
+        await WaitUntilAsync(() => provider.SentOptions.Count == 1).ConfigureAwait(false);
+        // The session is attached again with the model its provider starts with, and its first effort that is High.
+        var (model, effort) = provider.ResumedOptions.Count > 0
+            ? (provider.ResumedOptions[^1].Model, provider.ResumedOptions[^1].ReasoningEffort)
+            : (provider.CreatedOptions[^1].Model, provider.CreatedOptions[^1].ReasoningEffort);
+        Assert.AreEqual("gpt-first", model);
+        Assert.AreEqual(AgentReasoningEffort.High, effort);
+    }
+
+    [TestMethod]
     public async Task SessionCreate_ResolvesPersistsModelInheritanceAndChildProvenance()
     {
         using var root = TempDirectory.Create();
@@ -4265,6 +4381,11 @@ public sealed class AltaLiveToolTests
     {
         var registry = new ModelProviderRegistry();
         registry.RegisterOrReplaceSessionRuntime(new ModelProviderDescriptor(new ModelProviderId(providerRuntime.ProviderId.Value), providerRuntime.DisplayName), () => providerRuntime);
+        return CreateRuntime(options, registry);
+    }
+
+    private static SessionRuntimeService CreateRuntime(CatalogOptions options, ModelProviderRegistry registry)
+    {
         var hub = new AgentHub(registry);
         var projectCatalog = new ProjectCatalog(options);
         var sessionViewCatalog = new SessionViewCatalog(options);

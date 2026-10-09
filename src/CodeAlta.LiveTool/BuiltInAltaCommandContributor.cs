@@ -2627,7 +2627,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
         }
 
-        var executionOptions = await BuildExecutionOptionsForSessionAsync(context, info, options.PromptId).ConfigureAwait(false);
+        var executionOptions = await BuildExecutionOptionsForSessionAsync(context, info, options.PromptId, completeModel: kind != PromptDispatchKind.Queue).ConfigureAwait(false);
         var agentInput = AgentInput.Text(inputText);
 
         try
@@ -3763,8 +3763,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             OnUserInputRequest = InteractionDefaults(context).OnUserInputRequest,
         };
 
-    private static async Task<SessionExecutionOptions> BuildExecutionOptionsForSessionAsync(AltaCommandContext context, AltaSessionInfo info, string? promptId)
+    // completeModel: for a send. A send never leaves without a model while the provider of the session lists one, as
+    // in the window: a session that has none starts with the provider's.
+    private static async Task<SessionExecutionOptions> BuildExecutionOptionsForSessionAsync(AltaCommandContext context, AltaSessionInfo info, string? promptId, bool completeModel = false)
     {
+        var modelId = info.Preference?.ModelId ?? info.Session.ModelId;
+        var reasoning = info.Preference?.ReasoningEffort ?? info.Session.ReasoningEffort;
+        if (completeModel && string.IsNullOrWhiteSpace(modelId))
+        {
+            (modelId, reasoning) = await FindStartingModelAsync(context, info.Session.ResolvedProviderKey, reasoning).ConfigureAwait(false);
+        }
+
         var projectRoots = new List<string>();
         var workingDirectory = info.Session.WorkingDirectory;
         if (!string.IsNullOrWhiteSpace(info.Session.ProjectRef) && context.Services.Get<ProjectCatalog>() is { } catalog)
@@ -3783,8 +3792,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ProviderKey = info.Session.ResolvedProviderKey,
             WorkingDirectory = workingDirectory,
             ProjectRoots = projectRoots,
-            Model = info.Preference?.ModelId ?? info.Session.ModelId,
-            ReasoningEffort = info.Preference?.ReasoningEffort ?? info.Session.ReasoningEffort,
+            Model = modelId,
+            ReasoningEffort = reasoning,
             AgentPromptId = NormalizeOptionalText(promptId) ?? NormalizeOptionalText(info.Session.AgentPromptId),
             // The session works where it records: its worktree while that folder exists, the folder of its project otherwise.
             Tools = CreateAltaSessionTools(context, info.Session.ProviderId, () => info.Session.SessionId, info.Session.ProjectRef,
@@ -3885,7 +3894,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return ModelResolutionResult.Fail(NotFound(context, "provider.notFound", "No provider is registered or selected."));
         }
 
-        var modelId = FirstNonEmpty(request.ModelId, inherited?.ModelId);
+        // A model is inherited with its provider: another provider is asked for its own.
+        var sameProvider = inherited is not null && string.Equals(providerKey, inherited.ProviderKey, StringComparison.OrdinalIgnoreCase);
+        var modelId = FirstNonEmpty(request.ModelId, sameProvider ? inherited!.ModelId : null);
         var reasoning = request.ReasoningEffort ?? inherited?.ReasoningEffort;
         var selection = new AltaModelSelection
         {
@@ -3904,7 +3915,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async Task<ModelResolutionResult> ValidateAndCompleteModelSelectionAsync(AltaCommandContext context, AltaModelSelection selection, AgentReasoningEffort? requestedReasoning, string commandPath)
     {
-        if (context.Services.Get<IModelProviderInitializationService>() is not { } providerInitializationService || string.IsNullOrWhiteSpace(selection.ModelId))
+        if (context.Services.Get<IModelProviderInitializationService>() is not { } providerInitializationService)
         {
             return ModelResolutionResult.Success(selection);
         }
@@ -3922,6 +3933,34 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             AltaJsonlWriter.WriteWarning(context.Stderr, context.CorrelationId, "model.validationUnavailable", $"Provider '{selection.ProviderKey}' models are unavailable: {ex.Message}");
             return ModelResolutionResult.Success(selection);
+        }
+
+        if (string.IsNullOrWhiteSpace(selection.ModelId))
+        {
+            // No model was named or inherited: the session starts with the provider's, as one created in the window.
+            var configured = FindProviderDescriptor(context, selection.ProviderKey);
+            var (startingModelId, startingReasoning) = StartingModel(models, configured, selection.ReasoningEffort);
+            startingModelId ??= NormalizeOptionalText(configured?.DefaultModelId);
+            if (startingModelId is null)
+            {
+                return ModelResolutionResult.Fail(UsageError(context, "usage.missingModel",
+                    $"Provider '{selection.ProviderKey}' lists no model and has no default one: name a model with --model or --model-ref.", commandPath));
+            }
+
+            var starting = models.FirstOrDefault(candidate => string.Equals(candidate.Id, startingModelId, StringComparison.Ordinal));
+            if (starting is not null && requestedReasoning is { } asked && !ModelSupportsReasoning(starting, asked))
+            {
+                return ModelResolutionResult.Fail(UsageError(context, "usage.unsupportedReasoning", $"Reasoning effort '{AltaModelRef.ToWireName(asked)}' is not supported by model '{startingModelId}' for provider '{selection.ProviderKey}'.", commandPath));
+            }
+
+            // An effort that was asked and is not refused is the one of the session.
+            startingReasoning = requestedReasoning ?? startingReasoning;
+            return ModelResolutionResult.Success(selection with
+            {
+                ModelId = startingModelId,
+                ReasoningEffort = startingReasoning,
+                ModelRef = AltaModelRef.Format(selection.ProviderKey, startingModelId, startingReasoning),
+            });
         }
 
         var model = models.FirstOrDefault(candidate => string.Equals(candidate.Id, selection.ModelId, StringComparison.OrdinalIgnoreCase));
@@ -3943,6 +3982,46 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ModelRef = AltaModelRef.Format(selection.ProviderKey, model.Id, effectiveReasoning),
         });
     }
+
+    // What a session without a model starts with among what its provider lists, as the window completes it: the model
+    // configured for the provider when it is listed, else the first one listed. A model that reports its efforts takes
+    // the given effort when it supports it, else the provider's configured effort, High, its own default or its first.
+    private static (string? ModelId, AgentReasoningEffort? Effort) StartingModel(
+        IReadOnlyList<AgentModelInfo> models, ModelProviderDescriptor? configured, AgentReasoningEffort? effort)
+    {
+        var modelId = AgentModelDefaults.ResolveModelId(models, configured?.DefaultModelId);
+        var model = models.FirstOrDefault(candidate => string.Equals(candidate.Id, modelId, StringComparison.Ordinal));
+        if (model?.SupportedReasoningEfforts is not { Count: > 0 } supported)
+        {
+            return (modelId, effort);
+        }
+
+        return (modelId, AgentModelDefaults.ResolveReasoningEffort(model,
+            effort is { } given && supported.Contains(given) ? given : configured?.DefaultReasoningEffort));
+    }
+
+    // For a send: the model is left out when the provider cannot list its models, and the provider then decides.
+    private static async Task<(string? ModelId, AgentReasoningEffort? Effort)> FindStartingModelAsync(
+        AltaCommandContext context, string providerKey, AgentReasoningEffort? effort)
+    {
+        if (context.Services.Get<IModelProviderInitializationService>() is not { } providerInitializationService)
+        {
+            return (null, effort);
+        }
+
+        try
+        {
+            var models = await providerInitializationService.GetModelsAsync(new ModelProviderId(providerKey), context.CancellationToken).ConfigureAwait(false);
+            return StartingModel(models, FindProviderDescriptor(context, providerKey), effort);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or NotSupportedException)
+        {
+            return (null, effort);
+        }
+    }
+
+    private static ModelProviderDescriptor? FindProviderDescriptor(AltaCommandContext context, string providerKey)
+        => GetProviderDescriptors(context).FirstOrDefault(descriptor => string.Equals(descriptor.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase));
 
     private static async Task<SessionModelSelectionResult> ResolveSessionModelSelectionAsync(AltaCommandContext context, string sessionId)
     {

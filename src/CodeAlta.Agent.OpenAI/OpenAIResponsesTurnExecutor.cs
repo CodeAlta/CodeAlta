@@ -90,6 +90,15 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         try
         {
+            // Asked without a model, the Codex endpoint answers "The 'None' model is not supported": say what is missing.
+            if (provider.CodexSubscription is not null && string.IsNullOrWhiteSpace(request.ModelId))
+            {
+                throw new AgentTurnExecutionException(new AgentTurnFailure(
+                    $"No model is selected for this session, and provider '{provider.ProviderKey}' has no default model. " +
+                    "Select a model for the session, or set `model` for the provider.",
+                    IsContextOverflow: false));
+            }
+
             var requestContext = await CreateCodexRequestContextAsync(request, cancellationToken).ConfigureAwait(false);
             // The Codex endpoint can drop long-lived response streams, so retry a small
             // turn-level budget before surfacing the failure.

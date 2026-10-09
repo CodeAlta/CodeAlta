@@ -3800,6 +3800,29 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexTurnWithoutAModelIsNotSent()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient([]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true },
+        });
+
+        // The endpoint would answer "The 'None' model is not supported": the turn says what is missing instead.
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateCodexTurnRequest() with { ModelId = null },
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(0, responsesClient.Requests.Count);
+        StringAssert.Contains(exception.Failure.Message, "No model is selected");
+        StringAssert.Contains(exception.Failure.Message, "'codex'");
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_CodexWebSocket426FallsBackImmediatelyToHttp()
     {
         var webSocketSession = new ThrowingOpenAIResponsesWebSocketSession(
