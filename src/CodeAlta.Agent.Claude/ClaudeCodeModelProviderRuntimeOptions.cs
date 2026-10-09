@@ -5,8 +5,10 @@ namespace CodeAlta.Agent.Claude;
 /// </summary>
 /// <remarks>
 /// CodeAlta starts the unmodified <c>claude</c> executable and talks to it over its stream-json input and
-/// output. It never reads, stores or forwards credentials: the CLI signs in with whatever the user set up for it
+/// output. It never stores or forwards credentials: the CLI signs in with whatever the user set up for it
 /// (<c>claude</c> then <c>/login</c>, an API key, or a cloud provider), and its usage is billed to that account.
+/// The one exception is <c>ANTHROPIC_API_KEY</c>, which the CLI started by CodeAlta would use without asking:
+/// <see cref="ApiKeyPolicy"/> says whether the CLI is started with it.
 /// </remarks>
 public sealed class ClaudeCodeModelProviderRuntimeOptions
 {
@@ -41,6 +43,25 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// When it is empty the CLI uses the mode of the user's settings.
     /// </summary>
     public string? PermissionMode { get; init; }
+
+    /// <summary>
+    /// Gets or initializes whether the CLI is given the API key of the environment (<c>ANTHROPIC_API_KEY</c>).
+    /// </summary>
+    public ClaudeCodeApiKeyPolicy ApiKeyPolicy { get; init; }
+
+    /// <summary>
+    /// Reads the <c>anthropic_api_key</c> setting of a provider: <c>use</c>, <c>ignore</c>, or empty to follow the
+    /// answer Claude Code saved.
+    /// </summary>
+    /// <param name="value">The setting.</param>
+    /// <returns>The policy; <see cref="ClaudeCodeApiKeyPolicy.FollowClaudeCode"/> for any other value.</returns>
+    public static ClaudeCodeApiKeyPolicy ParseApiKeyPolicy(string? value)
+        => value?.Trim() switch
+        {
+            "use" => ClaudeCodeApiKeyPolicy.Use,
+            "ignore" => ClaudeCodeApiKeyPolicy.Ignore,
+            _ => ClaudeCodeApiKeyPolicy.FollowClaudeCode,
+        };
 
     /// <summary>
     /// Gets or initializes the only model of the provider, when it is pinned to one.
@@ -123,4 +144,14 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// Gets or initializes the resolver of the executable. Tests replace it.
     /// </summary>
     internal Func<ClaudeCodeCliResolution>? ResolveCli { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the reader of the environment the CLI inherits. Tests replace it.
+    /// </summary>
+    internal Func<string, string?>? GetEnvironmentVariable { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the reader of the configuration file of Claude Code (null when there is none). Tests replace it.
+    /// </summary>
+    internal Func<string?>? ReadClaudeConfig { get; init; }
 }

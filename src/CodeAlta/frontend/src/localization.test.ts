@@ -27,7 +27,7 @@ test("support labels translate while recorded host identity and confirmation byt
 test("project/session workflow labels translate while literal titles, paths and controller feedback do not", () => {
   const literal = "Settings Unknown Archived C:/Settings/<literal>";
   for (const locale of locales) {
-    for (const key of ["Project details", "Copy project path","Confirm archive", "Confirm unarchive",
+    for (const key of ["Project details", "Copy project path","Archive this project?", "Unarchive this project?", "Delete this session?", "Do not ask again",
       "Project name or folder path", "Trust and open folder", "Create and open", "Session title", "Rename"] as const) {
       if (locale !== "en") assert.notEqual(translate(locale, key), key);
     }

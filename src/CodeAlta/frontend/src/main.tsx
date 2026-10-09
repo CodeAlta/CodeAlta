@@ -42,9 +42,8 @@ import { SessionTabStrip } from "./SessionTabStrip";
 import { createSessionTabModel, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
-import { ProjectArchiveDialog } from "./ProjectArchiveDialog";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
-import { createProjectArchive } from "./projectArchive";
+import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, automationsTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
@@ -113,11 +112,13 @@ import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, ses
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
 import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import { sessionHierarchy } from "./sessionHierarchy";
 import { SessionTabMenu } from "./SessionTabMenu";
-import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { plainTitle } from "./sessionTitle";
+import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
@@ -201,7 +202,7 @@ import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
-import { modalDialogOpen } from "./modalDialogs";
+import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -214,6 +215,8 @@ type SettingsSection = Exclude<View, "workspace">;
 function App() {
   const language = useLanguagePreference();
   const t = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(language.locale, key, parameters);
+  // A press outside a window dismisses it, as Escape does.
+  useEffect(() => dismissDialogsOnOutsidePress(document), []);
   // The spaces: the groups of projects the window shows one at a time. What is read of the catalog is kept
   // whole, and the window is given what the shown space has of it, so that everything it lists and opens
   // (the Explorer, the tabs, the search, the work items) is the space's.
@@ -395,7 +398,7 @@ function App() {
   const openSettingsPage = useRef<(page: string) => void>(() => {});
   openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces") navigate(page); };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
-  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount } = useWindowPreferences();
+  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm } = useWindowPreferences();
   // The user's own color schemes, and what the editor of one shows while it edits.
   const schemeLibrary = useColorSchemeLibrary(setCustomSchemes);
   const [appearancePreview] = useState(createAppearancePreview);
@@ -430,7 +433,7 @@ function App() {
     fewer: (id: string) => setSubAgentExtra(id, 0),
   };
   const [notesVisible, setNotesVisible] = useState(true);
-  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | "file" | null>(null);
+  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "reminders" | "file" | null>(null);
   // The folder chosen with "+" that the Open project window opens on; it lasts as long as that window.
   const [projectFolder, setProjectFolder] = useState<string | null>(null);
   const addingFolder = useRef(false);
@@ -514,7 +517,6 @@ function App() {
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [deletingConfirmation, setDeletingConfirmation] = useState("");
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [deletingMessage, setDeletingMessage] = useState("");
   const deletingPending = useRef(false);
@@ -532,7 +534,6 @@ function App() {
   const menuSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
   const menuSelection = useRef<string | null>(null);
   const menuOrigin = useRef<HTMLButtonElement>(null);
-  const focusAction = useRef<"rename" | "delete" | null>(null);
   const [creatingVisible, writeCreatingVisible] = useState(false);
   const [creatingTitle, writeCreatingTitle] = useState("");
   const [creatingProvider, writeCreatingProvider] = useState("");
@@ -769,7 +770,7 @@ function App() {
   function applyTabState(next: SessionTabsState) {
     setTabs(next);
     const target = next.active;
-    setMenuTarget(null); focusAction.current = null;
+    setMenuTarget(null);
     if (target && selectedScope.current !== target.projectId) selectProject(target.projectId, target.sessionId);
     else { selectedSessionId.current = target?.sessionId ?? null; setSessionId(target?.sessionId ?? null); }
   }
@@ -1399,12 +1400,6 @@ function App() {
     && selectedSessionId.current === sessionId && selectedScope.current === projectId
     && visibleSessions.some(session => session.id === menuTarget.id)
     && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
-  useLayoutEffect(() => {
-    if (menuTarget || !focusAction.current || narrow && railVisible) return;
-    if (focusAction.current === "rename") { focusAction.current = null; return; } // The rename popover focuses its own field.
-    const field = sessionRail.current?.querySelector<HTMLInputElement>(".session-delete input");
-    if (field) { field.focus(); focusAction.current = null; }
-  }, [menuTarget, renamingId, deletingId, narrow, railVisible]);
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
@@ -1897,7 +1892,6 @@ function App() {
     } else if (action === "nextSession" || action === "previousSession") {
       if (!visibleSessions.length) return;
       setMenuTarget(null);
-      focusAction.current = null;
       const index = Math.max(0, visibleSessions.findIndex(session => session.id === sessionId));
       const next = visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id;
       selectedSessionId.current = next;
@@ -1960,7 +1954,6 @@ function App() {
 
   function selectProject(nextProjectId: string | null, selectedId?: string | null) {
     setMenuTarget(null);
-    focusAction.current = null;
     projectRenameGeneration.current++;
     setProjectRenameTarget(null);
     setProjectRenameConflict(false);
@@ -1974,6 +1967,7 @@ function App() {
     setRenamingMessage("");
     setDeletingId(null);
     setDeletingMessage("");
+    if (!archiveBusy) { setArchiveAsk(null); setArchiveMessage(""); }
     navigate("workspace");
     setCreatingVisible(false);
     setCreatingMessage("");
@@ -2002,7 +1996,6 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access[pending.action]) return;
-    focusAction.current = pending.action;
     if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
@@ -2027,7 +2020,7 @@ function App() {
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)}
+      onAction={(session, action) => openScopeSession(scope, session, action)} deleteAsks={confirms.sessionDelete}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
 
@@ -2053,10 +2046,25 @@ function App() {
     setRenamingMessage(renameLocked ? { key: "Earlier rename is unconfirmed. Refresh and inspect; no retry will be sent." } : "");
   }
 
+  // The session is the selected one. It is asked about beside its row, unless the user answered not to be asked again.
   function beginSessionDelete(row: WorkspaceSession) {
-    setDeletingId(row.id);
-    setDeletingConfirmation("");
-    setDeletingMessage(deleteLocked ? "Earlier deletion is unconfirmed. Refresh and inspect; no retry will be sent." : "");
+    setDeletingMessage("");
+    if (confirms.sessionDelete) setDeletingId(row.id);
+    else { setDeletingId(null); void deleteSessionRow(row, false); }
+  }
+
+  // Delete on the row of a session does what **Delete** of its menu does.
+  function deleteSessionFromRow(row: WorkspaceSession) {
+    if (snapshot?.sessions.filter(session => session.id === row.id).length !== 1 || currentSnapshot.current !== snapshot
+      || settingsVisible.current || dialog || modalDialogOpen()) return;
+    if (!sessionActionAccess(row, { id: row.id, projectId, hostEpoch: status?.hostEpoch ?? null }, row.id,
+      selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+      mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+      renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current).delete) return;
+    setMenuTarget(null);
+    if (selectedSessionId.current !== row.id) { selectedSessionId.current = row.id; setSessionId(row.id); setRenamingMessage(""); }
+    setRenamingId(null);
+    beginSessionDelete(row);
   }
 
   function runSessionMenuAction(action: SessionAction, row: WorkspaceSession, target: SessionMenuTarget) {
@@ -2074,7 +2082,6 @@ function App() {
     const switching = selectedSessionId.current !== row.id;
     if (switching) { selectedSessionId.current = row.id; setSessionId(row.id); }
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
-    focusAction.current = action;
     dismissSessionMenu(false);
     if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
     if (action === "rename") {
@@ -2414,13 +2421,26 @@ function App() {
     } else if (selectedSessionId.current === original.id) setRenamingMessage({ key: "Title not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload." });
   }
 
-  async function deleteSelectedSession() {
+  const sessionRows = () => Array.from(sessionRail.current?.querySelectorAll<HTMLButtonElement>(".session-row > button:first-child") ?? []);
+  // The row that takes the place of a deleted session gets the focus its question or its row lost with it, so the
+  // keyboard goes on from there. A focus that went elsewhere meanwhile stays where it is.
+  const [deletedRow, setDeletedRow] = useState<{ index: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!deletedRow) return;
+    setDeletedRow(null);
+    const focused = document.activeElement;
+    if (modalDialogOpen() || focused instanceof HTMLElement && focused !== document.body && !sessionRail.current?.contains(focused)) return;
+    const rows = sessionRows();
+    rows[Math.min(deletedRow.index, rows.length - 1)]?.focus();
+  }, [deletedRow]);
+
+  // Deletes the selected session. What went wrong is told in the question that was answered, or in a notice when
+  // nothing was asked.
+  async function deleteSessionRow(session: WorkspaceSession, asked: boolean) {
     if (batchDeletion.locked()) return;
-    const session = selectedSession;
-    if (!session || session.id !== deletingId || selectedSessionId.current !== session.id
+    if (selectedSessionId.current !== session.id
       || selectedScope.current !== (selectedProject?.id ?? null) || deletingPending.current || uncertainDelete.current
-      || !owned || !mutation?.capability.canMutate() || !session.workspacePath || selectedProject?.archived
-      || deletingConfirmation !== session.title) return;
+      || !owned || !mutation?.capability.canMutate() || !session.workspacePath || selectedProject?.archived) return;
     if (!sessionActionAccess(session, { id: session.id, projectId: projectId, hostEpoch: status?.hostEpoch ?? null },
       selectedSessionId.current, selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
       mutation.capability.canMutate(), deletingBusy || renamingBusy || renamingPending.current,
@@ -2430,11 +2450,16 @@ function App() {
       : { scope: "global", projectPath: session.workspacePath };
     const captured: DeletedTarget = { target, id: session.id };
     const capability = mutation.capability;
+    const index = sessionRows().findIndex(row => row.parentElement?.dataset.sessionId === session.id);
+    const failed = (message: string) => {
+      if (!asked) showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
+      else if (selectedSessionId.current === session.id) setDeletingMessage(message);
+    };
     deletingPending.current = true;
     setDeletingBusy(true);
     setDeletingMessage("");
     try {
-      const result = await deleteSession(status?.hostEpoch, target, session.id, session.title, deletingConfirmation, capability);
+      const result = await deleteSession(status?.hostEpoch, target, session.id, session.title, capability);
       if (!creationAlive.current) return;
       if (result.kind === "deleted") {
         const fresh = await refreshProjects(creationRefresh.current.signal);
@@ -2446,18 +2471,18 @@ function App() {
             setSessionId(recovered.sessionId);
           }
           setDeletingId(null);
-          setDeletingConfirmation("");
+          if (index >= 0) setDeletedRow({ index });
         } else {
           uncertainDelete.current = captured;
           setDeleteLocked(true);
-          if (selectedSessionId.current === session.id) setDeletingMessage("Deletion may have completed, but the refreshed catalog did not confirm absence. No retry will be sent.");
+          failed("Deletion may have completed, but the refreshed catalog did not confirm absence. No retry will be sent.");
         }
       } else {
         if (result.code === "delete_unconfirmed") {
           uncertainDelete.current = captured;
           setDeleteLocked(true);
         }
-        if (selectedSessionId.current === session.id) setDeletingMessage(sessionDeletionMessage(result.code));
+        failed(sessionDeletionMessage(result.code));
       }
     } finally { deletingPending.current = false; if (creationAlive.current) setDeletingBusy(false); }
   }
@@ -2475,10 +2500,63 @@ function App() {
         setSessionId(recovered.sessionId);
       }
       setDeletingId(null);
-      setDeletingConfirmation("");
       setDeletingMessage("");
     } else if (selectedSessionId.current === captured.id)
       setDeletingMessage("Absence is not confirmed in the refreshed catalog. No retry will be sent; inspect the session or reload.");
+  }
+
+  // Archiving the selected project, or taking it out of the archive, is asked about beside its row, unless the
+  // user answered not to be asked again. The project file is read and written in one go once the answer is yes.
+  const [archiveAsk, setArchiveAsk] = useState<{ id: string; archived: boolean } | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [archiveMessage, setArchiveMessage] = useState("");
+  // A question is asked beside a row: when the Explorer goes, as in a window made narrow, it goes with its row.
+  useEffect(() => {
+    if (railVisible) return;
+    if (!deletingPending.current) setDeletingId(null);
+    if (!archiveBusy) setArchiveAsk(null);
+  }, [railVisible]);
+  function archiveScope(): ArchiveScope | null {
+    const matches = currentSnapshot.current?.projects.filter(project => project.id === selectedScope.current);
+    const project = matches?.length === 1 ? matches[0] : undefined;
+    if (!project || !owned || !mutation?.capability.canMutate() || !currentHostEpoch.current || settingsVisible.current || currentView.current !== "workspace") return null;
+    return { epoch: currentHostEpoch.current, id: project.id, path: project.path, archived: project.archived,
+      generation: browserRevision.current + creationGeneration.current };
+  }
+  function beginProjectArchive() {
+    const scope = archiveScope();
+    if (!scope || archiveBusy || projectArchive.locked) return;
+    setArchiveMessage("");
+    if (confirms.projectArchive) setArchiveAsk({ id: scope.id, archived: scope.archived });
+    else void archiveSelectedProject(false);
+  }
+  async function archiveSelectedProject(asked: boolean) {
+    const failed = (message: string) => {
+      if (asked) setArchiveMessage(message); else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
+    };
+    const changed = "The project changed. Nothing was written.";
+    const scope = archiveScope();
+    if (!scope) { failed(changed); return; }
+    setArchiveBusy(true);
+    setArchiveMessage("");
+    try {
+      const target = await projectArchive.prepare(scope);
+      if (!creationAlive.current) return;
+      if (typeof target === "string") { failed(target); return; }
+      if (!archiveScopeCurrent(target, archiveScope())) { failed(changed); return; }
+      const result = await projectArchive.confirm(target, archiveScope());
+      if (!creationAlive.current) return;
+      if (result?.state !== "confirmed") { failed(result?.status ?? changed); return; }
+      setArchiveAsk(null);
+      // The write is confirmed even when the projects cannot be read again.
+      if (currentHostEpoch.current !== target.epoch || !mutation?.capability.canMutate()) return;
+      const version = browserRevision.current;
+      try {
+        const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+        if (creationAlive.current && currentHostEpoch.current === target.epoch && mutation.capability.canMutate() && version === browserRevision.current && fresh.configured)
+          publishWorkspaceState({ kind: "ready", snapshot: fresh });
+      } catch { /* The list is read again later. */ }
+    } finally { if (creationAlive.current) setArchiveBusy(false); }
   }
 
   // Settings pages also edit the selected project's settings when it can be written.
@@ -2547,8 +2625,9 @@ function App() {
               <MenuItem roleStructure="listoption" selected={projectSort === "recent"} text={t("Recent visible updates")} onClick={() => setProjectSort("recent")} />
               <MenuDivider />
               <MenuItem icon={<AppIcon name="open" size={15} />} text={`${t("Open project")}…`} label="Ctrl+O" onClick={() => setDialog("project")} />
-              <MenuItem icon={<AppIcon name="archive" size={15} />} text={t(selectedProject?.archived ? "Unarchive project…" : "Archive project…")}
-                disabled={!selectedProject || !owned || !mutation?.capability.canMutate()} onClick={() => setDialog("archive")} />
+              <MenuItem icon={<AppIcon name="archive" size={15} />} text={t(confirms.projectArchive ? selectedProject?.archived ? "Unarchive project…" : "Archive project…"
+                : selectedProject?.archived ? "Unarchive project" : "Archive project")}
+                disabled={!selectedProject || !owned || !mutation?.capability.canMutate() || archiveBusy || projectArchive.locked} onClick={beginProjectArchive} />
             </Menu>}>
               <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="ellipsis" size={18} />} aria-label={t("Project actions")} title={t("Project actions")} />
             </PopoverNext>}
@@ -2584,18 +2663,25 @@ function App() {
               value={projectRenameName} onChange={setProjectRenameName} busy={projectRenameBusy} disabled={projectRenameLocked || projectRenameConflict}
               error={projectRenameNotice ? workflowNotice(language.locale, projectRenameNotice) : null}
               onSubmit={() => void saveProjectRename()} onCancel={() => { projectRenameGeneration.current++; setProjectRenameTarget(null); }} /> } : undefined}
+            asking={archiveAsk && selectedProject && archiveAsk.id === selectedProject.id && archiveAsk.archived === selectedProject.archived ? { id: archiveAsk.id,
+              form: <ConfirmPopover title={t(archiveAsk.archived ? "Unarchive this project?" : "Archive this project?")} subject={selectedProject.name}
+                detail={t(archiveAsk.archived ? "It can be worked in again. Nothing is started."
+                  : "It becomes read-only in CodeAlta until it is unarchived. Its files and its sessions are kept.")}
+                confirmLabel={t(archiveAsk.archived ? "Unarchive" : "Archive")} busy={archiveBusy} error={archiveMessage || null}
+                onConfirm={remember => { if (remember) setConfirm("projectArchive", false); void archiveSelectedProject(true); }}
+                onCancel={() => { setArchiveAsk(null); setArchiveMessage(""); }} /> } : undefined}
             actions={{ current: () => ({ ...currentProjectDetailsContext(),
               active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
               generation: browserRevision.current + projectRenameGeneration.current, modalGeneration: creationGeneration.current,
               canMutate: owned && !!mutation?.capability.canMutate(),
               locked: projectRenamePending.current || !!uncertainProjectRename.current || projectRenameLocked
                 || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
-              open: selectProject, rename: () => void beginProjectRename(), archive: () => setDialog("archive"),
+              open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive,
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
                 search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse") } }}
             editor={owned ? { open: id => fileTabs.open.some(tab => isEditorTab(tab) && tab.projectId === id),
               unsaved: project => fileEditors.dirty(fileTabKey(editorTab(project))), show: project => openProjectEditor(project) } : undefined} />}
-          {projectArchive.records.length > 0 && <button type="button" className="quiet-button" onClick={() => setDialog("archive")}>{t("Archive operation evidence")}</button>}
+          {projectArchive.uncertain && <p role="alert" className="notice error-text">{t("A change of a project archive could not be confirmed. Check the project, and reload the window before archiving again.")}</p>}
           {projectRenameNotice && !projectRenaming && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
           <SpaceActivityBar spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} calls={calls}
@@ -2640,7 +2726,7 @@ function App() {
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
                 mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
-              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id}
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id}
                 onContextMenu={event => {
                   const target = event.target as HTMLElement;
                   if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
@@ -2649,13 +2735,20 @@ function App() {
                 }}
                 onKeyDown={event => {
                   const editing = !!(event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']");
-                  if (!isSessionContextKey(event.key, event.shiftKey, event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229, editing)) return;
+                  const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+                  // Delete on a row does what Delete of its menu does.
+                  if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
+                    event.preventDefault(); event.stopPropagation();
+                    deleteSessionFromRow(session);
+                    return;
+                  }
+                  if (!isSessionContextKey(event.key, event.shiftKey, composing, editing)) return;
                   event.preventDefault(); event.stopPropagation();
                   openSessionMenu(session.id, event.currentTarget.querySelector<HTMLButtonElement>(".session-actions-trigger"));
                 }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-expanded={twist && !twist.collapsed} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
-                onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
+                onClick={() => { setMenuTarget(null); selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
                 <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
@@ -2670,21 +2763,16 @@ function App() {
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
-                  { key: "delete", label: t("Delete… (confirmation required)"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
+                  { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
                 onSubmit={() => void renameSelectedSession()} onCancel={() => setRenamingId(null)} />}
-              {deletingId === session.id && <div className="session-delete" role="group" aria-label={t("Confirm deletion of {title}", { title: session.title })}>
-                <p>{t("Delete only this session's journal and history (ID: {id}). Project files are not deleted. This cannot be undone.", { id: session.id })}</p>
-                <label>{t("Type the exact session title:")} <strong>{session.title}</strong>
-                  <input value={deletingConfirmation} disabled={!owned || deletingBusy || deleteLocked} autoComplete="off"
-                    onChange={event => setDeletingConfirmation(event.target.value)} /></label>
-                <button type="button" disabled={batchDeletion.locked() || !owned || deletingBusy || deleteLocked || deletingConfirmation !== session.title}
-                  onClick={() => void deleteSelectedSession()}>{t("Delete this session")}</button>
-                <button type="button" disabled={deletingBusy} onClick={() => setDeletingId(null)}>{t("Cancel")}</button>
-                {deletingMessage && <p role="alert" className="notice error-text">{deletingMessage}</p>}
-              </div>}
+              {deletingId === session.id && <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(session.title)}
+                detail={t("Its history is deleted and cannot be restored. The files of the project are kept.")}
+                confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
+                onConfirm={remember => { if (remember) setConfirm("sessionDelete", false); void deleteSessionRow(session, true); }}
+                onCancel={() => { setDeletingId(null); setDeletingMessage(""); }} />}
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
@@ -2820,7 +2908,7 @@ function App() {
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
-        sessionWidth, setSessionWidth,
+        sessionWidth, setSessionWidth, confirms: { ...confirms, set: setConfirm },
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
@@ -2939,20 +3027,6 @@ function App() {
           || !browserActivation(currentSnapshot.current, tab, browserCapture.revision, browserRevision.current)) return false;
         selectSessionTab(tab); setDialog(null); return true;
       }} />}
-    <ProjectArchiveDialog owner={projectArchive} open={dialog === "archive" && !settingsOpen && view === "workspace"} close={() => setDialog(null)}
-      current={() => {
-        const matches = currentSnapshot.current?.projects.filter(project => project.id === selectedScope.current);
-        const project = matches?.length === 1 ? matches[0] : undefined;
-        if (!project || !owned || !mutation?.capability.canMutate() || !currentHostEpoch.current || settingsVisible.current || currentView.current !== "workspace") return null;
-        return { epoch: currentHostEpoch.current, id: project.id, path: project.path, archived: project.archived,
-          generation: browserRevision.current + creationGeneration.current };
-      }} refresh={async epoch => {
-        if (currentHostEpoch.current !== epoch || !mutation?.capability.canMutate()) return;
-        const version = browserRevision.current;
-        const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
-        if (creationAlive.current && currentHostEpoch.current === epoch && mutation.capability.canMutate() && version === browserRevision.current && fresh.configured)
-          publishWorkspaceState({ kind: "ready", snapshot: fresh });
-      }} />
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
       available={commandAvailable} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}

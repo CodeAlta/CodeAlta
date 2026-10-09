@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DialogH
 import { Button, PortalProvider } from "@blueprintjs/core";
 import { Rnd } from "react-rnd";
 import { AppIcon } from "./AppIcon";
+import { keptOnOutsidePress } from "./modalDialogs";
 import { useShellLanguage } from "./shellLanguage";
 import { centeredWindowGeometry, clampWindowGeometry, loadWindowGeometry, saveWindowGeometry, type WindowGeometry, type WindowSize } from "./windowGeometry";
 
@@ -77,13 +78,15 @@ export function AppWindowSurface({ storageKey, title, titleId, preferredSize, mi
 /**
  * A modal desktop-style window: a native modal dialog covers the viewport and hosts one movable,
  * resizable surface. Blueprint overlays opened inside it are portaled into the dialog so they stay
- * in the top layer.
+ * in the top layer. A press beside the window dismisses it as Escape does (`onCancel`).
  */
 export function AppWindow({ storageKey, title, titleId, className, preferredSize, minimumSize = { width: 480, height: 320 },
-  onClose, closeLabel, headerActions, onOpened, children, ...dialog }: Omit<SurfaceProps, "closeRef" | "titleId"> & {
+  onClose, closeLabel, headerActions, onOpened, keepOnOutsidePress = false, children, ...dialog }: Omit<SurfaceProps, "closeRef" | "titleId"> & {
   titleId: string; className?: string;
   /** Called once, after the content is mounted inside the open dialog (for initial focus). */
   onOpened?: () => void;
+  /** The window asks something, or holds what is being typed: a press beside it leaves it open. */
+  keepOnOutsidePress?: boolean;
 } & Omit<DialogHTMLAttributes<HTMLDialogElement>, "title" | "className" | "children">) {
   const [layer, setLayer] = useState<HTMLDialogElement | null>(null);
   useLayoutEffect(() => {
@@ -94,7 +97,8 @@ export function AppWindow({ storageKey, title, titleId, className, preferredSize
   const opened = useRef(false);
   const mounted = !!layer;
   useLayoutEffect(() => { if (mounted && !opened.current) { opened.current = true; onOpened?.(); } }, [mounted]);
-  return <dialog ref={setLayer} className={`app-window-layer${className ? ` ${className}` : ""}`} aria-modal="true" aria-labelledby={titleId} {...dialog}>
+  return <dialog ref={setLayer} className={`app-window-layer${className ? ` ${className}` : ""}`} aria-modal="true" aria-labelledby={titleId}
+    {...(keepOnOutsidePress ? keptOnOutsidePress : null)} {...dialog}>
     {layer && <PortalProvider portalContainer={layer}>
       <AppWindowSurface storageKey={storageKey} title={title} titleId={titleId} preferredSize={preferredSize} minimumSize={minimumSize}
         onClose={onClose} closeLabel={closeLabel} headerActions={headerActions}>{children}</AppWindowSurface>

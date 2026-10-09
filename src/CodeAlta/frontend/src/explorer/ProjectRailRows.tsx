@@ -47,7 +47,7 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, actions, children, activity, renaming, editor, changes, terminals, tree, head }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, actions, children, activity, renaming, asking, editor, changes, terminals, tree, head }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -60,6 +60,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   onRename: () => void;
   /** The rename form of the project being renamed, shown beside its row. */
   renaming?: { id: string; form: ReactNode };
+  /** The question asked about a project before it is archived or unarchived, shown beside its row. */
+  asking?: { id: string; form: ReactNode };
   actions?: ProjectRowAuthority;
   /** The code editors of the projects: which are open, which hold unsaved edits, and how one is opened. */
   editor?: ProjectTabs & Readonly<{ unsaved: (project: WorkspaceProject) => boolean }>;
@@ -124,6 +126,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         onClick={() => terminals.create(project)}>
         <AppIcon name="terminal" size={15} /></button>}
       {renaming?.id === project.id && renaming.form}
+      {asking?.id === project.id && asking.form}
     </ProjectRowActions>{branch(project.id)}</Fragment>;
   };
   const title = (key: "Favorites" | "Other projects", icon: boolean) => <li className="project-section" role="presentation">

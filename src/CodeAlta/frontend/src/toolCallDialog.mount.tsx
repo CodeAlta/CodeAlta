@@ -2,6 +2,7 @@
 import { StrictMode, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { dismissDialogsOnOutsidePress } from "./modalDialogs";
 import { ShellLanguageContext } from "./shellLanguage";
 import { buildTimelineItems, type HistoryEntry } from "./timeline";
 import { ToolCallDialog } from "./ToolCallDialog";
@@ -41,6 +42,8 @@ function Fixture() {
 }
 
 Object.defineProperty(navigator, "clipboard", { value: { writeText: async () => { } } });
+// As the application does: a press outside a window dismisses it.
+dismissDialogsOnOutsidePress(document);
 Object.assign(window, { toolFixture: { state,
   /** Shows the call these records describe; given again with other records, the open window follows them. */
   show(entries: Partial<HistoryEntry>[]) { flushSync(() => show!(entries.map(entry))); },

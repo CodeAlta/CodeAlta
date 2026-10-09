@@ -328,8 +328,8 @@ composer draft and timeline remain mounted underneath but cannot be interacted w
 open. Drag its title bar to move it and its edges or corners to resize it; the geometry is saved in
 this WebView's local storage and the title bar's restore button (or a double-click on the title bar)
 returns to the default. The expanded prompt editor (F6) is the same kind of window with its own saved
-geometry. Use the window's sections, Escape or Close settings to return. Configuration, Providers,
-Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs belong to the
+geometry. Use the window's sections, Escape, Close settings or a click beside the window to return.
+Configuration, Providers, Models, Agent prompts, MCP Servers and Logs are **not** workspace tabs. Session tabs belong to the
 global workspace, not the selected project: sessions from different projects can stay open together.
 Drag a tab along the tab strip to reorder it, to a pane edge to create a split view, or to its center to merge
 (up to 32 open sessions); drag the divider between panes to resize them. The presentation uses
@@ -364,6 +364,17 @@ windows: drag the title bar to move them, drag an edge to resize them, and use t
 button (or double-click it) to return to the default size and position. Each kind of window remembers
 its own geometry. Closing Reminders does not cancel an admitted action or retry an uncertain Save.
 
+A click outside a window closes it, as Escape does: the window gets the `cancel` event it handles for
+that key (`dismissDialogsOnOutsidePress` in `modalDialogs.ts`, one pair of listeners for every `dialog`
+of the page). The press and its release are both outside, so a selection or a window dragged out of its
+dialog closes nothing; with a menu or a popover open in the window, the click closes that alone. A
+window that asks something, or holds what is being typed, stays open and is closed by its own buttons
+or Escape: the review of a command permission, the input a provider asks for, the dialog of a plugin
+other than a message, the editor of an automation and **New space**. Such a `dialog` carries
+`data-outside-press="keep"` (`keptOnOutsidePress`, or `keepOnOutsidePress` of `AppWindow`). The
+questions that are Blueprint dialogs (unsaved changes, closing the window, exiting) already ignore a
+click outside them.
+
 In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
 **Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Chats** has
@@ -393,7 +404,8 @@ their own under them. A session that has sub-agents starts with a twist that hid
 again (`explorer/sessionTree.ts` makes the list). A collapsed session hides the selected session too; a
 selected session beyond a count stays listed, with the sessions it is under. A click opens
 the session, which selects its project. **Rename…** and **Delete…** act on the selected session, so in
-another project they open the session first. The form of a new session and the
+another project they open the session first. `Delete` on the row that has the focus does what
+**Delete…** does. The form of a new session and the
 notices of an unconfirmed action belong to the selected project.
 
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
@@ -416,9 +428,23 @@ as it is. A rename that is refused says why under the field. A session keeps the
 or renamed with, also when a later Send attaches it again (another model, a restart) and when it is
 continued from the terminal UI, which lists a session by the first line of its summary; a session that
 was never named shows the first line of its summary, 80 characters at most
-(`SessionRuntimeService.ListedTitle`), and its deletion is confirmed with that title. That line follows
+(`SessionRuntimeService.ListedTitle`). That line follows
 what the session says, also after a restart or another model: a Send that attaches a session again
 leaves its saved title as it is, so the line never becomes the name of the session.
+
+**Delete…** of a session, **Archive project…** and **Unarchive project…** ask in the same kind of
+popover beside the row (`ConfirmPopover.tsx`): the question, the name it is about, what it does, and
+**Cancel** and the button that does it, which has the focus. Enter answers yes; Escape, **Cancel** or a
+click elsewhere leaves everything as it is and gives the focus back to the row. What is refused is said
+in the popover. **Do not ask again** makes the next ones run at once, and their menu entries lose their
+ellipsis; what is refused is then said in a notice. The two answers are kept in this WebView's local
+storage (`codealta.desktop.confirm.sessionDelete.v1`, `codealta.desktop.confirm.projectArchive.v1`) and
+taken back with **Ask before deleting a session** and **Ask before archiving a project** of
+**Settings → Appearance**. Nothing is typed to delete a session: the request still names the session by
+its id and the title it is listed with (`confirmedTitle`), and the host refuses a session whose title
+is no longer that one. After a deletion the row that takes the place of the deleted one has the focus,
+so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
+is hidden.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. Real session
@@ -1631,6 +1657,10 @@ confirmation. When the configuration lacks some of the providers CodeAlta ships 
 its key, adapter type, endpoint, the variable of its key and what its service needs), disabled, and selects it so
 that its credential can be given. A configuration that has them all goes straight to the blank definition. **Save and apply** writes the global `config.toml` and re-registers the providers in
 the running host; it is refused as a conflict when the file changed on disk since the page read it.
+Each registration of a provider has a version (`ModelProviderRegistry.GetRegistrationVersion`), which an attachment
+records: an idle session whose provider was registered again since is attached again at its next send, as for a
+change of model, and runs with the saved settings (`SessionRuntimeService`, `UsesCurrentProvider`). A running turn,
+a draining queue, or an attachment another caller configured keeps the runtime it started with.
 A stored API key is never sent to the page: leaving the field blank keeps it, and **Remove the
 stored key** clears it. Settings the form does not show (timeouts, request overrides, compaction and
 so on) are preserved, but this structured save rewrites the file without its comments and blank
@@ -1646,7 +1676,10 @@ account, a button per sign-in method (**Sign in with the browser**, **Sign in wi
 and **Sign out**. A sign-in opens the provider's page in the system browser and shows the address,
 and the code to enter for a device flow, each with a copy button, until it completes or is canceled;
 a provider that was disabled is enabled when its sign-in succeeds. Save a new or edited provider
-before signing in.
+before signing in. A `claude-code` provider has no API field and no **Account** block; its form has
+**ANTHROPIC_API_KEY** instead (`anthropic_api_key` of `GlobalConfigProvider`/`GlobalConfigProviderEdit`): follow the
+answer Claude Code saved for the key (blank), ignore it and use the Claude login (`ignore`), or use it (`use`). See
+"`ANTHROPIC_API_KEY`" in [providers.md](providers.md). Another adapter type does not keep the setting.
 
 **The default provider.** `ModelProviderDescriptor.IsDefault` is true for every configured provider (it is
 the default option of its own definition), so it never says which provider a new session starts with.
@@ -3043,6 +3076,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | In a code editor: `Ctrl+B`, `Ctrl+Shift+E`, `Ctrl+Shift+F` | Show or hide the side, go to the files, search in files |
 | In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
 | In the files of a code editor: `F2`, `Delete`, `Enter`, `Space` | Rename, delete, open, preview |
+| On a session of the Explorer: `Delete` | Delete the session, after its question unless it is not asked any more |
 | `Alt+Up`, `Alt+Down` in a Changes tab (its files or a diff) | Go to the previous or next change of the shown file, or to the previous or next file when all files are in one view |
 | ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |

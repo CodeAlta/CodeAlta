@@ -3935,6 +3935,12 @@ public sealed class AgentSessionTests
         var checkpoint = checkpointEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentCompactionCheckpoint);
         Assert.IsNotNull(checkpoint);
         Assert.IsTrue(checkpoint!.OversizedAnchorReduced);
+
+        // The requests that reduced the anchor are summary requests like the others: the count of calls and the
+        // estimate of their input describe all of them.
+        Assert.AreEqual(1, history.OfType<AgentRawEvent>().Count(static evt => evt.BackendEventType == "local.compactionCheckpoint"));
+        Assert.AreEqual(summaryPayloads.Count, checkpoint.SummaryCallCount);
+        Assert.AreEqual(summaryPayloads.Sum(AgentTokenEstimator.EstimateTextTokens), checkpoint.SummaryPromptInputTokens);
     }
 
     [TestMethod]

@@ -27,6 +27,10 @@ public sealed class AgentHub : IAsyncDisposable
 
     internal IReadOnlyList<ModelProviderDescriptor> SelectionProviders => _modelProviderRegistry.ListProviders();
 
+    /// <summary>The version of the registration of a provider (<see cref="ModelProviderRegistry.GetRegistrationVersion"/>); 0 when it is not registered.</summary>
+    internal long GetProviderRegistrationVersion(string? providerKey)
+        => string.IsNullOrWhiteSpace(providerKey) ? 0 : _modelProviderRegistry.GetRegistrationVersion(new ModelProviderId(providerKey.Trim()));
+
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentHub"/> class.
     /// </summary>

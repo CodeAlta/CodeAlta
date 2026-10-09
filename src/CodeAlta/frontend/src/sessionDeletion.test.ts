@@ -14,10 +14,10 @@ const snapshot: WorkspaceSnapshot = { configured: true, projects: [{ id: "p1", n
   sessions: [{ messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "s2", title: "Kept", fullTitle: "Kept", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p1", lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" }],
   projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false };
 
-test("confirmed delete freezes scope, session identity and title; recovered selection stays in exact scope", async () => {
+test("a delete freezes scope, session identity and listed title; recovered selection stays in exact scope", async () => {
   let request: unknown;
   const remove = createSessionDeletion(async (value, options) => { request = value; assert.equal(options.timeoutMilliseconds, 10_000); return reply("ok"); });
-  const result = await remove(epoch, project, "s1", "Exact title", "Exact title", createMutationCapability(epoch));
+  const result = await remove(epoch, project, "s1", "Exact title", createMutationCapability(epoch));
   assert.deepEqual(request, { expectedHostEpoch: epoch, ...project, sessionId: "s1", confirmedTitle: "Exact title" });
   assert.deepEqual(result, { kind: "deleted", target: project, id: "s1" });
   if (result.kind !== "deleted") throw new Error("Expected deletion");
@@ -32,20 +32,19 @@ test("confirmed delete freezes scope, session identity and title; recovered sele
   assert.deepEqual(deletedSessionRecovery({ ...snapshot, sessions: [] }, result), { projectId: "p1", sessionId: null });
 });
 
-test("wrong confirmation, stale host and malformed responses never delete or retry automatically", async () => {
+test("an unusable title, a stale host and malformed responses never delete or retry automatically", async () => {
   let calls = 0;
   const capability = createMutationCapability(epoch);
   const remove = createSessionDeletion(async () => { calls++; return reply("ok"); });
   for (const title of ["", " ", " spaced", "control\n", "\ud800", "x".repeat(257)])
-    assert.deepEqual(await remove(epoch, project, "s1", title, title, capability), { kind: "error", code: "invalid_confirmation" });
-  assert.deepEqual(await remove(epoch, project, "s1", "Exact", "exact", capability), { kind: "error", code: "invalid_confirmation" });
-  assert.deepEqual(await remove(undefined, project, "s1", "Exact", "Exact", undefined), { kind: "error", code: "unconfigured" });
+    assert.deepEqual(await remove(epoch, project, "s1", title, capability), { kind: "error", code: "invalid_confirmation" });
+  assert.deepEqual(await remove(undefined, project, "s1", "Exact", undefined), { kind: "error", code: "unconfigured" });
   assert.equal(calls, 0);
-  assert.deepEqual(await createSessionDeletion(async () => reply("ok", { sessionId: "s2" }))(epoch, project, "s1", "Exact", "Exact", capability),
+  assert.deepEqual(await createSessionDeletion(async () => reply("ok", { sessionId: "s2" }))(epoch, project, "s1", "Exact", capability),
     { kind: "error", code: "delete_unconfirmed" });
-  assert.deepEqual(await createSessionDeletion(async () => { throw new Error("response lost"); })(epoch, project, "s1", "Exact", "Exact", capability),
+  assert.deepEqual(await createSessionDeletion(async () => { throw new Error("response lost"); })(epoch, project, "s1", "Exact", capability),
     { kind: "error", code: "delete_unconfirmed" });
-  assert.deepEqual(await createSessionDeletion(async () => reply("stale_epoch", { hostEpoch: other }))(epoch, project, "s1", "Exact", "Exact", capability),
+  assert.deepEqual(await createSessionDeletion(async () => reply("stale_epoch", { hostEpoch: other }))(epoch, project, "s1", "Exact", capability),
     { kind: "error", code: "stale_epoch" });
   assert.equal(capability.canMutate(), false);
   assert.match(sessionDeletionMessage("delete_unconfirmed"), /no retry/i);
@@ -56,8 +55,8 @@ test("one in-flight deletion only, including after switching project selection",
   let calls = 0;
   const remove = createSessionDeletion(async () => { calls++; return new Promise(resolve => { settle = resolve; }); });
   const capability = createMutationCapability(epoch);
-  const pending = remove(epoch, project, "s1", "Exact", "Exact", capability);
-  assert.deepEqual(await remove(epoch, global, "g1", "Global", "Global", capability), { kind: "error", code: "busy" });
+  const pending = remove(epoch, project, "s1", "Exact", capability);
+  assert.deepEqual(await remove(epoch, global, "g1", "Global", capability), { kind: "error", code: "busy" });
   settle(reply("ok"));
   const result = await pending;
   assert.equal(result.kind, "deleted");

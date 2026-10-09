@@ -332,6 +332,14 @@ public sealed class CodeAltaProviderDocument
     public string? PermissionMode { get; set; }
 
     /// <summary>
+    /// Gets or sets whether a <c>claude-code</c> provider gives the CLI the API key of the environment
+    /// (<c>ANTHROPIC_API_KEY</c>): <c>use</c> or <c>ignore</c>. When it is empty the answer Claude Code saved for the
+    /// key is followed, and a turn does not start while there is none.
+    /// </summary>
+    [JsonPropertyName("anthropic_api_key")]
+    public string? AnthropicApiKey { get; set; }
+
+    /// <summary>
     /// Gets or sets the GitHub Enterprise URL or domain for the GitHub Copilot direct provider.
     /// </summary>
     [JsonPropertyName("github_enterprise_url")]

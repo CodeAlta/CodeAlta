@@ -122,6 +122,8 @@ function PluginDialog({ ask, api, onFinish, onClosed }: {
   return <AppWindow storageKey={`codealta.desktop.window.plugin-${kind}.v1`} className="plugin-dialog" titleId={titleId} title={ask.title ?? t("Plugin")}
     preferredSize={viewport => ({ width: Math.min(width, viewport.width - 40), height: Math.min(height, viewport.height - 40) })}
     minimumSize={{ width: 320, height: 180 }} onClose={cancel} closeLabel={t("Close")} onOpened={opened}
+    // A plugin that asks waits for the answer; only a message has nothing to lose.
+    keepOnOutsidePress={kind !== "message"}
     onCancel={event => { event.preventDefault(); cancel(); }}
     onKeyDown={event => {
       event.stopPropagation();

@@ -25,10 +25,6 @@
 .runtime-observation-controls button { line-height: 1.5; }
 .runtime-observation-controls small { max-width: 36rem; overflow-wrap: anywhere; }
 .session-tabs .runtime-observation-controls { flex: 1 1 100%; }
-/* Archive confirmation retains long exact identities without overflowing narrow windows. */
-.archive-dialog { width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; box-sizing: border-box; }
-.archive-dialog p, .archive-dialog details { overflow-wrap: anywhere; }
-.archive-dialog button { margin: .5rem .5rem .5rem 0; }
 :root {
   color-scheme: dark;
   font-family: var(--bp-typography-family-default);
@@ -161,9 +157,6 @@ h1, h2, h3, p { margin-top: 0; }
 .session-rename { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
 .session-rename label { width: 100%; display: grid; gap: 4px; }
 .session-rename input { min-width: 0; }
-.session-delete { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; }
-.session-delete label { width: 100%; display: grid; gap: 4px; }
-.session-delete input { min-width: 0; }
 .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .session-draft-badge { display: inline-flex; align-items: center; gap: 4px; width: fit-content; padding: 2px 6px; border-radius: 5px; color: var(--text); background: var(--accent-soft); font-size: 11px; }
 .session-meta { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
@@ -1888,6 +1881,12 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .rename-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .rename-form .bp6-form-helper-text { overflow-wrap: anywhere; }
 .rename-actions { display: flex; justify-content: flex-end; gap: 6px; }
+/* The question asked beside a row before its session is deleted or its project archived. */
+.confirm-form { display: grid; gap: 8px; width: min(320px, calc(100vw - 32px)); padding: 12px 14px 10px; }
+.confirm-form p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.confirm-form .confirm-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.confirm-form .confirm-error { color: var(--red); }
+.confirm-form .bp6-checkbox { margin: 2px 0 0; }
 
 /* The developer instance says so beside its name, so two CodeAlta windows are told apart. */
 .window-brand-tag { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent); border-radius: 999px; color: var(--yellow); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; }

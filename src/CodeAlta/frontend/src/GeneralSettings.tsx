@@ -6,7 +6,7 @@ import { ChangesViewSetting } from "./changes/ChangesViewSetting";
 import { ColorSchemeSettings } from "./ColorSchemeSettings";
 import type { ProjectSort } from "./explorer/projectRail";
 import { SettingsField as Field } from "./SettingsField";
-import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
+import { themeLabel, themes, type Confirmation, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
@@ -31,7 +31,7 @@ function SessionWidthSlider({ value, label, onChange }: { value: number; label: 
   </div>;
 }
 
-export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, sessionWidth, setSessionWidth, closing }: {
+export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, sessionWidth, setSessionWidth, closing, confirms }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
   /** Whether the dark theme is the darker one. */
@@ -53,6 +53,8 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
   setSessionWidth?: (value: number) => void;
   /** What closing the window does; absent where the application cannot stay anywhere without it. */
   closing?: { behavior: CloseBehavior; platform: string; trayIcon?: boolean; set: (value: CloseBehavior) => void } | null;
+  /** What asks before it is done: the answer "do not ask again" of a question is taken back here. */
+  confirms?: Readonly<Record<Confirmation, boolean>> & { set: (confirmation: Confirmation, ask: boolean) => void };
   notices: PreferenceNotices;
 }) {
   const { t, locale, choice, issue, setLanguage } = useShellLanguage();
@@ -106,6 +108,14 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
       notice={notices.rail && <p role="status" className="notice" data-diagnostic={notices.rail}>{preferenceNotice(locale, "Desktop projects", locale === "en" ? "expanded" : t("Show projects"), notices.rail)}</p>}>
       <Switch id="settings-rail-collapsed" className="settings-checkbox" checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.currentTarget.checked)} />
     </Field>
+    {confirms && <>
+      <Field label={t("Ask before deleting a session")} htmlFor="settings-confirm-session-delete">
+        <Switch id="settings-confirm-session-delete" className="settings-checkbox" checked={confirms.sessionDelete} onChange={event => confirms.set("sessionDelete", event.currentTarget.checked)} />
+      </Field>
+      <Field label={t("Ask before archiving a project")} htmlFor="settings-confirm-project-archive">
+        <Switch id="settings-confirm-project-archive" className="settings-checkbox" checked={confirms.projectArchive} onChange={event => confirms.set("projectArchive", event.currentTarget.checked)} />
+      </Field>
+    </>}
     {closing && <Field label={t("When the window is closed")} htmlFor="settings-on-close"
       notice={closing.behavior === "keep" && <p className="settings-field-help">{t(keepRunningPlace(closing.platform, closing.trayIcon))}</p>}>
       <HTMLSelect id="settings-on-close" value={closing.behavior} onChange={event => closing.set(closeBehavior(event.target.value))}>

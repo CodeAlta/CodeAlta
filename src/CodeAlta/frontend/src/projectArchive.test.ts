@@ -19,7 +19,7 @@ test("archive and explicit unarchive freeze exact intent and retain definite out
     assert.equal(calls.at(-1)?.archived, !archived);
     assert.equal(calls.at(-1)?.sourcePath, target.source);
   }
-  assert.equal(owner.records.length, 2);
+  assert.equal(owner.locked, false);
 });
 
 test("held original blocks duplicate clicks and unknown results remain locked across reads", async () => {
@@ -28,7 +28,8 @@ test("held original blocks duplicate clicks and unknown results remain locked ac
   const owner = createProjectArchive(request => { calls++; return request.confirmed ? new Promise(resolve => { settle = resolve; }) : Promise.resolve(response(request)); });
   const target = await owner.prepare(scope); if (typeof target === "string") assert.fail(target);
   const original = owner.confirm(target, scope);
-  assert.equal(owner.records[0].state, "pending");
+  assert.equal(owner.locked, true);
+  assert.equal(owner.uncertain, false);
   assert.equal(await owner.confirm(target, scope), null);
   assert.equal(typeof await owner.prepare({ ...scope, id: "other" }), "string");
   settle({ ...response({ expectedHostEpoch: scope.epoch, projectId: scope.id, projectPath: scope.path,
@@ -37,10 +38,10 @@ test("held original blocks duplicate clicks and unknown results remain locked ac
   assert.equal(await owner.confirm(target, scope), null);
   assert.equal(typeof await owner.prepare(scope), "string");
   assert.equal(calls, 2);
-  assert.equal(owner.records[0].target, target);
+  assert.equal(owner.uncertain, true);
 });
 
-test("project host source state and dialog ABA refuse stale captures, catalog-only cannot confirm", async () => {
+test("project host source state and lifetime ABA refuse stale captures, catalog-only cannot confirm", async () => {
   let writes = 0;
   const owner = createProjectArchive(async request => { if (request.confirmed) writes++; return response(request); });
   const target = await owner.prepare(scope); if (typeof target === "string") assert.fail(target);
@@ -62,5 +63,6 @@ test("conflicts are definite refusals; bad success evidence and lost replies are
     const target = await owner.prepare(scope); if (typeof target === "string") assert.fail(target);
     assert.equal((await owner.confirm(target, scope))?.state, mode === "conflict" ? "refused" : "uncertain");
     assert.equal(owner.locked, mode !== "conflict");
+    assert.equal(owner.uncertain, mode !== "conflict");
   }
 });

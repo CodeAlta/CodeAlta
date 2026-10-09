@@ -3,7 +3,7 @@ import type { SessionPermissionCommand } from "#neoastra";
 import type { createPermissionReviewer, PermissionDecisionObservation, PermissionReviewState } from "./sessionPermissions";
 import { useShellLanguage } from "./shellLanguage";
 import { createPaletteFocusRestoration } from "./paletteActions";
-import { modalDialogOpen } from "./modalDialogs";
+import { keptOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
 export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }: {
   reviewer: ReturnType<typeof createPermissionReviewer>; epoch: string; sessionId: string;
@@ -85,7 +85,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }
     {entry.reason !== null && <><p>{t("Reason")}</p><pre data-permission-reason>{entry.reason}</pre></>}
   </>;
   return <section className="command-permission-panel" aria-label={t("Pending command permissions")}>
-    {review && <dialog key={review.id} ref={dialog} className="app-dialog permission-review-dialog" aria-modal="true" aria-labelledby="permission-review-title"
+    {review && <dialog key={review.id} ref={dialog} className="app-dialog permission-review-dialog" aria-modal="true" aria-labelledby="permission-review-title" {...keptOnOutsidePress}
       onClose={() => { if (activeReview.current === review) close(); }} onCancel={event => { event.preventDefault(); if (!composing.current) close(); }}
       onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
       onKeyDown={event => {

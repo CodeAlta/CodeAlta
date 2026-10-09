@@ -6,6 +6,7 @@ Add a rule here when it is important enough that contributors and agents should 
 
 ## Async And UI Threading
 
+- Desktop docking title-bar attributes that change tab-strip height or padding must be applied when the strip mounts, before FlexLayout's first geometry observation; parent layout effects can run before its deferred portal content exists. Keep later resize/model updates frame-coalesced. Never globally suppress `ResizeObserver` errors: capture unsuppressed browser errors on a fresh profile, verify geometry and notification counts settle over multiple frames, and exercise asynchronous boot replies plus initial settings/guide dialogs (`startupLayout.browser.test.ts`). A single skipped notification during startup is not proof of a persistent layout cycle; corroborate browser regressions with isolated native startup when changing this geometry.
 - Frontend UI flow defaults to plain `await`.
 - Do not use `ConfigureAwait(false)` in UI code or UI callbacks when the continuation reads or mutates bindable state, view models, controls, presentation state, or frontend coordinator state.
 - `ConfigureAwait(false)` is allowed in explicit background or infrastructure code such as libraries, SDKs, transport, persistence, filesystem I/O, pumps, workers, and startup code that marshals back before touching UI-owned state.
