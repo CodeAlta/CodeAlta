@@ -3306,7 +3306,7 @@ the sessions that wait for the user in the activity of its space.
 Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
 into manual review of supported command and file-change requests. The selected-session review shows a
 command with its complete command line, working directory and optional reason, and a file change with
-the complete root it asks to write under and its optional reason, with **Allow once / Deny / Cancel**.
+the complete root it asks to write under and its optional reason, with **Allow once / Deny** (the RPC still takes **Cancel**).
 Each kind is held to its own whole shape: a command that carries parsed actions, network access or a
 policy amendment is refused rather than shown as less than it is, and a request that arrives with the
 fields of the other kind, or without its own, is refused with the window it came in.
@@ -3316,11 +3316,14 @@ its session by itself: at once when the session is selected, then every 1.5 seco
 and no request is shown. A request that is shown is not read again while the run goes on, so the entry
 being answered is not replaced under the user; the end of the run reads once more what is left. It shows
 the first waiting entry, its command line and working directory or the root of the file change, and its
-reason, then its choices as one list: **Allow once**, **Deny**, **Cancel this request** and a text field.
+reason, then its choices as one list: **Allow once**, **Deny** and a text field. It offers no **Cancel**:
+its effect depends on the provider (Claude Code stops the turn, the tools of CodeAlta only fail the call),
+while **Deny** means the same everywhere and the Stop button of the composer stops a run.
 The choices are disabled for 400 ms after an entry appears (and after a selection shows it again), so a
 click aimed at what was there does not answer it. The arrow keys move along the list (Left and Right
-move the caret in the text field), Enter answers with the focused choice, and 1-3 answer directly; a
-held key answers nothing. When the entry arms, its first choice takes the focus if the focus is nowhere,
+move the caret in the text field), Enter answers with the focused choice, 1-2 answer directly and
+Escape denies (in the text field, Escape first clears its text; Escape that ends an IME composition
+answers nothing); a held key answers nothing. When the entry arms, its first choice takes the focus if the focus is nowhere,
 in the composer region or in the card, and the composer has no draft text or image.
 Text in the field and Enter send **Deny** and, once the host has taken that denial, the text as a steer
 of the run through the composer queue; otherwise the text is queued for the next turn. This works the

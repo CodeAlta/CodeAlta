@@ -109,15 +109,25 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     if (text) setInstead("");
   }
   const ready = canReview() && state === shown && armed === attempt;
-  const decisions = [["allow_once", "Allow once"], ["deny", "Deny"], ["cancel", "Cancel this request"]] as const;
-  // The choices are one list: the arrows move along it, Enter answers with the focused one.
+  // Deny is the answer that means the same for every provider: the run goes on without the action. Stopping the run
+  // is the Stop button of the composer.
+  const decisions = [["allow_once", "Allow once"], ["deny", "Deny"]] as const;
+  // The choices are one list: the arrows move along it, Enter answers with the focused one, Escape denies.
   function move(event: KeyboardEvent<HTMLElement>) {
     const field = event.target instanceof HTMLInputElement;
+    if (event.key === "Escape") {
+      if (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+      event.preventDefault();
+      // Escape first takes back the text being written, as in any field.
+      if (field && instead) setInstead("");
+      else choices.current?.querySelector<HTMLElement>("[data-permission-decision=deny]")?.click();
+      return;
+    }
     const step = event.key === "ArrowDown" || (!field && event.key === "ArrowRight") ? 1
       : event.key === "ArrowUp" || (!field && event.key === "ArrowLeft") ? -1 : 0;
     const items = Array.from(choices.current?.querySelectorAll<HTMLElement>("[data-permission-choice]") ?? []);
     const index = items.indexOf(event.target as HTMLElement);
-    const chosen = field || event.repeat ? -1 : ["1", "2", "3"].indexOf(event.key);
+    const chosen = field || event.repeat ? -1 : ["1", "2"].indexOf(event.key);
     if (chosen >= 0 && index >= 0) { event.preventDefault(); items[chosen].click(); return; }
     if (!step || index < 0) return;
     event.preventDefault();
@@ -146,7 +156,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
           onKeyDown={event => { if (event.key === "Enter" && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat)) event.preventDefault(); }} />
       </form>}
     </div>
-    <p className="detail permission-keys">{t("Arrow keys choose, Enter answers.")}</p>
+    <p className="detail permission-keys">{t("Arrow keys choose, Enter answers, Escape denies.")}</p>
     {outcome}
     {(shown.entries.length > 1 || shown.hasMore) && <p className="detail" role="status">{t("More requests are waiting after this one.")}</p>}
   </section>;

@@ -65,7 +65,7 @@ test("provider presentation preserves literal decisions and input owners across 
         assert.equal(await evaluate(`document.querySelector('main > section:last-child h3').textContent===${JSON.stringify(translate(locale, "Nonsecret provider input"))}`), true);
         assert.equal(await evaluate(`(()=>{const panel=document.querySelector('main > section.command-permission-panel');return !panel||panel.getAttribute('aria-label')===${JSON.stringify(translate(locale, "Pending command permissions"))}&&(!panel.querySelector('h3')||panel.querySelector('h3').textContent===${JSON.stringify(translate(locale, "Allow this command?"))})})()`), true);
         assert.equal(await evaluate(`kept.calls===JSON.stringify([providerFixture.permissions.length,providerFixture.decisions.length,providerFixture.inputs.length,providerFixture.answers.length,providerFixture.cancels.length]) && kept.original===providerFixture.input.readOriginal()?.request && kept.decision===providerFixture.permission.readOriginal()?.origin && kept.capability===providerFixture.capability.canMutate() && kept.focus===document.activeElement && kept.nodes.every(v=>v.node.isConnected&&v.value===v.node.value&&v.disabled===v.node.disabled)`), true, `${locale}: no reads, grants, owner replacement, reset or focus loss`);
-        assert.equal(await evaluate(`(()=>{const d=document.querySelector('.command-permission-panel');return !d?.querySelector('h3')||d.querySelector('[data-permission-command]').textContent===providerFixture.permissionPage.entries[0].command&&d.querySelector('[data-permission-directory]').textContent===providerFixture.permissionPage.entries[0].workingDirectory&&d.querySelector('[data-permission-reason]').textContent===providerFixture.permissionPage.entries[0].reason&&d.querySelector('[data-permission-decision=cancel]').textContent.endsWith(${JSON.stringify(translate(locale, "Cancel this request"))})})()`), true);
+        assert.equal(await evaluate(`(()=>{const d=document.querySelector('.command-permission-panel');return !d?.querySelector('h3')||d.querySelector('[data-permission-command]').textContent===providerFixture.permissionPage.entries[0].command&&d.querySelector('[data-permission-directory]').textContent===providerFixture.permissionPage.entries[0].workingDirectory&&d.querySelector('[data-permission-reason]').textContent===providerFixture.permissionPage.entries[0].reason&&d.querySelector('[data-permission-decision=deny]').textContent.endsWith(${JSON.stringify(translate(locale, "Deny"))})})()`), true);
         assert.equal(await evaluate(`(()=>{const option=document.querySelector('[aria-pressed]');return !option||option.textContent==='Settings — Complete'})()`), true);
         assert.equal(await evaluate(`(()=>{const d=document.querySelector('.provider-input-dialog');return !d||d.querySelector('h2').textContent===${JSON.stringify(translate(locale, "Review provider input"))}&&[...d.querySelectorAll('[data-input-question]')].every((p,i)=>p.textContent===providerFixture.inputPage.entries[0].prompts[i].question)})()`), true);
       }
@@ -123,19 +123,23 @@ test("provider presentation preserves literal decisions and input owners across 
     await evaluate("providerFixture.language('en')"); await paint();
     await click("Submit literal answers");
     await evaluate("document.querySelector('.provider-input-dialog header button').click()");
-    assert.equal(await evaluate("document.querySelectorAll('.command-permission-panel [data-permission-decision]').length"), 3, "The request is answered on its card, not in a dialog");
+    assert.equal(await evaluate("document.querySelectorAll('.command-permission-panel [data-permission-decision]').length"), 2, "The request is answered on its card, not in a dialog");
     assert.equal(await armed(), true, "Its choices arm a moment after it appears");
     assert.equal(await evaluate("providerFixture.permissions.length===1 && providerFixture.decisions.length===0"), true, "Showing it performs no read or decision");
     await evaluate("document.querySelector('[data-permission-decision=allow_once]').focus()");
     assert.equal(await evaluate("getComputedStyle(document.querySelector('[data-permission-decision=allow_once]')).color==='rgb(255, 255, 255)'"), true, "The focused choice stands out");
     await key("ArrowDown", "ArrowDown", 40); assert.equal(await focused("[data-permission-decision=deny]"), true, "Down moves to the next choice");
-    await key("ArrowRight", "ArrowRight", 39); assert.equal(await focused("[data-permission-decision=cancel]"), true, "Right too");
-    await key("ArrowDown", "ArrowDown", 40); assert.equal(await focused("[data-permission-instead]"), true, "The text to deny with is the last choice");
+    await key("ArrowRight", "ArrowRight", 39); assert.equal(await focused("[data-permission-instead]"), true, "Right too; the text to deny with is the last choice");
     await key("ArrowLeft", "ArrowLeft", 37); assert.equal(await focused("[data-permission-instead]"), true, "Left and Right move the caret in the text");
     await key("ArrowDown", "ArrowDown", 40); assert.equal(await focused("[data-permission-decision=allow_once]"), true, "The list wraps");
-    await key("ArrowUp", "ArrowUp", 38); await key("ArrowUp", "ArrowUp", 38); assert.equal(await focused("[data-permission-decision=cancel]"), true, "Up moves back");
-    await evaluate("document.querySelector('[data-permission-decision=cancel]').dispatchEvent(new KeyboardEvent('keydown',{key:'1',bubbles:true,cancelable:true,repeat:true}))");
+    await key("ArrowUp", "ArrowUp", 38); await key("ArrowUp", "ArrowUp", 38); assert.equal(await focused("[data-permission-decision=deny]"), true, "Up moves back");
+    await evaluate("document.querySelector('[data-permission-decision=deny]').dispatchEvent(new KeyboardEvent('keydown',{key:'1',bubbles:true,cancelable:true,repeat:true}))");
     assert.equal(await evaluate("providerFixture.decisions.length"), 0, "A held key answers nothing");
+    await evaluate("document.querySelector('[data-permission-instead]').focus()"); await command("Input.insertText", { text: "not that" });
+    await key("Escape", "Escape", 27);
+    assert.equal(await evaluate("document.querySelector('[data-permission-instead]').value===''&&providerFixture.decisions.length===0"), true, "Escape in the text first takes the text back");
+    await evaluate("document.querySelector('[data-permission-decision=allow_once]').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true,isComposing:true}))");
+    assert.equal(await evaluate("providerFixture.decisions.length"), 0, "Escape that ends a composition answers nothing");
     for (const theme of ["light", "dark"]) {
       await command("Emulation.setDeviceMetricsOverride", { width: 390, height: 600, deviceScaleFactor: 1, mobile: false });
       await evaluate(`document.documentElement.dataset.theme='${theme}'`); await paint();
@@ -175,8 +179,8 @@ test("provider presentation preserves literal decisions and input owners across 
     await evaluate("oldDecision.click()"); assert.equal(await evaluate("providerFixture.decisions.length"), 0, "A session selected again never reactivates old controls");
     assert.equal(await evaluate("document.querySelector('[data-permission-decision=allow_once]').disabled"), true, "A card shown again arms again");
     assert.equal(await armed(), true);
-    await evaluate("document.querySelector('[data-permission-decision=cancel]').click()");
-    assert.deepEqual(await evaluate("providerFixture.decisions[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", handle: await evaluate("providerFixture.handle"), decision: "cancel" });
+    await evaluate("document.querySelector('[data-permission-decision=allow_once]').focus()"); await key("Escape", "Escape", 27);
+    assert.deepEqual(await evaluate("providerFixture.decisions[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", handle: await evaluate("providerFixture.handle"), decision: "deny" }, "Escape denies");
     await evaluate("providerFixture.decisions[0].reject(Error('transport failure'))");
     assert.equal(await wait("providerFixture.permission.readOriginal()?.state==='error'"), true);
     assert.equal(await wait("!!document.querySelector('.command-permission-panel [role=alert]')"), true, "An uncertain answer stays shown");
