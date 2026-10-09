@@ -410,6 +410,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const availableAbortRun = captureAbortRun(epoch, sessionId, observedTarget, "availability");
   // The latest stagePrompt, for what an answer outside this render sends: the text of a denied permission.
   const stageLatest = useRef(stagePrompt);
+  const editLatest = useRef<(value: string) => void>(() => {});
   // Above the composer and never refused: a queued prompt waits for the session to be idle, a steering prompt
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
@@ -876,10 +877,15 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       if (canEditImages() && imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index))) setImageNotice("");
     }} />;
   stageLatest.current = stagePrompt;
+  editLatest.current = editText;
   return <>
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy}
-      instruct={(kind, value) => { stageLatest.current(kind, value, []); }} takeFocus={() => !latestText.current.trim() && !images.length} />}
+      instruct={(kind, value) => {
+        // Text that cannot be staged (a request is pending, the queue is full) goes back to the composer, never lost.
+        if (!stageLatest.current(kind, value, [])) editLatest.current(latestText.current.trim() ? `${latestText.current}
+${value}` : value);
+      }} takeFocus={() => !latestText.current.trim() && !images.length} />}
     <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>

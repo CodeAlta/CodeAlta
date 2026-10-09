@@ -428,6 +428,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .command-permission-panel > p { margin: 4px 0 0; }
 .command-permission-panel code { overflow-wrap: anywhere; }
 .command-permission-panel .permission-choices { display: grid; gap: 6px; margin-top: 10px; }
+/* The list has the focus before a choice does: the card says so. */
+.command-permission-panel .permission-choices:focus { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
 .command-permission-panel .permission-choices > button, .ide-shell .command-permission-panel .permission-choices > button { display: flex; align-items: center; gap: 8px; width: 100%; height: auto; min-height: 34px; margin: 0; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); background: transparent; font: inherit; text-align: start; cursor: pointer; }
 .command-permission-panel .permission-choices > button:hover:not(:disabled) { background: var(--panel-2); }
 .command-permission-panel .permission-choices > button:focus-visible, .command-permission-panel .permission-choices > button:focus { border-color: var(--accent); outline: none; color: #fff; background: var(--accent); }

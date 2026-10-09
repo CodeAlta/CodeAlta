@@ -206,7 +206,12 @@ test("provider presentation preserves literal decisions and input owners across 
     assert.equal(await wait("providerFixture.permissions.length===3"), true);
     await evaluate("document.activeElement?.blur();providerFixture.focus(true);providerFixture.permissions[2].resolve(providerFixture.permissionPage)");
     assert.equal(await wait("document.querySelector('.command-permission-panel h3')?.textContent==='Allow this command?' && !document.querySelector('[data-permission-decision=allow_once]').disabled"), true, "A waiting request shows");
-    assert.equal(await wait("document.activeElement===document.querySelector('[data-permission-decision=allow_once]')"), true, "With no draft, its first choice takes the focus: the keyboard alone answers");
+    assert.equal(await wait("document.activeElement===document.querySelector('.permission-choices')"), true, "With no draft, its list takes the focus: the keyboard alone answers");
+    for (const [name, code, keyCode, text] of [[" ", "Space", 32, " "], ["Enter", "Enter", 13, "\r"], ["1", "Digit1", 49, "1"]] as const) await key(name, code, keyCode, text);
+    assert.equal(await evaluate("providerFixture.decisions.length===0 && document.activeElement===document.querySelector('.permission-choices')"), true, "Typing that lands on the list answers nothing");
+    await key("ArrowDown", "ArrowDown", 40); assert.equal(await focused("[data-permission-decision=allow_once]"), true, "Down enters the list at its first choice");
+    await evaluate("document.querySelector('.permission-choices').focus()");
+    await key("ArrowUp", "ArrowUp", 38); assert.equal(await focused("[data-permission-instead]"), true, "Up enters it at its last");
     await evaluate("new Promise(resolve=>setTimeout(resolve,2000))");
     assert.equal(await evaluate("providerFixture.permissions.length"), 3, "A request that is shown is not read again while the run goes on");
     await evaluate("providerFixture.run(false)");

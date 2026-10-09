@@ -76,17 +76,19 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   const entry = shown?.entries[0];
   const attempt = entry?.handle.attemptId ?? null;
   useEffect(() => {
-    if (attempt === null) return;
+    // A request that comes back after it was gone is a new one on screen: it arms again.
+    if (attempt === null) { setArmed(null); return; }
     const timer = setTimeout(() => setArmed(attempt), armDelay);
     return () => clearTimeout(timer);
   }, [attempt]);
   useEffect(() => {
     if (armed === null || armed !== attempt) return;
-    // Answering with the keyboard alone: the first choice takes the focus when nothing else is being written.
+    // Answering with the keyboard alone: the list takes the focus when nothing else is being written. The list, not a
+    // choice: a space or an Enter typed at that moment answers nothing, the arrows go to the choices.
     const focused = document.activeElement;
     const region = card.current?.closest(".composer-region") ?? card.current;
     if ((focused === document.body || focused === null || !!region?.contains(focused)) && (takeFocus?.() ?? false))
-      choices.current?.querySelector<HTMLElement>("[data-permission-choice]")?.focus();
+      choices.current?.focus();
   }, [armed]);
   const outcome = <>
     {state?.kind === "resolving" && <p role="status">{t("Sending your decision…")}</p>}
@@ -129,18 +131,21 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     const index = items.indexOf(event.target as HTMLElement);
     const chosen = field || event.repeat ? -1 : ["1", "2"].indexOf(event.key);
     if (chosen >= 0 && index >= 0) { event.preventDefault(); items[chosen].click(); return; }
-    if (!step || index < 0) return;
+    if (!step) return;
+    // From the list itself, the arrows enter it at its first or its last choice.
+    if (index < 0 && event.target !== choices.current) return;
     event.preventDefault();
-    items[(index + step + items.length) % items.length].focus();
+    items[index < 0 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length].focus();
   }
   return <section ref={card} className="command-permission-panel" aria-label={t("Pending command permissions")}>
-    <h3>{t(entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
+    <h3 id={`${sessionId}-permission-question`}>{t(entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
+    <p className="sr-only" role="status">{t("A request waits for your permission.")}</p>
     {entry.kind === "commandExecution"
       ? <><pre data-permission-command>{entry.command}</pre>
         <p className="detail"><code data-permission-directory>{entry.workingDirectory}</code></p></>
       : <pre data-permission-grant-root>{entry.grantRoot}</pre>}
     {entry.reason !== null && entry.reason.trim() && <p className="detail" data-permission-reason>{entry.reason}</p>}
-    <div ref={choices} className="permission-choices" role="group" aria-label={t("Pending command permissions")} onKeyDown={move}>
+    <div ref={choices} className="permission-choices" role="group" tabIndex={-1} aria-labelledby={`${sessionId}-permission-question`} onKeyDown={move}>
       {decisions.map(([decision, label], index) => <button key={decision} type="button" data-permission-choice data-permission-decision={decision}
         disabled={!ready} tabIndex={index === 0 ? 0 : -1} onKeyDown={event => { if (event.repeat && event.key === "Enter") event.preventDefault(); }}
         onClick={event => decide(event.currentTarget, entry, decision)}>
