@@ -104,6 +104,35 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void Preferences_ReviewPermissions_UnlessTheUserTurnedItOff()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-review-").FullName;
+        try
+        {
+            var file = Path.Combine(root, "preferences.json");
+            // A new profile reviews: an agent runs with the privileges of CodeAlta.
+            Assert.IsTrue(DesktopPreferences.Load(root).ReviewPermissions);
+            Assert.IsTrue(DesktopPreferences.Default.ReviewPermissions);
+            // A file written before the setting existed says nothing about it, and still reviews.
+            File.WriteAllText(file, """{"onClose":"exit","zoom":125}""");
+            Assert.IsTrue(DesktopPreferences.Load(root).ReviewPermissions);
+            // Only the choice to approve automatically is written, and it is kept.
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Ask, ReviewPermissions: false).Save(root));
+            Assert.AreEqual("""{"onClose":"ask","reviewPermissions":false}""", File.ReadAllText(file));
+            Assert.IsFalse(DesktopPreferences.Load(root).ReviewPermissions);
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Ask).Save(root));
+            Assert.AreEqual("""{"onClose":"ask"}""", File.ReadAllText(file));
+            // Anything but false reviews.
+            foreach (var other in new[] { "true", "0", "\"false\"", "null" })
+            {
+                File.WriteAllText(file, "{\"onClose\":\"ask\",\"reviewPermissions\":" + other + "}");
+                Assert.IsTrue(DesktopPreferences.Load(root).ReviewPermissions, other);
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     [DataRow(100, 1, 110)]
     [DataRow(100, -1, 90)]
     [DataRow(300, 1, 400)]
@@ -142,7 +171,7 @@ public sealed class DesktopShellTests
         // Without a shell the width of the conversations is the whole space, and asking for another keeps it.
         Assert.AreEqual(("unavailable", 100), (service.SetSessionWidth(new(70, "session-1")).Status, service.SetSessionWidth(new(70)).SessionWidth));
         Assert.AreEqual(("unavailable", 100), (service.Zoom(new(1)).Status, service.Zoom(new(-1)).Zoom));
-        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null,"trayIcon":false,"zoom":100,"reviewPermissions":false}""",
+        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null,"trayIcon":false,"zoom":100,"reviewPermissions":true}""",
             JsonSerializer.Serialize(service.Preferences(new()) with { Platform = "windows" }, DesktopJsonContext.Default.DesktopShellPreferences));
         Assert.AreEqual("""{"kind":"session-width","runningSessions":0,"busyTerminals":0,"sessionWidth":60,"sessionId":"session-1"}""",
             JsonSerializer.Serialize(new DesktopShellEvent("session-width", 0, SessionWidth: 60, SessionId: "session-1"), DesktopJsonContext.Default.DesktopShellEvent));

@@ -11,9 +11,9 @@ reference for maintainers. The user documentation is under `site/docs`, starting
 Running `alta` with no options starts the same host as `altatui`: it owns the current project and
 the `~/.alta` runtime, acquires the shared runtime lock, starts the configured providers, and runs the
 built-in plugins (MCP, Git, Statistics) and the source plugins of `~/.alta/plugins` and of the
-launch project. Tool permissions are approved automatically unless **Review what the sessions do** of
-Settings > Appearance is on (an isolated-root launch can force it on); provider input forms are
-cancelled unless an isolated-root launch opts in to them. WebView-only data stays in the platform-local
+launch project. The commands and the file changes of a session are reviewed unless **Review what the
+sessions do** of Settings > Appearance was turned off; provider input forms are cancelled unless an
+isolated-root launch opts in to them. WebView-only data stays in the platform-local
 application-data directory, and existing `.alta` storage is not migrated.
 
 No-argument startup derives a stable WebView data directory from the platform's local application-data
@@ -3293,12 +3293,15 @@ On narrow screens the labelled controls wrap rather than clip; exact-target evid
 separate **Abort original Send operation** remain available.
 
 **Settings > Appearance > Review what the sessions do** turns that review on and off for the normal
-window, and keeps it in `preferences.json` (`reviewPermissions`, absent while it is off). It is read
-again for every send, so it applies to what the sessions do next rather than to what is already
-running, and one send reads it once so its setup and its cleanup agree. Off, the host answers every
-request of its sessions with Allow once, as it always did; the permission mode of a provider still
-decides what the provider resolves by itself. `--review-owned-command-permissions` of the owned mode
-below forces the review on whatever the setting says.
+window, and keeps it in `preferences.json` (`reviewPermissions`, written only as `false`, when the user
+turned it off). **It is on unless it was turned off**: an agent runs with the privileges of CodeAlta and
+none of this is a sandbox, so the window asks before a command runs or a file is written. It is read
+again for every send, so a change applies to what the sessions do next rather than to what is already
+running, and one send reads it once so its setup and its cleanup agree. Turned off, the host answers
+every request of its sessions with Allow once; the permission mode of a provider still decides what the
+provider resolves by itself before anything is asked here. A session that waits for an answer counts among
+the sessions that wait for the user in the activity of its space.
+`--review-owned-command-permissions` forces the review on whatever the setting says.
 
 Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
 into manual review of supported command and file-change requests. The selected-session review shows a

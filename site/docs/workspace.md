@@ -568,10 +568,12 @@ The Workspace Settings dialog covers the navigator and the UI theme, and is sepa
 
 Agents ask for permission before running commands or changing files. **Auto approve commands** is enabled by default in the TUI Workspace Settings: requests are approved automatically. Turn it off to review each request with **Allow Once**, **Allow for Session**, or **Deny**.
 
-In the desktop app, **Review what the sessions do** in Settings > Appearance does the same, and is off
-by default: requests are approved automatically until you turn it on. It applies to what the sessions do
-next, not to what is already running, and covers commands and file changes alike. A permission mode set
-on a provider still decides what that provider resolves by itself before anything is asked here.
+In the desktop app, **Review what the sessions do** in Settings > Appearance does the same, and is **on
+by default**: an agent runs with the privileges of CodeAlta, so the window asks before a command runs or a
+file is written. Turn it off to approve everything automatically. It applies to what the sessions do next,
+not to what is already running, and covers commands and file changes alike. A permission mode set on a
+provider still decides what that provider resolves by itself before anything is asked here. A session that
+is waiting for you is counted in the activity of its space.
 
 > [!CAUTION]
 > With automatic approval, commands and file changes run with your user privileges. They are not limited to the project folder.
