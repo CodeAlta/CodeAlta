@@ -59,6 +59,15 @@ test("the mode belongs to the session: another model or prompt keeps it, and the
   assert.equal(changeSelection(overridden, overridden.current, "permissionMode", "plan"), null);
 });
 
+test("a saved mode the provider no longer offers does not hold back another change", () => {
+  // The session keeps it: the change sends no mode. A provider without modes has no field to choose another.
+  for (const value of [{ ...choices, current: { ...current, permissionMode: "removed" } }, { ...without, current: { ...current, permissionMode: "auto" } }]) {
+    const changed = changeSelection(value, value.current, "modelId", "two");
+    assert.deepEqual(changed, { ...current, modelId: "two", reasoningEffort: "Low", permissionMode: null });
+    assert.equal(changeSelection(value, value.current, "agentPromptId", "default")?.permissionMode, null);
+  }
+});
+
 test("the mode shown is the chosen one, else the provider's, and says whether the review is skipped", () => {
   assert.equal(chosenPermissionMode(choices, current), null);
   assert.deepEqual(effectivePermissionMode(choices, current), { id: "plan", chosen: false, skipsReview: false });

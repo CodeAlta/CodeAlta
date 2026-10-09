@@ -41,6 +41,8 @@ export function changeSelection(choices: SessionChoicesResponse, current: Sessio
   const next = { ...current, [field]: value || null };
   // Another model starts with its own effort. It keeps the permission mode: the mode belongs to the session.
   if (field === "modelId") next.reasoningEffort = choices.models.find(model => model.id === next.modelId)?.startEffort ?? null;
+  // A saved mode the provider no longer offers does not hold back another change: the session keeps it.
+  if (field !== "permissionMode" && !validPermissionMode(choices, next.permissionMode)) next.permissionMode = null;
   // The mode the session already has is no change; going back to the provider's from another one is named.
   if (field === "permissionMode")
     next.permissionMode = (value || null) === (choices.current?.permissionMode ?? null) ? null : value || providerPermissionMode;
