@@ -587,7 +587,9 @@ Agents ask for permission before running commands or changing files. **Auto appr
 In the desktop app, **Review what the sessions do** in Settings > Appearance does the same, and is **on
 by default**: an agent runs with the privileges of CodeAlta, so the window asks before a command runs or a
 file is written. Turn it off to approve everything automatically. It applies to what the sessions do next,
-not to what is already running, and covers commands and file changes alike. The permission mode of a
+not to what is already running: a request already waiting can still be answered after you turn it off, and
+a turn that started without review is not stopped when you turn it on. It covers commands and file changes
+alike. The permission mode of a
 session, or of its provider, still decides what that provider resolves by itself before anything is asked
 here. A session that
 is waiting for you is counted in the activity of its space.
@@ -599,8 +601,9 @@ is sent to the agent. A denied request does not stop the agent, which goes on wi
 Stop button of the prompt. The choices answer a moment after the request appears,
 so a click meant for something else does not answer it.
 
-When you have no prompt draft, the request takes the focus: the arrow keys move between its choices, Enter
-answers with the chosen one, 1 and 2 answer directly, and Escape denies. Nothing appears while no request
+When you have no prompt draft, the request takes the focus: press an arrow key to reach its choices, then
+Enter answers with the chosen one; 1 and 2 answer directly, and Escape denies. A key you were typing when the
+request appeared answers nothing. Nothing appears while no request
 waits.
 
 > [!CAUTION]

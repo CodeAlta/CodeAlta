@@ -3311,8 +3311,12 @@ window, and keeps it in `preferences.json` (`reviewPermissions`, written only as
 turned it off). **It is on unless it was turned off**: an agent runs with the privileges of CodeAlta and
 none of this is a sandbox, so the window asks before a command runs or a file is written. It is read
 again for every send, so a change applies to what the sessions do next rather than to what is already
-running, and one send reads it once so its setup and its cleanup agree. Turned off, the host answers
-every request of its sessions with Allow once; the permission mode of a session, else of its provider,
+running: one send reads it once, its review and its automatic approval alike, so its setup and its
+cleanup agree. A send started with review on goes on asking after the setting is turned off, and one
+started with it off goes on approving after it is turned on. The window can therefore always answer: the
+boot status reports the review available (`commandReviewEnabled`) for every owned host, and
+`sessionPermissions` lists and resolves requests whatever the setting is now; with review off nothing
+waits, so nothing shows. Turned off, the host answers every request of its sessions with Allow once; the permission mode of a session, else of its provider,
 still decides what the provider resolves by itself before anything is asked here. A session that waits for an answer counts among
 the sessions that wait for the user in the activity of its space.
 `--review-owned-command-permissions` forces the review on whatever the setting says.
@@ -3337,10 +3341,14 @@ The choices are disabled for 400 ms after an entry appears (and after a selectio
 click aimed at what was there does not answer it. The arrow keys move along the list (Left and Right
 move the caret in the text field), Enter answers with the focused choice, 1-2 answer directly and
 Escape denies (in the text field, Escape first clears its text; Escape that ends an IME composition
-answers nothing); a held key answers nothing. When the entry arms, its first choice takes the focus if the focus is nowhere,
-in the composer region or in the card, and the composer has no draft text or image.
+answers nothing); a held key answers nothing. When the entry arms, the list itself (not a choice) takes the focus if the focus
+is nowhere, in the composer region or in the card, and the composer has no draft text or image: a space,
+an Enter or a digit typed at that moment answers nothing, and the arrows enter the list at its first or its
+last choice. The card announces a waiting request to screen readers (a polite status), and the list is
+labelled by its question.
 Text in the field and Enter send **Deny** and, once the host has taken that denial, the text as a steer
-of the run through the composer queue; otherwise the text is queued for the next turn. This works the
+of the run through the composer queue; otherwise the text is queued for the next turn. Text that cannot
+be staged (a request of the composer is pending, the queue is full) goes back to the composer draft. This works the
 same for every provider: none needs a deny message of its own.
 Unsupported permission payloads remain denied, this review flag alone leaves user input cancelled, and
 there is no Allow for Session option.
