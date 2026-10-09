@@ -39,13 +39,13 @@ export const globalConfig = {
   providers: async (): Promise<GlobalConfigProvidersResponse> => {
     calls.push("providers");
     return { status: "ok", revision: "A".repeat(64), defaultProvider: null, startingProvider: null,
-      providers: [], providerTypes: ["openai-chat"], reasoningEfforts: [], typeDefaults: [], builtIn: [], unsupported: [] };
+      providers: [], providerTypes: ["openai-chat"], reasoningEfforts: [], typeDefaults: [], builtIn: [], unsupported: [], permissionModes: [] };
   },
 };
 export const desktopShell = {
   ...demoShell,
   preferences: async (): Promise<DesktopShellPreferences> => ({ status: "ok", onClose: "ask", canKeepRunning: true,
-    platform: "windows", trayIcon: true, entryAdded: false, zoom: 100, sessionWidth: 100, sessionWidths: [] }),
+    platform: "windows", trayIcon: true, entryAdded: false, zoom: 100, sessionWidth: 100, sessionWidths: [], reviewPermissions: true }),
 };
 export const spaces = {
   ...demoSpaces,
