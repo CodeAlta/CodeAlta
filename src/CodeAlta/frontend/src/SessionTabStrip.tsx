@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Actions, DockLocation, Layout, TabNode, TabSetNode, type Action, type Model } from "flexlayout-react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
@@ -16,6 +16,17 @@ import { plainTitle } from "./sessionTitle";
 import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
 
 export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedId: string | null }>;
+
+function markTitleBars(host: HTMLElement) {
+  const bounds = host.getBoundingClientRect();
+  host.querySelectorAll<HTMLElement>(".flexlayout__tabset_tabbar_outer").forEach(bar => {
+    const box = bar.getBoundingClientRect();
+    const top = box.width > 0 && Math.abs(box.top - bounds.top) < 2;
+    bar.toggleAttribute("data-neoastra-drag-region", top);
+    bar.toggleAttribute("data-titlebar-start", top && Math.abs(box.left - bounds.left) < 2);
+    bar.toggleAttribute("data-titlebar-end", top && Math.abs(box.right - bounds.right) < 2);
+  });
+}
 
 export function SessionTabLabel({ label, path, dirty: shown, drafts, sessionId = null }: {
   label: string; path: string | null;
@@ -94,20 +105,20 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   // The tab bars along the top edge of the dock are the window's title bar: their empty space moves the
   // window, and the first and last one leave room for the application mark and the window controls.
   const markTitleBar = useRef(() => { });
+  // FlexLayout mounts its tab bars after our layout effect. Mark them in the commit that inserts their
+  // toolbar, before its geometry observer measures them: a later 34 -> title-bar-height change makes
+  // that observer resize an ancestor panel during descendant delivery, leaving a skipped notification.
+  const markMountedTitleBar = useCallback((button: HTMLButtonElement | null) => {
+    const host = button?.closest<HTMLElement>(".workspace-layout");
+    if (host) markTitleBars(host);
+  }, []);
   useLayoutEffect(() => {
     const host = root.current;
     if (!host) return;
     let frame = 0;
     const mark = () => {
       frame = 0;
-      const bounds = host.getBoundingClientRect();
-      host.querySelectorAll<HTMLElement>(".flexlayout__tabset_tabbar_outer").forEach(bar => {
-        const box = bar.getBoundingClientRect();
-        const top = box.width > 0 && Math.abs(box.top - bounds.top) < 2;
-        bar.toggleAttribute("data-neoastra-drag-region", top);
-        bar.toggleAttribute("data-titlebar-start", top && Math.abs(box.left - bounds.left) < 2);
-        bar.toggleAttribute("data-titlebar-end", top && Math.abs(box.right - bounds.right) < 2);
-      });
+      markTitleBars(host);
     };
     markTitleBar.current = () => { frame ||= requestAnimationFrame(mark); };
     mark();
@@ -248,7 +259,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
         if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
       }}
-      onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" variant="minimal" size="small" className="session-tab-more"
+      onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" ref={markMountedTitleBar} variant="minimal" size="small" className="session-tab-more"
         icon={<AppIcon name="ellipsis" size={16} />} aria-label={t("Open sessions")} aria-haspopup="menu"
         aria-expanded={!!menu && menu.anchor.dataset.tabset === node.getId()} data-tabset={node.getId()}
         onClick={event => more(event.currentTarget, node)} />)}
