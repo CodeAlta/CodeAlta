@@ -116,9 +116,10 @@ internal sealed class AgentCompactionSummarizer(
         var modelVisibleFileActivity = BudgetFileActivityForSummary(fileActivity, latestUserRequest, settings, maxOutputTokens);
         string? oversizedAnchorSynopsis = null;
         var oversizedAnchorInvocationCount = 0;
+        long oversizedAnchorInputTokens = 0;
         if (preparation.OversizedAnchorMessage is not null)
         {
-            (oversizedAnchorSynopsis, oversizedAnchorInvocationCount) = await ReduceOversizedAnchorAsync(
+            (oversizedAnchorSynopsis, oversizedAnchorInvocationCount, oversizedAnchorInputTokens) = await ReduceOversizedAnchorAsync(
                     ProviderId,
                     provider,
                     sessionId,
@@ -154,6 +155,8 @@ internal sealed class AgentCompactionSummarizer(
             .ConfigureAwait(false);
         return result with
         {
+            // The requests that reduced the anchor are in the count of calls: their input is in the estimate too.
+            SummaryPromptInputTokens = result.SummaryPromptInputTokens + oversizedAnchorInputTokens,
             ReadFiles = fileActivity.ReadFiles,
             ModifiedFiles = fileActivity.ModifiedFiles,
             ModelVisibleReadFileCount = modelVisibleFileActivity.ReadFiles.Count,
@@ -497,7 +500,7 @@ internal sealed class AgentCompactionSummarizer(
         return inputLimit;
     }
 
-    private async Task<(string Synopsis, int InvocationCount)> ReduceOversizedAnchorAsync(
+    private async Task<(string Synopsis, int InvocationCount, long EstimatedInputTokens)> ReduceOversizedAnchorAsync(
         ModelProviderId ProviderId,
         ModelProviderRuntimeDescriptor provider,
         string sessionId,
@@ -533,7 +536,7 @@ internal sealed class AgentCompactionSummarizer(
             .ConfigureAwait(false);
     }
 
-    private async Task<(string Synopsis, int InvocationCount)> ReduceOversizedAnchorTextAsync(
+    private async Task<(string Synopsis, int InvocationCount, long EstimatedInputTokens)> ReduceOversizedAnchorTextAsync(
         ModelProviderId ProviderId,
         ModelProviderRuntimeDescriptor provider,
         string sessionId,
@@ -567,9 +570,10 @@ internal sealed class AgentCompactionSummarizer(
             {
                 var rollingSynopsis = previousSynopsis;
                 var totalInvocations = 0;
+                long totalInputTokens = 0;
                 foreach (var chunkText in chunkTexts)
                 {
-                    var (chunkSynopsis, invocationCount) = await ReduceOversizedAnchorTextAsync(
+                    var (chunkSynopsis, invocationCount, inputTokens) = await ReduceOversizedAnchorTextAsync(
                             ProviderId,
                             provider,
                             sessionId,
@@ -586,9 +590,10 @@ internal sealed class AgentCompactionSummarizer(
                         .ConfigureAwait(false);
                     rollingSynopsis = chunkSynopsis;
                     totalInvocations += invocationCount;
+                    totalInputTokens += inputTokens;
                 }
 
-                return (rollingSynopsis ?? throw new InvalidOperationException("Oversized-anchor reduction did not produce a synopsis."), totalInvocations);
+                return (rollingSynopsis ?? throw new InvalidOperationException("Oversized-anchor reduction did not produce a synopsis."), totalInvocations, totalInputTokens);
             }
         }
 
@@ -606,7 +611,7 @@ internal sealed class AgentCompactionSummarizer(
                 cancellationToken)
             .ConfigureAwait(false);
         var normalizedSynopsis = NormalizeOversizedAnchorSynopsis(response.Summary, serializedAnchor, previousSynopsis);
-        return (normalizedSynopsis, 1);
+        return (normalizedSynopsis, 1, requestTokens);
     }
 
     private async Task<AgentCompactionSummaryResponse> ExecuteSummaryRequestAsync(
