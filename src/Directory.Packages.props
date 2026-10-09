@@ -4,7 +4,7 @@
     <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
-    <PackageVersion Include="Anthropic" Version="12.53.0" />
+    <PackageVersion Include="Anthropic" Version="12.54.1" />
     <PackageVersion Include="Azure.AI.OpenAI" Version="2.9.0-beta.1" />
     <PackageVersion Include="DiffPlex" Version="1.9.0" />
     <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.0-beta.3" />
@@ -22,7 +22,7 @@
     <PackageVersion Include="NJsonSchema" Version="11.6.1" />
     <PackageVersion Include="NJsonSchema.CodeGeneration.CSharp" Version="11.5.2" />
     <PackageVersion Include="NuGet.Versioning" Version="7.9.0" />
-    <PackageVersion Include="Google.GenAI" Version="1.24.0" />
+    <PackageVersion Include="Google.GenAI" Version="1.25.0" />
     <PackageVersion Include="OpenAI" Version="2.14.0" />
     <PackageVersion Include="SharpYaml" Version="3.14.0" />
     <PackageVersion Include="SkiaSharp" Version="3.119.4" />
