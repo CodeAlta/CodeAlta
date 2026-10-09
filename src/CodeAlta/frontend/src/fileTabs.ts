@@ -153,6 +153,7 @@ export function cycleTab(sessions: number, files: number, current: TabPosition, 
 type StoredTab = { projectId?: unknown; projectPath?: unknown; path?: unknown; view?: unknown; name?: unknown };
 const text = (field: unknown, limit: number): field is string => typeof field === "string" && field.length > 0 && field.length <= limit;
 // A tab as it was stored: of the editor or the changes, or, from before the editor had tabs of its own, of one file.
+// Nothing for a tab that is not understood.
 function storedTab(value: unknown): { tab: FileTab; file: string | null } | null {
   if (!value || typeof value !== "object") return null;
   const stored = value as StoredTab;
@@ -179,16 +180,17 @@ function restore(read: () => string | null): Restored | null {
     if (!value || typeof value !== "object") return null;
     const data = value as { version?: unknown; open?: unknown; active?: unknown };
     if (data.version !== 1 || !Array.isArray(data.open) || data.open.length > fileTabLimit) return null;
-    const stored = data.open.map(storedTab);
+    // A tab that is not understood, of a kind that another build stored, is left out: the tabs beside it are restored,
+    // and none is active when it was the active one.
     const active = data.active === null ? null : storedTab(data.active);
-    if (stored.some(entry => entry === null) || active === null && data.active !== null) return null;
     const open: FileTab[] = [];
     const files = new Map<string, string[]>();
-    for (const entry of stored) {
+    for (const entry of data.open.map(storedTab)) {
+      if (entry === null) continue;
       // The files that were tabs of their own are now the files of their project's editor.
-      if (entry!.file !== null) files.set(entry!.tab.projectId, [...files.get(entry!.tab.projectId) ?? [], entry!.file]);
-      if (!open.some(tab => sameFileTab(tab, entry!.tab))) open.push(entry!.tab);
-      else if (entry!.file === null) return null;
+      if (entry.file !== null) files.set(entry.tab.projectId, [...files.get(entry.tab.projectId) ?? [], entry.file]);
+      if (!open.some(tab => sameFileTab(tab, entry.tab))) open.push(entry.tab);
+      else if (entry.file === null) return null;
     }
     const selected = active ? open.find(tab => sameFileTab(tab, active.tab)) : null;
     if (selected === undefined) return null;

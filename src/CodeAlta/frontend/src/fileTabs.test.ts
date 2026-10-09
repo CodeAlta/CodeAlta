@@ -93,14 +93,34 @@ test("persisted tabs round-trip; malformed, duplicate, oversized or foreign valu
   for (const read of [() => null, () => "", () => "{", () => { throw new Error("denied"); }, () => "x".repeat(200000),
     json(null), json({ version: 2, open: [], active: null }), json({ version: 1, open: {}, active: null }),
     json({ version: 1, open: [editor(), editor()], active: null }), json({ version: 1, open: [changes(), changes()], active: null }),
-    json({ version: 1, open: [editor()], active: changes() }), json({ version: 1, open: [{ projectId: "p", view: "editor" }], active: null }),
-    json({ version: 1, open: [{ ...editor(), view: "history" }], active: null }), json({ version: 1, open: [{ ...changes(), path: "a.ts" }], active: null }),
-    json({ version: 1, open: [{ ...editor(), projectId: 4 }], active: null }), json({ version: 1, open: [{ projectId: "p", projectPath: "/p" }], active: null }),
+    json({ version: 1, open: [editor()], active: changes() }),
     json({ version: 1, open: Array.from({ length: fileTabLimit + 1 }, (_value, index) => editor(`f${index}`)), active: null })]) {
     assert.equal(restoreFileTabs(read), null);
     assert.equal(restoreLegacyFiles(read).size, 0);
   }
   assert.deepEqual(restoreFileTabs(json({ version: 1, open: [{ ...editor(), extra: true, path: "" }], active: null })), { open: [editor()], active: null, closed: [] });
+});
+
+test("a stored tab that is not understood is left out, and the tabs beside it are restored", () => {
+  const json = (value: unknown) => () => JSON.stringify(value);
+  // A tab of a kind that a newer build stored, among the tabs this one knows.
+  const canvas = { projectId: "p", projectPath: "/p", view: "canvas" };
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [editor(), canvas, changes(), automationsTab, workItemsTab], active: changes() })),
+    { open: [editor(), changes(), automationsTab, workItemsTab], active: changes(), closed: [] });
+  // It was the active one: no tab of a project is active, and the session selection shows.
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [editor(), canvas, changes()], active: canvas })), { open: [editor(), changes()], active: null, closed: [] });
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [canvas], active: canvas })), emptyFileTabs());
+  // The files that were tabs of their own are kept beside it.
+  const files = json({ version: 1, open: [{ projectId: "p", projectPath: "/p", path: "a.md" }, canvas, { projectId: "q", projectPath: "/q", path: "c.ts" }], active: null });
+  assert.deepEqual(restoreFileTabs(files)?.open, [editor(), editor("q")]);
+  assert.deepEqual([...restoreLegacyFiles(files)], [["p", ["a.md"]], ["q", ["c.ts"]]]);
+  // So is a tab of a known kind that is not as this build stores it, and what is no tab at all.
+  for (const tab of [{ projectId: "p", view: "editor" }, { ...editor(), view: "history" }, { ...changes(), path: "a.ts" }, { ...editor(), projectId: 4 },
+    { projectId: "p", projectPath: "/p" }, null, 4, "editor", []]) {
+    assert.deepEqual(restoreFileTabs(json({ version: 1, open: [tab], active: null })), emptyFileTabs(), JSON.stringify(tab));
+    assert.deepEqual(restoreFileTabs(json({ version: 1, open: [changes(), tab, editor("q")], active: editor("q") })),
+      { open: [changes(), editor("q")], active: editor("q"), closed: [] }, JSON.stringify(tab));
+  }
 });
 
 test("the tabs that each held one file become the editor of their project, with those files", () => {
@@ -159,7 +179,7 @@ test("the work items have one tab, of no project, that outlives the projects and
   let stored = "";
   persistFileTabs(value => { stored = value; }, state);
   assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
-  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "workItems" }], active: null })), null);
+  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "workItems" }], active: null })), emptyFileTabs());
   for (const locale of locales) {
     const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
       createElement(FileTabLabel, { tab: workItemsTab, project: "", dirty: false })));
@@ -181,7 +201,7 @@ test("the automations have one tab, of no project, that outlives the projects an
   persistFileTabs(value => { stored = value; }, state);
   assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
   // A stored tab that names a project is not the tab of the automations.
-  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "automations" }], active: null })), null);
+  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "automations" }], active: null })), emptyFileTabs());
   for (const locale of locales) {
     const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
       createElement(FileTabLabel, { tab: automationsTab, project: "", dirty: false })));
@@ -207,7 +227,7 @@ test("the code editor on the folder of a skill has a tab that names the skill, a
   persistFileTabs(value => { stored = value; }, state);
   assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
   for (const tab of [{ ...skill, name: undefined }, { ...skill, name: "" }, { ...skill, view: "changes" }, { ...skill, view: undefined, path: "SKILL.md" }])
-    assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [tab], active: null })), null, JSON.stringify(tab));
+    assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [tab], active: null })), emptyFileTabs(), JSON.stringify(tab));
   // The id says where the skill comes from: the skills of the user and of a project are edited, the others are read.
   for (const source of ["UserAlta", "UserCommon", "ProjectAlta", "ProjectCommon"]) {
     assert.equal(skillReadOnly(source), false, source);
@@ -239,11 +259,11 @@ test("the code editor on the folder of a file that no project has has a tab that
   assert.equal(openFileTab(state, { ...folder }).open.length, 2, "Asked again, the one that is open is shown.");
   // The folder is no project of the workspace: the tab stays when the projects go.
   assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [folder], active: folder, closed: [] });
-  // The host that gave the id knows the folder while it runs: the tab is not stored, and a stored one restores nothing.
+  // The host that gave the id knows the folder while it runs: the tab is not stored, and a stored one is not restored.
   let stored = "";
   persistFileTabs(value => { stored = value; }, state);
   assert.deepEqual(restoreFileTabs(() => stored), { open: [editor()], active: null, closed: [] });
-  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [folder], active: null })), null);
+  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [editor(), folder], active: folder })), { open: [editor()], active: null, closed: [] });
   // A tab the host opened for one file of a folder, or to be read, has nothing created, renamed or removed in it.
   for (const id of ["folder:file:0123456789abcdef01234567", "folder:view:0123456789abcdef01234567"]) {
     const fixed = diskEditorTab({ id, path: "/home/.alta", name: "config.toml" });
@@ -269,9 +289,9 @@ test("the code editor on the folder of a plugin has a tab that names the plugin,
   persistFileTabs(value => { stored = value; }, state);
   assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
   assert.equal(restoreLegacyFiles(() => stored).size, 0);
-  // A stored tab on such a folder is the editor, with the name it shows; anything else restores nothing.
+  // A stored tab on such a folder is the editor, with the name it shows; anything else is not restored.
   for (const tab of [{ ...plugin, name: undefined }, { ...plugin, name: "" }, { ...plugin, name: 4 }, { ...plugin, name: "x".repeat(129) }, { ...plugin, view: "changes" }, { ...plugin, view: undefined, path: "plugin.cs" }])
-    assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [tab], active: null })), null, JSON.stringify(tab));
+    assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [tab], active: null })), emptyFileTabs(), JSON.stringify(tab));
   for (const locale of locales) {
     const render = (dirty: boolean) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
       createElement(FileTabLabel, { tab: plugin, project: "notes", dirty })));
@@ -311,7 +331,8 @@ test("each terminal shown has a tab of its own, which lasts as long as the termi
   let stored: string | null = null;
   persistFileTabs(value => { stored = value; }, activateFileTab(state, first));
   assert.deepEqual(restoreFileTabs(() => stored), { open: [editor()], active: null, closed: [] });
-  assert.equal(restoreFileTabs(() => JSON.stringify({ version: 1, open: [first], active: null })), null, "A stored terminal tab is not a tab to restore.");
+  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [editor(), first], active: first })), { open: [editor()], active: null, closed: [] },
+    "A stored terminal tab is not a tab to restore.");
 });
 
 test("the tab of a terminal shows its title or its folder, and a mark once it has ended or asks to be looked at", () => {

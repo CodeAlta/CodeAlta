@@ -213,7 +213,11 @@ becomes a tab of the same FlexLayout strip. `fileTabs.ts` owns the pure state in
 parallel to `sessionTabs.ts`: a tab is `{ projectId, projectPath, path }`, its node
 id is `file:` followed by the JSON of `[projectId, path]` (one tab per file), and
 `codealta.desktop.fileTabs.v1` stores the open and active identities (32 at most).
-Restore drops tabs whose project is missing, archived or another folder.
+Restore drops tabs whose project is missing, archived or another folder. A stored
+tab that is not understood (a kind that another build stored) is left out and the
+tabs beside it are restored, with no active file tab when it was the active one;
+a state that is malformed as a whole (another version, no list, over the limit)
+restores nothing.
 
 App keeps the session selection as it is while a file is active: the active file
 is the selected tab, session-scoped commands are unavailable, and any session,
