@@ -56,10 +56,9 @@ internal static class ClaudeCodeApiKey
 
     /// <summary>The message of a turn that does not start because nothing says whether to use the key.</summary>
     public const string UndecidedMessage =
-        "ANTHROPIC_API_KEY is set, and Claude Code saved no answer for this key: CodeAlta does not know whether to " +
-        "bill the API account of the key or to use your Claude login. Choose it in Settings > Providers > Claude Code " +
-        "(ANTHROPIC_API_KEY), or set anthropic_api_key = \"use\" or \"ignore\" in the section of the provider in " +
-        "config.toml, then send the prompt again.";
+        "ANTHROPIC_API_KEY is set and Claude Code has no saved answer for it. Choose whether to use it (billed to its " +
+        "API account) or ignore it (your Claude login) in Settings > Providers > Claude Code, or with anthropic_api_key " +
+        "in config.toml, then send again.";
 
     // The variables that make the CLI use a cloud provider, which signs in with its own credentials.
     private static readonly string[] CloudProviderVariables = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"];
