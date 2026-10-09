@@ -468,7 +468,7 @@ The CLI only prompts for what the user's Claude Code settings neither allow nor 
 | `Edit`, `MultiEdit`, `Write`, `NotebookEdit` | `AgentFileChangePermissionRequest` | As for CodeAlta's own edit tools. |
 | `AskUserQuestion` | `AgentUserInputRequest` | Answered through the question form when the run takes live questions. The desktop application does not (it asks with `alta ask`): the tool is then refused with a message that names `mcp__codealta__alta` and `ask --stdin`, so that the model asks that way instead of concluding that nothing can be asked. |
 | `EnterPlanMode` | none | Refused by a `PreToolUse` hook (`codealta_plan_mode`): the plan mode of Claude Code ends with an approval of the user, which CodeAlta has no form for, and allowing it tells the model "User has approved your plan". The refusal names the plan mode of CodeAlta (`alta session set_agent --prompt-id plan`). |
-| `ExitPlanMode` | none | Refused when the provider is configured with `permission_mode = "plan"`: that session was made to plan and nobody approved anything. Allowed otherwise, so that a model that got into the mode another way is not kept in it. |
+| `ExitPlanMode` | none | Refused when the session runs in `plan` (its provider is configured with `permission_mode = "plan"` and the session has no mode of its own): that session was made to plan and nobody approved anything. Allowed otherwise, so that a model that got into the mode another way is not kept in it. |
 | `mcp__codealta__*` | none | The tool asks its own permission when the session runs it. |
 | any other | none (allowed) | CodeAlta gates commands and file changes only, as for its own tools. |
 
@@ -504,6 +504,16 @@ args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 ```
 
 `single_model_id`, `models_include_regex` and `sort_models` apply as for other providers.
+
+The provider reports its permission modes (`ModelProviderDescriptor.PermissionModes`). A session can have a
+mode of its own (`AgentSessionCreateOptions.PermissionMode`, `AgentTurnRequest.PermissionMode`), chosen in the
+composer of the desktop application, which overrides `permission_mode` for that session; `plan` is not offered
+for a session. The CLI is launched with the session's mode, else the provider's. Before a turn whose mode
+differs from the one the running CLI has, the session sends `set_permission_mode`, and restarts the CLI with
+`--permission-mode` only when that request fails. A session that goes back to no mode returns the CLI to the
+mode of the user's settings, learned from `initialize` (`current_permission_mode`), else restarts it. The
+orchestration keeps the session's mode in its saved local state (`permission_mode`, also in the SQLite cache),
+reads it at every attach and clears it on a provider switch.
 
 ### Limits
 

@@ -826,6 +826,20 @@ selects nothing, so a Send never reaches a provider without a model while the pr
 Choosing another model starts it with its own effort. A saved model the provider does not list is
 kept and shown as **Unverified**; settings change again once a listed model is chosen.
 
+The popover also has **Permissions** (`PermissionModeSelect`) for a session whose provider reports
+permission modes (`SessionChoicesResponse.PermissionModes`, today only Claude Code; empty hides the
+field). Its first entry, **Provider setting (<mode>)** or **The setting of the CLI** when the provider sets
+none, is the provider's `permission_mode`; then come the modes a session can be given, each with
+`SkipsReview` from the host (`acceptEdits`, `auto`, `dontAsk` and `bypassPermissions` skip CodeAlta's review).
+`plan` is not offered: it stays provider-wide. A mode that skips the review is marked ⚠, and the line
+under the list (its description and id) and the chip use the warning color. The chip shows the mode
+when the session has its own, or when the provider's mode skips the review. A saved mode the provider no
+longer lists stays shown as **Unverified**. The choice travels with the next Send
+(`SessionSelection.PermissionMode`: an id, or `"provider"` to go back to the provider's mode; absent keeps
+the session's); the host keeps it in the session's local state (`permission_mode`) and the Claude Code
+session switches the running CLI with `set_permission_mode`, restarting it only when the CLI refuses. A
+provider switch clears it. New-session drafts have no picker: the choice appears once the session exists.
+
 The provider indicator is a compact active-provider count, green when ready and orange when
 providers fail or are unsupported. Owned startup initializes the configured providers, as in
 the TUI; inventory reads themselves do not probe. Compaction has a persistent icon, disabled
@@ -3298,8 +3312,8 @@ turned it off). **It is on unless it was turned off**: an agent runs with the pr
 none of this is a sandbox, so the window asks before a command runs or a file is written. It is read
 again for every send, so a change applies to what the sessions do next rather than to what is already
 running, and one send reads it once so its setup and its cleanup agree. Turned off, the host answers
-every request of its sessions with Allow once; the permission mode of a provider still decides what the
-provider resolves by itself before anything is asked here. A session that waits for an answer counts among
+every request of its sessions with Allow once; the permission mode of a session, else of its provider,
+still decides what the provider resolves by itself before anything is asked here. A session that waits for an answer counts among
 the sessions that wait for the user in the activity of its space.
 `--review-owned-command-permissions` forces the review on whatever the setting says.
 

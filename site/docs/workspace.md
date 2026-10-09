@@ -141,6 +141,8 @@ An agent can change the width of its own session when you ask it to, for example
   <figcaption class="small text-secondary mt-2">A conversation at 70% of the width: the timeline and the prompt stay centered.</figcaption>
 </figure>
 
+### Agent prompt, model and permissions
+
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
 In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
@@ -149,6 +151,20 @@ In the desktop app, the agent prompt, provider, model and reasoning effort are i
   <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
   <figcaption class="small text-secondary mt-2">Agent prompt, provider, model and reasoning effort for the next send.</figcaption>
 </figure>
+
+A session of a provider that has permission modes (today [Claude Code](model-providers.md#claude-code))
+also has **Permissions** in that picker. It starts with **Provider setting**, the mode configured for the
+provider, or **The setting of the CLI** when the provider sets none (your own Claude Code settings then
+choose), and lists the modes the session can have instead: **Default**, **Accept edits**, **Auto**, **Don't
+ask** and **Bypass permissions**. A line under the list says what the chosen mode does. The modes in which
+the agent acts without asking you are marked ⚠ and shown in the warning color: with them, its commands or
+file changes are not reviewed in CodeAlta, even with [review](#tool-permissions) turned on. **Don't ask**
+does not mean "allow everything": Claude Code then runs only what its own settings allow and refuses the
+rest, while **Bypass permissions** runs everything. The mode
+applies from the next prompt you send, without restarting the session, and stays with the session when you
+reopen it; switching the session to another provider takes it back to that provider's setting. The picker
+shows the mode while the session has one of its own, and always when it skips the review. A new session
+gets the choice once it has started.
 
 `Ctrl+Enter` steers a running provider session. If the provider cannot steer live, CodeAlta re-queues the prompt for the next normal turn. `F8` aborts the running turn.
 
@@ -571,8 +587,9 @@ Agents ask for permission before running commands or changing files. **Auto appr
 In the desktop app, **Review what the sessions do** in Settings > Appearance does the same, and is **on
 by default**: an agent runs with the privileges of CodeAlta, so the window asks before a command runs or a
 file is written. Turn it off to approve everything automatically. It applies to what the sessions do next,
-not to what is already running, and covers commands and file changes alike. A permission mode set on a
-provider still decides what that provider resolves by itself before anything is asked here. A session that
+not to what is already running, and covers commands and file changes alike. The permission mode of a
+session, or of its provider, still decides what that provider resolves by itself before anything is asked
+here. A session that
 is waiting for you is counted in the activity of its space.
 
 A request appears on top of the prompt of its session, with the command it would run and its folder, or the
