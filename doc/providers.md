@@ -261,7 +261,15 @@ reads; it is not documented, so what is missing is left out. A Copilot token of 
 
 The `copilot` provider type registers direct HTTP access through `CodeAlta.Agent.Copilot`. Supported auth sources are device-flow, a GitHub-token environment variable, or a provider-token environment variable. Device-flow and GitHub-token auth exchange for a provider token and cache CodeAlta-owned credentials under the global state root.
 
-Model discovery uses the provider `/models` endpoint with a static fallback according to configuration. Per-model dispatch selects the compatible agent-runtime executor for Responses, chat-completions, or messages-style turns. Optional settings control enterprise domain, model-policy handling, preview model inclusion, single-model pinning, models.dev metadata enrichment, model overrides, and protocol tracing.
+Model discovery uses the provider `/models` endpoint with a static fallback according to configuration. Per-model dispatch selects the compatible agent-runtime executor for Responses, chat-completions, or messages-style turns.
+
+Copilot bills tokens (AI credits), and cached input at a fraction of the input price (a tenth for most models), so every route has to reach the prompt cache:
+
+- Messages (Claude): the Anthropic executor marks the cache breakpoints (see "Anthropic, Google, and Mistral providers"). Without them Copilot caches nothing of a Claude request.
+- Responses (GPT, Grok, MAI): `ConfigureOpenAIResponsesRequest` sends `prompt_cache_key` = session id and `store: false`. The cache of these models is implicit; the key keeps the requests of one session on the cache that holds its prefix (without it, Grok requests miss at random). `prompt_cache_retention` is accepted but changes nothing on Copilot and is not sent.
+- Every route sends `X-Interaction-Id` = session id, as the Copilot clients do.
+
+The Copilot endpoint reports what it bills beside the events of each protocol: a `copilot_usage` object (`total_nano_aiu` and `token_details` with `input`, `cache_read`, `cache_write` and `output`) on `response.completed`, on `message_delta` and on the last chat chunk. `CopilotRequestUsage` reads it from the stream (`CopilotUsageSseStream` through `OpenAIProviderOptions.ResponseStreamObserver` for the OpenAI SDK, `CopilotAnthropicSseHandler` for the Anthropic SDK) and puts it on the usage of the turn: `Cost` in AI credits (10^9 nano AIU, 0.01 USD), `CostUnit` and `CacheWriteTokens`. Optional settings control enterprise domain, model-policy handling, preview model inclusion, single-model pinning, models.dev metadata enrichment, model overrides, and protocol tracing.
 
 ## Direct HTTP `xai` provider
 
@@ -508,6 +516,8 @@ the CLI sends them, and the window that limits otherwise.
 ## Anthropic, Google, and Mistral providers
 
 `anthropic`, `google-genai`, `vertex-ai`, and `mistral` are implemented CodeAlta-runtime providers, not placeholders. They use `Microsoft.Extensions.AI.IChatClient`-based turn execution, list upstream models when supported, and can be constrained with `single_model_id`.
+
+The Anthropic Messages API caches nothing by itself: a request is cached only up to a `cache_control` marker, and the Anthropic SDK adds none. `AnthropicPromptCache` marks, for the `anthropic` provider and for the Messages route of Copilot, the four breakpoints a request may carry: the last tool, the system prompt (the instructions are sent as system content for that), the last message, and the message that ended the previous request, which is the one before the last assistant message. The marker of the last message is where the next request reads, so a read never depends on the 20-block lookback of the API. The markers use the default lifetime of five minutes. `AgentProviderProfile.SupportsCacheControl` (`supports_cache_control` in a profile) is null by default, which lets the transport decide: only `false` turns the markers off. A request that stands alone (`AgentTurnRequest.IsStandalone`, the summary of a compaction) is not marked: its cache write would be paid and never read. Cache writes are reported as `CacheWriteTokens` (the `CacheCreationInputTokens` count of the SDK).
 
 `vertex-ai` uses project/location configuration and application-default/environment credentials expected by the Google SDK. `google-genai` uses API-key configuration. Both can use `models_dev_provider_id` and `model_overrides` for context-window and output-limit metadata.
 

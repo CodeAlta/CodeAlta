@@ -114,6 +114,22 @@ For Codex and Claude Code, CodeAlta asks the command-line program of the provide
 
 In a session, the limits that the last turns reported are shown while they are recent. Otherwise CodeAlta asks the provider when the window opens.
 
+## Prompt caching and the cost of a request
+
+A session sends its whole conversation with every request. A provider bills the part it has already seen at a small share of the input price, when that part comes from its prompt cache. CodeAlta keeps the start of a request the same from one request to the next and asks for caching the way each protocol wants it:
+
+{.table}
+| Requests | What CodeAlta sends | What the usage reports |
+|---|---|---|
+| Anthropic Messages: the `anthropic` provider and the Claude models of Copilot | `cache_control` markers on the tools, the system prompt, the last message and the message that ended the previous request. This protocol caches nothing without them. | Cached input and cache write tokens |
+| OpenAI Responses of Copilot (GPT, Grok and other models) | The id of the session as `prompt_cache_key`, so that its requests reach the cache that holds its conversation | Cached input, and cache write tokens for the models that bill them |
+| Codex | The id of the session as `prompt_cache_key` | Cached input |
+| Other OpenAI-compatible and Google endpoints | Nothing: the endpoint caches a repeated start by itself when it supports it | Cached input when the endpoint reports it |
+
+The [context usage](workspace.md#context-usage-popup) of a session shows the last request: its input, cached input and cache write tokens. For Copilot it also shows what GitHub billed for that request, in AI credits, as the Copilot endpoint reports it.
+
+A cache is kept for a few minutes after the last request (five minutes for Anthropic models). The first request after a longer pause, a change of the tools of a session (a tool or an MCP server that is activated), and a compaction are paid at the full price, then cached again.
+
 ## Advanced TOML reference
 
 Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
@@ -218,7 +234,7 @@ The Codex HTTP adapter uses the configured HTTP transport and combines SSE frami
 
 Subscription model discovery uses a five-second outer timeout and up to three attempts for network, timeout, and HTTP 5xx failures, while 4xx responses—including 401—are not retried. Successful ETags are retained in model metadata, and `codex_endpoint_with_static_fallback` falls back to the bundled catalog after an eligible discovery failure. Initial/event metadata is allowlisted: rate limits and credits feed usage, model reroutes and safety/verification/moderation produce transient updates, and persisted provider state contains only bounded request/model/ETag/reasoning/rate-limit summaries. Raw headers, moderation payloads, turn state, credentials, and unknown metadata are not persisted.
 
-Copilot accepts `auth_source = "github_device_flow"`, `"github_token_env"`, or `"copilot_token_env"`; `model_discovery = "copilot_endpoint_with_static_fallback"`, `"copilot_endpoint"`, or `"static"`. `github_token_env` is required when using GitHub-token auth, and `copilot_token_env` is required when using Copilot-token auth.
+Copilot accepts `auth_source = "github_device_flow"`, `"github_token_env"`, or `"copilot_token_env"`; `model_discovery = "copilot_endpoint_with_static_fallback"`, `"copilot_endpoint"`, or `"static"`. `github_token_env` is required when using GitHub-token auth, and `copilot_token_env` is required when using Copilot-token auth. A model is called through the endpoint the Copilot catalog lists for it: Messages for Claude models, Responses for GPT and Grok models, chat completions otherwise. See [Prompt caching and the cost of a request](#prompt-caching-and-the-cost-of-a-request) for what these requests carry.
 
 xAI Grok accepts `auth_source = "xai_browser_oauth"` or `"xai_device_flow"`; `model_discovery = "xai_endpoint_with_static_fallback"`, `"xai_endpoint"`, or `"static"`. Both auth sources store CodeAlta-owned access and refresh tokens through the public Grok-CLI OAuth client and unlock SuperGrok / Grok Heavy plan access on accounts that have subscribed.
 
@@ -236,7 +252,7 @@ Use `[providers.<provider-key>.profile]` only when a provider-compatible endpoin
 | `requires_tool_result_name` | Whether tool-result messages must include a tool name. |
 | `requires_assistant_after_tool_result` | Whether a synthetic assistant turn must be inserted after tool results. |
 | `supports_tool_result_images` | Whether a tool result can carry an image. When `false`, an image a tool returns is attached to a user message placed after the tool results. By default OpenAI's own Responses endpoints take images in tool results and every other endpoint gets the user message. |
-| `supports_cache_control` | Whether cache-control metadata is supported. |
+| `supports_cache_control` | Whether a request of the Anthropic Messages protocol carries prompt-cache markers (`cache_control`). They are sent by default, by the `anthropic` provider and for the Claude models of Copilot. Set `false` for a compatible endpoint that refuses them: it then caches nothing of the prompt. |
 | `supports_strict_tools` | Whether strict tool schemas are supported. |
 | `thinking_format` | Provider-specific thinking/reasoning format name. |
 | `max_tokens_field_name` | Request-body field used for maximum output tokens, such as `max_output_tokens` or `max_completion_tokens`. |
