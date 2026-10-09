@@ -313,6 +313,43 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_WritesThePermissionModeOfACliProvider_AndTakesItForNoOtherType()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions" }, listed.PermissionModes.ToArray());
+        Assert.IsTrue(listed.Providers.All(static provider => provider.PermissionMode is null));
+        var cli = new GlobalConfigProviderEdit("claude", "claude-code", true, "Claude", null, null, null, null, null, true);
+
+        // A mode the CLI does not have is refused, and nothing is written.
+        foreach (var refused in new[] { cli with { PermissionMode = "whatever" }, cli with { PermissionMode = "Auto" } })
+            Assert.AreEqual("invalid", fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, refused, false, false)).Status, refused.PermissionMode);
+        Assert.AreEqual(ProvidersConfig, File.ReadAllText(fixture.ConfigPath), "Refused edits must not write.");
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, cli with { PermissionMode = " auto " }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "permission_mode = \"auto\"");
+        var after = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual("auto", after.Providers.Single(static provider => provider.Key == "claude").PermissionMode);
+        Assert.IsNull(after.Providers.Single(static provider => provider.Key == "local").PermissionMode);
+
+        // Blank leaves the mode to the settings of the CLI.
+        var cleared = fixture.Service.SaveProvider(new(Epoch, after.Revision, "claude", cli with { PermissionMode = " " }, false, false));
+        Assert.AreEqual("ok", cleared.Status, cleared.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("permission_mode", StringComparison.Ordinal));
+
+        // The configuration file takes the field for no other adapter type: a type changed away from the CLI
+        // drops the mode instead of writing something the store would refuse to read back.
+        var restored = fixture.Service.SaveProvider(new(Epoch, cleared.Revision, "claude", cli with { PermissionMode = "plan" }, false, false));
+        Assert.AreEqual("ok", restored.Status, restored.Message);
+        var moved = fixture.Service.SaveProvider(new(Epoch, restored.Revision, "claude",
+            cli with { Type = "anthropic", ApiKeyEnv = "CLAUDE_KEY", PermissionMode = "plan" }, false, false));
+        Assert.AreEqual("ok", moved.Status, moved.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("permission_mode", StringComparison.Ordinal));
+        Assert.IsNull(fixture.Service.Providers(new(Epoch)).Providers.Single(static provider => provider.Key == "claude").PermissionMode);
+    }
+
+    [TestMethod]
     public async Task SaveProvider_UpdatesOnlyTheEditedFieldsAndKeepsTheStoredSecret()
     {
         await using var fixture = new Fixture(ProvidersConfig);

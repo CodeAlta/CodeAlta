@@ -263,6 +263,12 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 <option value="ignore">{t("Ignore it: use my Claude login")}</option>
                 <option value="use">{t("Use it: bill its API account")}</option>
               </HTMLSelect></FormGroup>}
+            {runsOwnCli(form.type) && <FormGroup label={t("Permissions")} labelFor="provider-permission-mode"
+              helperText={t("The mode the CLI starts a session in. What the mode does not decide by itself is asked here.")}>
+              <HTMLSelect id="provider-permission-mode" fill value={form.permissionMode} disabled={busy} onChange={event => edit({ permissionMode: event.target.value })}>
+                <option value="">{t("The setting of the CLI")}</option>
+                {[...new Set([...(form.permissionMode ? [form.permissionMode] : []), ...listing.permissionModes])].map(mode => <option key={mode} value={mode}>{mode}</option>)}
+              </HTMLSelect></FormGroup>}
             {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
             {runsOwnCli(form.type)

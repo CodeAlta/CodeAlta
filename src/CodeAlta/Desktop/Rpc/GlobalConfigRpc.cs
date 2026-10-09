@@ -146,7 +146,7 @@ internal sealed class GlobalConfigService
                             Bound(definition?.Model), Bound(definition?.ReasoningEffort),
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
-                        { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey) };
+                        { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode) };
                     }).ToArray();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
                 var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
@@ -165,6 +165,7 @@ internal sealed class GlobalConfigService
                 {
                     Unsupported = unsupported,
                     StartingProvider = starting?.Key,
+                    PermissionModes = PermissionModes,
                 };
             }
         }
@@ -218,6 +219,9 @@ internal sealed class GlobalConfigService
         var anthropicApiKey = Optional(edit.AnthropicApiKey);
         if (anthropicApiKey is not (null or "use" or "ignore"))
             return new("invalid", null, "ANTHROPIC_API_KEY is used, ignored, or left to the answer of Claude Code.", null, null, 0);
+        var permissionMode = Optional(edit.PermissionMode);
+        if (permissionMode is not null && !PermissionModes.Contains(permissionMode, StringComparer.Ordinal))
+            return new("invalid", null, $"A permission mode is one of: {string.Join(", ", PermissionModes)}.", null, null, 0);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
             var original = request.OriginalKey?.Trim();
@@ -239,6 +243,9 @@ internal sealed class GlobalConfigService
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
             // Only the CLI of Claude Code reads that variable by itself.
             definition.AnthropicApiKey = definition.ProviderType == "claude-code" ? anthropicApiKey : null;
+            // Only a provider that runs the CLI takes a permission mode; the store refuses the field for any
+            // other type, so a type changed away from it leaves the mode behind.
+            definition.PermissionMode = TakesPermissionMode(definition.ProviderType) ? permissionMode : null;
             // A null key keeps the stored secret; the form never receives it back.
             if (edit.ClearApiKey) definition.ApiKey = null;
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
@@ -356,6 +363,15 @@ internal sealed class GlobalConfigService
     private static readonly ImmutableArray<string> ReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     /// <summary>
+    /// The permission modes a provider that runs the Claude Code CLI can start its sessions in. They are the modes
+    /// of the CLI itself, and the configuration store holds <c>permission_mode</c> to the same list.
+    /// </summary>
+    private static readonly ImmutableArray<string> PermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+
+    /// <summary>Provider types that take a permission mode: the ones that run the Claude Code CLI.</summary>
+    private static bool TakesPermissionMode(string? type) => string.Equals(type?.Trim(), "claude-code", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Re-registers the enabled provider definitions and unregisters providers that are no longer
     /// configured or enabled, like the TUI's provider refresh.
     /// </summary>
@@ -464,6 +480,12 @@ internal sealed record GlobalConfigProvidersResponse(string Status, string? Revi
     public IReadOnlyList<GlobalConfigUnsupportedProvider> Unsupported { get; init; } = [];
 
     /// <summary>
+    /// The permission modes a provider that runs its own CLI can be given, for the form's selector. Empty for a
+    /// response that carries no listing.
+    /// </summary>
+    public IReadOnlyList<string> PermissionModes { get; init; } = [];
+
+    /// <summary>
     /// The provider a new session starts with: <see cref="DefaultProvider"/> when it is enabled, otherwise the
     /// first enabled provider. Null when no provider is enabled.
     /// </summary>
@@ -499,6 +521,10 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// null to follow the answer Claude Code saved for the key.
     /// </summary>
     public string? AnthropicApiKey { get; init; }
+    /// The permission mode the file gives a provider that runs the Claude Code CLI; null when it leaves the mode
+    /// to the settings of the CLI, and always null for the other provider types.
+    /// </summary>
+    public string? PermissionMode { get; init; }
 }
 
 /// <summary>What each blank field of a provider falls back to; null when nothing is known for the field.</summary>
@@ -517,6 +543,11 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
 
     /// <summary><c>use</c> or <c>ignore</c> for <c>ANTHROPIC_API_KEY</c>; blank to follow Claude Code. Kept for <c>claude-code</c> only.</summary>
     public string? AnthropicApiKey { get; init; }
+    /// <summary>
+    /// The permission mode of a provider that runs the Claude Code CLI; blank to leave it to the settings of the
+    /// CLI. A provider of another type sends null: the configuration file takes the field for no other type.
+    /// </summary>
+    public string? PermissionMode { get; init; }
 }
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
     GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);

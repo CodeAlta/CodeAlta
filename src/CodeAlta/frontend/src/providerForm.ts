@@ -10,6 +10,8 @@ export type ProviderForm = Readonly<{
   icon: string; color: string;
   /** For a provider that runs Claude Code: `use` or `ignore` for ANTHROPIC_API_KEY; blank follows the answer Claude Code saved. */
   anthropicApiKey: string;
+  /** The permission mode a provider that runs its own CLI starts its sessions in; blank for the CLI's own setting. */
+  permissionMode: string;
 }>;
 
 /** The form for an existing provider, or a blank form for a new one. */
@@ -18,9 +20,9 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
     ? { key: provider.key, type: provider.type, enabled: provider.enabled, displayName: provider.displayName ?? "", model: provider.model ?? "",
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
-      anthropicApiKey: provider.anthropicApiKey ?? "" }
+      anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "" }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "" };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "" };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -47,7 +49,9 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
   return { key: form.key.trim().toLowerCase(), type: form.type, enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model),
     reasoningEffort: optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
     apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey,
-    icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null };
+    icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null,
+    // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.
+    permissionMode: cli ? optional(form.permissionMode) : null };
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */
