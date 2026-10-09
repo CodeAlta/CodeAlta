@@ -222,6 +222,13 @@ public sealed record AgentTurnRequest
     public bool CanUseProviderContinuation { get; init; }
 
     /// <summary>
+    /// Gets or initializes a value indicating whether the request stands alone: no later request starts with what it
+    /// sends, as for the summary of a compaction. A provider that bills what it writes to a prompt cache writes
+    /// nothing for such a request.
+    /// </summary>
+    public bool IsStandalone { get; init; }
+
+    /// <summary>
     /// Gets or initializes the persisted local session state.
     /// </summary>
     public required AgentSessionState State { get; init; }

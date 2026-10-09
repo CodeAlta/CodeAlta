@@ -32,6 +32,7 @@ internal sealed class AgentTurnExecutorCompactionSummaryExecutor(IModelProviderT
                             [new AgentMessagePart.Text(request.UserMessage)]),
                     ],
                     Tools = [],
+                    IsStandalone = true,
                     State = request.State,
                 },
                 static (_, _) => ValueTask.CompletedTask,

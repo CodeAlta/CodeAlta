@@ -97,7 +97,10 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.AreEqual(200000L, usageEvent.Usage?.TokenLimit);
         Assert.IsNotNull(client.LastOptions);
         Assert.AreEqual(64000, client.LastOptions.MaxOutputTokens);
-        StringAssert.Contains(client.LastOptions.Instructions, "System instructions");
+        // The instructions reach the client as system content, which is what takes a prompt-cache marker.
+        Assert.IsNull(client.LastOptions.Instructions);
+        var system = client.LastMessages!.First(static message => message.Role == ChatRole.System);
+        StringAssert.Contains(system.Text, "System instructions");
 
         await using var resumed = await providerRuntime.ResumeSessionAsync(
             session.SessionId,

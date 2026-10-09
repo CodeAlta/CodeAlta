@@ -102,7 +102,24 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         return new ChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
-            configureOptions: ConfigureOptions);
+            configureOptions: ConfigureOptions,
+            prepareRequest: MarkCacheBreakpoints);
+    }
+
+    private static (IReadOnlyList<ChatMessage> Messages, ChatOptions Options) MarkCacheBreakpoints(
+        AgentTurnRequest request,
+        IReadOnlyList<ChatMessage> messages,
+        ChatOptions options)
+    {
+        // A request that stands alone would pay for a cache write that nothing reads, and a profile can say that
+        // the endpoint takes no marker.
+        if (request.IsStandalone || request.Provider.Profile?.SupportsCacheControl == false)
+        {
+            return (messages, options);
+        }
+
+        var marked = AnthropicPromptCache.MarkBreakpoints(messages, options);
+        return (marked.Messages, marked.Options ?? options);
     }
 
     private static void ConfigureOptions(AgentTurnRequest request, ChatOptions options)

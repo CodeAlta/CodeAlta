@@ -5,6 +5,19 @@ using Microsoft.Extensions.AI;
 namespace CodeAlta.Agent.Runtime;
 
 /// <summary>
+/// The last step of a provider on a request of <see cref="ChatClientTurnExecutor"/>: it returns the messages and the
+/// options the client gets. The messages belong to the request and may be changed.
+/// </summary>
+/// <param name="request">The turn request.</param>
+/// <param name="messages">The messages of the request.</param>
+/// <param name="options">The options of the request.</param>
+/// <returns>The messages and the options to send.</returns>
+internal delegate (IReadOnlyList<ChatMessage> Messages, ChatOptions Options) ChatClientRequestPreparer(
+    AgentTurnRequest request,
+    IReadOnlyList<ChatMessage> messages,
+    ChatOptions options);
+
+/// <summary>
 /// Shared turn executor for provider SDKs that expose <see cref="IChatClient"/>.
 /// </summary>
 internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
@@ -13,6 +26,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> _listModelsAsync;
     private readonly Func<AgentTurnRequest, AgentReasoningEffort, bool>? _supportsReasoningEffort;
     private readonly Action<AgentTurnRequest, ChatOptions>? _configureOptions;
+    private readonly ChatClientRequestPreparer? _prepareRequest;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
@@ -23,11 +37,15 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// Optional provider-specific fallback for reasoning-effort support when model metadata is unavailable.
     /// </param>
     /// <param name="configureOptions">Optional provider-specific chat options customizer.</param>
+    /// <param name="prepareRequest">
+    /// Optional provider-specific last step on the messages and the options of a request, before the client gets them.
+    /// </param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
         Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
         Func<AgentTurnRequest, AgentReasoningEffort, bool>? supportsReasoningEffort = null,
-        Action<AgentTurnRequest, ChatOptions>? configureOptions = null)
+        Action<AgentTurnRequest, ChatOptions>? configureOptions = null,
+        ChatClientRequestPreparer? prepareRequest = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -36,6 +54,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         _listModelsAsync = listModelsAsync;
         _supportsReasoningEffort = supportsReasoningEffort;
         _configureOptions = configureOptions;
+        _prepareRequest = prepareRequest;
     }
 
     /// <inheritdoc />
@@ -59,12 +78,18 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             try
             {
                 // A tool result of these clients is text: the images of tool results follow in a user message.
-                var messages = Images.AgentToolResultImages.MoveToUserMessages(AgentReasoningReplay.SanitizeForRequest(request.Conversation, request))
+                IReadOnlyList<ChatMessage> messages = Images.AgentToolResultImages.MoveToUserMessages(AgentReasoningReplay.SanitizeForRequest(request.Conversation, request))
                     .Select(MapMessage)
                     .ToArray();
+                var options = CreateOptions(request);
+                if (_prepareRequest is not null)
+                {
+                    (messages, options) = _prepareRequest(request, messages, options);
+                }
+
                 var updates = new List<ChatResponseUpdate>();
                 await foreach (var update in chatClient
-                                   .GetStreamingResponseAsync(messages, CreateOptions(request), cancellationToken)
+                                   .GetStreamingResponseAsync(messages, options, cancellationToken)
                                    .ConfigureAwait(false))
                 {
                     updates.Add(update);
@@ -473,8 +498,16 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             totalTokens: response.Usage.TotalTokenCount,
             cachedInputTokens: response.Usage.CachedInputTokenCount,
             reasoningTokens: response.Usage.ReasoningTokenCount,
-            updatedAt: response.CreatedAt ?? DateTimeOffset.UtcNow);
+            updatedAt: response.CreatedAt ?? DateTimeOffset.UtcNow,
+            cacheWriteTokens: GetCacheWriteTokens(response.Usage));
     }
+
+    // The Anthropic client reports what a request wrote to the prompt cache as an additional count, under the name
+    // of the usage property of its API.
+    private static long? GetCacheWriteTokens(UsageDetails usage)
+        => usage.AdditionalCounts is { } counts && counts.TryGetValue("CacheCreationInputTokens", out var tokens) && tokens > 0
+            ? tokens
+            : null;
 
     private static JsonElement? CreateProviderState(ChatResponse response)
     {

@@ -158,9 +158,11 @@ public sealed record AgentProviderProfile
     public bool? SupportsToolResultImages { get; init; }
 
     /// <summary>
-    /// Gets or initializes whether the provider supports cache-control metadata.
+    /// Gets or initializes whether a request can carry prompt-cache markers (<c>cache_control</c> of the Anthropic
+    /// Messages protocol). When false, no marker is sent and the endpoint caches nothing of the prompt. Null lets
+    /// the transport decide: Anthropic Messages requests carry them.
     /// </summary>
-    public bool SupportsCacheControl { get; init; }
+    public bool? SupportsCacheControl { get; init; }
 
     /// <summary>
     /// Gets or initializes whether the provider preserves thought signatures.
