@@ -220,7 +220,8 @@ internal static class AgentUsageFactory
             return current;
         }
 
-        if (current is null)
+        // An operation that reports tokens is another request: nothing of the request before it is carried over.
+        if (current is null || incoming.InputTokens is not null || incoming.OutputTokens is not null)
         {
             return incoming;
         }

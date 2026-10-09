@@ -122,6 +122,19 @@ test("fields accumulate across the events of one attachment; identity comes from
   assert.equal(mergeUsageObservation(null, rateOnly), rateOnly);
 });
 
+test("nothing of a request is carried into the next one", () => {
+  const summary = { ...observation().lastOperation!, model: "claude-test", inputTokens: "44000", outputTokens: "900", cacheWriteTokens: "40000", cachedInputTokens: "3000",
+    cost: "0.31", costUnit: "AI credits", initiator: "compaction" };
+  const next = { ...observation().lastOperation!, inputTokens: "30000", outputTokens: "120", cachedInputTokens: null, reasoningEffort: null };
+  // The request after a summary request is not one of a compaction, and wrote nothing to a cache.
+  const merged = mergeUsageObservation(observation({ lastOperation: summary }), observation({ sequence: "2", lastOperation: next }));
+  assert.deepEqual(merged.lastOperation, next);
+  assert.deepEqual(inputTokens(merged.lastOperation), { total: "30000", uncached: "30000", cacheRead: "0", cacheWrite: "0" });
+  // What reports no tokens is not another request: it completes the last one.
+  const completed = mergeUsageObservation(merged, observation({ sequence: "3", lastOperation: { ...next, inputTokens: null, outputTokens: null, model: null, durationMs: "1250" } }));
+  assert.deepEqual(completed.lastOperation, { ...next, durationMs: "1250" });
+});
+
 test("rate windows and the Markdown copy carry only what was reported", () => {
   const english = { used: (percent: number) => `${percent}% used`, window: (minutes: string) => `${minutes}m window`, resets: (time: string) => `resets ${time}` };
   assert.equal(rateWindowSummary({ usedPercent: 40, resetsAt: null, windowDurationMinutes: "300" }, english), "40% used · 300m window");

@@ -2785,6 +2785,36 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
+    public void MergeSessionUsage_CarriesNothingOfARequestIntoTheNextOne()
+    {
+        var timestamp = DateTimeOffset.Parse("2026-10-09T09:00:00+00:00");
+        var summary = new AgentOperationUsageSnapshot(
+            Model: "claude-test", InputTokens: 44_000, OutputTokens: 900, CacheWriteTokens: 40_000, CachedInputTokens: 3_000,
+            Cost: 0.31, Initiator: "compaction", CostUnit: "AI credits");
+        var next = new AgentOperationUsageSnapshot(Model: "gpt-test", InputTokens: 30_000, OutputTokens: 120);
+        AgentSessionUsage Usage(AgentOperationUsageSnapshot operation, int second)
+            => new(LastOperation: operation, Scope: AgentUsageScope.LastOperation, Source: AgentUsageSource.ProviderUsage, UpdatedAt: timestamp.AddSeconds(second));
+
+        // The request after a summary request is not one of a compaction, and wrote nothing to a cache.
+        var merged = SessionUsageAggregator.Merge(Usage(summary, 0), Usage(next, 1));
+        Assert.AreEqual(next, merged.LastOperation);
+        Assert.AreEqual(new AgentInputTokenUsage(30_000, 30_000, 0, 0), AgentInputTokenUsage.From(merged.LastOperation));
+
+        // What reports no tokens is not another request: it completes the last one.
+        var completed = SessionUsageAggregator.Merge(merged, Usage(new AgentOperationUsageSnapshot(DurationMs: 1_250), 2));
+        Assert.AreEqual(next with { DurationMs = 1_250 }, completed.LastOperation);
+
+        // A session that is opened again reads its history the same way.
+        AgentEvent[] history =
+        [
+            new AgentSessionUpdateEvent(ModelProviderIds.OpenAIResponses, "session-1", timestamp, null, AgentSessionUpdateKind.UsageUpdated, "Compaction summary usage updated.", Usage: Usage(summary, 0)),
+            new AgentSessionUpdateEvent(ModelProviderIds.OpenAIResponses, "session-1", timestamp.AddSeconds(1), null, AgentSessionUpdateKind.UsageUpdated, "Usage updated.", Usage: Usage(next, 1)),
+        ];
+        Assert.AreEqual(next, CodeAlta.Agent.Runtime.AgentUsageFactory.RecoverUsageFromHistory(history)!.LastOperation);
+        Assert.AreEqual(next, SessionHistoryCoordinator.RecoverUsageFromHistory(history)!.LastOperation);
+    }
+
+    [TestMethod]
     public void BuildSessionUsageMarkdown_UsesInvariantCultureAndSections()
     {
         var previousCulture = CultureInfo.CurrentCulture;

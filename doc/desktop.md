@@ -960,8 +960,10 @@ asynchronous reads. It returns the last admitted usage event: numeric counters a
 bounded single-line text (model, effort, initiator, labels, plan; anything longer than 128 characters
 is dropped), rate-limit windows and the provider's cumulative session totals. Providers split usage
 across events, so the window keeps the newest value of each field seen on the same attachment and
-starts over when the attachment changes. Copilot quota snapshots, named Codex limits and compaction
-details are not shown.
+starts over when the attachment changes. The last operation is the exception: an operation that
+reports tokens is another request and replaces the one before it whole, so that its initiator, its
+cost and its cache counts are not shown on the next request (the TUI and the usage recovered from a
+journal do the same). Copilot quota snapshots, named Codex limits and compaction details are not shown.
 
 **Subscription usage.** The window shows the limits of the subscription as meters (`UsageLimitList`,
 `subscriptionUsage.ts`): the two rate-limit windows of the last observation while that observation is

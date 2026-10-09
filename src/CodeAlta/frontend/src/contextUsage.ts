@@ -87,7 +87,10 @@ export function mergeUsageObservation(current: SessionUsageObservation | null, i
     primary: fields(current.rateLimits.primary, incoming.rateLimits.primary),
     secondary: fields(current.rateLimits.secondary, incoming.rateLimits.secondary),
   } : incoming.rateLimits ?? current.rateLimits ?? null;
-  return { ...incoming, window: fields(current.window, incoming.window), lastOperation: fields(current.lastOperation, incoming.lastOperation),
+  // An operation that reports tokens is another request: nothing of the request before it is carried over.
+  const operation = incoming.lastOperation && (incoming.lastOperation.inputTokens !== null || incoming.lastOperation.outputTokens !== null)
+    ? incoming.lastOperation : fields(current.lastOperation, incoming.lastOperation);
+  return { ...incoming, window: fields(current.window, incoming.window), lastOperation: operation,
     rateLimits: limits, sessionTotal: incoming.sessionTotal ?? current.sessionTotal ?? null };
 }
 
