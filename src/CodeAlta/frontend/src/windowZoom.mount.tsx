@@ -12,7 +12,7 @@ import { WindowZoom, zoomWindow, type WindowZoomCommand } from "./WindowZoom";
 const steps = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500];
 const ran: WindowZoomCommand[] = [];
 const host = { zoom: 100 };
-const preferences = (): DesktopShellPreferences => ({ status: "ok", onClose: "ask", canKeepRunning: true, platform: "windows", entryAdded: false, reviewPermissions: false,
+const preferences = (): DesktopShellPreferences => ({ status: "ok", onClose: "ask", canKeepRunning: true, platform: "windows", entryAdded: false, reviewPermissions: false, inheritPermissions: false,
   sessionWidth: 100, sessionWidths: null, trayIcon: true, zoom: host.zoom });
 const zoom = async (request: { direction: number }) => {
   host.zoom = request.direction > 0 ? steps.find(step => step > host.zoom) ?? host.zoom : request.direction < 0 ? [...steps].reverse().find(step => step < host.zoom) ?? host.zoom : 100;

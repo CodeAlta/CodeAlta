@@ -3052,6 +3052,12 @@ WKWebView and WebKitGTK. The sources are in `Desktop/Ui/` (the tools and their p
   `enabled = false` turns it off, and so does everything that turns plugins off. A host that has the user
   review the commands of its sessions (`--review-owned-command-permissions`) does not have the plugin: a
   session that drives the window could answer the review itself.
+- **Not for a session that asks.** For the same reason a session whose permission mode has the user review
+  its commands (any policy but `Approve`) does not have the tools, whatever it activated:
+  `alta ui activate` answers `ui.activateDenied`, its runs start without the tools, a tool it still holds
+  answers with an error, and its instructions say "UI tools: unavailable". What it activated is kept: it has
+  the tools again on the first run after its mode stops asking. The plugin asks `DesktopUiSessions.Reviewed`,
+  which the application sets over `SessionRuntimeService.GetPermissionPolicy`.
 - **Files.** `take_screenshot` and `take_snapshot` take a `filePath` to save their result instead of
   returning it. A relative path starts from the folder the session works in (its git worktree, or the folder
   of its project), and the file has to be in that folder or in the folder of the tools (`ui` in the
@@ -3357,7 +3363,26 @@ typing in a terminal with `alta terminal send` or `create --command` (`terminal.
 enabling an automation that has a command trigger (`automation.commandDenied`), and creating, building,
 reloading or refreshing a plugin, which runs its code (`plugin.buildDenied`). The session that calls is
 the one that counts; a caller that is no session (a client of the MCP server) has the default mode of the
-application. A host started with the flag refuses them all.
+application. A host started with the flag refuses them all. The UI tools are withheld the same way (see
+"UI tools").
+
+A session that another session creates with `alta session create` is given its mode by the host
+(`SessionRuntimeService.GetCreatedSessionPermissionMode`, passed as `SessionExecutionOptions.PermissionMode`
+and saved with the session like a mode chosen in the composer). **Settings > Permissions > Sessions created
+by agents** decides, kept in `preferences.json` (`inheritPermissions`, written only as `true`) and read at
+each creation through `CodeAltaHostOptions.InheritPermissionModePolicy`:
+
+| Setting | A created session | A prompt to another session |
+| --- | --- | --- |
+| **Bypass permissions** (the default) | does not ask: it is given `bypassPermissions` where the default mode asks, and no mode where the default mode bypasses or its provider is configured with a mode | any session |
+| **Same as the session that creates them** | has the mode of the policy of its creator: `default`, `acceptEdits`, or `bypassPermissions` (no mode where it bypasses anyway) | refused (`session.promptDenied`) for a session that asks less than the caller |
+
+The default lets a session that asks hand a command to a session that does not: this is the user's choice,
+since a sub-agent that waits for an answer stops the work of its creator. The second value closes that
+route: a session then neither creates nor reaches (`alta session send`, `queue`, `steer`, a peer message, a
+reminder for another session) a session whose policy is looser than its own
+(`SessionRuntimeService.AcceptsPromptFrom`; a session that is not attached has the mode saved with it). A
+caller that is no session is not concerned.
 
 A session that waits for an answer counts among the sessions that wait for the user in the activity of
 its space (`SpaceSessionActivity.Waiting`). The page marks it with `WaitingBadge` in the Explorer (its

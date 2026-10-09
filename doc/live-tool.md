@@ -290,6 +290,16 @@ alta session create --project <project> --worktree --base main
 alta session create --project <project> --no-worktree
 ```
 
+In a host whose sessions have a permission mode (CodeAlta Desktop), a session that another session creates
+is given a mode by the host (`SessionRuntimeService.GetCreatedSessionPermissionMode`), named in the record
+as `permissionMode` when it has one of its own. By default it does not ask the user: it bypasses
+permissions, unless its provider is configured with a mode. When the user chose that such a session asks
+what its creator asks, it has the mode of the policy of the calling session (`default`, `acceptEdits` or
+`bypassPermissions`), and a session does not hand a prompt to a session that asks less than it does:
+`session send`, `queue`, `steer`, a peer message or request, and `reminder create --session` for another
+session fail with `session.promptDenied` (exit code 4). A caller that is no session creates a session
+without a mode and sends to any session.
+
 Control commands acknowledge submission. They do not block until the target model finishes. If a session is busy, `send --queue-if-busy` and `session queue` persist queue items with caller attribution; the runtime drains at most one queued prompt when that session becomes idle.
 
 ## Ask command
@@ -857,7 +867,9 @@ record `alta.ui.activate` has `toolsAvailable` (`now` when an agent run called t
 registered in the running turn and are called in the next step; `next_run` otherwise) and the names of the
 tools. The session keeps them on its later runs until `alta ui deactivate` (`alta.ui.deactivate`) or the end
 of the application. `alta ui status` (`alta.ui.status`) says whether the calling session has them. A caller
-that is no session gets `alta.ui.error` with the code `ui.noSession`. See `doc/desktop.md`, UI tools.
+that is no session gets `alta.ui.error` with the code `ui.noSession`, and a session whose commands the user
+reviews gets it with the code `ui.activateDenied` (exit code 4): it does not drive the window where its
+requests are answered. See `doc/desktop.md`, UI tools.
 
 The built-in statistics plugin contributes a small `statistics` root:
 

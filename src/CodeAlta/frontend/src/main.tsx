@@ -1183,6 +1183,11 @@ function App() {
     void desktopShell.setReviewPermissions({ review }, { timeoutMilliseconds: 8_000 })
       .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
   }
+  function setInheritPermissions(inherit: boolean) {
+    setShellPreferences(current => current && { ...current, inheritPermissions: inherit });
+    void desktopShell.setInheritPermissions({ inherit }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
+  }
   function setOnClose(onClose: CloseBehavior) {
     setShellPreferences(current => current && { ...current, onClose });
     void desktopShell.setOnClose({ onClose }, { timeoutMilliseconds: 8_000 })
@@ -2941,7 +2946,8 @@ function App() {
         sessionWidth, setSessionWidth, confirms: { ...confirms, set: setConfirm },
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
       : settingsSection === "permissions" ? <PermissionSettings
-        permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions } : null} />
+        permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
+          inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}

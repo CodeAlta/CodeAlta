@@ -206,6 +206,128 @@ public sealed class DesktopUiToolsTests
     }
 
     [TestMethod]
+    public async Task ASessionWhoseCommandsAreReviewed_DoesNotDriveTheWindow()
+    {
+        using var temp = new TempFolder();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var ui = new FakeUi(temp.Path);
+        var reviewed = false;
+        var sessions = new DesktopUiSessions { Reviewed = _ => Volatile.Read(ref reviewed) };
+        var provider = new ScriptedProvider();
+        var pluginAlta = new PluginAltaServiceBridge();
+        await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 32,
+            PluginBuiltIns = [DesktopUiPlugin.Definition(ui, sessions)],
+            PluginServices = new DesktopPluginServices(pluginAlta, new DesktopPluginUi()),
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), pluginAlta);
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Asks first");
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = session.SessionId };
+
+        // It could answer the review itself: the command that turns the tools on refuses, and its instructions say so.
+        Volatile.Write(ref reviewed, true);
+        provider.Script(Call("alta", """{"args":["ui","activate"]}"""), Say("no window for me"));
+        await SendAsync(host, session, "one");
+        StringAssert.Contains(provider.Requests[0].Instructions, DesktopUiPlugin.ReviewedGuidance);
+        StringAssert.Contains(provider.Requests[1].LastToolResult, "ui.activateDenied");
+        Assert.IsFalse(provider.Requests[1].Tools.Contains("take_snapshot"));
+        Assert.IsFalse(sessions.IsActive(session.SessionId));
+        var refused = await commands.InvokeAsync(["ui", "activate"], caller: caller);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, refused.Transcript);
+
+        // A session that has the tools runs without them from the moment its commands are reviewed.
+        Volatile.Write(ref reviewed, false);
+        Assert.AreEqual(AltaExitCodes.Success, (await commands.InvokeAsync(["ui", "activate"], caller: caller)).ExitCode);
+        Volatile.Write(ref reviewed, true);
+        provider.Requests.Clear();
+        provider.Script(Say("still none"));
+        await SendAsync(host, session, "two");
+        Assert.IsFalse(provider.Requests.Single().Tools.Contains("take_snapshot"));
+        StringAssert.Contains(provider.Requests.Single().Instructions, DesktopUiPlugin.ReviewedGuidance);
+        // A tool it was given before answers the same: the mode can change while a turn runs.
+        var click = await Invoke(DesktopUiPlugin.CreateTools(ui, sessions, project), "click", session.SessionId, """{"uid":"1_2"}""");
+        Assert.IsFalse(click.Success);
+        Assert.AreEqual(DesktopUiPlugin.ReviewedRefusal, click.Error);
+        Assert.HasCount(0, ui.Calls);
+
+        // It has them again when its commands are not reviewed any more.
+        Volatile.Write(ref reviewed, false);
+        provider.Requests.Clear();
+        provider.Script(Say("there they are"));
+        await SendAsync(host, session, "three");
+        CollectionAssert.Contains(provider.Requests.Single().Tools, "take_snapshot");
+        StringAssert.Contains(provider.Requests.Single().Instructions, DesktopUiPlugin.Guidance(active: true));
+    }
+
+    [TestMethod]
+    public async Task ASessionAnAgentCreates_DoesNotAsk_UnlessTheUserChoseThatItAsksWhatItsCreatorAsks()
+    {
+        using var temp = new TempFolder();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var review = false;
+        var inherit = false;
+        var provider = new ScriptedProvider();
+        await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, OwnedCommandReceiptCapacity = 32,
+            // The host of the desktop: the mode of a session comes first, and the settings of the user are read when needed.
+            SessionPermissionModes = true, ReviewOwnedPermissionsPolicy = () => Volatile.Read(ref review), InheritPermissionModePolicy = () => Volatile.Read(ref inherit),
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()));
+        var runtime = host.RuntimeService;
+        var creator = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Creator");
+        provider.Script(Say("ready"));
+        await SendAsync(host, creator, "one");
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = creator.SessionId, SourceProjectId = host.CurrentProject.Id };
+        async Task<string> CreateAsync(string title)
+        {
+            var created = await commands.InvokeAsync(["session", "create", "--project", host.CurrentProject.Id, "--title", title, "--provider", provider.Descriptor.ProviderId.Value], caller: caller);
+            Assert.AreEqual(AltaExitCodes.Success, created.ExitCode, created.Transcript);
+            using var record = JsonDocument.Parse(created.Transcript.Split('\n').First(static line => line.Contains("\"alta.session.created\"", StringComparison.Ordinal)));
+            return record.RootElement.GetProperty("sessionId").GetString()!;
+        }
+
+        // The user asked to be asked first, and the creator is: by default the session it creates is not.
+        Volatile.Write(ref review, true);
+        Assert.AreEqual(SessionPermissionPolicy.Review, runtime.GetPermissionPolicy(creator.SessionId));
+        var free = await CreateAsync("Does not ask");
+        Assert.AreEqual(SessionPermissionPolicy.Approve, runtime.GetPermissionPolicy(free));
+        // The mode is saved with the session, like one chosen in the composer: it is the one it is attached with again.
+        Assert.AreEqual(SessionPermissionModes.Bypass, (await host.Commands.GetSelectionChoicesAsync(free))!.Current.PermissionMode);
+        // No session runs, so a steer goes no further than the question of who may hand a prompt to whom.
+        async Task<(int ExitCode, string Transcript)> SteerAsync(string sessionId, AltaCallerIdentity from)
+        {
+            var result = await commands.InvokeAsync(["session", "steer", sessionId, "--message", "work"], caller: from);
+            return (result.ExitCode, result.Transcript);
+        }
+        Assert.IsFalse((await SteerAsync(free, caller)).Transcript.Contains("session.promptDenied", StringComparison.Ordinal));
+
+        // The user chose that it asks what its creator asks: the next one does, in a host that bypasses permissions too.
+        Volatile.Write(ref inherit, true);
+        Volatile.Write(ref review, false);
+        Assert.AreEqual(SessionPermissionPolicy.Approve, runtime.GetPermissionPolicy(await CreateAsync("Bypasses as its creator")));
+        Volatile.Write(ref review, true);
+        var asks = await CreateAsync("Asks as its creator");
+        Volatile.Write(ref review, false);
+        Assert.AreEqual(SessionPermissionPolicy.Review, runtime.GetPermissionPolicy(asks));
+        Assert.AreEqual(SessionPermissionModes.Ask, (await host.Commands.GetSelectionChoicesAsync(asks))!.Current.PermissionMode);
+
+        // The creator, which asks, hands a prompt to the one that asks as much, not to the one that asks less.
+        Volatile.Write(ref review, true);
+        Assert.IsFalse((await SteerAsync(asks, caller)).Transcript.Contains("session.promptDenied", StringComparison.Ordinal));
+        var denied = await SteerAsync(free, caller);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.ExitCode, denied.Transcript);
+        StringAssert.Contains(denied.Transcript, "session.promptDenied");
+        // A caller that is no session is the user's own client.
+        Assert.IsFalse((await SteerAsync(free, AltaCallerIdentity.Cli)).Transcript.Contains("session.promptDenied", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task ThePlugin_IsTurnedOffLikeAnyOther()
     {
         using var temp = new TempFolder();

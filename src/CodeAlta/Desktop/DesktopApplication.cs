@@ -350,6 +350,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 ReviewOwnedPermissionsPolicy = () => options.ReviewOwnedCommandPermissions || shell.ReviewPermissions,
                 // The mode chosen for a session comes first; a host started with that flag reviews every session.
                 SessionPermissionModes = !options.ReviewOwnedCommandPermissions,
+                // A session an agent creates does not ask, unless the user chose that it asks what its creator asks.
+                InheritPermissionModePolicy = () => shell.InheritPermissions,
                 EnableOwnedAsks = true,
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
                 // Source plugins are the same build as in the terminal application; the start-up screen
@@ -560,6 +562,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
+                // A session whose commands the user reviews does not drive the window, where the review is answered.
+                uiSessions.Reviewed = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId) != SessionPermissionPolicy.Approve;
                 automations.Start();
                 workspacePrepared.TrySetResult();
                 {

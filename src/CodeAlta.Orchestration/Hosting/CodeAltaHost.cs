@@ -320,6 +320,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 PluginEventCurrentProjectId = currentProject.Id,
                 PluginEventCurrentProjectPath = currentProject.ProjectPath,
                 SessionPermissionModes = options.SessionPermissionModes,
+                InheritPermissionMode = options.InheritPermissionModePolicy,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,

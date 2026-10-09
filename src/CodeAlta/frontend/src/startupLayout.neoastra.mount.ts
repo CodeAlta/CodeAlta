@@ -45,7 +45,7 @@ export const globalConfig = {
 export const desktopShell = {
   ...demoShell,
   preferences: async (): Promise<DesktopShellPreferences> => ({ status: "ok", onClose: "ask", canKeepRunning: true,
-    platform: "windows", trayIcon: true, entryAdded: false, zoom: 100, sessionWidth: 100, sessionWidths: [], reviewPermissions: true }),
+    platform: "windows", trayIcon: true, entryAdded: false, zoom: 100, sessionWidth: 100, sessionWidths: [], reviewPermissions: true, inheritPermissions: false }),
 };
 export const spaces = {
   ...demoSpaces,

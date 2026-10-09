@@ -628,6 +628,51 @@ public sealed class OwnedSessionCommandServiceTests
     }, sessionPermissionModes: true);
 
     [TestMethod]
+    public Task SessionPermissionModes_ASessionAnotherOneCreatesDoesNotAsk_UnlessItTakesTheModeOfItsCreator() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAll();
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var runtime = f.Host.RuntimeService;
+        var provider = choices.Current.ProviderKey;
+        SessionViewDescriptor Other(string? permissionMode) => new()
+        {
+            SessionId = "other", ProviderId = provider, ProviderKey = provider, WorkingDirectory = f.ProjectRoot, Kind = SessionViewKind.ProjectSession, PermissionMode = permissionMode,
+        };
+
+        // The creator asks first, in a host that bypasses permissions.
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("ask", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Ask } }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        Assert.AreEqual(SessionPermissionPolicy.Review, runtime.GetPermissionPolicy(f.SessionId));
+
+        // By default a session it creates does not ask: it needs no mode where the host bypasses, and is given the
+        // mode that bypasses where the host asks. It hands a prompt to any session.
+        Assert.IsNull(runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+        f.ReviewByDefault = true;
+        Assert.AreEqual(SessionPermissionModes.Bypass, runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+        Assert.IsTrue(runtime.AcceptsPromptFrom(f.SessionId, Other(SessionPermissionModes.Bypass)));
+        // A session that no session creates has the mode of the host.
+        Assert.IsNull(runtime.GetCreatedSessionPermissionMode(null, provider));
+        Assert.IsNull(runtime.GetCreatedSessionPermissionMode("nobody", provider));
+
+        // When the user chose so, it asks what its creator asks: the mode is saved with it, whatever the host does.
+        f.InheritPermissions = true;
+        Assert.AreEqual(SessionPermissionModes.Ask, runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+        f.ReviewByDefault = false;
+        Assert.AreEqual(SessionPermissionModes.Ask, runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+        // And its creator does not hand a prompt to a session that asks less than it does.
+        Assert.IsFalse(runtime.AcceptsPromptFrom(f.SessionId, Other(SessionPermissionModes.Bypass)));
+        Assert.IsFalse(runtime.AcceptsPromptFrom(f.SessionId, Other(SessionPermissionModes.AcceptEdits)));
+        Assert.IsFalse(runtime.AcceptsPromptFrom(f.SessionId, Other(null)), "A session without a mode bypasses, as the host does.");
+        Assert.IsTrue(runtime.AcceptsPromptFrom(f.SessionId, Other(SessionPermissionModes.Ask)));
+        Assert.IsTrue(runtime.AcceptsPromptFrom(null, Other(SessionPermissionModes.Bypass)), "A caller that is no session.");
+        f.ReviewByDefault = true;
+        Assert.IsTrue(runtime.AcceptsPromptFrom(f.SessionId, Other(null)));
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task DifferentProviderSelection_IsAdmittedThenFailsPreparationWithoutReplacingSource() => Fixture.RunAsync(async f =>
     {
         // This helper completes a real owned Send and commits the fake idle event; it does not compact.
@@ -1763,6 +1808,9 @@ public sealed class OwnedSessionCommandServiceTests
         private volatile CodeAltaHost? _host;
         private volatile bool _cleaning;
         private bool _ownsRoot;
+        // The settings of the user in a host whose sessions have a permission mode: read when they are needed.
+        internal volatile bool ReviewByDefault;
+        internal volatile bool InheritPermissions;
         private readonly string _root = Path.Combine(Path.GetTempPath(), "CodeAlta-owned-" + Guid.NewGuid().ToString("N"));
         internal string SessionId { get; } = Guid.CreateVersion7().ToString();
         internal string ProjectRoot => Path.Combine(_root, "project");
@@ -1895,6 +1943,8 @@ public sealed class OwnedSessionCommandServiceTests
                 // The host of the desktop: it approves by itself, and the mode of a session comes first.
                 AutoApproveOwnedPermissions = sessionPermissionModes,
                 SessionPermissionModes = sessionPermissionModes,
+                ReviewOwnedPermissionsPolicy = sessionPermissionModes ? () => ReviewByDefault : null,
+                InheritPermissionModePolicy = () => InheritPermissions,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
                 StartPlugins = false,
                 OwnsLogging = false,

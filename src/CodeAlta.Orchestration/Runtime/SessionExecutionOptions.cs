@@ -38,6 +38,12 @@ public sealed class SessionExecutionOptions
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the permission mode a session is created with, one of the modes of its provider or of
+    /// the host. Null, the default, gives it none. A session that exists keeps the mode saved with it.
+    /// </summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>
     /// Gets or initializes the selected agent prompt identifier.
     /// </summary>
     public string? AgentPromptId { get; init; }

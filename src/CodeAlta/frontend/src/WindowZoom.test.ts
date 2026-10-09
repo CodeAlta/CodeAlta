@@ -7,7 +7,7 @@ import { locales, translate } from "./localization";
 import { ShellLanguageContext } from "./shellLanguage";
 import { WindowZoom, zoomWindow } from "./WindowZoom";
 
-const preferences = (zoom: number, status = "ok"): DesktopShellPreferences => ({ status, onClose: "ask", canKeepRunning: true, platform: "windows", entryAdded: false, reviewPermissions: false,
+const preferences = (zoom: number, status = "ok"): DesktopShellPreferences => ({ status, onClose: "ask", canKeepRunning: true, platform: "windows", entryAdded: false, reviewPermissions: false, inheritPermissions: false,
   sessionWidth: 100, sessionWidths: null, trayIcon: true, zoom });
 
 test("a zoom command asks the host for its step, and the answer is the zoom the window shows", async () => {

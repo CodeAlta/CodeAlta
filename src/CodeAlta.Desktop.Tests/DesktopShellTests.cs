@@ -128,6 +128,18 @@ public sealed class DesktopShellTests
                 File.WriteAllText(file, "{\"onClose\":\"ask\",\"reviewPermissions\":" + other + "}");
                 Assert.IsFalse(DesktopPreferences.Load(root).ReviewPermissions, other);
             }
+
+            // A session an agent creates does not ask, unless the user chose that it takes the mode of its creator:
+            // only that choice is written, beside the other.
+            Assert.IsFalse(DesktopPreferences.Default.InheritPermissions);
+            Assert.IsFalse(DesktopPreferences.Load(root).InheritPermissions);
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Ask, InheritPermissions: true).Save(root));
+            Assert.AreEqual("""{"onClose":"ask","inheritPermissions":true}""", File.ReadAllText(file));
+            Assert.AreEqual((false, true), (DesktopPreferences.Load(root).ReviewPermissions, DesktopPreferences.Load(root).InheritPermissions));
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Ask, ReviewPermissions: true, InheritPermissions: true).Save(root));
+            Assert.AreEqual("""{"onClose":"ask","reviewPermissions":true,"inheritPermissions":true}""", File.ReadAllText(file));
+            File.WriteAllText(file, """{"onClose":"ask","inheritPermissions":"true"}""");
+            Assert.IsFalse(DesktopPreferences.Load(root).InheritPermissions);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -165,13 +177,14 @@ public sealed class DesktopShellTests
         var service = new DesktopShellService();
         Assert.AreEqual("unavailable", service.Preferences(new()).Status);
         Assert.AreEqual("ask", service.SetOnClose(new("exit")).OnClose);
+        Assert.AreEqual((false, false), (service.SetReviewPermissions(new(true)).ReviewPermissions, service.SetInheritPermissions(new(true)).InheritPermissions));
         Assert.AreEqual("unavailable", service.Hide(new()).Status);
         Assert.AreEqual("unavailable", service.Exit(new(Confirmed: true)).Status);
         // What the page reads: the names of the generated client.
         // Without a shell the width of the conversations is the whole space, and asking for another keeps it.
         Assert.AreEqual(("unavailable", 100), (service.SetSessionWidth(new(70, "session-1")).Status, service.SetSessionWidth(new(70)).SessionWidth));
         Assert.AreEqual(("unavailable", 100), (service.Zoom(new(1)).Status, service.Zoom(new(-1)).Zoom));
-        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null,"trayIcon":false,"zoom":100,"reviewPermissions":false}""",
+        Assert.AreEqual("""{"status":"unavailable","onClose":"ask","canKeepRunning":false,"platform":"windows","entryAdded":false,"sessionWidth":100,"sessionWidths":null,"trayIcon":false,"zoom":100,"reviewPermissions":false,"inheritPermissions":false}""",
             JsonSerializer.Serialize(service.Preferences(new()) with { Platform = "windows" }, DesktopJsonContext.Default.DesktopShellPreferences));
         Assert.AreEqual("""{"kind":"session-width","runningSessions":0,"busyTerminals":0,"sessionWidth":60,"sessionId":"session-1"}""",
             JsonSerializer.Serialize(new DesktopShellEvent("session-width", 0, SessionWidth: 60, SessionId: "session-1"), DesktopJsonContext.Default.DesktopShellEvent));

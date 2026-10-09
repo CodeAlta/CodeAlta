@@ -2538,7 +2538,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             () => createdSessionId,
             project?.Id,
             promptId,
-            worktreeDirectory);
+            worktreeDirectory,
+            // What the host gives a session that another session creates: by default it does not ask.
+            runtime.GetCreatedSessionPermissionMode(context.Caller.SourceSessionId, modelSelection.Selection!.ProviderKey));
 
         SessionViewDescriptor session;
         try
@@ -2578,6 +2580,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             worktreeDirectory = session.WorktreeDirectory,
             worktreeBranch = worktree?.Branch,
             modelSelection = ToModelSelectionPayload(modelSelection.Selection!, promptId),
+            permissionMode = session.PermissionMode,
         });
         return AltaExitCodes.Success;
     }
@@ -2621,6 +2624,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var info = infoResult.Info!;
+        if (!runtime.AcceptsPromptFrom(context.Caller.SourceSessionId, info.Session))
+        {
+            return PromptDenied(context);
+        }
+
         var inputText = kind is PromptDispatchKind.Message or PromptDispatchKind.Request
             ? BuildPeerAgentMessage(context, info.Session, options, promptResult.Prompt!)
             : promptResult.Prompt!;
@@ -2873,6 +2881,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (infoResult.ExitCode != AltaExitCodes.Success)
         {
             return infoResult.ExitCode;
+        }
+
+        // A reminder for another session is a prompt it is handed.
+        if (context.Services.Get<SessionRuntimeService>()?.AcceptsPromptFrom(context.Caller.SourceSessionId, infoResult.Info!.Session) == false)
+        {
+            return PromptDenied(context);
         }
 
         AltaReminderDescriptor descriptor;
@@ -3753,7 +3767,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Func<string?>? sourceSessionIdProvider,
         string? sourceProjectId,
         string? promptId = null,
-        string? worktreeDirectory = null)
+        string? worktreeDirectory = null,
+        string? permissionMode = null)
         => new()
         {
             ProviderId = new ModelProviderId(selection.ProviderKey),
@@ -3762,6 +3777,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ProjectRoots = projectRoots,
             Model = selection.ModelId,
             ReasoningEffort = selection.ReasoningEffort,
+            PermissionMode = permissionMode,
             AgentPromptId = NormalizeOptionalText(promptId),
             // The commands of the session resolve paths from the folder it works in.
             Tools = CreateAltaSessionTools(context, selection.ProviderKey, sourceSessionIdProvider, sourceProjectId, worktreeDirectory ?? workingDirectory, workingDirectory),
@@ -5669,6 +5685,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, code, AltaExitCodes.PolicyDenied, message);
         return AltaExitCodes.PolicyDenied;
     }
+
+    // In a host where a session takes the permission mode of its creator, a session does not hand a prompt to a
+    // session that asks less than it does: what the user would have reviewed here would run there without a review.
+    private static int PromptDenied(AltaCommandContext context)
+        => PermissionDenied(context, "session.promptDenied",
+            "The user reviews what this session does, and less of what the target session does: this session cannot hand it a prompt. Do the work here, or in a session you create.");
 
     // Whether the user reviews the commands of the caller, which then does nothing that runs a command nobody
     // reviewed: a background job, what is typed in a terminal, the command of an automation, a plugin that is built.

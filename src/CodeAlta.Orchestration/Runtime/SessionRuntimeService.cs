@@ -179,6 +179,61 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public string GetDefaultPermissionMode(string? providerKey)
         => ConfiguredPermissionMode(providerKey) ?? Runtime.SessionPermissionModes.Default(!_autoApproveOwnedPermissions());
 
+    /// <summary>
+    /// Gets or initializes whether a session that another session creates takes the permission mode of its creator,
+    /// read at every creation. Null or false, the default: such a session does not ask.
+    /// </summary>
+    /// <remarks>Only read where <see cref="SessionPermissionModes"/> is on.</remarks>
+    public Func<bool>? InheritPermissionMode { get; init; }
+
+    /// <summary>
+    /// Gets the permission mode a session is given when another session creates it. By default it does not ask:
+    /// it bypasses permissions, whatever the policy of the host, unless its provider is configured with a mode.
+    /// With <see cref="InheritPermissionMode"/> it asks what its creator asks.
+    /// </summary>
+    /// <param name="creatorSessionId">The session that creates it, or null when no session does.</param>
+    /// <param name="providerKey">The key of the provider of the new session.</param>
+    /// <returns>
+    /// One of <see cref="Runtime.SessionPermissionModes.HostModes"/>, or null to give the session no mode of its
+    /// own: no session creates it, the host has no mode per session, or it does not ask anyway.
+    /// </returns>
+    public string? GetCreatedSessionPermissionMode(string? creatorSessionId, string? providerKey)
+    {
+        if (!_sessionPermissionModes || string.IsNullOrWhiteSpace(creatorSessionId) || !_entries.ContainsKey(creatorSessionId)) return null;
+        var reviewByDefault = !_autoApproveOwnedPermissions();
+        var configured = ConfiguredPermissionMode(providerKey);
+        if (InheritPermissionMode?.Invoke() != true)
+            return configured is null && reviewByDefault ? Runtime.SessionPermissionModes.Bypass : null;
+        // A mode that asks is saved with the session: it keeps asking when the policy of the host changes.
+        return GetPermissionPolicy(creatorSessionId) switch
+        {
+            SessionPermissionPolicy.Review => Runtime.SessionPermissionModes.Ask,
+            SessionPermissionPolicy.AcceptEdits => Runtime.SessionPermissionModes.AcceptEdits,
+            _ => Runtime.SessionPermissionModes.Policy(configured, reviewByDefault) == SessionPermissionPolicy.Approve ? null : Runtime.SessionPermissionModes.Bypass,
+        };
+    }
+
+    /// <summary>
+    /// Gets whether a session may hand a prompt to another one. With <see cref="InheritPermissionMode"/>, a
+    /// session does not hand work to a session that asks less than it does: what it would have been asked for
+    /// would run there without a review.
+    /// </summary>
+    /// <param name="senderSessionId">The session that sends, or null when no session does.</param>
+    /// <param name="target">The session that receives the prompt.</param>
+    /// <returns>False when the prompt is refused.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="target"/> is null.</exception>
+    public bool AcceptsPromptFrom(string? senderSessionId, SessionViewDescriptor target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (!_sessionPermissionModes || InheritPermissionMode?.Invoke() != true || string.IsNullOrWhiteSpace(senderSessionId)
+            || !_entries.ContainsKey(senderSessionId) || string.Equals(senderSessionId, target.SessionId, StringComparison.Ordinal)) return true;
+        // A session that is not attached has the mode saved with it.
+        var policy = _entries.ContainsKey(target.SessionId)
+            ? GetPermissionPolicy(target.SessionId)
+            : Runtime.SessionPermissionModes.Policy(NormalizeOptionalText(target.PermissionMode) ?? ConfiguredPermissionMode(target.ResolvedProviderKey), !_autoApproveOwnedPermissions());
+        return policy <= GetPermissionPolicy(senderSessionId);
+    }
+
     private string? ConfiguredPermissionMode(string? providerKey)
     {
         if (string.IsNullOrWhiteSpace(providerKey)) return null;
@@ -896,6 +951,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             LatestSummary = UnnamedGlobalSessionSummary,
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
+            PermissionMode = NormalizeOptionalText(options.PermissionMode),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
         };
 
@@ -1007,6 +1063,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             LatestSummary = UnnamedProjectSessionSummary(project),
             ModelId = options.Model,
             ReasoningEffort = options.ReasoningEffort,
+            PermissionMode = NormalizeOptionalText(options.PermissionMode),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
         };
 
@@ -1369,7 +1426,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // with respect to them, without joining setup or retirement from inside the actor.
         await actor.QueryAsync(async actorCancellationToken =>
         {
-            await UpdateSessionLocalStateAsync(session, actorCancellationToken).ConfigureAwait(false);
+            // The mode a session is created with is saved with it: the next attachment reads it from there.
+            await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null).ConfigureAwait(false);
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
         if (startNewSession)
@@ -3943,9 +4001,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         };
     }
 
-    private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    private Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+        => UpdateSessionLocalStateAsync(session, cancellationToken, null);
+
+    // createdPermissionMode: the mode of a session that starts, when it has one. Any other update leaves the saved
+    // mode as it is: only the owner of the session changes it.
+    private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode)
     {
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
+        if (createdPermissionMode is not null) localState.PermissionMode = createdPermissionMode;
         localState.ProviderKey = session.ResolvedProviderKey;
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;

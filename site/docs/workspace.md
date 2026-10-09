@@ -608,7 +608,19 @@ that is, and the mark and the message tell you which one it is. Stopping the ses
 
 A session in a mode that asks cannot do what would run a command without asking you: start a
 [background job](sessions.md#background-jobs), type in a terminal, give an automation a command to run, or
-create and build a plugin.
+create and build a plugin. It cannot use the tools that drive the window either, where its requests are
+answered.
+
+A session that an agent creates, such as a sub-agent, does not ask you by default, whatever the default
+mode: a sub-agent that waits for an answer stops the work of the session that created it. Settings >
+Permissions > **Sessions created by agents** changes that:
+
+- **Bypass permissions** (the default): the session an agent creates does not ask. A session that asks
+  can then hand a command to a session that does not.
+- **Same as the session that creates them**: it asks what its creator asks, and a session cannot send a
+  prompt to a session that asks less than it does.
+
+The mode is given when the session is created, and you can change it in its prompt like any other.
 
 A request appears on top of the prompt of its session, with the command it would run and its folder, or the
 folder it would write under, and what the agent says it is for. Answer with **Allow once** or **Deny**, or

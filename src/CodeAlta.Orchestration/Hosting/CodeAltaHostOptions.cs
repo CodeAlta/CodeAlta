@@ -80,6 +80,13 @@ public sealed class CodeAltaHostOptions
     /// </remarks>
     public bool SessionPermissionModes { get; init; }
 
+    /// <summary>
+    /// Gets a policy read at every creation of a session by another session, for a host with
+    /// <see cref="SessionPermissionModes"/>: whether the new session takes the permission mode of its creator.
+    /// Null, the default, or false: a session another session creates does not ask.
+    /// </summary>
+    public Func<bool>? InheritPermissionModePolicy { get; init; }
+
     /// <summary>Gets whether owned sends expose the restricted, operation-bound ask producer. Default is false.</summary>
     public bool EnableOwnedAsks { get; init; }
 

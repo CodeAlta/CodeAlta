@@ -1426,6 +1426,20 @@ export const messages = dictionary({
     "Eine Sitzung kann einen eigenen Modus haben.",
     "セッションごとに独自のモードを設定できます。",
     "会话可以有自己的模式。"],
+  "Sessions created by agents": ["Sesiones creadas por agentes", "Sessions créées par des agents", "Von Agenten erstellte Sitzungen", "エージェントが作成したセッション", "智能体创建的会话"],
+  "Same as the session that creates them": ["Igual que la sesión que las crea", "Comme la session qui les crée", "Wie die erstellende Sitzung", "作成元のセッションと同じ", "与创建它的会话相同"],
+  "A session an agent creates does not ask you.": [
+    "Una sesión creada por un agente no te pregunta.",
+    "Une session créée par un agent ne vous demande rien.",
+    "Eine von einem Agenten erstellte Sitzung fragt Sie nicht.",
+    "エージェントが作成したセッションは確認を求めません。",
+    "智能体创建的会话不会询问你。"],
+  "A session an agent creates asks what the session that creates it asks.": [
+    "Una sesión creada por un agente pregunta lo mismo que la sesión que la crea.",
+    "Une session créée par un agent demande ce que demande la session qui la crée.",
+    "Eine von einem Agenten erstellte Sitzung fragt, was die erstellende Sitzung fragt.",
+    "エージェントが作成したセッションは、作成元のセッションと同じ内容を確認します。",
+    "智能体创建的会话会询问与创建它的会话相同的内容。"],
   "The setting of the CLI": ["La configuración de la CLI", "Le réglage de la CLI", "Die Einstellung der CLI", "CLI の設定", "CLI 的设置"],
   "The mode the CLI starts a session in. What the mode does not decide by itself is asked here.": [
     "El modo con el que la CLI inicia una sesión. Lo que el modo no decide por sí solo se pregunta aquí.",

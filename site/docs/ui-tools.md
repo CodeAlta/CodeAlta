@@ -79,4 +79,5 @@ The application then has the tools of the window, and `alta`, which runs the com
 - An application connected to the server can do in CodeAlta what you can do. Turn the server off on a computer you share with other people.
 - An agent saves a screenshot with `filePath`. A session saves in the folder it works in.
 - To keep sessions from driving the window, turn off the **UI tools** plugin in **Settings**, **Plugins**.
+- A session whose [permission mode](workspace.md#tool-permissions) asks before commands does not have the tools: it could answer its own requests in the window.
 - The buttons of the title bar are drawn by the system: a screenshot does not show them.

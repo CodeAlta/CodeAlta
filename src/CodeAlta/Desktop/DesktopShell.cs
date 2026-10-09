@@ -310,6 +310,25 @@ internal sealed class DesktopShell
         preferences?.Save(_dataRoot);
     }
 
+    /// <summary>
+    /// The user's setting: whether a session that another session creates takes the permission mode of its
+    /// creator, instead of not asking. Read when a session is created.
+    /// </summary>
+    internal bool InheritPermissions { get { lock (_gate) return _preferences.InheritPermissions; } }
+
+    /// <summary>Changes that setting and keeps it.</summary>
+    /// <param name="value">Whether a created session takes the mode of its creator.</param>
+    internal void SetInheritPermissions(bool value)
+    {
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            if (_preferences.InheritPermissions != value) preferences = _preferences = _preferences with { InheritPermissions = value };
+        }
+
+        preferences?.Save(_dataRoot);
+    }
+
     /// <summary>The most sessions that are shown with a width of their own at a time.</summary>
     internal const int MaximumSessionWidths = 256;
 

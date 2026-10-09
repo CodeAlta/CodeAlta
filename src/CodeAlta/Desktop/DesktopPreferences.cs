@@ -39,8 +39,12 @@ internal enum DesktopCloseBehavior
 /// on: the sessions bypass permissions, as they did before the setting existed. The host keeps it because it is
 /// the default permission policy of the sessions it owns, read at every send.
 /// </param>
+/// <param name="InheritPermissions">
+/// Whether a session that another session creates takes the permission mode of its creator. Off unless the user
+/// turned it on: such a session does not ask. The host keeps it because it reads it when a session is created.
+/// </param>
 internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true, int SessionWidth = DesktopPreferences.DefaultSessionWidth,
-    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false)
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false, bool InheritPermissions = false)
 {
     /// <summary>The least width of a conversation, in percent.</summary>
     internal const int MinimumSessionWidth = CodeAlta.LiveTool.IAltaAppearance.MinimumSessionWidth;
@@ -97,14 +101,16 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 ? percent : DefaultSessionWidth;
             // Approved automatically unless the file says otherwise: only the choice to review is written.
             var review = root.TryGetProperty("reviewPermissions", out var reviewed) && reviewed.ValueKind == JsonValueKind.True;
+            // A session another session creates does not ask unless the file says otherwise.
+            var inherit = root.TryGetProperty("inheritPermissions", out var inherited) && inherited.ValueKind == JsonValueKind.True;
             var zoom = root.TryGetProperty("zoom", out var zoomed) && zoomed.ValueKind == JsonValueKind.Number && zoomed.TryGetInt32(out var factor) && IsZoom(factor)
                 ? factor : DefaultZoom;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server, width, zoom, review);
+                return new(behavior, server, width, zoom, review, inherit);
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var kept) && kept.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review)
-                : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review };
+                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit)
+                : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review, InheritPermissions = inherit };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -125,7 +131,7 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
                 + (SessionWidth == DefaultSessionWidth ? "" : ",\"sessionWidth\":" + SessionWidth.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + "}");
+                + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + (InheritPermissions ? ",\"inheritPermissions\":true" : "") + "}");
             File.Move(temporary, path, overwrite: true);
             return true;
         }
