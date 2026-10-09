@@ -3292,8 +3292,12 @@ On narrow screens the labelled controls wrap rather than clip; exact-target evid
 separate **Abort original Send operation** remain available.
 
 Add **`--review-owned-command-permissions`** to the complete owned-mode command above to opt
-into manual review of supported plain command requests. The selected-session review shows the
-complete command, working directory and optional reason, with **Allow once / Deny / Cancel**.
+into manual review of supported command and file-change requests. The selected-session review shows a
+command with its complete command line, working directory and optional reason, and a file change with
+the complete root it asks to write under and its optional reason, with **Allow once / Deny / Cancel**.
+Each kind is held to its own whole shape: a command that carries parsed actions, network access or a
+policy amendment is refused rather than shown as less than it is, and a request that arrives with the
+fields of the other kind, or without its own, is refused with the window it came in.
 After a manual refresh, deliberately choose **Review command permission** to open the native
 HTML dialog for that exact observed entry. Opening or dismissing it performs no read or decision;
 Close/Escape dismisses presentation, unlike the explicit **Cancel** permission decision.

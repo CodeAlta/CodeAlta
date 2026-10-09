@@ -204,10 +204,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
             if (!execution.ReviewCommands || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
                 || !HasOwnedDeliveryCapacity(execution)) return null;
-            var command = (AgentCommandPermissionRequest)request;
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
-            var snapshot = new SessionPermissionSnapshot(handle, request.ProviderId, request.Timestamp, request.Kind,
-                command.Command, command.WorkingDirectory, command.Reason, null);
+            var snapshot = OwnedSnapshot(handle, request);
             var pending = new PendingPermission(snapshot,
                 new(TaskCreationOptions.RunContinuationsAsynchronously), cancellationToken, execution);
             _pending.Add(handle, pending);
@@ -352,17 +350,41 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private bool IsCanceled(PendingPermission pending)
         => pending.CancellationToken.IsCancellationRequested || (pending.OwnedExecution is { } execution && !CanUse(execution));
 
+    // A request the owned review can present: it is addressed to this execution, and it is one of the two kinds
+    // the review shows whole. A richer command prompt (parsed actions, network access, a policy amendment) is
+    // still refused rather than shown as less than it is.
     private static bool Eligible(OwnedPermissionExecution execution, AgentPermissionRequest request)
-        => request is AgentCommandPermissionRequest command
-            && request.Kind == "commandExecution" && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
+        => Addressed(execution, request) && request switch
+        {
+            AgentCommandPermissionRequest command => request.Kind == "commandExecution"
+                && ValidOwnedText(command.Command, OwnedCommandLimit, required: true)
+                && ValidOwnedText(command.WorkingDirectory, OwnedDirectoryLimit, required: true)
+                && ValidOwnedText(command.Reason, OwnedReasonLimit, required: false)
+                && command.ApprovalId is null && command.Actions is null && command.Network is null
+                && command.ProposedExecPolicyAmendment is null && command.ProposedNetworkPolicyAmendments is null,
+            AgentFileChangePermissionRequest change => request.Kind == "fileChange"
+                && ValidOwnedText(change.GrantRoot, OwnedDirectoryLimit, required: true)
+                && ValidOwnedText(change.Reason, OwnedReasonLimit, required: false),
+            _ => false,
+        };
+
+    private static bool Addressed(OwnedPermissionExecution execution, AgentPermissionRequest request)
+        => request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
             && ValidOwnedText(request.InteractionId, OwnedIdentityLimit, required: true, identity: true)
             && (request.RunId is null || ValidOwnedText(request.RunId.Value.Value, OwnedIdentityLimit, required: true, identity: true))
-            && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId)
-            && ValidOwnedText(command.Command, OwnedCommandLimit, required: true)
-            && ValidOwnedText(command.WorkingDirectory, OwnedDirectoryLimit, required: true)
-            && ValidOwnedText(command.Reason, OwnedReasonLimit, required: false)
-            && command.ApprovalId is null && command.Actions is null && command.Network is null
-            && command.ProposedExecPolicyAmendment is null && command.ProposedNetworkPolicyAmendments is null;
+            && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId);
+
+    // The presented form of an eligible request: a command carries its command line and folder, a file change
+    // carries the root it asks to write under. Only a kind <see cref="Eligible"/> accepted reaches this.
+    private static SessionPermissionSnapshot OwnedSnapshot(SessionPermissionHandle handle, AgentPermissionRequest request)
+        => request switch
+        {
+            AgentCommandPermissionRequest command => new(handle, request.ProviderId, request.Timestamp, request.Kind,
+                command.Command, command.WorkingDirectory, command.Reason, null),
+            AgentFileChangePermissionRequest change => new(handle, request.ProviderId, request.Timestamp, request.Kind,
+                null, null, change.Reason, change.GrantRoot),
+            _ => throw new InvalidOperationException($"A permission request of kind '{request.Kind}' is not presented by the owned review."),
+        };
 
     private static bool ValidOwnedText(string? value, int limit, bool required, bool identity = false)
     {

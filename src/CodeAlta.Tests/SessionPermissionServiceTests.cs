@@ -211,6 +211,10 @@ public sealed class SessionPermissionServiceTests
         new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, new AgentRunId("run"), "interaction",
         null, "echo preview", null, null, "test reason", null, null, null);
 
+    /// <summary>A file-change request of the same session, asking to write under <paramref name="grantRoot"/>.</summary>
+    internal static AgentFileChangePermissionRequest FileChange(string? grantRoot) => new(
+        new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, null, "interaction", grantRoot, "test reason");
+
     [TestMethod]
     public async Task OwnedPermission_ValidatesCompletePayloadAndRestrictsTrustedResolution()
     {
@@ -228,7 +232,10 @@ public sealed class SessionPermissionServiceTests
             foreach (var invalid in new AgentPermissionRequest[]
             {
                 new AgentGenericPermissionRequest(new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, null, "interaction", "commandExecution", default),
-                new AgentFileChangePermissionRequest(new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, null, "interaction", "Q:\\fixture", null),
+                // A file change is reviewed, but only when it says where it would write and says it completely.
+                FileChange(null), FileChange(" "), FileChange(new string('x', SessionPermissionService.OwnedDirectoryLimit + 1)),
+                FileChange("bad\udc00"), FileChange("Q:\\fixture") with { Reason = new string('x', SessionPermissionService.OwnedReasonLimit + 1) },
+                FileChange("Q:\\fixture") with { InteractionId = " " }, FileChange("Q:\\fixture") with { SessionId = "other" },
                 request with { SessionId = "other" }, request with { ProviderId = new ModelProviderId("other") },
                 request with { SessionId = "SESSION" },
                 request with { Kind = "other" },
@@ -257,12 +264,28 @@ public sealed class SessionPermissionServiceTests
                 Reason = new string('x', SessionPermissionService.OwnedReasonLimit),
                 InteractionId = new string('x', SessionPermissionService.OwnedIdentityLimit),
             };
+            // A complete file change is presented by the root it asks to write under, and carries nothing of
+            // the shape of a command.
+            var change = FileChange(new string('x', SessionPermissionService.OwnedDirectoryLimit));
+            var changePending = service.HandleOwnedCommandAsync(execution, change, CancellationToken.None);
+            deliveries.Add(changePending);
+            var changeSnapshot = (await service.ListAsync()).Single();
+            Assert.AreEqual("fileChange", changeSnapshot.Kind);
+            Assert.AreEqual(change.GrantRoot, changeSnapshot.GrantRoot);
+            Assert.AreEqual(change.Reason, changeSnapshot.Reason);
+            Assert.IsNull(changeSnapshot.Command);
+            Assert.IsNull(changeSnapshot.WorkingDirectory);
+            Assert.IsTrue(await service.ResolveAsync(changeSnapshot.Handle, AgentPermissionDecisionKind.Deny));
+            Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await changePending.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+
             var pending = service.HandleOwnedCommandAsync(execution, request, CancellationToken.None);
             deliveries.Add(pending);
             var snapshot = (await service.ListAsync()).Single();
+            Assert.AreEqual("commandExecution", snapshot.Kind);
             Assert.AreEqual(request.Command, snapshot.Command);
             Assert.AreEqual(request.WorkingDirectory, snapshot.WorkingDirectory);
             Assert.AreEqual(request.Reason, snapshot.Reason);
+            Assert.IsNull(snapshot.GrantRoot);
             var handle = snapshot.Handle;
             Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowForSession));
             Assert.IsTrue(await service.IsPendingAsync(handle));

@@ -55,6 +55,31 @@ public sealed class SessionOwnedRunBindingTests
         Assert.IsFalse(await f.Wait(f.Permissions.BindOwnedRunAsync(attached, new("run"), fresh.Token).AsTask()));
     });
 
+    [TestMethod]
+    public Task OwnedReview_PresentsAFileChangeByItsRoot_AndStillRefusesWhatItCannotShowWhole() => Fixture.Run(async f =>
+    {
+        var execution = await f.CreateExecution();
+        var callback = f.Permissions.CreateOwnedCommandHandler(execution);
+
+        // A file change is reviewed like a command: it carries the root it asks to write under, and nothing of
+        // the shape of a command.
+        var pending = f.Keep(callback(f.FileChange("edit", "inert-directory"), CancellationToken.None));
+        var entry = (await f.Wait(f.Permissions.ListOwnedCommandsAsync("session", CancellationToken.None).AsTask())).Entries.Single();
+        Assert.AreEqual("fileChange", entry.Request.Kind);
+        Assert.AreEqual("inert-directory", entry.Request.GrantRoot);
+        Assert.IsNull(entry.Request.Command);
+        Assert.IsNull(entry.Request.WorkingDirectory);
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Wait(pending)).Kind);
+
+        // A file change that does not say where it would write is not presented, and a command that carries
+        // more than the review shows whole is still refused rather than shown as less than it is.
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(callback(f.FileChange("rootless", null), CancellationToken.None)))).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(callback(f.Request("rich", null) with { ProposedExecPolicyAmendment = ["inert"] }, CancellationToken.None)))).Kind);
+    });
+
     private sealed class Fixture
     {
         private readonly object _gate = new();
@@ -84,6 +109,8 @@ public sealed class SessionOwnedRunBindingTests
         }
         internal AgentCommandPermissionRequest Request(string interaction, string? run) => new(new("inert"), "session", DateTimeOffset.UtcNow,
             run is null ? null : new AgentRunId(run), interaction, null, "inert text only", "inert-directory", null, "fixture", null, null, null);
+        internal AgentFileChangePermissionRequest FileChange(string interaction, string? grantRoot) => new(new("inert"), "session",
+            DateTimeOffset.UtcNow, null, interaction, grantRoot, "fixture");
         internal static async Task Run(Func<Fixture, Task> body)
         {
             var f = new Fixture();

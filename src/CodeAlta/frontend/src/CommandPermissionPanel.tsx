@@ -79,9 +79,12 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }
       <dt>{t("Runtime / attachment")}</dt><dd>{entry.handle.runtimeInstanceId} / {entry.handle.attachmentGeneration}</dd>
       <dt>{t("Run")}</dt><dd>{entry.handle.runId ?? t("Not supplied by provider")}</dd>
       <dt>{t("Interaction / attempt")}</dt><dd>{entry.handle.interactionId} / {entry.handle.attemptId}</dd>
-      <dt>{t("Working directory")}</dt><dd><pre data-permission-directory>{entry.workingDirectory}</pre></dd>
+      {entry.kind === "commandExecution"
+        && <><dt>{t("Working directory")}</dt><dd><pre data-permission-directory>{entry.workingDirectory}</pre></dd></>}
     </dl>
-    <p>{t("Command (complete)")}</p><pre data-permission-command>{entry.command}</pre>
+    {entry.kind === "commandExecution"
+      ? <><p>{t("Command (complete)")}</p><pre data-permission-command>{entry.command}</pre></>
+      : <><p>{t("File change under (complete)")}</p><pre data-permission-grant-root>{entry.grantRoot}</pre></>}
     {entry.reason !== null && <><p>{t("Reason")}</p><pre data-permission-reason>{entry.reason}</pre></>}
   </>;
   return <section className="command-permission-panel" aria-label={t("Pending command permissions")}>
@@ -109,8 +112,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview }
           void review.scope.decide(review.entry, decision);
         }}>{t(decision === "allow_once" ? "Allow once" : decision === "deny" ? "Deny" : "Cancel")}</button>)}</footer>
     </dialog>}
-    <h3>{t("Pending plain commands — explicit review enabled")}</h3>
-    <p className="detail">{t("Manual refresh only, at most four pending commands for this exact session. Review the complete command and directory before allowing it. Allow once can execute with the host's privileges; these roots are not a sandbox. Unsupported permission kinds/extensions remain denied. Only in-process built-in tools honor the per-send callback; other providers and custom tools are not implicitly rebound.")}</p>
+    <h3>{t("Pending commands and file changes — explicit review enabled")}</h3>
+    <p className="detail">{t("Manual refresh only, at most four pending requests for this exact session. Review the complete command and directory, or the root a file change would write under, before allowing it. Allow once can execute with the host's privileges; these roots are not a sandbox. Unsupported permission kinds/extensions remain denied. Only in-process built-in tools honor the per-send callback; other providers and custom tools are not implicitly rebound.")}</p>
     <p className="detail">{t("Deny and Cancel resolve this permission, not the entire run. Switching sessions or closing the review does not cancel pending permissions or revoke an accepted decision. Use the exact submission's Abort control separately. There is no durable recovery or execution acknowledgment.")}</p>
     <p className="detail">{t("One original decision response is retained in this renderer across selection and remount. Observe it explicitly before refreshing for another review; pending or uncertain decisions cannot be replaced or resent. Observation is local only. Renderer reload loses this record and permits only fresh manual pending reads in the same host; an empty list cannot recover a decision. Host restart recovers no old authority.")}</p>
     <button type="button" data-permission-observe onClick={() => setObservation(scope.current?.observeDecision() ?? null)}>{t("Observe retained decision")}</button>

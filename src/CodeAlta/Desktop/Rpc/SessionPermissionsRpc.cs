@@ -48,17 +48,23 @@ internal sealed class SessionPermissionsService
             var attempts = new HashSet<Guid>();
             foreach (var entry in page.Entries)
             {
+                // Each kind is held to its own complete shape: what the other kind carries must be absent, so a
+                // half-filled request is refused rather than shown with a blank command or a blank folder.
+                var shaped = entry?.Request is { } value && value.Kind switch
+                {
+                    "commandExecution" => Text(value.Command, 4096, true) && Text(value.WorkingDirectory, 1024, true) && value.GrantRoot is null,
+                    "fileChange" => Text(value.GrantRoot, 1024, true) && value.Command is null && value.WorkingDirectory is null,
+                    _ => false,
+                };
                 if (entry?.Handle is not { } handle || entry.Request is not { } summary || handle.Attempt is null
                     || handle.Attempt != summary.Handle || handle.Attempt.SessionId != request.SessionId
-                    || summary.Kind != "commandExecution" || summary.GrantRoot is not null
-                    || !Identity(summary.ProviderId.Value) || !Text(summary.Command, 4096, true)
-                    || !Text(summary.WorkingDirectory, 1024, true) || !Text(summary.Reason, 1024, false)
+                    || !shaped || !Identity(summary.ProviderId.Value) || !Text(summary.Reason, 1024, false)
                     || !attempts.Add(handle.Attempt.AttemptId)) return Error("wire_limit");
                 var wireHandle = new SessionPermissionCommandHandle(handle.OperationId.ToString("D"), handle.RuntimeInstanceId.ToString("D"),
                     handle.AttachmentGeneration.ToString(CultureInfo.InvariantCulture), handle.Attempt.SessionId,
                     handle.Attempt.RunId, handle.Attempt.InteractionId, handle.Attempt.AttemptId.ToString("D"));
                 if (!TryHandle(wireHandle, out _)) return Error("wire_limit");
-                entries.Add(new(wireHandle, summary.ProviderId.Value, summary.Command!, summary.WorkingDirectory!, summary.Reason));
+                entries.Add(new(wireHandle, summary.ProviderId.Value, summary.Kind, summary.Command, summary.WorkingDirectory, summary.GrantRoot, summary.Reason));
             }
             // Four complete commands, each <=6,144 text + 512 identity UTF-16 units. Worst-case six-byte
             // JSON escaping plus GUIDs/decimal identities/keys and 4 KiB framing fit in 192 KiB. Never truncate.
@@ -120,7 +126,13 @@ internal sealed class SessionPermissionsService
 internal sealed record SessionPermissionsRequest(string ExpectedHostEpoch, string SessionId);
 internal sealed record SessionPermissionCommandHandle(string OperationId, string RuntimeInstanceId, string AttachmentGeneration,
     string SessionId, string? RunId, string InteractionId, string AttemptId);
-internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle Handle, string ProviderId, string Command, string WorkingDirectory, string? Reason);
+/// <summary>
+/// One pending permission of a session. <paramref name="Kind"/> says which shape it has: a
+/// <c>commandExecution</c> carries <paramref name="Command"/> and <paramref name="WorkingDirectory"/> and no
+/// <paramref name="GrantRoot"/>; a <c>fileChange</c> carries only <paramref name="GrantRoot"/>.
+/// </summary>
+internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle Handle, string ProviderId, string Kind,
+    string? Command, string? WorkingDirectory, string? GrantRoot, string? Reason);
 internal sealed record SessionPermissionsPage(string Status, string HostEpoch, string? SessionId, SessionPermissionCommand[] Entries, bool HasMore);
 internal sealed record SessionPermissionResolveRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle, string Decision);
 internal sealed record SessionPermissionResolution(string Status, string HostEpoch, SessionPermissionCommandHandle? Handle);

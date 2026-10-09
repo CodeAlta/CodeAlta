@@ -28,6 +28,7 @@ const inputPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMo
   { id: "free", header: null, question: "Copy failed", options: [], allowFreeform: true },
 ] }] };
 const permissionPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMore: false, entries: [{ handle, providerId: "Settings",
+  kind: "commandExecution", grantRoot: null,
   command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny" }] };
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
