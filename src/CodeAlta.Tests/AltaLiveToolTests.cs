@@ -3035,6 +3035,240 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task Job_RunsInTheBackground_IsReadAndCancelled_AndItsEndIsGivenToItsSession()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("job-session");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var shell = new JobShell();
+        runtime.Jobs.Starter = shell.Start;
+        var services = new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime);
+        var dispatcher = CreateDispatcher(services);
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId };
+        JsonElement Record(AltaCommandResult result, string type) => ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString() == type);
+
+        // Started without waiting: the command answers with the job, and says that its result will come.
+        var start = await dispatcher.InvokeAsync(["job", "start", "--command", "gh run watch 7 --exit-status", "--title", "CI of the pull request", "--cwd", root.Path], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, start.ExitCode, start.Stdout);
+        var started = Record(start, "alta.job.started");
+        var jobId = started.GetProperty("id").GetString()!;
+        StringAssert.StartsWith(jobId, "job-");
+        Assert.AreEqual("running", started.GetProperty("state").GetString());
+        Assert.AreEqual("always", started.GetProperty("notify").GetString());
+        Assert.AreEqual(sessionId, started.GetProperty("sessionId").GetString());
+        StringAssert.Contains(started.GetProperty("nextStep").GetString(), "do not poll");
+        Assert.AreEqual(("gh run watch 7 --exit-status", root.Path), (shell.Processes[0].Command, shell.Processes[0].Folder));
+
+        // The session sees its jobs, another one does not, and a caller that is no session sees them all.
+        var mine = await dispatcher.InvokeAsync(["job", "list"], caller: caller).ConfigureAwait(false);
+        var others = await dispatcher.InvokeAsync(["job", "list"], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "another-session" }).ConfigureAwait(false);
+        var all = await dispatcher.InvokeAsync(["job", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(jobId, Record(mine, "alta.job").GetProperty("id").GetString());
+        Assert.AreEqual(0, Record(others, "alta.job.summary").GetProperty("count").GetInt32());
+        Assert.AreEqual(1, Record(all, "alta.job.summary").GetProperty("count").GetInt32());
+
+        // It is read while it runs.
+        shell.Processes[0].Write("queued\nin progress\nall checks passed\n");
+        var status = Record(await dispatcher.InvokeAsync(["job", "status", jobId], caller: caller).ConfigureAwait(false), "alta.job.status");
+        Assert.AreEqual("running", status.GetProperty("state").GetString());
+        Assert.AreEqual("all checks passed", status.GetProperty("lastLine").GetString());
+        var output = Record(await dispatcher.InvokeAsync(["job", "output", jobId, "--lines", "2"], caller: caller).ConfigureAwait(false), "alta.job.output");
+        Assert.AreEqual("in progress\nall checks passed", output.GetProperty("text").GetString());
+        Assert.IsTrue(output.GetProperty("truncated").GetBoolean());
+        Assert.AreEqual(0, providerRuntime.SentOptions.Count);
+
+        // Its end starts a turn of the session, which had none.
+        shell.Processes[0].Exit(0);
+        await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+        var prompt = ExtractText(providerRuntime.SentOptions[0].Input);
+        StringAssert.StartsWith(prompt, "[CodeAlta background job]");
+        StringAssert.Contains(prompt, "Job: " + jobId);
+        StringAssert.Contains(prompt, "Result: succeeded (exit code 0)");
+        StringAssert.Contains(prompt, "all checks passed");
+        await runtime.Jobs.WhenSettledAsync(jobId).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        var ended = Record(await dispatcher.InvokeAsync(["job", "status", jobId], caller: caller).ConfigureAwait(false), "alta.job.status");
+        Assert.AreEqual(("succeeded", 0, "queued"), (ended.GetProperty("state").GetString(), ended.GetProperty("exitCode").GetInt32(), ended.GetProperty("resultPrompt").GetString()));
+
+        // A job that ends while the session runs is given to the turn that runs, and a failure is told as a success is.
+        var failing = Record(await dispatcher.InvokeAsync(["job", "start", "--stdin", "--timeout", "00:30:00", "--cwd", root.Path], caller: caller, stdin: "dotnet test\n").ConfigureAwait(false), "alta.job.started");
+        Assert.AreEqual("dotnet test", shell.Processes[1].Command);
+        Assert.AreEqual(("always", 1800L), (failing.GetProperty("notify").GetString(), failing.GetProperty("timeoutSeconds").GetInt64()));
+        shell.Processes[1].Write("2 tests failed\n");
+        shell.Processes[1].Exit(1);
+        await WaitUntilAsync(() => providerRuntime.SteeredOptions.Count == 1).ConfigureAwait(false);
+        var steered = ExtractText(providerRuntime.SteeredOptions[0].Input);
+        StringAssert.Contains(steered, "Job: " + failing.GetProperty("id").GetString());
+        StringAssert.Contains(steered, "Result: failed (exit code 1)");
+        StringAssert.Contains(steered, "2 tests failed");
+
+        // A job the session cancels tells nothing.
+        var waiting = Record(await dispatcher.InvokeAsync(["job", "start", "--command", "sleep 600", "--notify", "always", "--cwd", root.Path], caller: caller).ConfigureAwait(false), "alta.job.started");
+        var cancelled = Record(await dispatcher.InvokeAsync(["job", "cancel", waiting.GetProperty("id").GetString()!], caller: caller).ConfigureAwait(false), "alta.job.cancelled");
+        Assert.AreEqual(("cancelled", true), (cancelled.GetProperty("state").GetString(), cancelled.GetProperty("wasRunning").GetBoolean()));
+        Assert.IsTrue(shell.Processes[2].Killed);
+        await runtime.Jobs.WhenSettledAsync(waiting.GetProperty("id").GetString()).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        Assert.AreEqual((1, 1), (providerRuntime.SentOptions.Count, providerRuntime.SteeredOptions.Count));
+
+        // What is asked wrongly is refused before anything runs.
+        foreach (var (arguments, code, exitCode) in new (string[] Arguments, string Code, int ExitCode)[]
+                 {
+                     (["job", "start", "--cwd", root.Path], "usage.missingCommand", AltaExitCodes.Usage),
+                     (["job", "start", "--command", "echo", "--stdin", "--cwd", root.Path], "usage.commandConflict", AltaExitCodes.Usage),
+                     (["job", "start", "--command", "echo", "--notify", "sometimes", "--cwd", root.Path], "usage.invalidNotify", AltaExitCodes.Usage),
+                     (["job", "start", "--command", "echo", "--timeout", "soon", "--cwd", root.Path], "usage.invalidTimeout", AltaExitCodes.Usage),
+                     (["job", "start", "--command", "echo", "--timeout", "0", "--cwd", root.Path], "usage.invalidTimeout", AltaExitCodes.Usage),
+                     (["job", "start", "--command", "echo", "--cwd", Path.Combine(root.Path, "missing")], "folder.notFound", AltaExitCodes.NotFound),
+                     (["job", "status", "job-unknown"], "job.notFound", AltaExitCodes.NotFound),
+                     (["job", "output", jobId, "--lines", "0"], "usage.invalidLines", AltaExitCodes.Usage),
+                     (["job", "cancel"], "Missing required argument `<job-id>`", AltaExitCodes.Usage),
+                 })
+        {
+            var refused = await dispatcher.InvokeAsync(arguments, caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(exitCode, refused.ExitCode, string.Join(' ', arguments));
+            StringAssert.Contains(refused.Stdout, code, string.Join(' ', arguments));
+        }
+
+        // A job belongs to a session: a caller that is none names one.
+        var noSession = await dispatcher.InvokeAsync(["job", "start", "--command", "echo", "--cwd", root.Path], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        StringAssert.Contains(noSession.Stdout, "usage.missingSession");
+        var named = await dispatcher.InvokeAsync(["job", "start", "--command", "echo", "--cwd", root.Path, "--session", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(sessionId, Record(named, "alta.job.started").GetProperty("sessionId").GetString());
+        var unknown = await dispatcher.InvokeAsync(["job", "start", "--command", "echo", "--cwd", root.Path, "--session", "no-such-session"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, unknown.ExitCode);
+        Assert.AreEqual(4, shell.Processes.Count);
+
+        // A host that has the user review the commands of its sessions starts none of them this way.
+        var reviewed = CreateDispatcher(services.Add(new AltaJobPolicy(AcceptsCommands: false)));
+        var denied = await reviewed.InvokeAsync(["job", "start", "--command", "echo", "--cwd", root.Path], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.ExitCode);
+        StringAssert.Contains(denied.Stdout, "job.startDenied");
+        Assert.AreEqual(4, shell.Processes.Count);
+        Assert.AreEqual(AltaExitCodes.Success, (await reviewed.InvokeAsync(["job", "list"], caller: caller).ConfigureAwait(false)).ExitCode);
+    }
+
+    [TestMethod]
+    public async Task Job_IsABackgroundTaskOfItsSession_ThatTheUserStops()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("job-task");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var shell = new JobShell();
+        runtime.Jobs.Starter = shell.Start;
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId };
+        Assert.AreEqual(0, runtime.CountSessionsAtWork());
+
+        var start = await dispatcher.InvokeAsync(["job", "start", "--command", "npm run build", "--title", "Build", "--notify", "always", "--cwd", root.Path], caller: caller).ConfigureAwait(false);
+        var jobId = ReadJsonLines(start.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.job.started").GetProperty("id").GetString()!;
+
+        // What the window reads of the session: the job is one of its background tasks, and the session is at work.
+        var task = (await runtime.GetCurrentStateAsync(sessionId).ConfigureAwait(false)).Entry!.BackgroundTasks.Single();
+        Assert.AreEqual((jobId, "command", "Build", true), (task.TaskId, task.Kind, task.Description, task.IsJob));
+        Assert.IsNull(task.Outcome);
+        Assert.AreEqual(1, runtime.ListOverview().Single(overview => overview.SessionId == sessionId).BackgroundTasks);
+        Assert.IsFalse(runtime.ListOverview().Single(overview => overview.SessionId == sessionId).Running, "A job is not a turn.");
+        Assert.AreEqual(1, runtime.CountSessionsAtWork());
+
+        // The user stops it as any background task; a job of another session, or one that is not known, is not stopped.
+        Assert.IsFalse(await runtime.StopBackgroundTaskAsync("another-session", jobId).ConfigureAwait(false));
+        Assert.IsFalse(await runtime.StopBackgroundTaskAsync(sessionId, "job-unknown").ConfigureAwait(false));
+        Assert.IsTrue(await runtime.StopBackgroundTaskAsync(sessionId, jobId).ConfigureAwait(false));
+        Assert.IsTrue(shell.Processes[0].Killed);
+
+        // The job asked to be told every end: the session that waited for it hears that the user stopped it.
+        await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+        StringAssert.Contains(ExtractText(providerRuntime.SentOptions[0].Input), "Result: stopped before it ended");
+        var stopped = (await runtime.GetCurrentStateAsync(sessionId).ConfigureAwait(false)).Entry!.BackgroundTasks.Single();
+        Assert.AreEqual(AgentBackgroundTaskOutcome.Stopped, stopped.Outcome);
+        Assert.IsNotNull(stopped.EndedAt);
+        Assert.AreEqual(0, runtime.ListOverview().Single(overview => overview.SessionId == sessionId).BackgroundTasks);
+        Assert.IsFalse(await runtime.StopBackgroundTaskAsync(sessionId, jobId).ConfigureAwait(false), "It ended: there is nothing left to stop.");
+    }
+
+    [TestMethod]
+    public async Task Job_IsACommandOfEveryHost_WithItsHelp()
+    {
+        var dispatcher = CreateDispatcher();
+
+        var root = await dispatcher.InvokeAsync(["--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var group = await dispatcher.InvokeAsync(["job", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var start = await dispatcher.InvokeAsync(["job", "start", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var tools = await dispatcher.InvokeAsync(["tool", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        StringAssert.Contains(root.Stdout, "alta job start");
+        foreach (var leaf in new[] { "start", "list", "status", "output", "cancel" })
+        {
+            StringAssert.Contains(group.Stdout, leaf);
+            StringAssert.Contains(tools.Stdout, "job " + leaf);
+        }
+
+        StringAssert.Contains(group.Stdout, "--timeout");
+        StringAssert.Contains(start.Stdout, "--notify");
+        StringAssert.Contains(start.Stdout, "--timeout");
+        StringAssert.Contains(start.Stdout, "--stdin");
+    }
+
+    /// <summary>Commands of jobs that run nothing: a test writes for them and ends them.</summary>
+    private sealed class JobShell
+    {
+        private readonly List<JobProcess> _processes = [];
+
+        public IReadOnlyList<JobProcess> Processes
+        {
+            get { lock (_processes) return [.. _processes]; }
+        }
+
+        public CodeAlta.Orchestration.Jobs.IShellCommandProcess Start(string command, string folder, Action<string> onOutput)
+        {
+            var process = new JobProcess(command, folder, onOutput);
+            lock (_processes) _processes.Add(process);
+            return process;
+        }
+    }
+
+    private sealed class JobProcess(string command, string folder, Action<string> onOutput) : CodeAlta.Orchestration.Jobs.IShellCommandProcess
+    {
+        private readonly TaskCompletionSource<int> _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public string Command { get; } = command;
+        public string Folder { get; } = folder;
+        public bool Killed { get; private set; }
+        public int? ProcessId => 4242;
+        public Task<int> Completion => _exit.Task;
+
+        public void Write(string text) => onOutput(text);
+        public void Exit(int code) => _exit.TrySetResult(code);
+
+        public void Kill()
+        {
+            Killed = true;
+            _exit.TrySetResult(-1);
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    [TestMethod]
     public async Task ReminderListAndDelete_ManageRepeatedReminders()
     {
         using var root = TempDirectory.Create();

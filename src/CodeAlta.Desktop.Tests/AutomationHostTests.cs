@@ -85,7 +85,7 @@ public sealed class AutomationHostTests
         Assert.AreEqual("refused", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x"), "unknown"), default)).Status);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Id = "not-an-id" }, null), default)).Status);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Effort = "extreme" }, null), default)).Status);
-        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [new("sometimes", 0, 1, [], [], null, "opened", "trusted")] }, null), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [new("sometimes", 0, 1, [], [], null, "opened", "trusted", null, null)] }, null), default)).Status);
         Assert.AreEqual(1, (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Count);
     }
 
@@ -135,15 +135,15 @@ public sealed class AutomationHostTests
     public async Task Rpc_PreviewsATrigger_AndTellsWhenSomethingChanges()
     {
         await using var fixture = await Fixture.CreateAsync();
-        var preview = fixture.Rpc.Preview(new(Epoch, new("hourly", 15, 6, [], [], null, "opened", "trusted")));
+        var preview = fixture.Rpc.Preview(new(Epoch, new("hourly", 15, 6, [], [], null, "opened", "trusted", null, null)));
         Assert.AreEqual("ok", preview.Status);
         CollectionAssert.AreEqual(new[] { 12, 18, 0, 6, 12 }, preview.Times.Select(static time => time.Hour).ToArray());
         Assert.IsTrue(preview.Times.All(static time => time.Minute == 15));
-        var wrong = fixture.Rpc.Preview(new(Epoch, new("cron", 0, 1, [], [], "61 * * * *", "opened", "trusted")));
+        var wrong = fixture.Rpc.Preview(new(Epoch, new("cron", 0, 1, [], [], "61 * * * *", "opened", "trusted", null, null)));
         Assert.AreEqual("refused", wrong.Status);
         Assert.IsFalse(string.IsNullOrWhiteSpace(wrong.Message));
-        Assert.AreEqual("invalid_request", fixture.Rpc.Preview(new(Epoch, new("daily", 0, 1, ["25:00"], [], null, "opened", "trusted"))).Status);
-        Assert.AreEqual("stale_epoch", fixture.Rpc.Preview(new("other", new("daily", 0, 1, ["09:00"], [], null, "opened", "trusted"))).Status);
+        Assert.AreEqual("invalid_request", fixture.Rpc.Preview(new(Epoch, new("daily", 0, 1, ["25:00"], [], null, "opened", "trusted", null, null))).Status);
+        Assert.AreEqual("stale_epoch", fixture.Rpc.Preview(new("other", new("daily", 0, 1, ["09:00"], [], null, "opened", "trusted", null, null))).Status);
 
         using var stop = new CancellationTokenSource(Patience);
         await using var events = fixture.Rpc.WatchAsync(new(Epoch), stop.Token).GetAsyncEnumerator(stop.Token);
@@ -302,6 +302,92 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task Rpc_SavesACommandTrigger_ListsIt_AndSaysWhatIsWrongWithItsCommand()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var tools = Directory.CreateDirectory(Path.Combine(fixture.Project.ProjectPath, "tools")).FullName;
+        AutomationTriggerItem Command(string? command, string? folder) => new("command", 0, 1, [], [], null, "opened", "trusted", command, folder);
+
+        var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("Watch the build") with { ProjectId = fixture.Project.Id, Triggers = [Command("  gh run watch 123 --exit-status ", " tools ")] }, null), default);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.GlobalPath), "triggers = [\n  { type = \"command\", command = \"gh run watch 123 --exit-status\", cwd = \"tools\" },\n]");
+
+        var item = (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single();
+        var trigger = item.Triggers.Single();
+        Assert.AreEqual(("command", "gh run watch 123 --exit-status", "tools", null, null), (trigger.Type, trigger.Command, trigger.Folder, item.NextRunAt, item.WatchProblem));
+        // It is not a time on the clock: there is nothing to preview, and nothing in the day to come.
+        var preview = fixture.Rpc.Preview(new(Epoch, trigger));
+        Assert.AreEqual(("ok", 0), (preview.Status, preview.Times.Count));
+        Assert.AreEqual(0, (await fixture.Rpc.ListAsync(new(Epoch), default)).Upcoming.Count);
+
+        // Saved in the window, its command runs, in the folder it names.
+        fixture.Service.Tick(Noon);
+        Assert.AreEqual(tools, fixture.Commands.Single("gh run watch 123 --exit-status").Folder);
+
+        // A chat has one too; a folder that does not exist is said on the automation.
+        var chat = await fixture.Rpc.SaveAsync(new(Epoch, Input("A chat") with { Triggers = [Command("wait-for-it", "no-such-folder-of-codealta")] }, null), default);
+        Assert.AreEqual("ok", chat.Status, chat.Message);
+        fixture.Service.Tick(Noon);
+        var listed = (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(candidate => candidate.Id == chat.Id);
+        StringAssert.StartsWith(listed.WatchProblem, "The folder of its command does not exist: ");
+        Assert.AreEqual((null, null), (listed.Triggers.Single().Expression, listed.ProjectId));
+
+        // The other triggers carry neither a command nor a folder, whatever the page sends.
+        var daily = await fixture.Rpc.SaveAsync(new(Epoch, Input("Daily") with { Triggers = [new("daily", 0, 1, ["09:00"], [], null, "opened", "trusted", "left over", "left over")] }, null), default);
+        var plain = (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(candidate => candidate.Id == daily.Id).Triggers.Single();
+        Assert.AreEqual((null, null), (plain.Command, plain.Folder));
+
+        Assert.AreEqual(("refused", "A command trigger has a command."), Outcome(await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [Command(" ", null)] }, null), default)));
+        Assert.AreEqual(("refused", "A command trigger has a command."), Outcome(await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [Command(null, null)] }, null), default)));
+        Assert.AreEqual("refused", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [Command("one\ntwo", null)] }, null), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [Command(new string('x', AutomationTrigger.MaximumCommandLength * 2 + 1), null)] }, null), default)).Status);
+        Assert.AreEqual(3, (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Count);
+    }
+
+    [TestMethod]
+    public async Task ASession_CreatesACommandTrigger_UnlessTheHostHasTheUserReviewItsCommands()
+    {
+        await using (var fixture = await Fixture.CreateAsync())
+        {
+            var created = await fixture.One("alta.automation.created", "automation", "create", "--name", "Watch the build", "--chat", "--trigger", "command@gh run watch 123 --exit-status",
+                "--content", "Say what the build did.");
+            CollectionAssert.AreEqual(new[] { "command@gh run watch 123 --exit-status" }, created.GetProperty("triggers").EnumerateArray().Select(static value => value.GetString()).ToArray());
+            var trigger = fixture.Service.Snapshot.Find(Text(created, "id")!)!.Definition.Triggers.Single();
+            Assert.AreEqual((AutomationTriggerKind.Command, "gh run watch 123 --exit-status", null), (trigger.Kind, trigger.Command, trigger.Folder));
+            StringAssert.Contains((await fixture.Alta.InvokeAsync(["automation", "--help"])).Stdout, "command@<command line>");
+
+            var empty = await fixture.Run(["automation", "create", "--name", "x", "--content", "y", "--trigger", "command@"]);
+            Assert.AreEqual(AltaExitCodes.Usage, empty.Code);
+            StringAssert.Contains(empty.Text, "A command trigger has a command.");
+        }
+
+        // The command of a trigger is one nobody reviewed: such a host takes none from a session.
+        await using var review = await Fixture.CreateAsync(acceptsCommands: false);
+        var denied = await review.Run(["automation", "create", "--name", "Watch", "--chat", "--trigger", "daily@09:00", "--trigger", "command@wait-for-it", "--content", "x"]);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.Code, denied.Text);
+        StringAssert.Contains(denied.Text, "automation.commandDenied");
+        StringAssert.Contains(denied.Text, "The user creates it in the Automations tab.");
+        Assert.AreEqual(0, review.Service.Snapshot.Entries.Count, "Nothing is written.");
+        Assert.AreEqual(AltaExitCodes.Success, (await review.Run(["automation", "create", "--name", "Daily", "--chat", "--trigger", "daily@09:00", "--content", "x"])).Code);
+
+        // The user still writes one in the window. A session does not start its command; it may end it.
+        var input = Input("By the user") with { Enabled = false, Triggers = [new("command", 0, 1, [], [], null, "opened", "trusted", "wait-for-it", null)] };
+        var id = (await review.Rpc.SaveAsync(new(Epoch, input, null), default)).Id!;
+        var enable = await review.Run(["automation", "enable", id]);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+        StringAssert.Contains(enable.Text, "automation.commandDenied");
+        Assert.IsFalse(review.Service.Snapshot.Find(id)!.Definition.Enabled);
+        Assert.AreEqual("ok", (await review.Rpc.SetEnabledAsync(new(Epoch, id, true), default)).Status);
+        review.Service.Tick(Noon);
+        var command = review.Commands.Single("wait-for-it");
+        Assert.AreEqual("False", Text(await review.One("alta.automation.changed", "automation", "disable", id), "enabled"));
+        review.Service.Tick(Noon);
+        Assert.IsTrue(command.Killed);
+        Assert.AreEqual(id, Text(await review.One("alta.automation.deleted", "automation", "delete", id), "id"));
+        Assert.AreEqual(1, review.Commands.Count);
+    }
+
+    [TestMethod]
     public void TriggerText_ReadsWhatItWrites_AndSaysWhatIsWrong()
     {
         foreach (var text in new[]
@@ -341,7 +427,7 @@ public sealed class AutomationHostTests
     public async Task Upcoming_ListsADenseScheduleOncePerSlot()
     {
         await using var fixture = await Fixture.CreateAsync();
-        var minute = (await fixture.Rpc.SaveAsync(new(Epoch, Input("Every minute") with { Triggers = [new("cron", 0, 1, [], [], "* * * * *", "opened", "trusted")] }, null), default)).Id!;
+        var minute = (await fixture.Rpc.SaveAsync(new(Epoch, Input("Every minute") with { Triggers = [new("cron", 0, 1, [], [], "* * * * *", "opened", "trusted", null, null)] }, null), default)).Id!;
         var twice = (await fixture.Rpc.SaveAsync(new(Epoch, Input("Twice"), null), default)).Id!;
         var manual = (await fixture.Rpc.SaveAsync(new(Epoch, Input("By hand") with { Triggers = [] }, null), default)).Id!;
         var disabled = (await fixture.Rpc.SaveAsync(new(Epoch, Input("Disabled") with { Enabled = false }, null), default)).Id!;
@@ -485,7 +571,7 @@ public sealed class AutomationHostTests
     }
 
     private static AutomationInput Input(string name)
-        => new(null, name, true, "Do the thing.", null, null, null, null, null, false, [new("daily", 0, 1, ["17:30", "09:00"], [], null, "opened", "trusted")]);
+        => new(null, name, true, "Do the thing.", null, null, null, null, null, false, [new("daily", 0, 1, ["17:30", "09:00"], [], null, "opened", "trusted", null, null)]);
 
     private static (string Status, string? Message) Outcome(AutomationMutationResponse response) => (response.Status, response.Message);
 
@@ -500,13 +586,13 @@ public sealed class AutomationHostTests
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands)
         {
             (_root, Project, Other) = (root, project, other);
             Service = new AutomationService(GlobalPath, token => projects.LoadAsync(token), new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false),
-                Runner, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc);
+                Runner, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc, commands: Commands);
             Rpc = new AutomationsService(Service, projects, Epoch);
-            var services = new AltaServiceCollection().Add(projects).Add<IAltaAutomations>(new DesktopAltaAutomations(Service, projects));
+            var services = new AltaServiceCollection().Add(projects).Add<IAltaAutomations>(new DesktopAltaAutomations(Service, projects, acceptsCommands));
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -517,18 +603,20 @@ public sealed class AutomationHostTests
         public ProjectDescriptor Project { get; }
         public ProjectDescriptor Other { get; }
         public FakeAutomationRunner Runner { get; } = new();
+        public FakeAutomationCommands Commands { get; } = new();
         public AutomationService Service { get; }
         public AutomationsService Rpc { get; }
         public AltaCommandDispatcher Alta { get; }
         public AltaCallerIdentity Session { get; }
 
-        public static async Task<Fixture> CreateAsync()
+        /// <param name="acceptsCommands">False for a host that has the user review the commands of its sessions.</param>
+        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true)
         {
             var root = Directory.CreateTempSubdirectory("codealta-automation-host-").FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
-            var fixture = new Fixture(root, projects, project, other);
+            var fixture = new Fixture(root, projects, project, other, acceptsCommands);
             await fixture.Service.RefreshAsync();
             return fixture;
         }

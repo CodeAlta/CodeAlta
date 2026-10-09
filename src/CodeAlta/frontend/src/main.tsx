@@ -29,7 +29,7 @@ import {
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
-import { backgroundCalls, runningBackgroundTasks, type BackgroundTaskState } from "./backgroundTasks";
+import { backgroundCalls, runningBackgroundTasks, type BackgroundCallState } from "./backgroundTasks";
 import { MessageLinksContext } from "./TimelineMessage";
 import { markdownHrefKind, openMarkdownLink, type MarkdownLinkScope } from "./markdownLinks";
 import { MarkdownLinkScopeContext } from "./MarkdownContent";
@@ -3232,7 +3232,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
   const [askFileSlot, setAskFileSlot] = useState<HTMLDivElement | null>(null);
   const [running, setRunning] = useState<boolean | null>(null);
   // The tool calls whose task goes on in the background, or ended there: their tiles say so.
-  const [backgroundCallStates, setBackgroundCallStates] = useState<ReadonlyMap<string, BackgroundTaskState>>(() => new Map());
+  const [backgroundCallStates, setBackgroundCallStates] = useState<ReadonlyMap<string, BackgroundCallState>>(() => new Map());
   const [timelineNotices, setTimelineNotices] = useState<HTMLDivElement | null>(null);
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
@@ -3370,7 +3370,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
             const calls = backgroundCalls(background ?? []);
             setBackgroundCallStates(current => current.size === calls.size && [...calls].every(([call, state]) => current.get(call) === state) ? current : calls);
             onRunActivity?.(value, runningBackgroundTasks(background ?? []).length);
-          }} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          }} toolOutputs={toolOutputs} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}

@@ -3,8 +3,10 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { createPortal } from "react-dom";
 import { PromptImageAttachments } from "./PromptImageAttachments";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
+import { BackgroundJobDialog } from "./BackgroundJobDialog";
 import { BackgroundTasksStatus } from "./BackgroundTaskViews";
-import { backgroundTasks, runningBackgroundTasks, sameBackgroundTasks, type BackgroundTask } from "./backgroundTasks";
+import { backgroundTasks, sameBackgroundTasks, type BackgroundTask } from "./backgroundTasks";
+import type { ToolOutputs } from "./toolOutput";
 import type { DisplayState } from "./sessionDisplay";
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from "react";
 import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectReferencePicker";
@@ -61,7 +63,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
   }
 }
 
-export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
+export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
   active?: boolean;
   observing?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
@@ -86,6 +88,8 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
   /** Reports whether this session is working while the panel watches it, and null once it no longer does. */
   /** What the panel sees of the run of the session and of the tasks of its provider; null when it stops watching. */
   onRunActivity?: (running: boolean | null, background?: readonly BackgroundTask[]) => void;
+  /** The live output of the session, for what its background jobs write. */
+  toolOutputs?: ToolOutputs;
   onOpenReminders?: () => void;
   /** A prompt from the New session tab: sent once, when this composer holds exactly that text and its choices are validated. */
   autoSend?: { text: string; consume: () => void } | null;
@@ -388,7 +392,6 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
     const read = invalidEpoch || runtimeState?.kind !== "ready" ? [] : backgroundTasks(runtimeState.snapshot.entry);
     setBackground(current => sameBackgroundTasks(current, read) ? current : read);
   }, [runtimeState, invalidEpoch]);
-  const backgroundRunning = useMemo(() => runningBackgroundTasks(background), [background]);
   const stopBackgroundTask = useCallback(async (taskId: string) => {
     if (!capability.canMutate()) return;
     // The answer is not shown: the task leaves the list when its provider stopped it.
@@ -878,7 +881,8 @@ export function OwnedSessionPanel({ onRunActivity, sessionId, epoch, projectId =
       {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
         : compacting ? t("Compacting…")
         : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}
-      <BackgroundTasksStatus tasks={backgroundRunning} disabled={invalidEpoch} onStop={stopBackgroundTask} /></>}
+      <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
+        renderOutput={props => <BackgroundJobDialog {...props} outputs={toolOutputs} />} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
       onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: t("Ask CodeAlta to work on this project…"), onKeyDown: event => {

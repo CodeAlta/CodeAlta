@@ -1456,6 +1456,16 @@ public static class AgentBuiltInToolFactory
         }
     }
 
+    /// <summary>
+    /// Creates what starts a command in the shell <c>shell_command</c> uses, for a host that runs a command by itself
+    /// (a background job): the same interpreter, arguments and environment, with both outputs redirected.
+    /// </summary>
+    /// <param name="command">The command line.</param>
+    /// <param name="workdir">The folder the command runs in.</param>
+    /// <returns>The start information; the caller sets what it needs more (encodings, a closed input).</returns>
+    internal static ProcessStartInfo CreateShellStartInfo(string command, string workdir)
+        => CreateShellProcessSpec(command, workdir, login: false).StartInfo;
+
     private static ShellProcessSpec CreateShellProcessSpec(string command, string workdir, bool login)
     {
         if (OperatingSystem.IsWindows())

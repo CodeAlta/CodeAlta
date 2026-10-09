@@ -7,7 +7,7 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="ProjectId">The project of the session; <see langword="null"/> for a chat.</param>
 /// <param name="Title">The title of the session, as the runtime knows it.</param>
 /// <param name="Running">Whether a run is in flight or queued prompts are being sent.</param>
-/// <param name="BackgroundTasks">How many tasks its provider goes on doing in the background.</param>
+/// <param name="BackgroundTasks">How many tasks go on in the background for it: those of its provider and its background jobs.</param>
 /// <param name="Failed">Whether its last run ended with an error and no run started since.</param>
 public sealed record SessionRuntimeOverview(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed);
 
@@ -49,9 +49,9 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
     public SessionRuntimeActivity? Activity { get; init; }
 
     /// <summary>
-    /// What the provider of this attachment does in the background outside its runs, as its last event listed it:
-    /// the tasks that go on, then the last ones that failed or were stopped. Bounded; empty for a provider that
-    /// has no such tasks.
+    /// What goes on in the background for the session outside its runs: the tasks of the provider of this
+    /// attachment, as its last event listed them, and the background jobs of the session. The ones that go on come
+    /// first, then the last ones that ended. Bounded; empty when there is none.
     /// </summary>
     public IReadOnlyList<SessionRuntimeBackgroundTask> BackgroundTasks { get; init; } = [];
 }
@@ -64,7 +64,20 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
 /// <param name="StartedAt">When the task was first known; null for a task that ended.</param>
 /// <param name="Outcome">Null while the task goes on; how it ended otherwise.</param>
 public sealed record SessionRuntimeBackgroundTask(string TaskId, string Kind, string? Description, string? ToolCallId,
-    DateTimeOffset? StartedAt, AgentBackgroundTaskOutcome? Outcome);
+    DateTimeOffset? StartedAt, AgentBackgroundTaskOutcome? Outcome)
+{
+    /// <summary>
+    /// Gets a value indicating whether the task is a background job of the host (<see cref="Jobs.SessionJobService"/>),
+    /// whose output can be read, rather than a task of the provider.
+    /// </summary>
+    public bool IsJob { get; init; }
+
+    /// <summary>Gets the exit code of the command of a job that ended by itself.</summary>
+    public int? ExitCode { get; init; }
+
+    /// <summary>Gets when a job ended; null while it runs, and for a task of the provider.</summary>
+    public DateTimeOffset? EndedAt { get; init; }
+}
 
 /// <summary>Actor-owned attachment-local activity. Arrival order, not maximum timestamp; never a journal total.</summary>
 /// <param name="Timestamp">Timestamp of the last valid matching admitted agent event, otherwise unknown.</param>

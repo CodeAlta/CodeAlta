@@ -31,7 +31,10 @@ public interface IAltaAutomations
     /// <summary>Writes a new automation in the configuration of the user, or of the project it runs in.</summary>
     /// <param name="request">The automation.</param>
     /// <param name="cancellationToken">Cancels before the file is written.</param>
-    /// <returns>The identifier of the automation with the status <c>ok</c>, or why it was refused.</returns>
+    /// <returns>
+    /// The identifier of the automation with the status <c>ok</c>, or why it was refused: <c>refused</c>, or
+    /// <c>denied</c> for a command trigger in a host that has the user review the commands of its sessions.
+    /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
     Task<AltaAutomationChange> CreateAsync(AltaAutomationRequest request, CancellationToken cancellationToken);
 
@@ -39,7 +42,10 @@ public interface IAltaAutomations
     /// <param name="id">The identifier of the automation.</param>
     /// <param name="enabled">Whether its triggers start it.</param>
     /// <param name="cancellationToken">Cancels before the file is written.</param>
-    /// <returns>The status <c>ok</c>, <c>not_found</c>, or <c>refused</c> with the reason.</returns>
+    /// <returns>
+    /// The status <c>ok</c>, <c>not_found</c>, <c>refused</c> with the reason, or <c>denied</c> when enabling it
+    /// would start a command in a host that has the user review the commands of its sessions.
+    /// </returns>
     Task<AltaAutomationChange> SetEnabledAsync(string id, bool enabled, CancellationToken cancellationToken);
 
     /// <summary>Removes an automation from its configuration file. Its runs and their sessions stay.</summary>
@@ -62,7 +68,7 @@ public interface IAltaAutomations
 /// <param name="Triggers">
 /// Its triggers, such as <c>daily@09:00</c>, <c>hourly@15</c>, <c>weekly@mon,thu@08:30</c>, <c>cron@0 9 * * 1-5</c>,
 /// <c>issue@opened</c> or <c>pull_request@updated</c>, the last two with <c>+anyone</c> when they run for every
-/// author. None: it is run by hand.
+/// author, or <c>command@&lt;command line&gt;</c> for a command it keeps running. None: it is run by hand.
 /// </param>
 /// <param name="Problem">Why it cannot run as defined; null when it can.</param>
 /// <param name="NextRunAt">When a schedule of it is next due; null without one, when disabled or while the automations are paused.</param>
@@ -83,7 +89,7 @@ public sealed record AltaAutomation(string Id, string Name, bool Enabled, string
 /// <param name="StartedAt">When the run started.</param>
 /// <param name="EndedAt">When it ended; null while it runs.</param>
 /// <param name="Trigger">What started it: <c>manual</c>, or the kind of the trigger.</param>
-/// <param name="Detail">What the trigger was about, such as the issue that was opened.</param>
+/// <param name="Detail">What the trigger was about, such as the issue that was opened, or the last line its command wrote.</param>
 /// <param name="Status"><c>running</c>, <c>completed</c>, <c>failed</c>, <c>cancelled</c>, <c>interrupted</c> or <c>skipped</c>.</param>
 /// <param name="Message">Why the run failed or was skipped.</param>
 public sealed record AltaAutomationRun(string Id, string AutomationId, string? Name, string? SessionId, string? ProjectId, DateTimeOffset StartedAt,
@@ -120,7 +126,7 @@ public sealed record AltaAutomationRequest(string Name, string Prompt)
 }
 
 /// <summary>What a change to the automations gave.</summary>
-/// <param name="Status"><c>ok</c>, <c>not_found</c>, or <c>refused</c>.</param>
+/// <param name="Status"><c>ok</c>, <c>not_found</c>, <c>refused</c>, or <c>denied</c>.</param>
 /// <param name="Id">The automation that was written.</param>
 /// <param name="Message">Why the change was refused.</param>
 public sealed record AltaAutomationChange(string Status, string? Id = null, string? Message = null);

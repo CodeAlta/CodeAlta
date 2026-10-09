@@ -43,6 +43,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Model providers, sessions, agent prompts, skills, MCP servers, plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
     <tr><th scope="row">Delegated agents, prompt queue, steering, compaction</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
     <tr><th scope="row">Notes, reminders and asks</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Background jobs: commands an agent starts without waiting for them</th><td>{{ alta_yes }} <small>Listed in the session, with their output</small></td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">Automations: prompts on a schedule, on a new issue or pull request</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Issues and pull requests of the repository</th><td>{{ alta_yes }} <small>A tab, and <code>#</code> in a prompt</small></td><td>{{ alta_part }} <small><code>#</code> in a prompt, issues only</small></td></tr>
     <tr><th scope="row">Work items: follow-up tasks and plans</th><td>{{ alta_yes }} <small>Cards in the session and a tab</small></td><td>{{ alta_part }} <small>Through the agent</small></td></tr>

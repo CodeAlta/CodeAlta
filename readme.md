@@ -32,7 +32,7 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 - **Sessions on your projects**: sessions are saved on disk. Queue prompts, steer a running turn, and let a session delegate tasks to child sessions.
 - **Spaces**: in CodeAlta Desktop, group your projects into spaces such as Work and Personal. The window shows one space at a time, each with its own tabs.
 - **Worktrees**: a session can work in its own git worktree, on its own branch, so that several sessions change the same project at the same time.
-- **Automations**: in CodeAlta Desktop, a prompt can run on a schedule, when an issue or a pull request is opened, or on demand.
+- **Automations**: in CodeAlta Desktop, a prompt can run on a schedule, when an issue or a pull request is opened, when a command succeeds, or on demand.
 - **UI tools and MCP server**: in CodeAlta Desktop, an agent sees and drives the window, and other applications do the same through its MCP server.
 - **The models you already have**: subscriptions and API keys for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI, and OpenAI-compatible servers, and Claude Code through the CLI you installed.
 - **Everything the agent does**: tool calls, file diffs, and context usage are in the timeline. In CodeAlta Desktop a tool call opens with its output in a live terminal, or with the file or the diff it worked on. Web links in assistant messages open in your default browser.

@@ -3,13 +3,13 @@ import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SessionRuntimeBackgroundTaskResponse, SessionRuntimeScopedResponse, SessionRuntimeStateEntry } from "#neoastra";
 import { BackgroundCallsContext, BackgroundMark, BackgroundTasksStatus } from "./BackgroundTaskViews";
-import { backgroundCalls, backgroundTaskElapsed, backgroundTaskIcon, backgroundTaskKind, backgroundTasks, runningBackgroundTasks, sameBackgroundTasks } from "./backgroundTasks";
+import { backgroundCalls, backgroundTaskElapsed, backgroundTaskEnd, backgroundTaskIcon, backgroundTaskKind, backgroundTasks, listedBackgroundTasks, runningBackgroundTasks, sameBackgroundTasks } from "./backgroundTasks";
 import { createRuntimeObservations, projectRuntimeObservation, sessionBackground, sessionRunning, type RuntimeTarget } from "./runtimeObservations";
 import { TimelineMessage } from "./TimelineMessage";
 import type { TimelineItem } from "./timeline";
 
 const task = (taskId: string, state = "running", toolCallId: string | null = null): SessionRuntimeBackgroundTaskResponse =>
-  ({ taskId, kind: "command", description: `Does ${taskId}`, toolCallId, startedAt: state === "running" ? "2026-01-01T00:00:00Z" : null, state });
+  ({ taskId, kind: "command", description: `Does ${taskId}`, toolCallId, startedAt: state === "running" ? "2026-01-01T00:00:00Z" : null, state, isJob: false, exitCode: null, endedAt: null });
 const entry = (tasks: unknown, changes: Partial<SessionRuntimeStateEntry> = {}): SessionRuntimeStateEntry => ({ attachmentGeneration: "9", isTerminated: false, isRetiring: false,
   activeRunId: null, backgroundTasks: tasks as SessionRuntimeBackgroundTaskResponse[], queueDrainInProgress: false, providerId: "fake", providerKey: "fake", modelId: null,
   reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: null, activity: null, ...changes });
@@ -18,7 +18,7 @@ test("the background tasks of a session are read as the host lists them, and wha
   const read = backgroundTasks(entry([task("b1", "running", "toolu_1"), task("b2", "failed", "toolu_2"), task("b3", "stopped")]));
   assert.deepEqual(read.map(item => [item.id, item.state, item.toolCallId, item.startedAt]),
     [["b1", "running", "toolu_1", "2026-01-01T00:00:00Z"], ["b2", "failed", "toolu_2", null], ["b3", "stopped", null, null]]);
-  assert.deepEqual(read[0], { id: "b1", kind: "command", description: "Does b1", toolCallId: "toolu_1", startedAt: "2026-01-01T00:00:00Z", state: "running" });
+  assert.deepEqual(read[0], { id: "b1", kind: "command", description: "Does b1", toolCallId: "toolu_1", startedAt: "2026-01-01T00:00:00Z", state: "running", job: false, exitCode: null, endedAt: null });
   // A state this version does not know, a twice listed task, a task without an identity or a kind, and what is not a task.
   assert.deepEqual(backgroundTasks(entry([task("b1"), task("b1"), task("b2", "paused"), { ...task("b3"), taskId: "" }, { ...task("b4"), kind: 7 }, null, "b5",
     { ...task("b6"), description: 4, toolCallId: "", startedAt: "not a time" }])).map(item => [item.id, item.description, item.toolCallId, item.startedAt]),
@@ -132,4 +132,35 @@ test("the tile of a call that started a task says what the task does, beside the
   assert.match(draw(new Map([["toolu_2", "running"]])), /tool-outcome[^>]*>Completed</);
   assert.match(draw(new Map([["toolu_1", "running"]]), { toolPhase: "failed" }), /tool-outcome[^>]*>Failed</);
   assert.doesNotMatch(draw(new Map([["toolu_1", "running"]]), { toolPhase: "started" }), /data-tool-background/);
+});
+
+test("a background job is listed with how it ended, for a moment after it ended", () => {
+  const job = (taskId: string, state: string, changes: Partial<SessionRuntimeBackgroundTaskResponse> = {}): SessionRuntimeBackgroundTaskResponse =>
+    ({ ...task(taskId, state), startedAt: "2026-01-01T00:00:00Z", isJob: true, ...changes });
+  const listed = [job("job-1", "running"), job("job-2", "completed", { exitCode: 0, endedAt: "2026-01-01T00:10:00Z" }),
+    job("job-3", "failed", { exitCode: 3, endedAt: "2026-01-01T00:05:00Z" }), job("job-4", "stopped", { endedAt: "not a time" }), task("b1", "completed")];
+  const read = backgroundTasks(entry(listed));
+
+  // A task of a provider that ran to its end leaves nothing; a job that succeeded is still there, with its exit code.
+  assert.deepEqual(read.map(item => [item.id, item.state, item.job, item.exitCode, item.endedAt]), [["job-1", "running", true, null, null],
+    ["job-2", "completed", true, 0, "2026-01-01T00:10:00Z"], ["job-3", "failed", true, 3, "2026-01-01T00:05:00Z"], ["job-4", "stopped", true, null, null]]);
+  assert.deepEqual(runningBackgroundTasks(read).map(item => item.id), ["job-1"]);
+  // What ended is shown for ten minutes; a job whose end is not known is not kept.
+  assert.deepEqual(listedBackgroundTasks(read, Date.parse("2026-01-01T00:16:00Z")).map(item => item.id), ["job-1", "job-2"]);
+  assert.deepEqual(listedBackgroundTasks(read, Date.parse("2026-01-01T00:11:00Z")).map(item => item.id), ["job-1", "job-2", "job-3"]);
+  assert.equal(listedBackgroundTasks(read.slice(1), Date.parse("2026-01-01T01:00:00Z")).length, 0);
+  // No tool call started a job: no tile of the timeline says anything of it.
+  assert.equal(backgroundCalls(read).size, 0);
+  assert.deepEqual(["completed", "failed", "stopped", "running"].map(state => backgroundTaskEnd(state as "completed")), ["Succeeded", "Failed", "Stopped", null]);
+  // A job that ended is another reading than the same job running.
+  assert.equal(sameBackgroundTasks(read, backgroundTasks(entry(listed))), true);
+  assert.equal(sameBackgroundTasks(read, backgroundTasks(entry([job("job-1", "completed", { exitCode: 0, endedAt: "2026-01-01T00:12:00Z" }), ...listed.slice(1)]))), false);
+
+  // The composer keeps the list while a job that just ended can still be read, without the mark of what goes on.
+  const ended = backgroundTasks(entry([job("job-9", "failed", { exitCode: 2, endedAt: new Date().toISOString() })]));
+  const html = renderToStaticMarkup(<BackgroundTasksStatus tasks={ended} onStop={async () => { }} />);
+  assert.match(html, /Background tasks/);
+  assert.doesNotMatch(html, /session-background/);
+  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={read.slice(0, 1)} onStop={async () => { }} />), /session-background.*1 background task/);
+  assert.equal(renderToStaticMarkup(<BackgroundTasksStatus tasks={backgroundTasks(entry([job("job-3", "failed", { exitCode: 3, endedAt: "2026-01-01T00:05:00Z" })]))} onStop={async () => { }} />), "");
 });

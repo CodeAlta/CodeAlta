@@ -3,12 +3,12 @@ import test from "node:test";
 import type { AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
 import { locales, translate, type Locale, type MessageKey } from "../localization";
 import { automationTemplates, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, inputOf, isSchedule, maximumNameLength,
-  maximumPromptLength, newTrigger, openableRun, runStatusLabel, runTone, runTriggerLabel, sessionOrigin, timelinePosition, timelineRows, triggerIcon, triggerLabel, triggerTone, triggerTypes,
+  maximumPromptLength, needsProject, newTrigger, openableRun, runStatusLabel, runTone, runTriggerLabel, sessionOrigin, timelinePosition, timelineRows, triggerIcon, triggerLabel, triggerTone, triggerTypes,
   type AutomationForm } from "./automations";
 
 const english = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
 const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): AutomationTriggerItem =>
-  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", ...change });
+  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: null, projectName: null, projectFolder: null, storeProjectId: null, file: "/home/config.toml",
   provider: null, model: null, effort: null, agent: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, ...change,
@@ -27,6 +27,13 @@ test("a trigger reads as a sentence, and several as one line", () => {
   assert.equal(read(trigger("issue")), "When an issue is opened");
   assert.equal(read(trigger("pull_request")), "When a pull request is opened");
   assert.equal(read(trigger("pull_request", { event: "updated" })), "When a pull request is updated");
+  assert.equal(read(trigger("command", { command: " gh run watch 123 --exit-status ", folder: "tools" })), "When gh run watch 123 --exit-status succeeds");
+  // A long command is named by its start; where an automation is read before it is allowed, it is whole, with its folder.
+  assert.equal(read(trigger("command", { command: "x".repeat(200) })), `When ${"x".repeat(59)}… succeeds`);
+  assert.equal(describeTrigger(trigger("command", { command: "x".repeat(200), folder: " tools " }), english, "en", true), `When ${"x".repeat(200)} succeeds (in tools)`);
+  assert.equal(describeTrigger(trigger("command", { command: "wait-for-it" }), english, "en", true), "When wait-for-it succeeds");
+  assert.equal(describeTrigger(trigger("daily", { at: ["09:00"] }), english, "en", true), "Daily at 09:00");
+  for (const locale of locales) assert.ok(read(trigger("command", { command: "wait-for-it" }), locale).includes("wait-for-it"), locale);
   assert.equal(read(trigger("later")), "later", "A kind this page does not know is shown as it is named.");
   assert.equal(describeTriggers([], english, "en"), "Manual");
   assert.equal(describeTriggers([trigger("daily", { at: ["09:00"] }), trigger("issue")], english, "en"), "Daily at 09:00 · When an issue is opened");
@@ -38,24 +45,27 @@ test("a trigger reads as a sentence, and several as one line", () => {
 });
 
 test("each kind of trigger has its label, icon and color; a run by hand has its own", () => {
-  assert.deepEqual(triggerTypes.map(type => english(triggerLabel(type))), ["Hourly", "Daily", "Weekly", "Cron", "Issue", "Pull request", "Jira issue"]);
+  assert.deepEqual(triggerTypes.map(type => english(triggerLabel(type))), ["Hourly", "Daily", "Weekly", "Cron", "Issue", "Pull request", "Jira issue", "Command"]);
   assert.equal(new Set(triggerTypes.map(triggerIcon)).size, triggerTypes.length);
   assert.equal(new Set(triggerTypes.map(triggerTone)).size, triggerTypes.length);
   assert.deepEqual([triggerIcon(undefined), triggerTone(undefined), english(triggerLabel("unknown"))], ["hand", "muted", "Manual"]);
-  assert.deepEqual(triggerTypes.filter(type => !isSchedule({ type })), ["issue", "pull_request", "jira"]);
+  assert.deepEqual(triggerTypes.filter(type => !isSchedule({ type })), ["issue", "pull_request", "jira", "command"]);
+  // A command watches no repository: it runs in a chat too.
+  assert.deepEqual(triggerTypes.filter(type => needsProject({ type })), ["issue", "pull_request", "jira"]);
   assert.deepEqual([runTone("running"), runTone("completed"), runTone("failed"), runTone("skipped"), runTone("interrupted")], ["running", "ok", "failed", "muted", "muted"]);
   assert.deepEqual(["running", "completed", "failed", "cancelled", "interrupted", "skipped", "later"].map(status => english(runStatusLabel(status))),
     ["Running", "Completed", "Failed", "Cancelled", "Interrupted", "Skipped", "Unknown"]);
-  assert.deepEqual(["manual", "daily", "issue", "pull_request"].map(name => english(runTriggerLabel(name))), ["Manual", "Daily", "Issue", "Pull request"]);
+  assert.deepEqual(["manual", "daily", "issue", "pull_request", "command"].map(name => english(runTriggerLabel(name))), ["Manual", "Daily", "Issue", "Pull request", "Command"]);
 });
 
-test("a new trigger starts with values that can be saved", () => {
+test("a new trigger starts with values that can be saved; a command waits to be written", () => {
   for (const type of triggerTypes) {
     const form: AutomationForm = { ...emptyForm("p"), name: "n", prompt: "p", triggers: [newTrigger(type)] };
-    assert.equal(formProblem(form), null, type);
+    assert.equal(formProblem(form), type === "command" ? "Write the command of the trigger." : null, type);
   }
-  assert.deepEqual(newTrigger("weekly"), { type: "weekly", minute: 0, every: 1, at: ["09:00"], days: ["mon"], expression: null, event: "opened", authors: "trusted" });
+  assert.deepEqual(newTrigger("weekly"), { type: "weekly", minute: 0, every: 1, at: ["09:00"], days: ["mon"], expression: null, event: "opened", authors: "trusted", command: null, folder: null });
   assert.equal(newTrigger("cron").expression, "0 9 * * 1-5");
+  assert.deepEqual([newTrigger("command").command, newTrigger("command").folder, newTrigger("daily").command], ["", null, null]);
 });
 
 test("a form says what it misses before it is sent", () => {
@@ -71,6 +81,10 @@ test("a form says what it misses before it is sent", () => {
   // An event is one of the repository of a project.
   assert.equal(formProblem({ ...form, projectId: null, triggers: [trigger("issue")] }), "A trigger on issues or pull requests needs a project.");
   assert.equal(formProblem({ ...form, projectId: null, triggers: [trigger("daily", { at: ["09:00"] })] }), null);
+  // A command is written, and runs in a chat as well as in a project.
+  assert.equal(formProblem({ ...form, triggers: [trigger("command", { command: "  " })] }), "Write the command of the trigger.");
+  assert.equal(formProblem({ ...form, projectId: null, triggers: [trigger("command", { command: "wait-for-it" })] }), null);
+  for (const locale of locales) assert.ok(translate(locale, "Write the command of the trigger.").length > 0);
   for (const locale of locales) assert.ok(translate(locale, "A trigger on issues or pull requests needs a project.").length > 0);
 });
 
@@ -82,6 +96,10 @@ test("what is sent for a form is trimmed, and names a model only with its provid
   assert.deepEqual([inputOf({ ...form, provider: "" }).model, inputOf({ ...form, provider: "" }).effort, inputOf({ ...form, model: "" }).effort, inputOf({ ...form, agent: " " }).agent], [null, null, null, null]);
   assert.equal(inputOf({ ...form, triggers: [] }).catchUp, false, "An automation that is run by hand misses nothing.");
   assert.equal(inputOf({ ...form, triggers: [trigger("issue")] }).catchUp, true);
+  // A command is sent trimmed, with its folder when it names one; another kind sends neither.
+  assert.deepEqual(inputOf({ ...form, triggers: [trigger("command", { command: " wait-for-it --once ", folder: " tools " }), trigger("command", { command: "other", folder: "  " }),
+    trigger("daily", { at: ["09:00"], command: "left over", folder: "left over" })] }).triggers.map(value => [value.command, value.folder]),
+    [["wait-for-it --once", "tools"], ["other", null], [null, null]]);
 });
 
 test("the form of an automation holds what it is, and where it is written", () => {

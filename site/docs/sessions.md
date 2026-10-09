@@ -93,6 +93,7 @@ Think of it as CodeAlta giving the agent a safe, scoped way to ask the host ques
 - whether a related session has finished and what its final result was;
 - how to create a child session for another project, provider, model, or reasoning effort;
 - how to schedule a later reminder prompt for itself or another session;
+- how to run a long command in the background and receive its result when it ends;
 - how to update sticky Markdown notes in the sidebar while it works.
 
 ## Sub-agents
@@ -151,7 +152,15 @@ In CodeAlta Desktop, an agent can show you what changed with `alta diff show`: i
 
 Agents can also ask the live tool to schedule in-process reminder prompts with `alta reminder create --duration <seconds> --content ...`. Reminders default to the calling session, can target another session with `--session <session-id>`, can repeat with `--repeat <count>`, and can be inspected or removed with `alta reminder list` and `alta reminder delete <reminder-id>`. In the TUI, use the compact clock button in the prompt bar or `/reminder` (`Ctrl+G Ctrl+D`) to create, delete, and edit reminder messages for the selected session.
 
-An agent that waits for something that takes long, such as a CI run or a deployment, sets a reminder to come back and check it, and says so in its answer. The reminder is listed in **Reminders** until it fires. Reminders are not kept when CodeAlta restarts.
+An agent that waits for something that takes long, such as a CI run or a deployment, starts a background job when a command can do the waiting, or sets a reminder to come back and check it, and says so in its answer. The reminder is listed in **Reminders** until it fires. Reminders are not kept when CodeAlta restarts.
+
+### Background jobs
+
+An agent can start a command without waiting for it: a long build or test run, or a command that waits for something, such as `gh run watch <run> --exit-status`. CodeAlta runs the command as a background job of the session. The agent goes on with other work or ends its turn, and when the command ends CodeAlta gives the session its result: the exit code and the end of what the command wrote, whether it succeeded or failed. A session that had stopped starts a new turn with it; a session that is working receives it in the turn that runs.
+
+In CodeAlta Desktop the line above the prompt says how many background tasks a session has. Select it to see each job with how long it has run, open what it writes as it comes, or stop it. A job stays in the list for ten minutes after it ended, with its result. In the conversation, the result of a job appears as a **Background job** message.
+
+The agent uses the `alta job` commands for this: `start` (with `--timeout` for a command that could hang, and `--notify success` or `never` to change when the result is sent), `list`, `status`, `output` and `cancel`. Jobs end when CodeAlta exits, and CodeAlta Desktop asks before exiting while one runs. When CodeAlta Desktop is started with the review of commands, a session cannot start a job.
 
 Agents can update the Notes of the current session (the sidebar Notes panel in the TUI, the Notes window in the desktop app) with `alta notes set --stdin`, read it back with `alta notes get`, and clear it with `alta notes clear`. Notes are session-scoped sticky Markdown for plans, checklists, and progress summaries; switching tabs shows the selected session's notes, and reopening a session restores the latest notes set/clear event from that session's journal.
 

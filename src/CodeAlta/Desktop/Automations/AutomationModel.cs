@@ -27,6 +27,9 @@ internal enum AutomationTriggerKind
 
     /// <summary>When an issue of the project's Jira is created or updated.</summary>
     Jira,
+
+    /// <summary>When a command the automation keeps running ends with the exit code 0.</summary>
+    Command,
 }
 
 /// <summary>Whose issues and pull requests start an automation.</summary>
@@ -70,6 +73,15 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary>The longest cron expression kept.</summary>
     internal const int MaximumExpressionLength = 128;
 
+    /// <summary>The longest command kept.</summary>
+    internal const int MaximumCommandLength = 2048;
+
+    /// <summary>The longest folder of a command kept.</summary>
+    internal const int MaximumFolderLength = 1024;
+
+    /// <summary>The name of <see cref="AutomationTriggerKind.Command"/> in a configuration file, and of the runs it starts.</summary>
+    internal const string CommandKindName = "command";
+
     /// <summary>The names of the days in a configuration file, Sunday first.</summary>
     internal static readonly string[] DayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
@@ -97,8 +109,27 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary>An event trigger: whose items start the automation.</summary>
     public AutomationAuthors Authors { get; init; }
 
-    /// <summary>Whether the trigger is a schedule, as opposed to an event of the repository.</summary>
-    public bool IsSchedule => Kind is not (AutomationTriggerKind.Issue or AutomationTriggerKind.PullRequest or AutomationTriggerKind.Jira);
+    /// <summary>
+    /// <see cref="AutomationTriggerKind.Command"/>: the command line the automation keeps running, in the shell the
+    /// <c>shell_command</c> tool uses. It is one line.
+    /// </summary>
+    public string? Command { get; init; }
+
+    /// <summary>
+    /// <see cref="AutomationTriggerKind.Command"/>: the folder the command runs in, <c>cwd</c> in a configuration
+    /// file: a path relative to the folder of the project, or a full path. Null for the folder of the project, or
+    /// the home folder of the user for an automation that runs in no project.
+    /// </summary>
+    public string? Folder { get; init; }
+
+    /// <summary>Whether the trigger is a schedule, as opposed to an event of the repository or a command.</summary>
+    public bool IsSchedule => !IsEvent && !IsCommand;
+
+    /// <summary>Whether the trigger is an event of the repository of the project, or of its tracker.</summary>
+    public bool IsEvent => Kind is AutomationTriggerKind.Issue or AutomationTriggerKind.PullRequest or AutomationTriggerKind.Jira;
+
+    /// <summary>Whether the trigger is a command the automation keeps running.</summary>
+    public bool IsCommand => Kind == AutomationTriggerKind.Command;
 
     /// <summary>Whether the trigger watches a tracker a plugin gives, as opposed to the hosted repository of the project.</summary>
     public bool IsTracker => Kind == AutomationTriggerKind.Jira;
@@ -106,7 +137,7 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary>The name of the kind in a configuration file.</summary>
     public string KindName => KindNames[(int)Kind];
 
-    private static readonly string[] KindNames = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira"];
+    private static readonly string[] KindNames = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", CommandKindName];
 
     /// <summary>Reads the name of a kind from a configuration file.</summary>
     internal static bool TryParseKind(string? name, out AutomationTriggerKind kind)
@@ -123,6 +154,8 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
         AutomationTriggerKind.Daily => "daily:" + string.Join(',', At),
         AutomationTriggerKind.Weekly => "weekly:" + string.Join(',', Days.Select(static day => DayNames[(int)day])) + "@" + string.Join(',', At),
         AutomationTriggerKind.Cron => "cron:" + Expression,
+        // Neither part holds a tabulation: two commands that differ, or that run in two folders, are two triggers.
+        AutomationTriggerKind.Command => "command:" + Folder + "\t" + Command,
         _ => $"{KindName}:{Event}:{(Authors == AutomationAuthors.Anyone ? "anyone" : "trusted")}",
     };
 }
@@ -219,7 +252,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
 
     /// <summary>
     /// A value that changes with what the automation runs and with when it runs: its name, prompt, model, agent
-    /// prompt, project and triggers. It does not change with <see cref="Enabled"/>.
+    /// prompt, project and triggers, the command and the folder of a command trigger included. It does not change
+    /// with <see cref="Enabled"/>.
     /// </summary>
     internal string Fingerprint()
     {

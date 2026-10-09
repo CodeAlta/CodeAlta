@@ -186,7 +186,7 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
     <dl className="automation-facts">
       <dt>{t("Starts")}</dt>
       <dd>{item.triggers.length === 0 ? t("When you run it") : <ul>{item.triggers.map((trigger, index) =>
-        <li key={index}><span data-file-tone={triggerTone(trigger.type)}><TriggerIcon type={trigger.type} size={13} /></span>{describeTrigger(trigger, t, locale)}</li>)}</ul>}</dd>
+        <li key={index}><span data-file-tone={triggerTone(trigger.type)}><TriggerIcon type={trigger.type} size={13} /></span>{describeTrigger(trigger, t, locale, true)}</li>)}</ul>}</dd>
       {item.triggers.length > 0 && <><dt>{t("Next run")}</dt>
         <dd>{waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : paused ? t("Paused") : next?.label ?? t("Waits for its event")}</dd></>}
       {item.repository && <><dt>{t("Repository")}</dt><dd>{item.repository}</dd></>}

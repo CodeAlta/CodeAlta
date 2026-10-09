@@ -61,6 +61,7 @@ The exact command set depends on the host, active plugins, and session context. 
 | `ask` | Queue structured questions or approvals for the current session. | “Before changing files, ask me to approve the plan with Approve/Revise choices.” | The agent should yield after queuing an ask and wait for your answer. |
 | `notes` (`note`) | Get, replace, or clear session-scoped sticky Markdown notes. | “Keep a 5-item checklist visible in Notes while you work.” | Replaces the current session’s notes document; `note` is a compatibility alias. |
 | `reminder` | Schedule delayed prompt content for a session and list/delete reminders. | “Remind yourself in 5 minutes to check the child session result.” | Runs only while the CodeAlta host process remains active; delivered prompts use normal queue semantics. |
+| `job` | Start a shell command in the background of a session, list the jobs, read their output, cancel them. | “Start the full test run as a background job and continue with the docs; fix what fails when its result comes back.” | Runs a command with the rights of CodeAlta; the result is sent to the session when the command ends. Jobs end when CodeAlta exits. |
 | `provider` | Inspect registered/configured providers and provider model lists. | “List enabled providers that can run a high-reasoning model.” | Read-only; does not validate external billing or model cost. |
 | `model` | List, show, and resolve provider model references. | “Pick two available high-reasoning model refs for a comparison run and explain the tradeoff.” | Read-only selection metadata. |
 | `skill` (`skills`, `skills_activate`) | List, show, and activate CodeAlta-managed skills. | “If an IL decompile skill is available, activate it for this session before inspecting the assembly.” | Activation injects skill context into a session; aliases exist for compatibility, but new prompts should prefer `skill`. |
@@ -145,6 +146,16 @@ Start a read-only child session to inspect the build logs. Set a reminder for th
 ```
 
 Reminders are delivered through normal session queue semantics while the current CodeAlta host is still running.
+
+### Wait for a command without blocking
+
+When a command does the waiting, ask for a background job instead of a reminder: the agent is given the result as soon as the command ends.
+
+```text
+Push the branch, then start `gh run watch --exit-status` on its CI run as a background job. Go on with the release notes meanwhile, and fix what the run reports when its result comes back.
+```
+
+See [Background jobs](sessions.md#background-jobs).
 
 ### Switch or create modes through prompts
 

@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -32,6 +33,12 @@ internal sealed class ToolCallsService
     private readonly RuntimeToolOutputProjection? _output;
     private readonly string? _epoch;
     private readonly TimeSpan _pace;
+
+    /// <summary>
+    /// Gets the background jobs of the sessions, whose output is followed like the one of a running call, under
+    /// the identity of the job; null serves none.
+    /// </summary>
+    internal SessionJobService? Jobs { get; init; }
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal ToolCallsService()
@@ -114,7 +121,11 @@ internal sealed class ToolCallsService
         if (request is null || !Identity(request.SessionId) || !Identity(request.ActivityId)) { yield return Ended("invalid"); yield break; }
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) { yield return Ended("stale_epoch"); yield break; }
         cancellationToken.ThrowIfCancellationRequested();
-        await using var observation = _output.ObserveAsync(request.SessionId, request.ActivityId, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        // A background job of the session is followed the same way: it writes outside any tool call, until its command ends.
+        var job = Jobs is not null && request.ActivityId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)
+            && Jobs.Get(request.ActivityId) is { } found && string.Equals(found.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase);
+        await using var observation = (job ? Jobs!.ObserveOutputAsync(request.ActivityId, cancellationToken) : _output.ObserveAsync(request.SessionId, request.ActivityId, cancellationToken))
+            .GetAsyncEnumerator(cancellationToken);
         while (true)
         {
             var moved = false;

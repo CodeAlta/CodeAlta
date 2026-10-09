@@ -179,6 +179,43 @@ public sealed class DesktopToolCallsTests
     }
 
     [TestMethod]
+    public async Task Observe_StreamsWhatABackgroundJobOfTheSessionWrites_UnderTheIdentityOfTheJob()
+    {
+        var runtime = new SessionRuntimeEventPublisher();
+        Action<string>? write = null;
+        var exit = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var jobs = new CodeAlta.Orchestration.Jobs.SessionJobService(start: (_, _, onOutput) => { write = onOutput; return new JobProcess(exit.Task); });
+        var service = new ToolCallsService((_, _, _) => Task.FromResult<AgentEvent?>(null), runtime.ToolOutput, Epoch, TimeSpan.Zero) { Jobs = jobs };
+        var job = jobs.Start(new() { SessionId = "session", Command = "npm test", Folder = Path.GetTempPath() }).Job!;
+        write!("12 passing\n");
+
+        await using var channel = service.Observe(new(Epoch, "session", job.Id), CancellationToken.None);
+        await using var items = channel.Items.GetAsyncEnumerator();
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.AreEqual(("ok", "12 passing\n", "0", true, false), (items.Current.Status, items.Current.Text, items.Current.Start, items.Current.IsReset, items.Current.IsComplete));
+        write("done\n");
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.AreEqual(("done\n", "11", false), (items.Current.Text, items.Current.Start, items.Current.IsComplete));
+        exit.SetResult(0);
+        Assert.IsTrue(await items.MoveNextAsync().AsTask().WaitAsync(Wait));
+        Assert.IsTrue(items.Current.IsComplete);
+
+        // The job of another session is not served: it reads as a call that does not run.
+        await using var other = service.Observe(new(Epoch, "another", job.Id), CancellationToken.None);
+        var foreign = new List<ToolCallOutputItem>();
+        await foreach (var item in other.Items.WaitAsync(Wait)) foreign.Add(item);
+        Assert.AreEqual(new ToolCallOutputItem("ok", string.Empty, "0", "0", true, true), foreign.Single());
+    }
+
+    private sealed class JobProcess(Task<int> exit) : CodeAlta.Orchestration.Jobs.IShellCommandProcess
+    {
+        public int? ProcessId => null;
+        public Task<int> Completion => exit;
+        public void Kill() { }
+        public void Dispose() { }
+    }
+
+    [TestMethod]
     public void RowSummary_ShowsAnAltaCommandAsItsCommandLine_AndNamesFilesAndArguments()
     {
         static HistoryToolSummary Row(string? name, object details)

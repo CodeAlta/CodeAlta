@@ -5,8 +5,8 @@ import { modelCatalog, workspace, type AutomationTriggerItem, type ModelCatalogM
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { useShellLanguage } from "../shellLanguage";
-import { dayName, formProblem, inputOf, isSchedule as schedule, maximumNameLength, maximumPromptLength, maximumTriggers, newTrigger, triggerLabel, triggerTone, triggerTypes, weekDays,
-  type AutomationForm, type TriggerType } from "./automations";
+import { dayName, formProblem, inputOf, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
+  newTrigger, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 
 const hours = [1, 2, 3, 4, 6, 8, 12];
@@ -44,8 +44,11 @@ function Times({ value, disabled, onChange }: { value: readonly string[]; disabl
   </span>;
 }
 
-function TriggerRow({ hub, trigger, disabled, onChange, onRemove }: {
-  hub: AutomationsHub; trigger: AutomationTriggerItem; disabled: boolean; onChange: (value: AutomationTriggerItem) => void; onRemove: () => void;
+export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove }: {
+  hub: AutomationsHub; trigger: AutomationTriggerItem;
+  /** Whether the automation runs in no project: its command then runs in the home folder. */
+  chat: boolean;
+  disabled: boolean; onChange: (value: AutomationTriggerItem) => void; onRemove: () => void;
 }) {
   const { t, locale } = useShellLanguage();
   const set = (change: Partial<AutomationTriggerItem>) => onChange({ ...trigger, ...change });
@@ -78,7 +81,15 @@ function TriggerRow({ hub, trigger, disabled, onChange, onRemove }: {
       {trigger.type === "jira" && <HTMLSelect value={trigger.event === "updated" ? "updated" : "created"} disabled={disabled} aria-label={t("Event")} onChange={event => set({ event: event.target.value })}>
         <option value="created">{t("is created")}</option><option value="updated">{t("is updated")}</option>
       </HTMLSelect>}
-      {!schedule(trigger) && trigger.type !== "jira" && <HTMLSelect value={trigger.authors} disabled={disabled} aria-label={t("Authors")} onChange={event => set({ authors: event.target.value })}>
+      {trigger.type === "command" && <>
+        <InputGroup className="automation-command" value={trigger.command ?? ""} disabled={disabled} spellCheck={false} maxLength={maximumCommandLength}
+          aria-label={t("Command")} placeholder="gh run watch 123 --exit-status" onChange={event => set({ command: event.target.value })} />
+        <span>{t("in")}</span>
+        <InputGroup className="automation-command-folder" value={trigger.folder ?? ""} disabled={disabled} spellCheck={false} maxLength={maximumFolderLength}
+          aria-label={t("Working folder")} title={t("Working folder")} placeholder={t(chat ? "Home folder" : "Project folder")}
+          onChange={event => set({ folder: event.target.value })} />
+      </>}
+      {(trigger.type === "issue" || trigger.type === "pull_request") && <HTMLSelect value={trigger.authors} disabled={disabled} aria-label={t("Authors")} onChange={event => set({ authors: event.target.value })}>
         <option value="trusted">{t("by a member")}</option><option value="anyone">{t("by anyone")}</option>
       </HTMLSelect>}
       {schedule(trigger) && <TriggerPreview hub={hub} trigger={trigger} />}
@@ -141,9 +152,9 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   }
   // An event is one of the repository of a project: a chat has none.
   const add = <Menu>{triggerTypes.map(type => {
-    const needsProject = !schedule({ type }) && !form.projectId;
+    const missing = needsProject({ type }) && !form.projectId;
     return <MenuItem key={type} icon={<span data-file-tone={triggerTone(type)}><TriggerIcon type={type} size={15} /></span>} text={t(triggerLabel(type))}
-      disabled={needsProject} label={needsProject ? t("Needs a project") : undefined} onClick={() => edit({ triggers: [...form.triggers, newTrigger(type)] })} />;
+      disabled={missing} label={missing ? t("Needs a project") : undefined} onClick={() => edit({ triggers: [...form.triggers, newTrigger(type)] })} />;
   })}</Menu>;
 
   return <AppWindow storageKey="codealta.desktop.window.automation.v1" className="automation-editor-dialog" titleId="automation-editor-title"
@@ -175,7 +186,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
             {form.triggers.length === 0 && <li className="automation-trigger">
               <span className="automation-trigger-icon" data-file-tone="muted"><AppIcon name="hand" size={15} /></span>
               <div className="automation-trigger-fields"><span>{t("When you run it")}</span></div></li>}
-            {form.triggers.map((trigger, index) => <TriggerRow key={index} hub={hub} trigger={trigger} disabled={busy}
+            {form.triggers.map((trigger, index) => <TriggerRow key={index} hub={hub} trigger={trigger} chat={!form.projectId} disabled={busy}
               onChange={value => edit({ triggers: form.triggers.map((other, at) => at === index ? value : other) })}
               onRemove={() => edit({ triggers: form.triggers.filter((_, at) => at !== index) })} />)}
           </ul>

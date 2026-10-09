@@ -88,7 +88,7 @@
 .automation-facts dt { color: var(--muted); }
 .automation-facts dd { margin: 0; min-width: 0; }
 .automation-facts ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
-.automation-facts li { display: flex; align-items: center; gap: 6px; }
+.automation-facts li { display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; }
 .automation-facts li > span { display: inline-flex; }
 .automation-file { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .automation-prompt { max-height: 180px; margin: 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -138,6 +138,9 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-minute.bp6-numeric-input .bp6-input-group, .automation-minute.bp6-numeric-input input { width: 100%; }
 .automation-cron { flex: 1 1 180px; }
 .automation-cron input { font-family: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace); }
+.automation-command { flex: 3 1 260px; }
+.automation-command-folder { flex: 1 1 140px; }
+.automation-command input, .automation-command-folder input { font-family: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace); }
 .automation-times { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .automation-time { display: inline-flex; align-items: center; }
 .automation-time input[type="time"] { height: 28px; padding: 0 6px; font: inherit; font-variant-numeric: tabular-nums; color-scheme: dark; }

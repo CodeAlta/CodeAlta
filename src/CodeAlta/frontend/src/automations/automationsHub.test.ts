@@ -11,7 +11,7 @@ const run = (status: string, sessionId: string | null = "s1"): AutomationRunItem
   ({ id: "r1", automationId: "a", name: "A", sessionId, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status, message: status === "failed" ? "No model." : null });
 const listed = (items: AutomationItem[], change: Partial<AutomationsListResponse> = {}): AutomationsListResponse =>
   ({ status: "ok", paused: false, scanned: true, items, faults: [], runs: [], upcoming: [], ...change });
-const trigger: AutomationTriggerItem = { type: "daily", minute: 0, every: 1, at: ["09:00"], days: [], expression: null, event: "opened", authors: "trusted" };
+const trigger: AutomationTriggerItem = { type: "daily", minute: 0, every: 1, at: ["09:00"], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null };
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 // A host that answers what the test says and records what it is asked. Its notices are sent by the test.

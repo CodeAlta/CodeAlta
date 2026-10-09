@@ -48,6 +48,27 @@ public sealed class SessionRuntimeStateRpcTests
         Assert.AreNotEqual(longCall, tasks[1].ToolCallId);
         Assert.AreEqual(("agent", null, null, null, "failed"), (tasks[2].Kind, tasks[2].Description, tasks[2].ToolCallId, tasks[2].StartedAt, tasks[2].State));
         Assert.AreEqual((null, "toolu_4", "stopped"), (tasks[3].Description, tasks[3].ToolCallId, tasks[3].State));
+        Assert.IsTrue(tasks.All(static task => !task.IsJob && task.ExitCode is null && task.EndedAt is null), "A task of a provider is not a job.");
+
+        // A background job of the host says what it is, and how its command ended: one that succeeded is still listed.
+        var ended = started.AddMinutes(3);
+        state = state with
+        {
+            Entry = entry with
+            {
+                BackgroundTasks =
+                [
+                    new("job-1a2b3c4d", "command", "CI of the pull request", null, started, null) { IsJob = true },
+                    new("job-5e6f7a8b", "command", "dotnet test", null, started, CodeAlta.Agent.AgentBackgroundTaskOutcome.Completed) { IsJob = true, ExitCode = 0, EndedAt = ended },
+                    new("job-9c0d1e2f", "command", "npm run build", null, started, CodeAlta.Agent.AgentBackgroundTaskOutcome.Failed) { IsJob = true, ExitCode = 2, EndedAt = ended },
+                ],
+            },
+        };
+        var jobs = (await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.BackgroundTasks;
+        Assert.AreEqual(("job-1a2b3c4d", "running", true, null, null), (jobs[0].TaskId, jobs[0].State, jobs[0].IsJob, jobs[0].ExitCode, jobs[0].EndedAt));
+        Assert.AreEqual(("completed", true, 0), (jobs[1].State, jobs[1].IsJob, jobs[1].ExitCode));
+        StringAssert.EndsWith(jobs[1].EndedAt!, "+02:00");
+        Assert.AreEqual(("failed", 2), (jobs[2].State, jobs[2].ExitCode));
 
         // No more tasks than the page shows, however many the provider lists: the answer stays within the wire.
         state = state with { Entry = entry with { BackgroundTasks = [.. Enumerable.Range(0, 40).Select(index => new SessionRuntimeBackgroundTask($"t{index}", "command", new string('\u00e9', 300), "toolu_" + index, started, null))] } };

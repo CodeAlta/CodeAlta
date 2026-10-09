@@ -6,6 +6,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime.Actors;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
@@ -111,6 +112,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
         Permissions = new SessionPermissionService(autoApproveOwnedPermissions);
+        Jobs = new SessionJobService(DeliverJobResultAsync);
     }
 
     /// <summary>Gets application-owned pending permissions, independent of attached frontend presentations.</summary>
@@ -1888,6 +1890,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
+        // A background job is a task of the host, not of the provider: the user stops it whatever the session does.
+        if (taskId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)) return StopJobAsync(sessionId, taskId, cancellationToken);
         return AdmitAsync(() => StopBackgroundTaskBodyAsync(sessionId, taskId, cancellationToken), cancellationToken);
     }
 
@@ -2001,7 +2005,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             snapshot = new(entry.Attachment.Ordinal, entry.IsTerminated, entry.Attachment.IsRetiring,
                 entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
                 entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
-            { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = entry.BackgroundTasks };
+            { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = WithJobTasks(entry.BackgroundTasks, sessionId) };
         return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
@@ -2057,8 +2061,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public IReadOnlyList<SessionRuntimeOverview> ListOverview()
         => [.. _entries.Values
             .Where(static entry => !entry.IsTerminated)
-            .Select(static entry => new SessionRuntimeOverview(entry.SessionId, entry.ProjectId, entry.Title,
-                entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null), entry.LastRunFailed))];
+            .Select(entry => new SessionRuntimeOverview(entry.SessionId, entry.ProjectId, entry.Title,
+                entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null) + Jobs.CountRunning(entry.SessionId), entry.LastRunFailed))];
 
     /// <summary>
     /// Lists the sessions that are at work right now, each with the folder it works in: its worktree when it has
@@ -2549,13 +2553,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         lock (_identityGate)
         {
         _disposed = true;
-        return new ValueTask(_forwarding.CloseAsync(
+        // The commands of the jobs are ended first: none tells its end to a session that is closing.
+        var jobs = Jobs.DisposeAsync().AsTask();
+        return new ValueTask(Task.WhenAll(jobs, _forwarding.CloseAsync(
             () => Permissions.DisposeAsync().AsTask(),
             async () =>
             {
                 await _sessionActors.DisposeAsync().ConfigureAwait(false);
                 _entries.Clear();
-            }, _events.Complete));
+            }, _events.Complete)));
         }
     }
 

@@ -24,7 +24,7 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static Command CreateAutomationCommand(AltaCommandContext context)
     {
-        var group = Group("automation", "Use the automations of CodeAlta: prompts that start a session on a schedule, on an event of the repository, or by hand.");
+        var group = Group("automation", "Use the automations of CodeAlta: prompts that start a session on a schedule, on an event of the repository, when a command succeeds, or by hand.");
         group.Add(CreateAutomationListCommand(context));
         group.Add(CreateAutomationShowCommand(context));
         group.Add(CreateAutomationCurrentCommand(context));
@@ -40,6 +40,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             "A session started by an automation finds it with `alta automation current`. Such a session reads the automations; it does not run, create, enable, disable or delete one.",
             "`allowed` is false for an automation that came with the repository of a project and that the user has not allowed yet in the Automations tab: its triggers start nothing until then. Only the user allows it.",
             "Triggers: `daily@09:00` (several times: `daily@09:00,17:30`), `hourly@15` (minute 15; every 2 hours: `hourly@15/2`), `weekly@mon,thu@08:30`, `cron@0 9 * * 1-5` (local time), `issue@opened`, `pull_request@opened`, `pull_request@updated` (new commits), `jira@created`, `jira@updated` (an issue of the Jira project of the project, when its configuration names one). No trigger: run it with `alta automation run`.",
+            "A command trigger, `command@<command line>`, keeps a command running that waits for something, such as `command@gh run watch 123 --exit-status`: each time the command ends with the exit code 0 the automation starts a session, with what the command printed after the prompt, and the command is started again; another exit code starts nothing. Everything after `command@` is the command, run in the shell of `shell_command`, in the folder of the project (the home folder for a chat). A host that has the user review the commands of its sessions refuses it (`automation.commandDenied`): the user then creates it in the Automations tab.",
             "An issue or pull request trigger watches the repository of the project on GitHub, GitLab or Azure DevOps, and runs for what the people of the repository open (its owner, the members of its organization, its collaborators). Add `+anyone`, as in `issue@opened+anyone`, only when the user asks to run for every author: what a stranger writes then reaches a session.",
             "Examples: `alta automation list`; `alta automation create --name \"Nightly review\" --trigger daily@23:00 --content \"Review what changed today.\"`; `alta automation run <id>`; `alta automation runs <id>`.");
         return group;
@@ -71,7 +72,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("current", "Show the automation that started a session, and the run that did.");
         command.Add("session=", "Session id. Defaults to the caller's current session.", value => session = value);
         command.Add((_, _) => ValueTask.FromResult(HandleAutomationCurrent(context, session)));
-        AddHelpText(command, "The record `alta.automation.none` says the session was started by the user, or by another session. The `detail` of the run names the issue or the pull request that started it.");
+        AddHelpText(command, "The record `alta.automation.none` says the session was started by the user, or by another session. The `detail` of the run names the issue or the pull request that started it, or is the last line its command printed.");
         return command;
     }
 
@@ -116,7 +117,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         AddHelpText(
             command,
             "Write the prompt for a session that starts with nothing else: say what to look at and what to produce.",
-            "Examples: `alta automation create --name \"Issue triage\" --trigger daily@09:00 --content \"Triage the issues opened since yesterday.\"`; `--trigger issue@opened` to run for every issue a maintainer opens; `--chat` for one that needs no project.");
+            "Examples: `alta automation create --name \"Issue triage\" --trigger daily@09:00 --content \"Triage the issues opened since yesterday.\"`; `--trigger issue@opened` to run for every issue a maintainer opens; `--trigger \"command@gh run watch 123 --exit-status\"` to run each time that command succeeds; `--chat` for one that needs no project.");
         return command;
     }
 
@@ -161,6 +162,10 @@ internal sealed partial class BuiltInAltaCommandContributor
     // runs nor changes automations, so that nothing it was told can keep itself going.
     private static bool IsStartedByAutomation(AltaCommandContext context, IAltaAutomations automations)
         => NormalizeOptionalText(context.Caller.SourceSessionId) is { } session && automations.FindRunOfSession(session) is not null;
+
+    private static int AutomationCommandDenied(AltaCommandContext context, string? message)
+        => PermissionDenied(context, "automation.commandDenied",
+            message ?? "This host has the user review the commands of its sessions: a session cannot create or enable an automation that runs a command.");
 
     private static int AutomationSessionDenied(AltaCommandContext context)
         => PermissionDenied(context, "automation.startedByAutomation",
@@ -395,6 +400,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             CatchUp = options.CatchUp,
             Triggers = [.. options.Triggers.Select(static trigger => trigger.Trim()).Where(static trigger => trigger.Length > 0)],
         }, context.CancellationToken).ConfigureAwait(false);
+        if (change.Status == "denied")
+        {
+            return AutomationCommandDenied(context, change.Message);
+        }
+
         if (change.Status != "ok" || change.Id is null || FindAutomation(automations, change.Id) is not { } created)
         {
             return UsageError(context, "automation.refused", change.Message ?? "The automation was not created.", "alta automation create");
@@ -431,6 +441,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (result.Status == "not_found")
         {
             return AutomationNotFound(context, reference);
+        }
+
+        if (result.Status == "denied")
+        {
+            return AutomationCommandDenied(context, result.Message);
         }
 
         if (result.Status != "ok")

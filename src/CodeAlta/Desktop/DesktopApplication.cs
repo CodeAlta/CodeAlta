@@ -502,7 +502,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             Mark("host created");
             DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
             if (DesktopPlugins.DescribeStartupFailures(host.PluginRuntime.Diagnostics) is { } pluginFailures) pluginUi.NotifyProblem(pluginFailures);
-            shell.RunningSessions = host.RuntimeService.CountActiveRuns;
+            // A session whose background job runs is at work too: exiting ends the command.
+            shell.RunningSessions = host.RuntimeService.CountSessionsAtWork;
             sessionTaskbarProgress = DesktopWindowsTaskbarProgress.StartIfAvailable(window, chrome.Services.WindowPolish, host.RuntimeService);
             shell.HasWorkspace = true;
             if (!closeRequested.Task.IsCompleted)
@@ -529,8 +530,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 automations = new Automations.AutomationService(host.CatalogOptions.ConfigPath, token => host.ProjectCatalog.LoadAsync(token),
                     new Automations.AutomationStateStore(Path.Combine(host.CatalogOptions.StateRoot, "automations.json"), pausedByDefault: options.Developer),
                     new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed(),
-                    () => [.. (host.PluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueEventSource>()]);
-                // A host that has the user review the commands of its sessions lets no session type in a terminal.
+                    () => [.. (host.PluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueEventSource>()],
+                    new Automations.ShellAutomationCommands());
+                // A host that has the user review the commands of its sessions lets no session type in a terminal, nor
+                // give an automation a command to run.
                 // A host that started its plugins builds one again while it runs, and tells the page when it did. Building
                 // and loading a plugin runs code: a host that has the user review the commands of its sessions does not let
                 // a session do it with an alta command.
@@ -540,7 +543,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(worktreeConfig, host.CatalogOptions.StateRoot);
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView);
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
+                    // A command a session starts in the background is one nobody reviewed.
+                    options.ReviewOwnedCommandPermissions ? new AltaJobPolicy(AcceptsCommands: false) : null);
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
@@ -638,7 +643,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         async (sessionId, token) => await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false)));
                     builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
-                    builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch));
+                    builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch) { Jobs = host.RuntimeService.Jobs });
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);
                     builder.AddPluginUiService(pluginCommands);

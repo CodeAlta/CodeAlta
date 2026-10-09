@@ -116,6 +116,30 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "stay on it: never branch from it");
         StringAssert.Contains(defaultPrompt.Body, "As a sub-agent, never create or switch branches");
         StringAssert.Contains(defaultPrompt.Body, "Never merge or rebase your branch into the default branch");
+        // A command that can do the waiting is a background job, whose result comes back; not for what ends in seconds.
+        StringAssert.Contains(defaultPrompt.Body, "alta job start --command");
+        StringAssert.Contains(defaultPrompt.Body, "its result (exit code and output) is sent to you as a prompt when it ends, whether it succeeded or failed");
+        StringAssert.Contains(defaultPrompt.Body, "--timeout <seconds or hh:mm:ss>");
+        StringAssert.Contains(defaultPrompt.Body, "no help to read first");
+        StringAssert.Contains(defaultPrompt.Body, "Do not poll a job and do not wait for it with a sleep");
+        StringAssert.Contains(defaultPrompt.Body, "Do not start a job for a command that ends in a few seconds");
+    }
+
+    [TestMethod]
+    public void BuiltInSystemPrompt_SaysWhatBackgroundJobsAreFor()
+    {
+        using var root = TempDirectory.Create();
+        var system = new AgentPromptCatalog().ListSystemPrompts(new AgentPromptCatalogQuery { UserCodeAltaRoot = root.Path })
+            .Single(static prompt => prompt.IsBuiltIn && prompt.PromptName == "default");
+
+        // A job is started without waiting and its result is sent later, whatever its exit code; it is for what takes long.
+        StringAssert.Contains(system.Body, "Background jobs");
+        StringAssert.Contains(system.Body, "`alta job start`");
+        StringAssert.Contains(system.Body, "the host sends you its result (exit code and output) as a prompt when it ends, whether it succeeded or failed");
+        StringAssert.Contains(system.Body, "Use them wisely");
+        StringAssert.Contains(system.Body, "not for a command that completes quickly");
+        StringAssert.Contains(system.Body, "Give a job a timeout when its command could hang");
+        StringAssert.Contains(system.Body, "unless the host explicitly supports it (a background job, a reminder)");
     }
 
     private static IReadOnlyList<AgentPromptDescriptor> ListBuiltInPrompts(string userCodeAltaRoot)

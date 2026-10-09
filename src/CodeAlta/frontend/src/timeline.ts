@@ -1,5 +1,6 @@
 import type { HistoryResponse } from "#neoastra";
 import { parseDelegatedMessage } from "./delegatedMessage";
+import { parseJobResult } from "./jobResult";
 import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { projectFileChanges, type FileChanges } from "./fileChanges";
@@ -49,6 +50,8 @@ export type TimelineItem = Readonly<{
   delegated?: boolean;
   /** The session a delegated prompt comes from, when it is known: the row names it by its title. */
   sourceSessionId?: string;
+  /** For the prompt CodeAlta gives a session when one of its background jobs ended: whether the command succeeded. */
+  jobResult?: "succeeded" | "ended";
 }>;
 
 /**
@@ -191,12 +194,15 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   const fromAgent = !streaming && normalizedKind === "user" && entry.eventType === "contentCompleted";
   const delegated = !fromAgent ? null : parseDelegatedMessage(entry.text)
     ?? (entry.sourceSessionId ? { sourceSessionId: entry.sourceSessionId, kind: "prompt", body: entry.text ?? "" } : null);
+  // The end of a background job is a prompt of the host: it is shown as what it is, without its envelope.
+  const job = !fromAgent || delegated ? null : parseJobResult(entry.text);
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
     if (normalizedKind === "user") {
-      category = "user"; icon = delegated ? "branch" : "user"; title = delegated ? "Agent message" : "You";
+      category = "user"; icon = delegated ? "branch" : job ? "terminal" : "user"; title = delegated ? "Agent message" : job ? "Background job" : "You";
       if (delegated) markdown = delegated.body;
+      if (job) markdown = job.body;
     }
     else if (normalizedKind === "assistant") { category = "assistant"; icon = "assistant"; title = "Assistant"; }
     else if (normalizedKind.startsWith("reasoning")) { category = "reasoning"; icon = "brain"; title = normalizedKind === "reasoningsummary" ? "Reasoning summary" : "Reasoning"; }
@@ -207,6 +213,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     else { title = friendly(kind || entry.eventType); }
     subtitle = streaming ? "Streaming" : delegated
       ? friendly(delegated.kind)
+      : job ? [job.title, job.result].filter(part => part).join(" · ")
       : category === "image" ? toolImages!.map(image => image.title).join(", ") : null;
   } else if (entry.eventType === "activity") {
     category = normalizedKind === "filechange" ? "file" : "tool";
@@ -312,6 +319,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolChanges: entry.tool?.added != null && entry.tool.removed != null ? { added: entry.tool.added, removed: entry.tool.removed } : undefined,
     toolExitCode: entry.tool?.exitCode,
     delegated: delegated ? true : undefined,
+    jobResult: job ? job.succeeded ? "succeeded" : "ended" : undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
   };
 }

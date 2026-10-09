@@ -5,19 +5,21 @@ import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 
 export type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
-export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira";
-export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira"];
+export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira" | "command";
+export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", "command"];
 /** The days as the host names them, Monday first as a week is shown. */
 export const weekDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const maximumTriggers = 8;
 export const maximumNameLength = 120;
 export const maximumPromptLength = 32768;
+export const maximumCommandLength = 2048;
+export const maximumFolderLength = 1024;
 
 const typeLabels: Readonly<Record<TriggerType, MessageKey>> = {
-  hourly: "Hourly", daily: "Daily", weekly: "Weekly", cron: "Cron", issue: "Issue", pull_request: "Pull request", jira: "Jira issue",
+  hourly: "Hourly", daily: "Daily", weekly: "Weekly", cron: "Cron", issue: "Issue", pull_request: "Pull request", jira: "Jira issue", command: "Command",
 };
 const typeIcons: Readonly<Record<TriggerType, IconName>> = {
-  hourly: "repeat", daily: "sun", weekly: "calendar", cron: "terminal", issue: "issueOpen", pull_request: "pullRequest", jira: "list",
+  hourly: "repeat", daily: "sun", weekly: "calendar", cron: "terminal", issue: "issueOpen", pull_request: "pullRequest", jira: "list", command: "tool",
 };
 
 export const triggerLabel = (type: string): MessageKey => typeLabels[type as TriggerType] ?? "Manual";
@@ -33,12 +35,15 @@ export function triggerTone(type: string | undefined): string {
     case "issue": return "green";
     case "pull_request": return "orange";
     case "jira": return "blue";
+    case "command": return "cyan";
     default: return "muted";
   }
 }
 
-/** Whether a trigger is a time on the clock, as opposed to an event of the repository of a project. */
-export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => trigger.type !== "issue" && trigger.type !== "pull_request" && trigger.type !== "jira";
+/** Whether a trigger is an event of the repository of a project, or of its tracker: it needs a project. */
+export const needsProject = (trigger: Readonly<{ type: string }>): boolean => trigger.type === "issue" || trigger.type === "pull_request" || trigger.type === "jira";
+/** Whether a trigger is a time on the clock, as opposed to an event of the repository of a project or a command. */
+export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !needsProject(trigger) && trigger.type !== "command";
 
 /**
  * Whether an automation waits for the user before its triggers start it: it came with the configuration of its
@@ -49,7 +54,8 @@ export const waitsToBeAllowed = (item: Readonly<{ allowed: boolean; triggers: re
 /** A trigger with the values a new one of its kind starts with. */
 export function newTrigger(type: TriggerType): AutomationTriggerItem {
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
-    expression: type === "cron" ? "0 9 * * 1-5" : null, event: type === "jira" ? "created" : "opened", authors: "trusted" };
+    expression: type === "cron" ? "0 9 * * 1-5" : null, event: type === "jira" ? "created" : "opened", authors: "trusted",
+    command: type === "command" ? "" : null, folder: null };
 }
 
 /** The name of a day in the language of the page, short: "Mon". */
@@ -61,8 +67,11 @@ export function dayName(day: string, locale: Locale): string {
   catch { return day; }
 }
 
-/** How one trigger reads: "Daily at 09:00". */
-export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, locale: Locale): string {
+/**
+ * How one trigger reads: "Daily at 09:00". A command is named by its start, or read whole, with the folder it
+ * names, where the user reads what an automation runs before allowing it.
+ */
+export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, locale: Locale, whole = false): string {
   const times = trigger.at.join(", ");
   switch (trigger.type) {
     case "hourly": {
@@ -78,6 +87,12 @@ export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, lo
     case "issue": return t("When an issue is opened");
     case "pull_request": return t(trigger.event === "updated" ? "When a pull request is updated" : "When a pull request is opened");
     case "jira": return t(trigger.event === "updated" ? "When a Jira issue is updated" : "When a Jira issue is created");
+    case "command": {
+      const command = (trigger.command ?? "").trim();
+      const folder = (trigger.folder ?? "").trim();
+      if (whole) return t("When {command} succeeds", { command }) + (folder ? ` (${t("in")} ${folder})` : "");
+      return t("When {command} succeeds", { command: command.length > 60 ? `${command.slice(0, 59)}…` : command });
+    }
     default: return trigger.type;
   }
 }
@@ -128,10 +143,11 @@ export function formProblem(form: AutomationForm): MessageKey | null {
   if (!form.prompt.trim()) return "Write the prompt the automation sends.";
   if (form.prompt.length > maximumPromptLength) return "The prompt is too long.";
   for (const trigger of form.triggers) {
-    if (!isSchedule(trigger) && !form.projectId) return "A trigger on issues or pull requests needs a project.";
+    if (needsProject(trigger) && !form.projectId) return "A trigger on issues or pull requests needs a project.";
     if ((trigger.type === "daily" || trigger.type === "weekly") && trigger.at.length === 0) return "Add a time to the trigger.";
     if (trigger.type === "weekly" && trigger.days.length === 0) return "Choose a day for the weekly trigger.";
     if (trigger.type === "cron" && !(trigger.expression ?? "").trim()) return "Write the cron expression.";
+    if (trigger.type === "command" && !(trigger.command ?? "").trim()) return "Write the command of the trigger.";
   }
   return null;
 }
@@ -144,7 +160,8 @@ export function inputOf(form: AutomationForm): AutomationInput {
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
-    triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null })) };
+    triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,
+      command: trigger.type === "command" ? (trigger.command ?? "").trim() : null, folder: trigger.type === "command" ? (trigger.folder ?? "").trim() || null : null })) };
 }
 
 export type AutomationScope = "all" | "chats" | "projects";

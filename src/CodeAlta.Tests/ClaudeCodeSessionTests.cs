@@ -85,6 +85,8 @@ public sealed class ClaudeCodeSessionTests
         // agent back in any case takes a reminder.
         StringAssert.Contains(appended, "starts a turn the user sees as a run of the session");
         StringAssert.Contains(appended, "`alta reminder`");
+        // A command CodeAlta runs itself is shown to the user and brings its result back: it is preferred for what takes long.
+        StringAssert.Contains(appended, "`alta job start` is run by CodeAlta itself");
         Assert.IsTrue(appended.IndexOf("Be brief.", StringComparison.Ordinal) > appended.IndexOf("`alta session`", StringComparison.Ordinal));
 
         // No tool of Claude Code is named: which ones a version has is its own business.

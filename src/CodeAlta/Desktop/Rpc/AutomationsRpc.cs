@@ -227,7 +227,7 @@ internal sealed class AutomationsService
     private static AutomationTriggerItem Trigger(AutomationTrigger trigger)
         => new(trigger.KindName, trigger.Minute, trigger.Every, [.. trigger.At.Select(static time => time.ToString())],
             [.. trigger.Days.Select(static day => AutomationTrigger.DayNames[(int)day])], trigger.Expression, trigger.Event,
-            trigger.Authors == AutomationAuthors.Anyone ? "anyone" : "trusted");
+            trigger.Authors == AutomationAuthors.Anyone ? "anyone" : "trusted", trigger.Command, trigger.Folder);
 
     // False: the request is not one the page sends. A problem: what the user wrote is refused, with the reason.
     private static bool TryRead(AutomationInput input, out AutomationDefinition? definition, out string? problem)
@@ -275,7 +275,8 @@ internal sealed class AutomationsService
     {
         trigger = null;
         if (!AutomationTrigger.TryParseKind(item.Type, out var kind) || item.At is null || item.Days is null || item.At.Count > 24 || item.Days.Count > 7
-            || item.Expression is { Length: > AutomationTrigger.MaximumExpressionLength }) return false;
+            || item.Expression is { Length: > AutomationTrigger.MaximumExpressionLength } || item.Command is { Length: > AutomationTrigger.MaximumCommandLength * 2 }
+            || item.Folder is { Length: > AutomationTrigger.MaximumFolderLength * 2 }) return false;
         var times = new List<AutomationTime>();
         foreach (var text in item.At)
         {
@@ -302,6 +303,8 @@ internal sealed class AutomationsService
             Expression = kind == AutomationTriggerKind.Cron ? string.Join(' ', (item.Expression ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)) : null,
             Event = item.Event is "updated" ? "updated" : "opened",
             Authors = item.Authors == "anyone" ? AutomationAuthors.Anyone : AutomationAuthors.Trusted,
+            Command = kind == AutomationTriggerKind.Command ? (item.Command ?? string.Empty).Trim() : null,
+            Folder = kind == AutomationTriggerKind.Command ? Blank(item.Folder) : null,
         };
         return true;
     }
@@ -312,7 +315,7 @@ internal sealed class AutomationsService
 internal sealed record AutomationsRequest(string? ExpectedEpoch);
 
 /// <summary>One trigger, as the page shows and edits it. Which members count depends on <see cref="Type"/>.</summary>
-/// <param name="Type"><c>hourly</c>, <c>daily</c>, <c>weekly</c>, <c>cron</c>, <c>issue</c> or <c>pull_request</c>.</param>
+/// <param name="Type"><c>hourly</c>, <c>daily</c>, <c>weekly</c>, <c>cron</c>, <c>issue</c>, <c>pull_request</c>, <c>jira</c> or <c>command</c>.</param>
 /// <param name="Minute">Hourly: the minute of the hour.</param>
 /// <param name="Every">Hourly: every how many hours.</param>
 /// <param name="At">Daily and weekly: the times of day, <c>HH:mm</c>.</param>
@@ -320,7 +323,10 @@ internal sealed record AutomationsRequest(string? ExpectedEpoch);
 /// <param name="Expression">Cron: the five fields.</param>
 /// <param name="Event">Issue and pull request: <c>opened</c> or <c>updated</c>.</param>
 /// <param name="Authors">Issue and pull request: <c>trusted</c> or <c>anyone</c>.</param>
-internal sealed record AutomationTriggerItem(string Type, int Minute, int Every, IReadOnlyList<string> At, IReadOnlyList<string> Days, string? Expression, string Event, string Authors);
+/// <param name="Command">Command: the command line the automation keeps running.</param>
+/// <param name="Folder">Command: the folder it runs in, from the folder of the project; null for that folder.</param>
+internal sealed record AutomationTriggerItem(string Type, int Minute, int Every, IReadOnlyList<string> At, IReadOnlyList<string> Days, string? Expression, string Event, string Authors,
+    string? Command, string? Folder);
 
 /// <summary>An automation as the page shows it.</summary>
 /// <param name="ProjectId">The project it runs in; null for a chat.</param>
@@ -331,7 +337,7 @@ internal sealed record AutomationTriggerItem(string Type, int Minute, int Every,
 /// <param name="NextRunAt">When a schedule of it is next due.</param>
 /// <param name="LastRun">Its latest run.</param>
 /// <param name="Repository">The repository its event triggers watch, as <c>owner/name</c>.</param>
-/// <param name="WatchProblem">Why its event triggers see nothing of that repository.</param>
+/// <param name="WatchProblem">Why its event triggers see nothing of that repository, or what is wrong with the command of a trigger.</param>
 /// <param name="Allowed">
 /// Whether its triggers may start it: false for an automation kept with a project that the user has not allowed as it is now.
 /// </param>

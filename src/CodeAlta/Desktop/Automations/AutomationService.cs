@@ -19,8 +19,8 @@ internal sealed record AutomationSnapshot(IReadOnlyList<AutomationEntry> Entries
 
 /// <summary>
 /// The automations of the application. It reads them from the configuration of the user and of each project,
-/// away from the thread that asks; it runs the ones whose schedule is due or whose event happened in the
-/// repository of their project; and it keeps what each run started.
+/// away from the thread that asks; it runs the ones whose schedule is due, whose event happened in the
+/// repository of their project or whose command succeeded; and it keeps what each run started.
 /// </summary>
 /// <remarks>
 /// A schedule is read on the clock of the machine. A time that passed while the application was not running, or
@@ -81,11 +81,13 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <param name="zone">The time zone the schedules are read in.</param>
     /// <param name="feed">Reads the repositories for the event triggers, and is disposed with the service; null when they are not watched.</param>
     /// <param name="trackers">Gives the plugins that say what happened in a tracker, as they are active when asked; null when there are none.</param>
+    /// <param name="commands">Runs the commands of the command triggers; null when they are not run.</param>
     internal AutomationService(string globalConfigPath, Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> projects,
         AutomationStateStore state, IAutomationRunner runner, TimeProvider time, TimeZoneInfo zone, IAutomationFeed? feed = null,
-        Func<IReadOnlyList<CodeAlta.Plugins.Abstractions.IIssueEventSource>>? trackers = null)
+        Func<IReadOnlyList<CodeAlta.Plugins.Abstractions.IIssueEventSource>>? trackers = null, IAutomationCommands? commands = null)
     {
         _trackers = trackers;
+        _commands = commands;
         ArgumentException.ThrowIfNullOrWhiteSpace(globalConfigPath);
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(state);
@@ -144,7 +146,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         if (!entry.Source.IsGlobal) _state.Allow(entry.Id, Allowance(entry));
         lock (_gate)
         {
-            // Its schedules count from now, and its event triggers look at their repository soon.
+            // Its schedules count from now, its event triggers look at their repository soon, and its commands are started.
             foreach (var key in _due.Keys.Where(key => key.Id == id).ToArray()) _due.Remove(key);
             Reschedule(_time.GetUtcNow(), first: false);
             _lookSoon = true;
@@ -431,17 +433,23 @@ internal sealed partial class AutomationService : IAsyncDisposable
         return await BeginAsync(entry, "manual", null, entry.Definition.Prompt, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Stops the schedules and waits for what was being read or started. Sessions that are running keep going.</summary>
+    /// <summary>
+    /// Stops the schedules, ends the commands of the triggers and waits for what was being read or started.
+    /// Sessions that are running keep going.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         Task[] pending;
+        List<IAutomationCommand> commands;
         lock (_gate)
         {
             if (_closed) return;
             _closed = true;
+            commands = EndCommands();
             pending = [.. new[] { _loop, _scan, _look }.OfType<Task>(), .. _observers];
         }
 
+        foreach (var command in commands) command.Kill();
         await _stop.CancelAsync().ConfigureAwait(false);
         try
         {
@@ -498,7 +506,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
         }
     }
 
-    /// <summary>Starts what is due at a moment and tells how long to wait until something else is.</summary>
+    /// <summary>
+    /// Starts what is due at a moment, starts and ends the commands of the triggers as the automations are now,
+    /// and tells how long to wait until something else is due.
+    /// </summary>
     internal TimeSpan Tick(DateTimeOffset now)
     {
         var starts = new List<(AutomationEntry Entry, AutomationTrigger Trigger)>();
@@ -529,6 +540,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         }
 
         foreach (var (entry, trigger) in starts) Trigger(entry, trigger.KindName, null, entry.Definition.Prompt);
+        if (LookAtCommands(now) is { } restart && (next is null || restart < next)) next = restart;
         var wait = next is { } due2 ? due2 - now : LongestWait;
         return wait < TimeSpan.FromMilliseconds(250) ? TimeSpan.FromMilliseconds(250) : wait > LongestWait ? LongestWait : wait;
     }
@@ -646,6 +658,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
             // An event that waited for this run is looked for again soon.
             waiting = _waiting;
             _lookSoon |= waiting;
+            // A command that succeeded meanwhile starts its run at the next look.
+            waiting |= HoldsCommand(automationId);
         }
 
         var ended = _state.Update(runId, run => run with { Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId });

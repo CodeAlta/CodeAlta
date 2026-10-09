@@ -97,10 +97,13 @@ internal sealed partial class AutomationService
         lock (_gate) return _repositories.GetValueOrDefault(id);
     }
 
-    /// <summary>Why the event triggers of an automation see nothing; null when they do, or have none.</summary>
+    /// <summary>
+    /// Why the event triggers of an automation see nothing, or what is wrong with the command of a trigger; null
+    /// when nothing is, or when it has neither.
+    /// </summary>
     internal string? WatchProblem(string id)
     {
-        lock (_gate) return _state.Paused ? null : _watchProblems.GetValueOrDefault(id);
+        lock (_gate) return _state.Paused ? null : _watchProblems.GetValueOrDefault(id) ?? CommandProblem(id);
     }
 
     /// <summary>
@@ -129,7 +132,7 @@ internal sealed partial class AutomationService
             if (!Armed(entry)) continue;
             foreach (var trigger in entry.Definition.Triggers)
             {
-                if (trigger.IsSchedule) continue;
+                if (!trigger.IsEvent) continue;
                 if (entry.ProjectPath is null) problems[entry.Id] = "A trigger on issues or pull requests needs a project.";
                 else watched.Add((entry, trigger));
             }
@@ -364,7 +367,7 @@ internal sealed partial class AutomationService
         lock (_gate)
         {
             if (_feed is null && _trackers is null || _closed || _state.Paused || _look is { IsCompleted: false }) return null;
-            if (!_snapshot.Entries.Any(entry => entry.Definition.Triggers.Any(static trigger => !trigger.IsSchedule) && Armed(entry)))
+            if (!_snapshot.Entries.Any(entry => entry.Definition.Triggers.Any(static trigger => trigger.IsEvent) && Armed(entry)))
             {
                 // A trigger that comes back later starts from then.
                 _looked.Clear();

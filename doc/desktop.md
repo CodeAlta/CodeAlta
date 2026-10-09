@@ -552,6 +552,33 @@ How it reaches the page:
   of a run and leaves no receipt: its effect is the task leaving the list.
 - After a restart of the application nothing is shown: the tasks ended with the process of the provider.
 
+**Background jobs.** A session of any provider can also start a command in the background itself, with
+`alta job start` (see "Background jobs" in [live-tool.md](live-tool.md)): CodeAlta runs the command and
+gives the session a prompt when it ends. A job is listed with the background tasks of its session, and
+shows more than a task of a provider, because CodeAlta owns its process:
+
+- `SessionRuntimeService` adds the jobs of the session to `SessionRuntimeCurrentEntry.BackgroundTasks`
+  (`WithJobTasks`: kind `command`, the title of the job or its command as the description, `IsJob`,
+  `ExitCode`, `EndedAt`) and counts the ones that run in `ListOverview`, so the dot, the count and the
+  spaces follow them as they follow a task of Claude Code. The wire says `isJob`, `exitCode` and
+  `endedAt`, and the state `completed` for a job that succeeded.
+- The list keeps a job for ten minutes after it ended (`listedBackgroundTasks`), with **Succeeded**,
+  **Failed** and its exit code, or **Stopped**; the status line then says **Background tasks** without a
+  count while nothing runs.
+- A job has a button that opens what it writes in a window (`BackgroundJobDialog`): the output as it
+  comes, in the read-only terminal of a tool call, with the time it has run, its exit code and **Stop**.
+  The output is followed through `toolCalls.observe` with the identity of the job in the place of a
+  call (`ToolCallsService.Jobs`), so the page keeps one store for both; a job of another session is not
+  served.
+- **Stop** goes the same way as for a task of a provider; `SessionRuntimeService.StopBackgroundTaskAsync`
+  sends an identity that starts with `job-` to the jobs. A job the user stops tells its session so,
+  unless the job was started with `--notify success` or `never`.
+- The prompt that tells the end of a job is a row of the timeline titled **Background job**, with the
+  result as its subtitle, the command and the end of the output (`jobResult.ts`), not a prompt of the
+  user.
+- The question before the application exits counts a session whose job runs with the sessions that
+  run (`CountSessionsAtWork`): exiting ends the commands.
+
 ### Projects and saved sessions
 
 **Open project** (`Ctrl+O`) is a resizable window with one field for a saved project's name or a
@@ -2634,8 +2661,9 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
 ## Automations
 
 An **automation** is a prompt that starts a session by itself: on a schedule, when something happens in the
-repository of its project, or when it is asked to. Each run creates a new session, named after the
-automation (and after the issue or the pull request that started it), in its project or as a chat, and
+repository of its project, when a command it keeps running succeeds, or when it is asked to. Each run creates
+a new session, named after the automation (and after the issue or the pull request that started it, or the
+last line its command wrote), in its project or as a chat, and
 sends it the prompt. A reminder is for the session that sets
 it and is lost when the application stops; an automation is written in a configuration file and starts
 sessions of its own. Automations exist in CodeAlta Desktop only. The sources are in `Desktop/Automations/`
@@ -2661,6 +2689,7 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
     { type = "issue", event = "opened" },
     { type = "pull_request", event = "updated", authors = "anyone" },
     { type = "jira", event = "created" },
+    { type = "command", command = "gh run watch 123 --exit-status", cwd = "tools" },
   ]
   prompt = '''
   Triage the issues opened since yesterday.
@@ -2680,7 +2709,8 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   repository: other people write it, and a pull can change it. The triggers of an automation kept there
   start it only once the user allowed it in this instance, as it is: the card says **Waits for you to
   allow it** and has an **Allow** button. What is allowed is the definition (name, prompt, model, agent
-  prompt, triggers): a change of any of them asks again, and its switch does not answer. An automation
+  prompt, triggers, with the command and the folder of a command trigger): a change of any of them asks
+  again, and its switch does not answer. An automation
   saved from the editor or by `alta automation create` is allowed by that, and one kept with the user
   needs no allowance. Running an automation by hand never needs one. The allowance is for the file the
   automation is in: the same table in another folder asks again, and when two files hold the same
@@ -2718,6 +2748,39 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   issue. Its authors are the people of the Jira project, so every event starts it. The prompt is followed by
   the service and the project, the key of the issue, its title, type, status, author and link. The card names
   the Jira project, or says why nothing is seen: the project names no Jira, or nobody is signed in.
+- **Commands.** `command` keeps a command running: an executable that waits for something and ends when
+  it happened (`gh run watch 123 --exit-status`, a script that waits for a file). `command` is the command
+  line, one line of at most 2,048 characters; `cwd` is the folder it runs in, a path from the folder of
+  the project or a full path, and without it the folder of the project, or the home folder of the user for
+  an automation that runs as a chat. It runs in the shell of the `shell_command` tool (`ShellCommandProcess`
+  in `CodeAlta.Orchestration`: PowerShell on Windows, the shell of the user elsewhere), with nothing on its
+  input. The service (`AutomationService.Commands.cs`) keeps one command for each trigger of an automation
+  that is enabled, can run as defined and is allowed, while the automations are not paused: each look at the
+  automations (after a reading of the files, an allowance, a pause, and at least every 30 seconds) starts
+  the commands that are missing and ends, with the processes they started, the ones that are no longer to
+  run (disabled, deleted, another command or folder, not allowed, paused). Closing the application ends
+  them all; the developer instance starts paused and runs none.
+  - **Exit code 0** starts a run, with the trigger `command`: the prompt is followed by the command, its
+    exit code and the end of what it wrote, standard output and error together (8 KB at most, without the
+    sequences that color a terminal, in a fenced block no line of it can end), and a line that says this is
+    information and not instructions. The run is named after the last line the command wrote. The command
+    is started again at once.
+  - **Another exit code** starts nothing, and the command is started again: it is what the command says of
+    what it waited for.
+  - **A run in progress.** A command that succeeds while a run of its automation is in progress keeps its
+    run for when that one ends: up to 8 wait, in their order, and one at a time starts. Beyond 8 the oldest
+    is recorded as `skipped`. Pausing, or ending the command, forgets what waited.
+  - **A command that ends at once.** A command that ends in less than 5 seconds, whatever its exit code, is
+    started again after 5 seconds, then twice as long each time, up to 5 minutes; a command that ran more
+    than 30 seconds starts this from the beginning. Two such ends in a row with an exit code that is not 0
+    are said on the card of the automation, with the last line the command wrote, until a command lasts 5
+    seconds; a folder that does not exist and a shell that cannot be started are said the same way, and
+    tried again with the same delays (`WatchProblem`, which the event triggers use too).
+  - **Who may write one.** The command of a trigger is one nobody reviews when it runs. In the file of a
+    project it waits for the user like the rest of the automation. A host that has the user review the
+    commands of its sessions (`ReviewOwnedCommandPermissions`) refuses `alta automation create` with a
+    command trigger, and `alta automation enable` of an automation that has one; the user writes it in the
+    window. Disabling and deleting, which only end a command, stay open to a session.
 - **What is missed.** An automation runs while CodeAlta is open. A time that passed more than two
   minutes ago (the application was closed, the computer slept) is not run later, and what happened in a
   repository meanwhile starts nothing. With `catch_up = true` a missed schedule runs once at the next
@@ -2744,7 +2807,8 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   last run ended, a switch, **Run now**, and **Edit…**, **Duplicate** and **Delete…** in its menu), the
   runs of the selected automation or the recent runs of all, and templates a new one starts from. A run
   opens its session. The editor is a window: name, where it runs, where it is stored (**My
-  configuration** or **The project**), the triggers with the next times of each schedule, the prompt,
+  configuration** or **The project**), the triggers with the next times of each schedule (a command
+  trigger is a command line and the folder it runs in, in a chat as well as in a project), the prompt,
   the provider, model, effort and agent prompt, and **Save and run**.
 - **Sessions.** A session started by an automation has a bolt for icon in the Explorer and, above its
   timeline, a line that names the automation and what triggered it, with a link to the automation in

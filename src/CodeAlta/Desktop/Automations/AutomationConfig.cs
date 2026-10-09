@@ -84,7 +84,15 @@ internal static class AutomationConfig
         if (definition.Triggers.Count > AutomationDefinition.MaximumTriggers) return $"An automation has at most {AutomationDefinition.MaximumTriggers} triggers.";
         foreach (var trigger in definition.Triggers)
         {
-            if (trigger.IsSchedule)
+            if (trigger.IsCommand)
+            {
+                if (string.IsNullOrWhiteSpace(trigger.Command)) return "A command trigger has a command.";
+                if (trigger.Command.Length > AutomationTrigger.MaximumCommandLength || trigger.Command.Any(char.IsControl) || !IsWellFormed(trigger.Command))
+                    return $"The command of a trigger is one line of at most {AutomationTrigger.MaximumCommandLength} characters.";
+                if (trigger.Folder is { } folder && (string.IsNullOrWhiteSpace(folder) || folder.Length > AutomationTrigger.MaximumFolderLength || folder.Any(char.IsControl) || !IsWellFormed(folder)))
+                    return "The folder of a command trigger is a path.";
+            }
+            else if (trigger.IsSchedule)
             {
                 if (!AutomationSchedule.TryCreate(trigger, out _, out var error)) return error;
                 if (trigger.Expression is { Length: > AutomationTrigger.MaximumExpressionLength }) return "The cron expression is too long.";
@@ -262,14 +270,15 @@ internal static class AutomationConfig
         if (!TryText(table, "type", out var type, out problem)) return false;
         if (!AutomationTrigger.TryParseKind(type, out var kind))
         {
-            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue, pull_request or jira.";
+            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue, pull_request, jira or command.";
             return false;
         }
 
         if (!TryNumber(table, "minute", 0, out var minute, out problem) || !TryNumber(table, "every", 1, out var every, out problem)
             || !TryTexts(table, "at", out var at, out problem) || !TryTexts(table, "days", out var days, out problem)
             || !TryText(table, "expression", out var expression, out problem) || !TryText(table, "event", out var @event, out problem)
-            || !TryText(table, "authors", out var authors, out problem)) return false;
+            || !TryText(table, "authors", out var authors, out problem) || !TryText(table, "command", out var command, out problem)
+            || !TryText(table, "cwd", out var folder, out problem)) return false;
         var times = new List<AutomationTime>();
         foreach (var text in at)
         {
@@ -314,6 +323,8 @@ internal static class AutomationConfig
             // An issue of Jira is created where one of a repository is opened: both words are read for it.
             Event = (@event ?? (kind == AutomationTriggerKind.Jira ? "created" : "opened")).Trim().ToLowerInvariant() is var read && kind == AutomationTriggerKind.Jira && read == "opened" ? "created" : read,
             Authors = authors?.Trim().ToLowerInvariant() == "anyone" ? AutomationAuthors.Anyone : AutomationAuthors.Trusted,
+            Command = kind == AutomationTriggerKind.Command ? (command ?? string.Empty).Trim() : null,
+            Folder = kind == AutomationTriggerKind.Command ? Blank(folder) : null,
         };
         return true;
     }
@@ -415,6 +426,10 @@ internal static class AutomationConfig
                 break;
             case AutomationTriggerKind.Cron:
                 builder.Append(", expression = ").Append(Quote(trigger.Expression ?? string.Empty));
+                break;
+            case AutomationTriggerKind.Command:
+                builder.Append(", command = ").Append(Quote(trigger.Command ?? string.Empty));
+                if (trigger.Folder is { } folder) builder.Append(", cwd = ").Append(Quote(folder));
                 break;
             default:
                 builder.Append(", event = ").Append(Quote(trigger.Event));

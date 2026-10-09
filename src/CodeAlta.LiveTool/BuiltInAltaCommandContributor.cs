@@ -80,6 +80,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("reminder create"),
         Read("reminder list"),
         Mutating("reminder delete"),
+        Mutating("job start"),
+        Read("job list"),
+        Read("job status"),
+        Read("job output"),
+        Disruptive("job cancel"),
         Read("skill list", supportsCatalogOnlyContext: true),
         Read("skill show", supportsCatalogOnlyContext: true),
         Mutating("skill activate"),
@@ -122,6 +127,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         yield return CreateSessionCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
+        yield return CreateJobCommand(context.Invocation);
         yield return CreateSkillCommand(context.Invocation);
         yield return CreateSkillsAliasCommand(context.Invocation);
         yield return CreateSkillsActivateAliasCommand(context.Invocation);

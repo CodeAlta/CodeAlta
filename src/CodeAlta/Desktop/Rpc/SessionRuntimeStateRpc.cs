@@ -114,6 +114,7 @@ internal sealed class SessionRuntimeStateService
             ? new(task.TaskId, Cut(task.Kind, 32)!, Cut(task.Description, 160), task.ToolCallId is null ? null : RuntimeDisplayProjection.CompactIdentifier(task.ToolCallId),
                 task.StartedAt?.ToString("O", CultureInfo.InvariantCulture),
                 task.Outcome switch { null => "running", CodeAlta.Agent.AgentBackgroundTaskOutcome.Failed => "failed", CodeAlta.Agent.AgentBackgroundTaskOutcome.Stopped => "stopped", _ => "completed" })
+            { IsJob = task.IsJob, ExitCode = task.ExitCode, EndedAt = task.EndedAt?.ToString("O", CultureInfo.InvariantCulture) }
             : null;
 
     // Cuts a text at a character, never inside a surrogate pair, and makes one line of it.
@@ -162,6 +163,16 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
 /// <param name="Description">What it does, in one line; null when its provider does not say.</param>
 /// <param name="ToolCallId">The tool call that started it, as the timeline names that call; null when unknown.</param>
 /// <param name="StartedAt">When it was first known, as a round-trip timestamp; null for a task that ended.</param>
-/// <param name="State"><c>running</c>, or how it ended: <c>failed</c> or <c>stopped</c>.</param>
-internal sealed record SessionRuntimeBackgroundTaskResponse(string TaskId, string Kind, string? Description, string? ToolCallId, string? StartedAt, string State);
+/// <param name="State"><c>running</c>, or how it ended: <c>failed</c>, <c>stopped</c>, or <c>completed</c> for a background job that succeeded.</param>
+internal sealed record SessionRuntimeBackgroundTaskResponse(string TaskId, string Kind, string? Description, string? ToolCallId, string? StartedAt, string State)
+{
+    /// <summary>Whether it is a background job the host runs for the session: what it writes can be followed (<c>jobs.observe</c>).</summary>
+    public bool IsJob { get; init; }
+
+    /// <summary>The exit code of the command of a job that ended by itself.</summary>
+    public int? ExitCode { get; init; }
+
+    /// <summary>When a job ended, as a round-trip timestamp; null while it runs, and for a task of the provider.</summary>
+    public string? EndedAt { get; init; }
+}
 internal sealed record SessionRuntimeActivityResponse(string? Timestamp, string Source, string AdmittedEvents, string OmittedEvents);

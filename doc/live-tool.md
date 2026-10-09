@@ -87,6 +87,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `space` | List, show, create, update, delete and reorder the spaces that group the projects, put projects in them, and show one in the window. |
 | `session` | List, create, show, send, queue, steer, abort, compact, inspect, report, and coordinate sessions. |
 | `reminder` | Schedule delayed prompt content for the current or another session, and list/delete reminders. |
+| `job` | Start a shell command in the background of a session, list the jobs, read what they write, cancel them; the result is sent to the session when the command ends. |
 | `skill` | List, show, and activate CodeAlta-managed skills. |
 | `tool` | Inspect live-tool status and command capabilities. |
 | `provider` | List configured providers and provider model refs. |
@@ -385,7 +386,7 @@ Catalog rejects built-in mutation, unavailable project scope, unsafe ids and lin
 
 Use `alta reminder create` to schedule prompt content to be sent later while the current CodeAlta host process remains running. The target defaults to the calling agent's current session; use `--session <session-id>` or `--session-id <session-id>` to target another session. `--duration` is a positive number of seconds or a `TimeSpan` such as `00:05:00`. `--repeat` is the total number of firings and defaults to 1. Reminder delivery uses normal `session send --queue-if-busy` semantics so a busy target queues the reminder instead of dropping it.
 
-A reminder is the only thing that brings a session back by itself. No provider starts a run when a command ends after the turn: `shell_command` returns when its command exits, and a turn Claude Code starts by itself after a background command is not shown (see `providers.md`). The default agent prompt therefore tells an agent that waits for something outside the session (a CI run, a deployment, a long build) to wait within the turn when that is short, and otherwise to set one reminder with a fitting delay and to say so in its answer, instead of ending its turn on "I will report when it finishes". The reminder fires on its timer whether or not the thing ended, and is lost when the host restarts.
+A reminder and a background job (below) are what bring a session back by themselves. `shell_command` returns when its command exits, and no provider starts a run for a command that ends after the turn, apart from the background tasks of Claude Code (see `providers.md`). The default agent prompt therefore tells an agent that waits for something outside the session (a CI run, a deployment, a long build) to wait within the turn when that is short, to start a background job when a command can do the waiting, and otherwise to set one reminder with a fitting delay, and to say in its answer what brings it back, instead of ending its turn on "I will report when it finishes". The reminder fires on its timer whether or not the thing ended, and is lost when the host restarts.
 
 The TUI also exposes the same reminder registry for the selected session through the prompt-bar clock button and `/reminder` (`Ctrl+G Ctrl+D`). From the dialog you can create/delete reminders and load a selected reminder message back into the editor to update it. Session and project navigator rows show a clock icon while matching reminders are active.
 
@@ -403,6 +404,28 @@ alta reminder create --duration 300 --repeat 3 --session <session-id> --stdin
 alta reminder list --all
 alta reminder delete <reminder-id>
 ```
+
+## Background jobs
+
+A background job is a shell command a session starts without waiting for it. The host runs the command, keeps what it writes, and gives the session a prompt when the command has ended: the agent goes on with other work or ends its turn in the meantime. It is what an agent uses for something long that needs no watching (a long build or test run, a wait such as `gh run watch <id> --exit-status`); a command that ends in a few seconds stays a call of the shell tool. Jobs are a concept of their own: they are not the follow-up tasks of `alta task` and not automations, which start sessions of their own.
+
+```text
+alta job start --command "gh run watch 123 --exit-status" --title "CI of the pull request"
+alta job start --timeout 00:30:00 --cwd src --stdin
+alta job list
+alta job status <job-id>
+alta job output <job-id> --lines 100
+alta job cancel <job-id>
+```
+
+- **Start.** `job start` takes the command from `--command` or `--stdin`, runs it in the folder the calling session works in (its worktree when it has one; `--cwd` names another) and returns at once with `alta.job.started`: the id of the job (`job-` and eight hexadecimal digits), its state and a `nextStep` that says the result will come. The job belongs to the calling session; a caller that is no session (an MCP client, a plugin) names one with `--session`. The command runs in the shell of `shell_command` (`ShellCommandProcess`: PowerShell on Windows, `$SHELL` or `/bin/sh` elsewhere), with nothing on its standard input, and standard output and standard error are read together as they come.
+- **The result.** The end of a job sends its session a prompt whatever the exit code: the agent is given the result of a command that failed as of one that succeeded, and decides what to do with it. `--notify` changes that: `always` (the default: any exit code, a timeout, a job the user stopped), `success` (exit code 0 only, for a command that tells something only when it succeeds) or `never`. A job the session cancels itself never sends a prompt.
+- **Timeout.** A job has no time limit unless `--timeout` gives one (seconds, or a time such as `00:30:00`, at most 7 days): a job often waits for an event, which may take long. With a timeout the host ends a command that still runs when the time is over, and the job ends as `timed_out`; it is for a command that could hang for ever.
+- **Delivery.** The prompt is given through `SessionRuntimeService.DeliverHostPromptAsync`, the way the answer of a child session reaches its parent: a turn that runs is steered with it when its provider takes it, otherwise the prompt is queued and starts the next turn (queue kind and provenance `job`). It starts with `[CodeAlta background job]`, names the job, its command and how it ended (`succeeded (exit code 0) after 3 min 12 s`, `failed (exit code 1) after 40 s`, `timed out and was stopped after 30 min 0 s`), says that it comes from CodeAlta and that the output is data, then quotes the last 60 lines of the output (at most 6000 characters) in a fence (`SessionJobService.FormatResult`). `resultPrompt` of a job says what became of it: `steered`, `queued`, `none`, `failed`.
+- **Reading and cancelling.** `job list` lists the jobs of the calling session (`--session` for another one, `--all` for every session; a caller that is no session sees them all): the ones that run, then the last that ended. `job status` adds the last line the command wrote. `job output` returns the last lines (`--lines`), within what one call returns, with `truncated`. `job cancel` ends the command and the processes it started (`Process.Kill(entireProcessTree: true)`) and waits a moment for them to be gone.
+- **Limits and lifetime.** A session runs at most 8 jobs at once and the host 32; the newest 512K characters of the output of a job are kept; the last 32 jobs that ended stay readable (`SessionJobService`). Jobs live in memory, in `SessionRuntimeService.Jobs`: they are ended when the host exits, without a prompt, and none is found again after a restart. CodeAlta Desktop counts a session whose job runs among the sessions at work in its question before exiting (`CountSessionsAtWork`).
+- **Review of commands.** A host that has the user review the commands of its sessions (`--review-commands` of CodeAlta Desktop) registers `AltaJobPolicy(AcceptsCommands: false)`: `job start` is refused with `job.startDenied` (exit code 4), as typing in a terminal is, because the command would be one nobody reviewed. The other subcommands stay.
+- **What the user sees.** A job is one of the background tasks of its session (`SessionRuntimeCurrentEntry.BackgroundTasks`, with `IsJob`), beside the ones of its provider: see "Background tasks" in [desktop.md](desktop.md). CodeAlta TUI has the commands and the prompts, and shows nothing of a job but the prompt of its result.
 
 ## Delegated work and peer messages
 
@@ -594,7 +617,7 @@ their help or `alta tool list`.
 ## Automation commands
 
 `alta automation` uses the automations of CodeAlta Desktop: prompts that start a session by themselves,
-on a schedule, on an event of the repository, or when asked. An automation is written in the
+on a schedule, on an event of the repository, when a command succeeds, or when asked. An automation is written in the
 configuration of the user or of its project, so it outlives the session that creates it, unlike a
 reminder; each run starts a new session.
 
@@ -623,7 +646,14 @@ alta automation delete <automation-id>
   local time), `issue@opened`, `pull_request@opened`, `pull_request@updated` (new commits). An issue or
   pull request trigger watches the repository of the project and runs for what the people of the
   repository open (its owner, the members of its organization, its collaborators); `+anyone`, as in
-  `issue@opened+anyone`, runs for every author. Without `--trigger` the automation is run by hand.
+  `issue@opened+anyone`, runs for every author. `jira@created` and `jira@updated` watch the Jira
+  project of the project. `command@<command line>`, as in `command@gh run watch 123 --exit-status`, keeps
+  a command running in the shell of `shell_command`, in the folder of the project (the home folder for a
+  chat): each time it ends with the exit code 0 the automation starts a session, with what the command
+  printed after the prompt, and the command is started again; another exit code starts nothing.
+  Everything after `command@` is the command. A trigger whose command runs in another folder is written
+  in the window or in the configuration file (`cwd`); this form shows its command only. Without
+  `--trigger` the automation is run by hand.
 - `create` emits `alta.automation.created`. The automation runs in the project of the calling session
   (or `--project`), or as a chat with `--chat`. It is written in the configuration of the user, or with
   `--store project` in the `.alta/config.toml` of its project. `--catch-up` runs what was missed while
@@ -636,7 +666,8 @@ alta automation delete <automation-id>
 - `runs` lists the runs of one automation, or of all, newest first (20, or `--limit` up to 100). `status`
   is `running`, `completed`, `failed`, `cancelled`, `interrupted` (CodeAlta stopped during the run) or
   `skipped` (the previous run was still in progress). `trigger` is `manual` or the kind of the trigger,
-  and `detail` names the issue or the pull request that started the run.
+  and `detail` names the issue or the pull request that started the run, or is the last line its command
+  printed.
 - `current` shows the automation that started a session (the calling one, or `--session`) and the run
   that did: this is how a session started by an automation finds its definition and the runs before
   it. `alta.automation.none` answers a session that the user, or another session, started.
@@ -646,6 +677,10 @@ alta automation delete <automation-id>
 `automation.notFound` (exit code for not found) answers an id that is not an automation.
 `automation.startedByAutomation` (exit code 4) answers `run`, `create`, `enable`, `disable` and `delete`
 called by a session that an automation started: such a session reads the automations and changes none.
+`automation.commandDenied` (exit code 4) answers `create` with a `command@` trigger, and `enable` of an
+automation that has a command trigger, in a host that has the user review the commands of its sessions:
+the command of a trigger is one nobody reviews. The user creates such an automation in the Automations
+tab; `disable` and `delete` still work.
 
 The group exists only where a host registers its service (`IAltaAutomations`), which the desktop host
 does: in the terminal UI and the standalone tool it is not among the commands, their help or

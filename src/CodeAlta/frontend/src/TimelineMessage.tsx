@@ -155,7 +155,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const outcome = ({ completed: "Completed", failed: "Failed", canceled: "Canceled", requested: "Pending",
     started: "Running", progressed: "Running", selected: "Running", deselected: "Completed" } as Record<string, "Completed" | "Failed" | "Canceled" | "Pending" | "Running">)[item.toolPhase ?? ""];
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
-  const title = item.category === "file" ? t("Modified files") : item.category === "image" ? t("Image read") : item.category === "user" ? t(item.delegated ? "Agent message" : "You") : item.category === "plan" ? t("Plan")
+  const title = item.category === "file" ? t("Modified files") : item.category === "image" ? t("Image read") : item.category === "user" ? t(item.delegated ? "Agent message" : item.jobResult ? "Background job" : "You") : item.category === "plan" ? t("Plan")
     : item.category === "assistant" ? t("Assistant") : item.category === "notes" ? t("Notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });
@@ -173,7 +173,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       if (item.category === "tool" && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
-    data-tool-phase={item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-job-result={item.jobResult} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">

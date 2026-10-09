@@ -96,6 +96,65 @@ internal sealed class FakeAutomationStart(AutomationEntry entry, string runId, s
     internal void Complete(AutomationOutcome outcome) => _completion.TrySetResult(outcome);
 }
 
+// The commands of the command triggers: each one waits until a test says how it ended.
+internal sealed class FakeAutomationCommands : IAutomationCommands
+{
+    private readonly Lock _gate = new();
+    private readonly List<FakeAutomationCommand> _started = [];
+
+    /// <summary>Why no command can be started; null when they can.</summary>
+    internal string? Refuse { get; set; }
+
+    /// <summary>How many commands were started.</summary>
+    internal int Count
+    {
+        get { lock (_gate) return _started.Count; }
+    }
+
+    /// <summary>The one command that was started with a command line.</summary>
+    internal FakeAutomationCommand Single(string command)
+    {
+        lock (_gate) return _started.Single(started => started.Command == command);
+    }
+
+    /// <summary>The command that was last started with a command line.</summary>
+    internal FakeAutomationCommand Last(string command)
+    {
+        lock (_gate) return _started.Last(started => started.Command == command);
+    }
+
+    public IAutomationCommand Start(string command, string folder)
+    {
+        if (Refuse is { } problem) throw new InvalidOperationException(problem);
+        var started = new FakeAutomationCommand(command, folder);
+        lock (_gate) _started.Add(started);
+        return started;
+    }
+}
+
+internal sealed class FakeAutomationCommand(string command, string folder) : IAutomationCommand
+{
+    private readonly TaskCompletionSource<AutomationCommandExit> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _killed;
+
+    internal string Command => command;
+
+    internal string Folder => folder;
+
+    internal bool Killed => Volatile.Read(ref _killed) != 0;
+
+    public Task<AutomationCommandExit> Completion => _completion.Task;
+
+    /// <summary>Ends the command by itself.</summary>
+    internal void Exit(int code, string output) => _completion.TrySetResult(new(code, output));
+
+    public void Kill()
+    {
+        Interlocked.Exchange(ref _killed, 1);
+        _completion.TrySetResult(new(-1, string.Empty));
+    }
+}
+
 internal sealed class AutomationTempRoot : IDisposable
 {
     internal string Path { get; } = Directory.CreateDirectory(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "CodeAlta-automations-" + Guid.NewGuid().ToString("N"))).FullName;

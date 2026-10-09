@@ -10,8 +10,14 @@ namespace CodeAlta.Desktop;
 /// </summary>
 /// <param name="automations">The automations of the application.</param>
 /// <param name="projects">The host's project catalog, for the folder of the project a new automation runs in.</param>
-internal sealed class DesktopAltaAutomations(AutomationService automations, ProjectCatalog projects) : IAltaAutomations
+/// <param name="acceptsCommands">
+/// Whether a session may give an automation a command to run: not in a host that has the user review the commands
+/// of its sessions.
+/// </param>
+internal sealed class DesktopAltaAutomations(AutomationService automations, ProjectCatalog projects, bool acceptsCommands = true) : IAltaAutomations
 {
+    private const string CommandDenied = "This host has the user review the commands of its sessions: a session cannot create or enable an automation that runs a command. The user creates it in the Automations tab.";
+
     /// <inheritdoc />
     public IReadOnlyList<AltaAutomation> List() => [.. automations.Snapshot.Entries.Select(Automation)];
 
@@ -35,7 +41,9 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
         foreach (var text in request.Triggers)
         {
             if (!AutomationTriggerText.TryParse(text, out var trigger, out problem)) return new("refused", null, problem);
-            triggers.Add(trigger!);
+            // The command of a trigger is one nobody reviewed.
+            if (trigger!.IsCommand && !acceptsCommands) return new("denied", null, CommandDenied);
+            triggers.Add(trigger);
         }
 
         string? folder = null;
@@ -67,7 +75,9 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
     /// <inheritdoc />
     public async Task<AltaAutomationChange> SetEnabledAsync(string id, bool enabled, CancellationToken cancellationToken)
     {
-        if (automations.Snapshot.Find(id) is null) return new("not_found");
+        if (automations.Snapshot.Find(id) is not { } entry) return new("not_found");
+        // Enabling it starts its command; disabling it, or removing it, only ends one.
+        if (enabled && !acceptsCommands && entry.Definition.Triggers.Any(static trigger => trigger.IsCommand)) return new("denied", id, CommandDenied);
         return await automations.SetEnabledAsync(id, enabled, cancellationToken).ConfigureAwait(false) is { } refused ? new("refused", id, refused) : new("ok", id);
     }
 
@@ -90,7 +100,9 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
 /// <summary>
 /// A trigger on one line, as the <c>alta automation</c> commands show and take it: <c>daily@09:00,17:30</c>,
 /// <c>hourly@15</c>, <c>hourly@15/2</c>, <c>weekly@mon,thu@08:30</c>, <c>cron@0 9 * * 1-5</c>, <c>issue@opened</c>,
-/// <c>pull_request@updated</c>, the last two with <c>+anyone</c> for items of any author, <c>jira@created</c>, <c>jira@updated</c>.
+/// <c>pull_request@updated</c>, the last two with <c>+anyone</c> for items of any author, <c>jira@created</c>, <c>jira@updated</c>,
+/// <c>command@gh run watch 123 --exit-status</c>. What follows <c>command@</c> is the command, whatever it holds;
+/// the folder a command trigger names is not part of this form.
 /// </summary>
 internal static class AutomationTriggerText
 {
@@ -104,6 +116,7 @@ internal static class AutomationTriggerText
             AutomationTriggerKind.Daily => "daily@" + string.Join(',', trigger.At),
             AutomationTriggerKind.Weekly => "weekly@" + string.Join(',', trigger.Days.Select(static day => AutomationTrigger.DayNames[(int)day])) + "@" + string.Join(',', trigger.At),
             AutomationTriggerKind.Cron => "cron@" + trigger.Expression,
+            AutomationTriggerKind.Command => "command@" + trigger.Command,
             _ => trigger.KindName + "@" + trigger.Event + (trigger.Authors == AutomationAuthors.Anyone ? "+anyone" : string.Empty),
         };
     }
@@ -120,7 +133,7 @@ internal static class AutomationTriggerText
         if (name == "pr") name = "pull_request";
         if (!AutomationTrigger.TryParseKind(name, out var kind))
         {
-            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened, pull_request@opened or jira@created.";
+            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened, pull_request@opened, jira@created or command@<command line>.";
             return false;
         }
 
@@ -167,6 +180,10 @@ internal static class AutomationTriggerText
                 break;
             case AutomationTriggerKind.Cron:
                 trigger = new(kind) { Expression = string.Join(' ', rest.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)) };
+                break;
+            case AutomationTriggerKind.Command:
+                // The command is taken as it is written, the marks it holds included.
+                trigger = new(kind) { Command = rest };
                 break;
             default:
                 var anyone = rest.EndsWith("+anyone", StringComparison.OrdinalIgnoreCase);
