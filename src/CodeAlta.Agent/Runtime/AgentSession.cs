@@ -1372,6 +1372,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
             ReasoningEffort = _options.ReasoningEffort,
+            PermissionMode = NormalizeOptionalText(_options.PermissionMode),
             Conversation = _toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,

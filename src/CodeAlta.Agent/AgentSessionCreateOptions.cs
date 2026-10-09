@@ -81,6 +81,13 @@ public class AgentSessionCreateOptions
     public AgentReasoningEffort? ReasoningEffort { get; init; }
 
     /// <summary>
+    /// Gets or initializes the permission mode of the session, one of the
+    /// <see cref="Runtime.AgentProviderProfile.PermissionModes"/> of its provider. Null leaves the mode the provider
+    /// is configured with.
+    /// </summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>
     /// Gets or initializes the system message (system prompt).
     /// </summary>
     public string? SystemMessage { get; init; }

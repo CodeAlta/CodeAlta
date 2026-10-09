@@ -54,6 +54,7 @@ internal static class ClaudeCodeLauncher
     /// <param name="showReasoning">Whether the CLI writes the summaries of the thinking of the model.</param>
     /// <param name="delegatesToSessions">Whether what the model delegates goes to child sessions of CodeAlta: the CLI then starts without its own subagent tool.</param>
     /// <param name="withoutApiKey">Whether the CLI is started without the API key of the environment, to sign in with the user's login.</param>
+    /// <param name="permissionMode">The permission mode of the session, or <see langword="null" /> for the one of the provider.</param>
     public static ClaudeCodeLaunch Create(
         string executable,
         ClaudeCodeModelProviderRuntimeOptions options,
@@ -63,11 +64,15 @@ internal static class ClaudeCodeLauncher
         bool withTools,
         bool showReasoning = false,
         bool delegatesToSessions = false,
-        bool withoutApiKey = false)
+        bool withoutApiKey = false,
+        string? permissionMode = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(key);
+
+        // The mode is not part of the key: a running CLI is switched to another one without a restart.
+        permissionMode = string.IsNullOrWhiteSpace(permissionMode) ? options.PermissionMode : permissionMode;
 
         var arguments = new List<string>
         {
@@ -82,10 +87,10 @@ internal static class ClaudeCodeLauncher
             "--permission-prompt-tool", "stdio",
         };
 
-        if (!string.IsNullOrWhiteSpace(options.PermissionMode))
+        if (!string.IsNullOrWhiteSpace(permissionMode))
         {
             arguments.Add("--permission-mode");
-            arguments.Add(options.PermissionMode.Trim());
+            arguments.Add(permissionMode.Trim());
         }
 
         if (!string.IsNullOrWhiteSpace(key.Model))

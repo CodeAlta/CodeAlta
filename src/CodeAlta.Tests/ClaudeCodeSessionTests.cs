@@ -519,6 +519,44 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    [DataRow(null, "plan", "deny")]
+    [DataRow("plan", "default", "allow")]
+    public async Task PlanModeOfClaudeCode_IsLeftOrNot_ByThePermissionModeOfTheSession(string? providerMode, string sessionMode, string behavior)
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? exit = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "ExitPlanMode", new JsonObject { ["plan"] = "Do it." })));
+            exit = await process.AskPermissionAsync("ExitPlanMode", new JsonObject { ["plan"] = "Do it." }, "toolu_1");
+            process.EmitToolResult("toolu_1", "refused", isError: true);
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("the plan")));
+            process.EmitResult("the plan", user);
+        };
+        // The mode of the session is the one of its turns, whatever the provider is configured with.
+        var options = cli.CreateOptions();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            PermissionMode = providerMode,
+        });
+        await using var session = await CreateSessionAsync(runtime, directory, permissionMode: sessionMode);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("plan it") }).WaitAsync(Timeout);
+
+        Assert.AreEqual(sessionMode, SessionProcess(cli).LaunchPermissionMode);
+        Assert.AreEqual(behavior, exit!.Value.GetProperty("behavior").GetString());
+        if (behavior == "deny")
+        {
+            StringAssert.Contains(exit.Value.GetProperty("message").GetString(), "permission mode");
+        }
+    }
+
+    [TestMethod]
     public async Task QuestionOfARunThatCannotAsk_IsRefusedWithTheWayCodeAltaAsks()
     {
         using var directory = TestTempDirectory.Create();
@@ -1287,13 +1325,15 @@ public sealed class ClaudeCodeSessionTests
         IReadOnlyList<AgentToolDefinition>? tools = null,
         string? model = null,
         AgentReasoningEffort? reasoningEffort = null,
-        string? developerInstructions = null)
+        string? developerInstructions = null,
+        string? permissionMode = null)
         => await runtime.CreateSessionAsync(new AgentSessionCreateOptions
         {
             ProviderKey = runtime.Descriptor.ProviderId.Value,
             WorkingDirectory = directory.Path,
             Model = model,
             ReasoningEffort = reasoningEffort,
+            PermissionMode = permissionMode,
             DeveloperInstructions = developerInstructions,
             Tools = tools,
             OnPermissionRequest = onPermission ?? (static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))),

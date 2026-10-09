@@ -266,6 +266,102 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task PermissionModeOfTheTurn_StartsTheCliInsteadOfTheOneOfTheProvider()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-code",
+            TransportFactory = cli,
+            ResolveCli = cli.CreateOptions().ResolveCli,
+            IdleTimeout = TimeSpan.Zero,
+            PermissionMode = "acceptEdits",
+        });
+        var request = CreateRequest([User("one")]);
+
+        await ExecuteAsync(executor, request with { SessionId = "own", PermissionMode = " dontAsk " });
+        CollectionAssert.IsSubsetOf(new[] { "--permission-mode", "dontAsk" }, cli.Last.Launch.Arguments.ToArray());
+        Assert.AreEqual(1, cli.Last.Launch.Arguments.Count(static argument => argument == "--permission-mode"));
+
+        await ExecuteAsync(executor, request with { SessionId = "provider" });
+        CollectionAssert.IsSubsetOf(new[] { "--permission-mode", "acceptEdits" }, cli.Last.Launch.Arguments.ToArray());
+        Assert.AreEqual(0, cli.Last.PermissionModeRequests.Count, "The CLI started in the mode of the turn.");
+    }
+
+    [TestMethod]
+    public async Task ChangeOfPermissionMode_SwitchesTheRunningCliWithoutARestart()
+    {
+        var cli = new ClaudeCodeFakeCli { SettingsPermissionMode = "auto" };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var conversation = new List<AgentConversationMessage> { User("one") };
+        var previous = await ExecuteAsync(executor, CreateRequest(conversation));
+        var process = cli.Last;
+        Assert.IsNull(process.LaunchPermissionMode, "A session that asks for no mode leaves the one of the user's settings.");
+
+        async Task SendAsync(string text, string? permissionMode)
+        {
+            conversation.AddRange([previous.AssistantMessage, User(text)]);
+            previous = await ExecuteAsync(executor, CreateRequest(conversation, previous) with { PermissionMode = permissionMode });
+        }
+
+        await SendAsync("two", "acceptEdits");
+        Assert.AreEqual("acceptEdits", process.PermissionMode);
+        await SendAsync("three", "acceptEdits");
+        CollectionAssert.AreEqual(new[] { "acceptEdits" }, process.PermissionModeRequests.ToArray(), "A CLI in the mode is not asked again.");
+
+        // No mode is the one the CLI said it started in, from the settings of the user.
+        await SendAsync("four", null);
+        Assert.AreEqual("auto", process.PermissionMode);
+        CollectionAssert.AreEqual(new[] { "acceptEdits", "auto" }, process.PermissionModeRequests.ToArray());
+
+        Assert.AreEqual(1, cli.Processes.Count, "The mode is switched in the running CLI.");
+        CollectionAssert.AreEqual(new[] { "one", "two", "three", "four" }, process.UserMessages.Select(ClaudeCodeFakeProcess.UserText).ToArray());
+    }
+
+    [TestMethod]
+    public async Task PermissionModeTheCliRefuses_RestartsItInThatMode()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+        var conversation = new List<AgentConversationMessage> { User("one"), first.AssistantMessage, User("two") };
+
+        // Claude Code is only put in that mode by its command line.
+        var second = await ExecuteAsync(executor, CreateRequest(conversation, first) with { PermissionMode = "bypassPermissions" });
+
+        Assert.AreEqual(2, cli.Processes.Count);
+        var (before, after) = (cli.Processes[0], cli.Processes[1]);
+        CollectionAssert.AreEqual(new[] { "bypassPermissions" }, before.PermissionModeRequests.ToArray());
+        Assert.IsTrue(before.IsDisposed);
+        Assert.AreEqual(before.SessionId, after.ResumedSessionId);
+        Assert.AreEqual("bypassPermissions", after.LaunchPermissionMode);
+        Assert.AreEqual("two", ClaudeCodeFakeProcess.UserText(after.UserMessages.Single()));
+
+        // That process leaves it without a restart, for the mode the settings gave the first one.
+        conversation.AddRange([second.AssistantMessage, User("three")]);
+        await ExecuteAsync(executor, CreateRequest(conversation, second));
+
+        Assert.AreEqual(2, cli.Processes.Count);
+        Assert.AreEqual("default", after.PermissionMode);
+    }
+
+    [TestMethod]
+    public async Task SessionThatNoLongerAsksForAMode_RestartsInTheSettingsOfTheUser_WhenTheirModeIsNotKnown()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { PermissionMode = "acceptEdits" });
+        var conversation = new List<AgentConversationMessage> { User("one"), first.AssistantMessage, User("two") };
+
+        await ExecuteAsync(executor, CreateRequest(conversation, first));
+
+        Assert.AreEqual(2, cli.Processes.Count, "No process started in the mode of the settings told which one it is.");
+        Assert.AreEqual("acceptEdits", cli.Processes[0].LaunchPermissionMode);
+        Assert.IsNull(cli.Processes[1].LaunchPermissionMode);
+        Assert.AreEqual(cli.Processes[0].SessionId, cli.Processes[1].ResumedSessionId);
+    }
+
+    [TestMethod]
     public async Task CliWithoutTheReasoningDisplayOption_IsStartedWithoutIt()
     {
         var cli = new ClaudeCodeFakeCli { RefuseReasoningDisplay = true };

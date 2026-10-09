@@ -38,6 +38,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets a value indicating whether the CLI answers the interrupt request.</summary>
     public bool AnswerInterrupt { get; set; } = true;
 
+    /// <summary>Gets or sets the permission mode the settings of the user give a process started without one.</summary>
+    public string SettingsPermissionMode { get; set; } = "default";
+
     /// <summary>Gets or sets what a result says of the models of the conversation. The default names the model that answers.</summary>
     public Func<JsonObject>? ModelUsage { get; set; }
 
@@ -89,6 +92,8 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         _cli = cli;
         Launch = launch;
         SessionId = FindOption("--session-id=") ?? FindOption("--resume=") ?? "fake-session";
+        LaunchPermissionMode = launch.Arguments.SkipWhile(static argument => argument != "--permission-mode").Skip(1).FirstOrDefault();
+        PermissionMode = LaunchPermissionMode ?? cli.SettingsPermissionMode;
         if (cli.RefuseReasoningDisplay && launch.Arguments.Contains("--thinking-display"))
         {
             StandardErrorTail = "error: unknown option '--thinking-display'";
@@ -108,6 +113,17 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     public string SessionId { get; }
 
     public string? ResumedSessionId => FindOption("--resume=");
+
+    /// <summary>Gets the permission mode the process was started in, if any.</summary>
+    public string? LaunchPermissionMode { get; }
+
+    /// <summary>Gets the permission mode the process is in.</summary>
+    public string PermissionMode { get; private set; }
+
+    /// <summary>Gets the modes the host asked the process to switch to, refused or not.</summary>
+    public IReadOnlyList<string> PermissionModeRequests => [.. _received
+        .Where(static message => Type(message) == "control_request" && message.GetProperty("request").GetProperty("subtype").GetString() == "set_permission_mode")
+        .Select(static message => message.GetProperty("request").GetProperty("mode").GetString()!)];
 
     /// <summary>Gets everything the host wrote to the process.</summary>
     public IReadOnlyList<JsonElement> Received => [.. _received];
@@ -473,6 +489,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                     ["account"] = _cli.SignedIn
                         ? new JsonObject { ["email"] = "someone@example.test", ["organization"] = "Someone's Organization", ["subscriptionType"] = "Claude Max", ["apiProvider"] = "firstParty" }
                         : new JsonObject { ["tokenSource"] = "none", ["apiProvider"] = "firstParty" },
+                    ["current_permission_mode"] = PermissionMode,
                 };
                 if (_cli.ListsToolsAtStart)
                 {
@@ -512,15 +529,36 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
             case "mcp_message":
                 Respond(requestId, null);
                 break;
-            default:
-                Emit(new JsonObject
+            case "set_permission_mode":
+                // What Claude Code 2.1.295 answers.
+                var mode = request.GetProperty("mode").GetString();
+                if (mode == "bypassPermissions" && LaunchPermissionMode != "bypassPermissions")
                 {
-                    ["type"] = "control_response",
-                    ["response"] = new JsonObject { ["subtype"] = "error", ["request_id"] = requestId, ["error"] = "Unsupported control request subtype" },
-                });
+                    RespondError(requestId, "Cannot set permission mode to bypassPermissions because the session was not launched with --dangerously-skip-permissions");
+                }
+                else if (mode is "default" or "manual" or "acceptEdits" or "plan" or "auto" or "dontAsk" or "bypassPermissions")
+                {
+                    PermissionMode = mode == "manual" ? "default" : mode;
+                    Respond(requestId, new JsonObject { ["mode"] = PermissionMode });
+                }
+                else
+                {
+                    RespondError(requestId, "must be one of acceptEdits, auto, bypassPermissions, default, dontAsk, plan");
+                }
+
+                break;
+            default:
+                RespondError(requestId, "Unsupported control request subtype");
                 break;
         }
     }
+
+    private void RespondError(string requestId, string error)
+        => Emit(new JsonObject
+        {
+            ["type"] = "control_response",
+            ["response"] = new JsonObject { ["subtype"] = "error", ["request_id"] = requestId, ["error"] = error },
+        });
 
     private void Respond(string requestId, JsonObject? response)
     {

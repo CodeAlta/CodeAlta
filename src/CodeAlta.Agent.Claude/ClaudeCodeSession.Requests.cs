@@ -46,9 +46,11 @@ internal sealed partial class ClaudeCodeSession
                 }
             }
 
+            string? permissionMode;
             lock (_gate)
             {
                 run = _run;
+                permissionMode = _permissionMode;
             }
 
             var interactionId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? requestId;
@@ -58,12 +60,12 @@ internal sealed partial class ClaudeCodeSession
             }
 
             if (string.Equals(toolName, "ExitPlanMode", StringComparison.Ordinal) &&
-                string.Equals(_options.PermissionMode?.Trim(), "plan", StringComparison.OrdinalIgnoreCase))
+                string.Equals(permissionMode, "plan", StringComparison.OrdinalIgnoreCase))
             {
                 // Allowing it tells the model that the user approved its plan. Nobody did, and the session was
                 // put in that mode on purpose. A session that was not is let out of it, below.
                 return Deny(
-                    "This session is in the plan mode of Claude Code by the configuration of its CodeAlta provider (`permission_mode`): it is not left from within the session, and the user approved nothing. Give the plan as your answer.",
+                    "This session is in the plan mode of Claude Code by its permission mode in CodeAlta (its own, or the `permission_mode` of its provider): it is not left from within the session, and the user approved nothing. Give the plan as your answer.",
                     interrupt: false);
             }
 
