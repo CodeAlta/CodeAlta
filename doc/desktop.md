@@ -368,15 +368,21 @@ Each project opens and closes on its own, and several can be open, each with its
 of a row opens and closes it without selecting it. Clicking a project selects it and opens it; clicking
 the selected project closes and opens it. A project that becomes the selected one in any other way (a
 session tab of another project, **Open project**) is opened too. **Collapse all** in the Projects header
-closes every project and the chats. What is open is kept with the favorites in this WebView's
-local storage (`codealta.desktop.projectTree.v1`) and restored as it was at the next start; with nothing
-stored, the selected project is the one open.
+closes every project and the chats. What is open is kept with the favorites and the collapsed sessions in
+this WebView's local storage (`codealta.desktop.projectTree.v1`) and restored as it was at the next start;
+with nothing stored, the selected project is the one open.
 
 Up and Down go through the rows of the Explorer, Home and End to the first and the last. Right opens a
-project and Left closes it; Left on a session goes to its project.
+project and Left closes it. On a session that has sub-agents, Left hides them and Right shows them; Left
+on any other session goes to its project.
 
 The sessions of an open project are the same rows whether it is selected or not: the most recent ones
-(the recent-session count of **Settings → Appearance**), **Show more…** for the others. A click opens
+(the recent-session count of **Settings → Appearance**), **Show more…** for the others. That count is of
+the sessions of the project itself: the sub-agents of a session are listed under it and have a count of
+their own (the sub-agent count of the same page, 4 by default), at every level, with a **Show more…** of
+their own under them. A session that has sub-agents starts with a twist that hides them and shows them
+again (`explorer/sessionTree.ts` makes the list). A collapsed session hides the selected session too; a
+selected session beyond a count stays listed, with the sessions it is under. A click opens
 the session, which selects its project. **Rename…** and **Delete…** act on the selected session, so in
 another project they open the session first. The form of a new session and the
 notices of an unconfirmed action belong to the selected project.

@@ -107,6 +107,8 @@ Say so when you want it otherwise: "do not use sub-agents", or "use a sub-agent 
 In CodeAlta Desktop:
 
 - The sub-agents of a session are listed under it in the sidebar, and the session shows how many it started.
+- Click the arrow of a session to hide its sub-agents, and again to show them. CodeAlta keeps them hidden at the next start.
+- A session lists its 4 most recent sub-agents, and **Show more…** under them lists the others. **Settings > Appearance** sets that number.
 - A sub-agent is an ordinary session: open it to follow its work, or to write to it.
 - What agents send each other is shown as an **Agent message**, in its own color: the prompt a sub-agent receives, and the answer it gives back. The message names the session it comes from. Click the name to open that session.
 

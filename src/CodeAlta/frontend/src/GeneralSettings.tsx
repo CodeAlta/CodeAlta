@@ -10,7 +10,7 @@ import { themeLabel, themes, type Theme, type PreferenceNotices } from "./window
 import { clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
 import { locales, languageNames, preferenceNotice } from "./localization";
-import { defaultRecentSessionCount } from "./recentSessions";
+import { defaultRecentSessionCount, defaultSubAgentCount } from "./recentSessions";
 import { closeBehavior, closeBehaviorLabel, closeBehaviors, keepRunningPlace, type CloseBehavior } from "./desktopShell";
 
 /** The icon of each theme choice, shared with the title-bar switch. */
@@ -31,7 +31,7 @@ function SessionWidthSlider({ value, label, onChange }: { value: number; label: 
   </div>;
 }
 
-export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, sessionWidth, setSessionWidth, closing }: {
+export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, sessionWidth, setSessionWidth, closing }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
   /** Whether the dark theme is the darker one. */
@@ -45,6 +45,9 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
   setDesktopCollapsed: (value: boolean) => void;
   recentSessionCount: number;
   setRecentSessionCount: (value: number) => void;
+  /** How many sub-agents the Explorer lists under a session. */
+  subAgentCount: number;
+  setSubAgentCount: (value: number) => void;
   /** How much of the space of a session its timeline and its prompt take, in percent; absent where it cannot be set. */
   sessionWidth?: number;
   setSessionWidth?: (value: number) => void;
@@ -82,6 +85,12 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
     <Field label={t("Recent session display count (1–50)")} htmlFor="settings-recent-count"
       notice={notices.recent && <p role="status" className="notice" data-diagnostic={notices.recent}>{preferenceNotice(locale, "Recent session count", String(defaultRecentSessionCount), notices.recent)}</p>}>
       <HTMLSelect id="settings-recent-count" value={recentSessionCount} onChange={event => setRecentSessionCount(Number(event.target.value))}>
+        {Array.from({ length: 50 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
+      </HTMLSelect>
+    </Field>
+    <Field label={t("Sub-agent display count (1–50)")} htmlFor="settings-sub-agent-count"
+      notice={notices.subAgents && <p role="status" className="notice" data-diagnostic={notices.subAgents}>{preferenceNotice(locale, "Sub-agent count", String(defaultSubAgentCount), notices.subAgents)}</p>}>
+      <HTMLSelect id="settings-sub-agent-count" value={subAgentCount} onChange={event => setSubAgentCount(Number(event.target.value))}>
         {Array.from({ length: 50 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
       </HTMLSelect>
     </Field>

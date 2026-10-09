@@ -1,12 +1,14 @@
-/** What the Explorer remembers between starts: the projects left open and the favorite ones. */
+/** What the Explorer remembers between starts: the projects left open, the favorite ones, and the sessions whose sub-agents are hidden. */
 export type ProjectTree = Readonly<{
   /** The open scopes: project ids, and `globalScope` for the global sessions. */
   expanded: readonly string[];
   /** The favorite projects, by id, in the order they were added. */
   favorites: readonly string[];
+  /** The sessions whose sub-agents are hidden, by id. */
+  collapsed: readonly string[];
 }>;
 
-export const emptyProjectTree: ProjectTree = Object.freeze({ expanded: [], favorites: [] });
+export const emptyProjectTree: ProjectTree = Object.freeze({ expanded: [], favorites: [], collapsed: [] });
 export const projectTreeKey = "codealta.desktop.projectTree.v1";
 /** The name of the global sessions among the open scopes; no project has an empty id. */
 export const globalScope = "";
@@ -35,12 +37,12 @@ export function restoreProjectTree(read: () => string | null): ProjectTree | nul
     const value = JSON.parse(raw) as unknown;
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const stored = value as Record<string, unknown>;
-    return { expanded: ids(stored.expanded, true), favorites: ids(stored.favorites, false) };
+    return { expanded: ids(stored.expanded, true), favorites: ids(stored.favorites, false), collapsed: ids(stored.collapsed, false) };
   } catch { return null; }
 }
 
 export function persistProjectTree(write: (value: string) => void, tree: ProjectTree): boolean {
-  try { write(JSON.stringify({ expanded: tree.expanded, favorites: tree.favorites })); return true; }
+  try { write(JSON.stringify({ expanded: tree.expanded, favorites: tree.favorites, collapsed: tree.collapsed })); return true; }
   catch { return false; }
 }
 
@@ -71,4 +73,12 @@ export const isFavorite = (tree: ProjectTree, projectId: string): boolean => tre
 export function setFavorite(tree: ProjectTree, projectId: string, favorite: boolean): ProjectTree {
   if (!projectId || projectId.length > longestId || isFavorite(tree, projectId) === favorite) return tree;
   return { ...tree, favorites: favorite ? added(tree.favorites, projectId) : tree.favorites.filter(value => value !== projectId) };
+}
+
+export const isCollapsed = (tree: ProjectTree, sessionId: string): boolean => tree.collapsed.includes(sessionId);
+
+/** Hides the sub-agents of a session, or shows them again; the same tree is returned when nothing changes. */
+export function setCollapsed(tree: ProjectTree, sessionId: string, collapsed: boolean): ProjectTree {
+  if (!sessionId || sessionId.length > longestId || isCollapsed(tree, sessionId) === collapsed) return tree;
+  return { ...tree, collapsed: collapsed ? added(tree.collapsed, sessionId) : tree.collapsed.filter(value => value !== sessionId) };
 }

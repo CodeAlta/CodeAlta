@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { colorSchemeIds, colorSchemeOf, colorSchemeStorageKey, customSchemeIdOf, customSchemeSelection, customSchemeStorageKey, defaultColorScheme,
   parseCustomScheme, schemePalette, type ColorScheme, type ColorVariant, type CustomColorScheme, type ShownAppearance } from "./colorSchemes";
 import type { PreferenceIssue } from "./localization";
-import { readRecentSessionCount, recentSessionCountKey, validRecentSessionCount } from "./recentSessions";
+import { readRecentSessionCount, readSubAgentCount, recentSessionCountKey, subAgentCountKey, validRecentSessionCount } from "./recentSessions";
 import { persistProjectSort, projectSortStorageKey, type ProjectSort } from "./explorer/projectRail";
 import { persistProjectRailCollapsed, projectRailVisibilityKey, resetNarrowRail, toggleProjectRail, type ProjectRailState } from "./explorer/projectRailVisibility";
 
@@ -65,7 +65,7 @@ function useSystemDark(): boolean {
 }
 export const themeStorageKey = "codealta.desktop.theme.v1";
 export const darkerStorageKey = "codealta.desktop.darker.v1";
-type Preference = "theme" | "scheme" | "sort" | "rail" | "recent";
+type Preference = "theme" | "scheme" | "sort" | "rail" | "recent" | "subAgents";
 export type PreferenceNotices = Partial<Record<Preference, PreferenceIssue>>;
 
 function readPreference<T extends string>(key: string, valid: readonly T[], fallback: T): { value: T; notice?: PreferenceIssue } {
@@ -101,6 +101,7 @@ export function useWindowPreferences() {
     scheme: readScheme(),
     kept: readKeptScheme(),
     recent: readRecentSessionCount(() => localStorage.getItem(recentSessionCountKey)),
+    subAgents: readSubAgentCount(() => localStorage.getItem(subAgentCountKey)),
     sort: readPreference(projectSortStorageKey, ["name", "recent"], "name"),
     rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
   }));
@@ -113,16 +114,23 @@ export function useWindowPreferences() {
   const selection = useRef({ scheme: colorScheme, kept: keptScheme });
   selection.current = { scheme: colorScheme, kept: keptScheme };
   const [recentSessionCount, updateRecent] = useState(initial.recent.value);
+  const [subAgentCount, updateSubAgents] = useState(initial.subAgents.value);
   const [projectSort, updateSort] = useState<ProjectSort>(initial.sort.value);
   const [railState, updateRail] = useState<ProjectRailState>({ desktopCollapsed: initial.rail.value === "collapsed", narrowOpen: false });
   const railCurrent = useRef(railState);
-  const [notices, setNotices] = useState<PreferenceNotices>({ theme: initial.theme.notice ?? initial.darker.notice, scheme: initial.scheme.notice, sort: initial.sort.notice, rail: initial.rail.notice, recent: initial.recent.issue });
+  const [notices, setNotices] = useState<PreferenceNotices>({ theme: initial.theme.notice ?? initial.darker.notice, scheme: initial.scheme.notice, sort: initial.sort.notice, rail: initial.rail.notice, recent: initial.recent.issue, subAgents: initial.subAgents.issue });
 
   function setRecentSessionCount(value: number) {
     if (!validRecentSessionCount(value)) return;
     updateRecent(value);
     try { localStorage.setItem(recentSessionCountKey, String(value)); setNotices(current => ({ ...current, recent: undefined })); }
     catch { setNotices(current => ({ ...current, recent: "unsaved" })); }
+  }
+  function setSubAgentCount(value: number) {
+    if (!validRecentSessionCount(value)) return;
+    updateSubAgents(value);
+    try { localStorage.setItem(subAgentCountKey, String(value)); setNotices(current => ({ ...current, subAgents: undefined })); }
+    catch { setNotices(current => ({ ...current, subAgents: "unsaved" })); }
   }
 
   function save(key: Preference, persist: () => boolean) {
@@ -187,5 +195,5 @@ export function useWindowPreferences() {
   const shownScheme = selectedScheme(colorScheme, customSchemes, keptScheme);
   const appearance: ShownAppearance = useMemo(() => ({ theme: shownTheme, scheme: colorScheme, palette: schemePalette(shownScheme, variant) }), [shownTheme, colorScheme, shownScheme, variant]);
   return { theme, shownTheme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes,
-    projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount };
+    projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount };
 }

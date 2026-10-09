@@ -6,9 +6,10 @@ import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neo
 import { locales, translate } from "../localization";
 import { sessionHierarchy } from "../sessionHierarchy";
 import { ShellLanguageContext } from "../shellLanguage";
-import { ExplorerSessions } from "./ExplorerSessions";
+import { ExplorerSessions, sessionTwistKey } from "./ExplorerSessions";
 import { projectRailProjection } from "./projectRail";
 import { ProjectRailRows, type ProjectTreeView } from "./ProjectRailRows";
+import { sessionList } from "./sessionTree";
 
 const never = () => assert.fail("rendering must not act");
 const project = (id: string, name: string, archived = false): WorkspaceProject => ({ id, name, path: `/${id}`, archived });
@@ -118,16 +119,20 @@ test("every open scope shows its sessions; the selected one keeps its own while 
 test("the sessions of an open scope are rows that open them, with more on demand", () => {
   const value = snapshot([project("a", "Alpha")], [session("parent", "a"), session("child", "a", "parent"), { ...session("other", "a"), automationId: "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77" }]);
   const all = sessionHierarchy(value.sessions, value.sessions, "a");
-  const render = (rows: typeof all, more: number, extended: boolean, global = false) => renderToStaticMarkup(createElement(ExplorerSessions, { rows, global, more, extended,
+  const tree = { toggle: never, more: never, fewer: never };
+  const list = (rows: typeof all, collapsed: readonly string[] = [], subCount = 4, extra = 0) =>
+    sessionList(rows, { count: 50, subCount, active: null, extra: () => extra, collapsed: id => collapsed.includes(id) }).entries;
+  const renderList = (entries: ReturnType<typeof list>, more = 0, extended = false, global = false) => renderToStaticMarkup(createElement(ExplorerSessions, { entries, global, more, extended, tree,
     access: () => ({ rename: true, delete: true }), marks: row => createElement("i", null, `marks of ${row.id}`), onAction: never, onMore: never, onFewer: never }));
+  const render = (rows: typeof all, more: number, extended: boolean, global = false) => renderList(list(rows), more, extended, global);
   const html = render(all, 0, false);
   const listed = html.split('class="session-row"').slice(1);
   assert.equal(listed.length, 3);
   const child = listed.find(row => row.includes("title of child"))!;
   // A session started by another one is pushed in under it, with an icon of its own.
-  assert.match(child, /padding-left:23px[\s\S]*data-file-tone="teal"[\s\S]*<i>marks of child<\/i>/);
+  assert.match(child, /padding-left:26px[\s\S]*data-file-tone="teal"[\s\S]*<i>marks of child<\/i>/);
   // A session shows the logo of its provider, named by its tooltip; a session started by another one has both icons.
-  assert.match(listed.find(row => row.includes("title of parent"))!, /aria-pressed="false"[\s\S]*padding-left:11px[\s\S]*<span class="session-icon session-provider" title="codex"><svg class="brand-icon" data-brand="codex"/);
+  assert.match(listed.find(row => row.includes("title of parent"))!, /aria-pressed="false"[\s\S]*padding-left:14px[\s\S]*<span class="session-icon session-provider" title="codex"><svg class="brand-icon" data-brand="codex"/);
   assert.match(child, /data-file-tone="teal"[\s\S]*data-brand="codex"/);
   // A provider of no known brand keeps the icon of a session.
   const plain = render(sessionHierarchy([{ ...session("plain", "a"), providerKey: "my-proxy" }, { ...session("none", "a"), providerKey: null }], [], "a"), 0, false);
@@ -143,4 +148,47 @@ test("the sessions of an open scope are rows that open them, with more on demand
   assert.match(render(all, 0, true), /Show fewer/);
   assert.match(render([], 0, false), /No sessions in this project\./);
   assert.match(render([], 0, false, true), /No chats\./);
+});
+
+test("a session that has sub-agents hides them and shows them, and lists more of them on demand", () => {
+  const sessions = [session("parent", "a"), ...["c1", "c2", "c3"].map(id => session(id, "a", "parent")), session("leaf", "a")];
+  const all = sessionHierarchy(snapshot([project("a", "Alpha")], sessions).sessions, sessions, "a");
+  const tree = { toggle: never, more: never, fewer: never };
+  const render = (collapsed: readonly string[], subCount: number, extra = 0) => renderToStaticMarkup(createElement(ExplorerSessions, {
+    entries: sessionList(all, { count: 50, subCount, active: null, extra: () => extra, collapsed: id => collapsed.includes(id) }).entries, global: false, more: 0, extended: false, tree,
+    access: () => ({ rename: true, delete: true }), marks: () => null, onAction: never, onMore: never, onFewer: never }));
+  const open = render([], 4);
+  const rowOf = (html: string, id: string) => html.split('class="session-row"').slice(1).find(row => row.includes(`title of ${id}`))!;
+  // Only the session that has sub-agents says whether they are shown, and has the twist that hides them.
+  assert.match(rowOf(open, "parent"), /aria-expanded="true"[\s\S]*class="tree-twist session-twist" title="Hide the sub-agents"[\s\S]*tree-chevron expanded/);
+  assert.doesNotMatch(rowOf(open, "leaf"), /aria-expanded="(true|false)" title|tree-twist/);
+  assert.doesNotMatch(rowOf(open, "c1"), /tree-twist/);
+  assert.doesNotMatch(open, /Show more|Show fewer/);
+  const closed = render(["parent"], 4);
+  assert.match(rowOf(closed, "parent"), /aria-expanded="false"[\s\S]*title="Show the sub-agents"/);
+  assert.doesNotMatch(rowOf(closed, "parent"), /tree-chevron expanded/);
+  assert.equal(closed.split('class="session-row"').length - 1, 2);
+  // The sub-agents beyond the count are behind a line of their own, pushed in like them.
+  const capped = render([], 1);
+  assert.equal(capped.split('class="session-row"').length - 1, 3);
+  assert.match(capped, /class="session-list-disclosure sub-agent-disclosure" style="padding-left:26px"><button[^>]*>Show more… <span class="muted-text">\(2\)<\/span><\/button><\/div>/);
+  assert.match(render([], 1, 1), /sub-agent-disclosure"[^>]*><button[^>]*>Show more… <span class="muted-text">\(1\)<\/span><\/button><button[^>]*>Show fewer<\/button>/);
+  assert.match(render([], 1, 2), /sub-agent-disclosure"[^>]*><button[^>]*>Show fewer<\/button>/);
+});
+
+test("left hides the sub-agents of a row and right shows them; any other key is left to the Explorer", () => {
+  const press = (key: string, collapsed: boolean | null, modifiers: Partial<Record<"altKey" | "ctrlKey" | "metaKey" | "shiftKey", boolean>> = {}) => {
+    const done: string[] = [];
+    const event = { key, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...modifiers,
+      preventDefault: () => done.push("default"), stopPropagation: () => done.push("stop") } as unknown as Parameters<typeof sessionTwistKey>[0];
+    sessionTwistKey(event, collapsed === null ? undefined : { collapsed, toggle: () => done.push("toggle") });
+    return done.join(" ");
+  };
+  assert.equal(press("ArrowLeft", false), "default stop toggle");
+  assert.equal(press("ArrowRight", true), "default stop toggle");
+  // Nothing to hide or to show: left then goes to the project, as on a session that has no sub-agent.
+  for (const [key, collapsed] of [["ArrowLeft", true], ["ArrowRight", false], ["ArrowLeft", null], ["ArrowDown", false], ["Enter", true]] as const)
+    assert.equal(press(key, collapsed), "", `${key} ${collapsed}`);
+  assert.equal(press("ArrowLeft", false, { ctrlKey: true }), "");
+  assert.equal(press("ArrowRight", true, { altKey: true }), "");
 });

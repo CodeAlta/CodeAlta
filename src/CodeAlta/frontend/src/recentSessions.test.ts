@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activityTicks, validActivity, orderObservedActivity, readRecentSessionCount, validRecentSessionCount, limitSessionHierarchy } from "./recentSessions";
-import type { SessionHierarchyRow } from "./sessionHierarchy";
+import { activityTicks, validActivity, orderObservedActivity, readRecentSessionCount, readSubAgentCount, validRecentSessionCount } from "./recentSessions";
 
 test("recent count storage is canonical, bounded, nonwriting and reports failures", () => {
   for (let i = 1; i <= 50; i++) assert.deepEqual(readRecentSessionCount(() => String(i)), { value: i });
@@ -12,6 +11,12 @@ test("recent count storage is canonical, bounded, nonwriting and reports failure
   }
   assert.match(readRecentSessionCount(() => { throw Error(); }).notice!, /unavailable/);
   for (const n of [0, 51, NaN, Infinity, 1.5]) assert.equal(validRecentSessionCount(n), false);
+});
+test("the count of sub-agents is stored the same way, with a default of its own", () => {
+  assert.deepEqual(readSubAgentCount(() => null), { value: 4 });
+  assert.deepEqual(readSubAgentCount(() => "50"), { value: 50 });
+  assert.deepEqual(readSubAgentCount(() => "0"), { value: 4, issue: "invalid", notice: "Sub-agent count: invalid saved preference; using 4. Not overwritten." });
+  assert.equal(readSubAgentCount(() => { throw Error(); }).issue, "unavailable");
 });
 test("observed activity keeps exact submillisecond order, stable unknowns and rejects malformed facts", () => {
   const timestamp = "2026-01-01T12:00:00.0000001+02:00";
@@ -27,9 +32,4 @@ test("observed activity keeps exact submillisecond order, stable unknowns and re
     { id: "newer", t: "2026-01-01T12:00:00.0000002+02:00" }, { id: "tie", t: timestamp }];
   assert.deepEqual(orderObservedActivity(rows, row => row.t).map(row => row.id), ["newer", "older", "tie", "unknown1", "unknown2"]);
   assert.equal(rows[0].id, "unknown1");
-});
-test("count retains active row and verified ancestors without expanding loaded scope", () => {
-  const rows = [0, 0, 1, 2, 0].map((depth, index) => ({ session: { id: String(index) }, depth })) as SessionHierarchyRow[];
-  assert.deepEqual(limitSessionHierarchy(rows, 1, "3").map(row => row.session.id), ["0", "1", "2", "3"]);
-  assert.deepEqual(limitSessionHierarchy(rows, 1, "absent").map(row => row.session.id), ["0"]);
 });

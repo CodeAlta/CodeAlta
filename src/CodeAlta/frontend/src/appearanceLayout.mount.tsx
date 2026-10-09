@@ -19,7 +19,7 @@ function Fixture() {
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
     <div className="settings-card-page" style={{ width }}>
       <GeneralSettings theme="dark" setTheme={() => { }} darker={false} setDarker={() => { }} sort="name" setSort={() => { }}
-        desktopCollapsed={false} setDesktopCollapsed={() => { }} recentSessionCount={6} setRecentSessionCount={() => { }} notices={{}}
+        desktopCollapsed={false} setDesktopCollapsed={() => { }} recentSessionCount={6} setRecentSessionCount={() => { }} subAgentCount={4} setSubAgentCount={() => { }} notices={{}}
         closing={{ behavior: "ask", platform: "windows", set: () => { } }}
         schemes={{ colorScheme: defaultColorScheme, setColorScheme: () => { }, shownScheme: colorSchemeOf(defaultColorScheme), variant: "dark", customSchemes: [],
           library, preview, platform: "windows" }} />

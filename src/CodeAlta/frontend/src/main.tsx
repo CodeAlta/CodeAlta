@@ -116,8 +116,7 @@ import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatch
 import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
-import { sessionHierarchy, type SessionHierarchyRow } from "./sessionHierarchy";
-import { limitSessionHierarchy } from "./recentSessions";
+import { sessionHierarchy } from "./sessionHierarchy";
 import { SessionTabMenu } from "./SessionTabMenu";
 import { isSessionContextKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection } from "./explorer/projectRail";
@@ -142,12 +141,13 @@ import { carriedBy, readingOrder, sessionCards, workCounts, workItemKey, workIte
 import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
-import { ExplorerSessions, SessionRowTitle, sessionRowIndent } from "./explorer/ExplorerSessions";
+import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
+import { listedSessions, sessionList, type SessionListEntry } from "./explorer/sessionTree";
 import { ProviderBrandsContext, providerBrands } from "./ProviderIcon";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
-import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey,
+import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey, setCollapsed,
   setFavorite, toggleScope, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
@@ -397,7 +397,7 @@ function App() {
   const openSettingsPage = useRef<(page: string) => void>(() => {});
   openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces") navigate(page); };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
-  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount } = useWindowPreferences();
+  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount } = useWindowPreferences();
   // The user's own color schemes, and what the editor of one shows while it edits.
   const schemeLibrary = useColorSchemeLibrary(setCustomSchemes);
   const [appearancePreview] = useState(createAppearancePreview);
@@ -415,6 +415,22 @@ function App() {
       return next;
     });
   }
+  // How many more sub-agents than at first each session of the Explorer lists.
+  const [subAgentExtras, setSubAgentExtras] = useState<ReadonlyMap<string, number>>(() => new Map());
+  function setSubAgentExtra(id: string, extra: number) {
+    setSubAgentExtras(current => {
+      if ((current.get(id) ?? 0) === extra) return current;
+      const next = new Map(current);
+      if (extra > 0) next.set(id, extra); else next.delete(id);
+      return next;
+    });
+  }
+  // The sub-agents of a session, in any scope: hidden or shown, and more or fewer of them listed.
+  const sessionTree = {
+    toggle: (session: WorkspaceSession, collapsed: boolean) => setProjectTree(current => setCollapsed(current, session.id, collapsed)),
+    more: (id: string) => setSubAgentExtra(id, (subAgentExtras.get(id) ?? 0) + subAgentCount),
+    fewer: (id: string) => setSubAgentExtra(id, 0),
+  };
   const [notesVisible, setNotesVisible] = useState(true);
   const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "archive" | "reminders" | "file" | null>(null);
   // The folder chosen with "+" that the Open project window opens on; it lasts as long as that window.
@@ -1326,25 +1342,27 @@ function App() {
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
   const loadedSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, projectId) : [];
   const extraSessions = sessionExtras.get(scopeKey(projectId)) ?? 0;
-  const visibleSessionRows = limitSessionHierarchy(loadedSessionRows, recentSessionCount + extraSessions, sessionId);
-  const visibleSessions = visibleSessionRows.map(row => row.session);
+  const listLimits = (count: number, active: string | null) => ({ count, subCount: subAgentCount, active,
+    extra: (id: string) => subAgentExtras.get(id) ?? 0, collapsed: (id: string) => isCollapsed(projectTree, id) });
+  const selectedList = sessionList(loadedSessionRows, listLimits(recentSessionCount + extraSessions, sessionId));
+  const visibleSessions = listedSessions(selectedList.entries).map(row => row.session);
   // The sessions of the open scopes other than the selected one, which has the list above.
   const openScopes = useMemo(() => {
-    const scopes = new Map<string, { rows: SessionHierarchyRow[]; more: number }>();
+    const scopes = new Map<string, { entries: SessionListEntry[]; more: number }>();
     if (!snapshot) return scopes;
     for (const key of projectTree.expanded) {
       const id = key === globalScope ? null : key;
       if (id === projectId || id !== null && !snapshot.projects.some(project => project.id === id)) continue;
       const all = sessionHierarchy(sessionsForProject(snapshot, id), snapshot.sessions, id);
-      const rows = limitSessionHierarchy(all, recentSessionCount + (sessionExtras.get(key) ?? 0), null);
-      scopes.set(key, { rows, more: all.length - rows.length });
+      const list = sessionList(all, listLimits(recentSessionCount + (sessionExtras.get(key) ?? 0), null));
+      scopes.set(key, { entries: list.entries, more: list.hidden });
     }
     return scopes;
-  }, [snapshot, projectTree.expanded, projectId, recentSessionCount, sessionExtras]);
+  }, [snapshot, projectTree.expanded, projectTree.collapsed, projectId, recentSessionCount, sessionExtras, subAgentCount, subAgentExtras]);
   const autoStatusRefresh = useRef<() => Promise<void> | undefined>(() => undefined);
   autoStatusRefresh.current = () => {
     if (!snapshot || document.visibilityState === "hidden") return;
-    const candidates = [...visibleSessions, ...[...openScopes.values()].flatMap(scope => scope.rows.map(row => row.session)),
+    const candidates = [...visibleSessions, ...[...openScopes.values()].flatMap(scope => listedSessions(scope.entries).map(row => row.session)),
       ...snapshot.sessions.filter(row => tabs.open.some(tab => tab.sessionId === row.id)), ...snapshot.sessions];
     const seen = new Set<string>();
     const observed = candidates.flatMap(row => {
@@ -2007,7 +2025,7 @@ function App() {
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions rows={shown.rows} global={scope === null} more={shown.more} extended={extra > 0} marks={session => sessionMarks(session, scope)}
+    return <ExplorerSessions entries={shown.entries} global={scope === null} more={shown.more} extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
@@ -2615,7 +2633,11 @@ function App() {
           {!owned && <p className="muted-text">{t("Session creation requires an owned host.")}</p>}
           {batchDeletionState.phase !== "idle" && <p role="status">Batch deletion: {batchDeletionState.phase}. {batchDeletionState.items.filter(item => item.outcome === "deleted").length} confirmed deleted; {batchDeletionState.items.filter(item => item.outcome === "uncertain").length} uncertain. Single deletion is blocked. Reopen Browse saved sessions for the retained exact-target report.</p>}
           <div className="session-list">
-            {visibleSessionRows.map(({ session, depth, diagnostic, tooltip, subAgents }, index) => {
+            {selectedList.entries.map((entry, index) => {
+              if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
+                onMore={() => sessionTree.more(entry.parentId)} onFewer={() => sessionTree.fewer(entry.parentId)} />;
+              const { session, depth, diagnostic, tooltip, subAgents } = entry.row;
+              const twist = sessionTwist(entry, sessionTree.toggle);
               const menu = activeMenu?.id === session.id ? activeMenu : null;
               const access = sessionActionAccess(session,
                 menu ?? { id: session.id, projectId, hostEpoch: status?.hostEpoch ?? null },
@@ -2636,10 +2658,10 @@ function App() {
                   event.preventDefault(); event.stopPropagation();
                   openSessionMenu(session.id, event.currentTarget.querySelector<HTMLButtonElement>(".session-actions-trigger"));
                 }}>
-              <button type="button" aria-pressed={sessionId === session.id} aria-describedby={`session-tooltip-${index}`} title={tooltip}
-                style={{ paddingLeft: sessionRowIndent(depth) }}
+              <button type="button" aria-pressed={sessionId === session.id} aria-expanded={twist && !twist.collapsed} aria-describedby={`session-tooltip-${index}`} title={tooltip}
+                style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
                 onClick={() => { setMenuTarget(null); focusAction.current = null; selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
-                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} />{sessionMarks(session, projectId)}
+                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
                 tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
@@ -2672,7 +2694,7 @@ function App() {
             })}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
             <div className="session-list-disclosure">
-              {visibleSessionRows.length < loadedSessionRows.length && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({loadedSessionRows.length - visibleSessionRows.length})</span></button>}
+              {selectedList.hidden > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({selectedList.hidden})</span></button>}
               {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
             </div>
           </div>
@@ -2802,7 +2824,7 @@ function App() {
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
-          onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); },
+          onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
         sessionWidth, setSessionWidth,
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}

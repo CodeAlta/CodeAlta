@@ -40,3 +40,8 @@
 
 /* The global sessions stay at the foot of the projects; open, they scroll in what they are given. */
 .ide-shell .project-root-list { max-height: 45%; overflow-x: hidden; overflow-y: auto; }
+
+/* The twist of a session that has sub-agents takes the room left of its icon: the rows with and without one stay aligned. */
+.ide-shell .session-row > button:first-child > .session-twist { width: 14px; margin: -3px -5px -3px -14px; }
+/* What stands for the sub-agents that are not listed is pushed in like them. */
+.ide-shell .sub-agent-disclosure { padding-block: 1px 3px; }

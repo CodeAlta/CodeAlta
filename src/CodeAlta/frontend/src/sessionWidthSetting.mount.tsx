@@ -24,7 +24,7 @@ function Fixture() {
       preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 300, height: 300 }} onClose={() => { }} closeLabel="Close">
       <div className="settings-dialog-body"><div className="settings-dialog-content"><div className="configuration-page settings-card-page"><div className="settings-grid">
         <GeneralSettings theme="dark" setTheme={() => { }} darker={false} setDarker={() => { }} sort="name" setSort={() => { }}
-          desktopCollapsed={false} setDesktopCollapsed={() => { }} recentSessionCount={6} setRecentSessionCount={() => { }} notices={{}}
+          desktopCollapsed={false} setDesktopCollapsed={() => { }} recentSessionCount={6} setRecentSessionCount={() => { }} subAgentCount={4} setSubAgentCount={() => { }} notices={{}}
           sessionWidth={width} setSessionWidth={value => { changes.push(value); setWidth(value); }}
           schemes={{ colorScheme: defaultColorScheme, setColorScheme: () => { }, shownScheme: colorSchemeOf(defaultColorScheme), variant: "dark", customSchemes: [],
             library, preview, platform: "windows" }} />

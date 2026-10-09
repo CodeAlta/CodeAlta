@@ -441,7 +441,7 @@ The **Appearance** page sets:
 - the theme: **Dark**, **Light**, or **Auto**, which follows the operating system;
 - **Darker dark theme**, for deeper backgrounds in the dark theme with the same text and accents;
 - one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own;
-- how projects are sorted and how many recent sessions are listed per project;
+- how projects are sorted, how many recent sessions are listed per project, and how many sub-agents per session;
 - the width of the conversation, as a percentage of the space of a session;
 - what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 

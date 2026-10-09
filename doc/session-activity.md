@@ -64,11 +64,15 @@ not reuse them. Future provider-supplied times are not corrected using a clock.
 General settings persists **Recent session display count (1–50)** in WebView local
 storage (`codealta.desktop.recent-session-count.v1`, default 6). Malformed values
 are not overwritten automatically; defaults and unavailable/failed storage are
-reported in settings. Failed writes still apply in this window.
+reported in settings. Failed writes still apply in this window. **Sub-agent
+display count (1–50)** is kept the same way
+(`codealta.desktop.sub-agent-count.v1`, default 4).
 
-The navigator limits loaded saved-update tree rows, retaining the active row and
-verified ancestors of retained rows. Thus the displayed number can exceed the
-preference. Existing explicit search filtering is unchanged. **Show all loaded
+The navigator limits the loaded saved-update tree level by level: the first
+count is of the sessions of the scope, the second of the sub-agents listed under
+each session. The active row is retained beyond both, with its verified
+ancestors, unless one of them is collapsed. Thus the displayed number can exceed
+the preferences. Existing explicit search filtering is unchanged. **Show all loaded
 sessions** and **Browse saved sessions** remain available. Neither increases the
 snapshot scope or makes a globally-most-recent claim.
 

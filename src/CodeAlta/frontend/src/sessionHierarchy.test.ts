@@ -2,28 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSession } from "#neoastra";
 import { sessionHierarchy } from "./sessionHierarchy";
-import { limitSessionHierarchy } from "./recentSessions";
 
 const date = (day: number) => `2026-01-${String(day).padStart(2, "0")}T00:00:00Z`;
 const row = (id: string, parentSessionId: string | null = null, day = 1, title = id): WorkspaceSession => ({
   messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id, title, fullTitle: title, fullTitleTruncated: false, parentSessionId, scopeKind: "project", projectId: "p1",
   workspacePath: "/p1", lineageIssue: null, providerKey: "fixture", updatedAt: date(day),
-});
-
-test("incremental project disclosure stays bounded and retains the active lineage", () => {
-  const sessions = Array.from({ length: 75 }, (_, index) => row(`session-${index}`));
-  sessions.push(row("active-parent"), row("active-child", "active-parent"));
-  const rows = sessionHierarchy(sessions, sessions, "p1");
-  const first = limitSessionHierarchy(rows, 20, "active-child");
-  const more = limitSessionHierarchy(rows, 40, "active-child");
-  assert.ok(first.length <= 22);
-  assert.ok(more.length <= 42 && more.length > first.length);
-  for (const page of [first, more]) {
-    assert.ok(page.some(item => item.session.id === "active-child"));
-    assert.ok(page.some(item => item.session.id === "active-parent"));
-  }
-  assert.deepEqual(limitSessionHierarchy(rows, 20, "active-child"), first);
-  assert.equal(limitSessionHierarchy(rows, 100, "active-child").length, rows.length);
 });
 
 test("out-of-order nested rows retain all descendants and sort roots by latest descendant", () => {
