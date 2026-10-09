@@ -243,6 +243,33 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task CancelledPermission_DoesNotHideAnotherFailureOfTheTurn()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            var input = new JsonObject { ["command"] = "echo light > light.txt" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            await process.AskPermissionAsync("Bash", input, "toolu_1");
+            process.EmitToolResult("toolu_1", "The user doesn't want to proceed with this tool use.", isError: true);
+            // The turn ends on a limit, not on the stop the answer asked for.
+            process.EmitResult(null, user, isError: true, subtype: "error_max_turns");
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(
+            runtime,
+            directory,
+            onPermission: static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel)));
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "turn limit");
+    }
+
+    [TestMethod]
     public async Task EditTool_WaitsForTheSessionBeforeItEditsSoThatTheChangeIsShown()
     {
         using var directory = TestTempDirectory.Create();

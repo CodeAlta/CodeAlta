@@ -60,6 +60,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private string? _permissionMode;
     private string? _cliPermissionMode;
     private string? _settingsPermissionMode;
+    // A switch was given up before its answer: the CLI may be in the mode asked for, or still in the other one.
+    private bool _cliPermissionModeUnknown;
 
     // What the CLI knows of the conversation of CodeAlta.
     private bool _conversationBound;
@@ -426,22 +428,29 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     {
         string? current;
         string? target;
+        bool unknown;
         lock (_gate)
         {
             current = _cliPermissionMode;
             target = permissionMode ?? _settingsPermissionMode;
+            unknown = _cliPermissionModeUnknown;
         }
 
         if (target is null)
         {
             // The mode of the user's settings is not known: only a process started without a mode and never
             // switched is in it.
-            return current is null;
+            return current is null && !unknown;
         }
 
-        if (string.Equals(current, target, StringComparison.Ordinal))
+        if (!unknown && string.Equals(current, target, StringComparison.Ordinal))
         {
             return true;
+        }
+
+        lock (_gate)
+        {
+            _cliPermissionModeUnknown = true;
         }
 
         try
@@ -455,6 +464,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             lock (_gate)
             {
                 _cliPermissionMode = ClaudeCodeJson.GetString(response, "mode") ?? target;
+                _cliPermissionModeUnknown = false;
             }
 
             return true;
@@ -554,6 +564,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _cliRunning = false;
             _turnActive = false;
             _cliPermissionMode = permissionMode;
+            _cliPermissionModeUnknown = false;
         }
 
         ForgetBackgroundTasks();
@@ -633,6 +644,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _eventReader = null;
             _launchKey = null;
             _cliPermissionMode = null;
+            _cliPermissionModeUnknown = false;
         }
 
         // What a process that is being replaced still writes is not listened to.

@@ -319,6 +319,46 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task SwitchOfPermissionModeGivenUpBeforeItsAnswer_IsNotTakenForTheModeOfTheCli()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var conversation = new List<AgentConversationMessage> { User("one") };
+        var first = await ExecuteAsync(executor, CreateRequest(conversation));
+        var process = cli.Last;
+        conversation.AddRange([first.AssistantMessage, User("two")]);
+
+        // The CLI takes the mode, and the turn is stopped before its answer arrives.
+        cli.AnswerPermissionModeSwitch = false;
+        using var stop = new CancellationTokenSource();
+        var stopped = executor.ExecuteTurnAsync(CreateRequest(conversation, first) with { PermissionMode = "acceptEdits" }, static (_, _) => ValueTask.CompletedTask, stop.Token);
+        for (var attempt = 0; attempt < 500 && process.PermissionModeRequests.Count == 0; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        stop.Cancel();
+        try
+        {
+            await stopped.WaitAsync(Timeout);
+            Assert.Fail("The stopped turn did not end.");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        Assert.AreEqual("acceptEdits", process.PermissionMode);
+
+        // Back in the mode it was, with the next prompt: the CLI is asked again rather than assumed to have stayed there.
+        cli.AnswerPermissionModeSwitch = true;
+        conversation.Add(User("three"));
+        await ExecuteAsync(executor, CreateRequest(conversation, first) with { PermissionMode = "default" });
+
+        Assert.AreEqual("default", process.PermissionMode);
+        CollectionAssert.AreEqual(new[] { "acceptEdits", "default" }, process.PermissionModeRequests.ToArray());
+    }
+
+    [TestMethod]
     public async Task PermissionModeTheCliRefuses_RestartsItInThatMode()
     {
         var cli = new ClaudeCodeFakeCli();

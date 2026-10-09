@@ -428,10 +428,10 @@ internal sealed partial class ClaudeCodeSession
             _stoppedByDecision = false;
         }
 
-        if (stopped)
+        if (stopped && string.Equals(subtype, "error_during_execution", StringComparison.Ordinal))
         {
             // The CLI ends the turn the user stopped with an error of its own (an `[ede_diagnostic]`): the turn did
-            // not fail, it ends with what it did.
+            // not fail, it ends with what it did. Any other error (a limit, an API error) is still one.
             _apiError = null;
         }
         else if (ClaudeCodeJson.GetBoolean(result, "is_error") || (subtype is not null && subtype.StartsWith("error", StringComparison.Ordinal)))

@@ -38,6 +38,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets a value indicating whether the CLI answers the interrupt request.</summary>
     public bool AnswerInterrupt { get; set; } = true;
 
+    /// <summary>Gets or sets a value indicating whether the CLI answers a switch of permission mode it takes.</summary>
+    public bool AnswerPermissionModeSwitch { get; set; } = true;
+
     /// <summary>Gets or sets the permission mode the settings of the user give a process started without one.</summary>
     public string SettingsPermissionMode { get; set; } = "default";
 
@@ -539,7 +542,10 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                 else if (mode is "default" or "manual" or "acceptEdits" or "plan" or "auto" or "dontAsk" or "bypassPermissions")
                 {
                     PermissionMode = mode == "manual" ? "default" : mode;
-                    Respond(requestId, new JsonObject { ["mode"] = PermissionMode });
+                    if (_cli.AnswerPermissionModeSwitch)
+                    {
+                        Respond(requestId, new JsonObject { ["mode"] = PermissionMode });
+                    }
                 }
                 else
                 {
