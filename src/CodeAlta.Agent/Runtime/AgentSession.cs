@@ -40,6 +40,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly IModelProviderTurnExecutor _turnExecutor;
     private IReadOnlyList<AgentModelInfo> _cachedModels;
     private readonly AgentCompactionSummarizer _compactionSummarizer;
+    // What the summary requests of the compaction that runs used, and the run it belongs to.
+    private readonly List<AgentOperationUsageSnapshot> _compactionSummaryOperations = [];
+    private AgentRunId? _compactionRunId;
     private readonly AgentSessionCreateOptions _options;
     private readonly bool _allowProviderContinuation;
     private readonly Channel<AgentEvent> _eventChannel;
@@ -113,7 +116,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _toolImages = new AgentSessionToolImages(store as IAgentSessionAttachmentStore, summary.SessionId);
         _turnExecutor = turnExecutor;
         _cachedModels = cachedModels ?? LoadConstructorModelCache(provider, turnExecutor);
-        _compactionSummarizer = new AgentCompactionSummarizer(new AgentTurnExecutorCompactionSummaryExecutor(turnExecutor));
+        _compactionSummarizer = new AgentCompactionSummarizer(
+            new AgentTurnExecutorCompactionSummaryExecutor(turnExecutor),
+            RecordCompactionSummaryUsageAsync);
         _options = options;
         _allowProviderContinuation = allowProviderContinuation;
         _summary = summary;
@@ -2312,6 +2317,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             $"{trigger} local compaction started.");
         await AppendEventsAsync([started], cancellationToken).ConfigureAwait(false);
         await Task.Yield();
+        _compactionSummaryOperations.Clear();
+        _compactionRunId = runId;
 
         var now = DateTimeOffset.UtcNow;
         var latestUserRequest = GetLatestUserRequest(_conversation);
@@ -2598,6 +2605,19 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             throw new InvalidOperationException("Compaction summarization could not produce a prompt that fits the resolved limits after bounded replanning.");
         }
 
+        if (SumCompactionSummaryUsage(_compactionSummaryOperations) is { } summaryUsage)
+        {
+            checkpoint = checkpoint with
+            {
+                SummaryInputTokens = summaryUsage.InputTokens,
+                SummaryCachedInputTokens = summaryUsage.CachedInputTokens,
+                SummaryCacheWriteTokens = summaryUsage.CacheWriteTokens,
+                SummaryOutputTokens = summaryUsage.OutputTokens,
+                SummaryCost = summaryUsage.Cost,
+                SummaryCostUnit = summaryUsage.CostUnit,
+            };
+        }
+
         _conversation.Clear();
         _conversation.Add(checkpointMessage);
         _conversation.AddRange(retainedConversation);
@@ -2654,6 +2674,68 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             PreCompactionTokens: result.TokensBefore,
             PostCompactionTokens: result.TokensAfter);
     }
+
+    // A summary request of a compaction is an operation of the session: its usage is recorded when it answers, so
+    // that the statistics of the turn count it, also when the compaction fails afterwards. The window of the usage
+    // stays the one of the conversation, which the summary request is not part of.
+    private async ValueTask RecordCompactionSummaryUsageAsync(AgentOperationUsageSnapshot operation, CancellationToken cancellationToken)
+    {
+        _compactionSummaryOperations.Add(operation);
+        var now = DateTimeOffset.UtcNow;
+        var usage = (_state.Usage ?? new AgentSessionUsage(Scope: AgentUsageScope.LastOperation, Source: AgentUsageSource.ProviderUsage)) with
+        {
+            LastOperation = operation,
+            UpdatedAt = now,
+        };
+        _state = _state with { Usage = usage, UpdatedAt = now };
+        _summary = _summary with { Usage = usage, UpdatedAt = now };
+        var recorded = new AgentSessionUpdateEvent(
+            ProviderId,
+            SessionId,
+            now,
+            _compactionRunId,
+            AgentSessionUpdateKind.UsageUpdated,
+            "Compaction summary usage updated.",
+            Usage: usage);
+        await AppendEventsAsync([recorded], cancellationToken).ConfigureAwait(false);
+    }
+
+    // What the summary requests of one compaction used together. A cost adds up in one unit: the unit of the first
+    // request that reports one.
+    private static CompactionSummaryUsage? SumCompactionSummaryUsage(IReadOnlyList<AgentOperationUsageSnapshot> operations)
+    {
+        if (operations.Count == 0)
+        {
+            return null;
+        }
+
+        long input = 0, cached = 0, cacheWrite = 0, output = 0;
+        double? cost = null;
+        string? costUnit = null;
+        foreach (var operation in operations)
+        {
+            var split = AgentInputTokenUsage.From(operation);
+            input += split?.Total ?? 0;
+            cached += split?.CacheRead ?? 0;
+            cacheWrite += split?.CacheWrite ?? 0;
+            output += Math.Max(0, operation.OutputTokens ?? 0);
+            if (operation.Cost is { } operationCost && (cost is null || string.Equals(costUnit, operation.CostUnit, StringComparison.Ordinal)))
+            {
+                cost = (cost ?? 0) + operationCost;
+                costUnit = operation.CostUnit;
+            }
+        }
+
+        return new CompactionSummaryUsage(input, cached, cacheWrite, output, cost, costUnit);
+    }
+
+    private readonly record struct CompactionSummaryUsage(
+        long InputTokens,
+        long CachedInputTokens,
+        long CacheWriteTokens,
+        long OutputTokens,
+        double? Cost,
+        string? CostUnit);
 
     private static int GetCompactionSummarizerMaxOutputTokens(
         AgentCompactionSettings settings,
@@ -2866,6 +2948,23 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             writer.WriteNumber("keptMessageCount", checkpoint.KeptMessageCount);
             writer.WriteNumber("messagesAfter", checkpoint.KeptMessageCount + 1);
             writer.WriteNumber("summaryPromptInputTokens", checkpoint.SummaryPromptInputTokens);
+            // What the provider reported for the summary requests, beside the estimate made before them.
+            if (checkpoint.SummaryInputTokens is { } summaryInputTokens)
+            {
+                writer.WriteNumber("summaryInputTokens", summaryInputTokens);
+                writer.WriteNumber("summaryCachedInputTokens", checkpoint.SummaryCachedInputTokens ?? 0);
+                writer.WriteNumber("summaryCacheWriteTokens", checkpoint.SummaryCacheWriteTokens ?? 0);
+                writer.WriteNumber("summaryOutputTokens", checkpoint.SummaryOutputTokens ?? 0);
+                if (checkpoint.SummaryCost is { } summaryCost)
+                {
+                    writer.WriteNumber("summaryCost", summaryCost);
+                    if (!string.IsNullOrWhiteSpace(checkpoint.SummaryCostUnit))
+                    {
+                        writer.WriteString("summaryCostUnit", checkpoint.SummaryCostUnit);
+                    }
+                }
+            }
+
             writer.WriteNumber("summaryPromptIncludedMessageCount", checkpoint.SummaryPromptIncludedMessageCount);
             writer.WriteNumber("summaryPromptTotalMessageCount", checkpoint.SummaryPromptTotalMessageCount);
             writer.WriteNumber("summaryCallCount", checkpoint.SummaryCallCount);

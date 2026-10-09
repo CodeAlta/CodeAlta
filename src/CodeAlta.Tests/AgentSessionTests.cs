@@ -1610,6 +1610,133 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_CompactAsync_RecordsWhatTheSummaryRequestUsed()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-compact-usage");
+        var state = CreateState("session-compact-usage");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        static AgentSessionUsage Usage(long input, long output, long cached = 0, long cacheWrite = 0, double? cost = null) => new(
+            Window: new AgentWindowUsageSnapshot(input + output, 272_000, null),
+            LastOperation: new AgentOperationUsageSnapshot(
+                "gpt-5.4", InputTokens: input, OutputTokens: output, CacheWriteTokens: cacheWrite, CachedInputTokens: cached, Cost: cost, CostUnit: cost is null ? null : "AI credits"),
+            Scope: AgentUsageScope.CurrentWindow,
+            Source: AgentUsageSource.ProviderUsage,
+            UpdatedAt: DateTimeOffset.UtcNow);
+
+        await using (var session = new AgentSession(
+                         ModelProviderIds.OpenAIResponses,
+                         provider,
+                         summary,
+                         state,
+                         [],
+                         store,
+                         new ScriptedTurnExecutor(
+                             [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                             (_, _, _) => Task.FromResult(
+                                 new AgentTurnResponse
+                                 {
+                                     AssistantMessage = new AgentConversationMessage(
+                                         AgentConversationRole.Assistant,
+                                         [new AgentMessagePart.Text(
+                                             """
+                                             ## Objective
+                                             Continue the coding task.
+                                             ## Active User Request
+                                             Second prompt
+                                             ## Constraints
+                                             - Preserve behavior.
+                                             ## Progress
+                                             ### Done
+                                             - First answer captured.
+                                             ### In Progress
+                                             - Working on the second prompt.
+                                             ### Blocked
+                                             - None recorded.
+                                             ## Decisions
+                                             - Use checkpoints.
+                                             ## Next Steps
+                                             - Continue from the retained suffix.
+                                             ## Critical Context
+                                             - Keep recent context verbatim.
+                                             ## Relevant Files
+                                             - None tracked.
+                                             """)]),
+                                     // What the summary request used: a request of its own, far from the size of the conversation.
+                                     Usage = Usage(input: 21_000, output: 900, cached: 1_000, cacheWrite: 500, cost: 0.42),
+                                 }),
+                             (_, _, _) => Task.FromResult(
+                                 new AgentTurnResponse
+                                 {
+                                     AssistantMessage = new AgentConversationMessage(
+                                         AgentConversationRole.Assistant,
+                                         [new AgentMessagePart.Text("First answer " + new string('a', 120))]),
+                                     Usage = Usage(input: 500, output: 40),
+                                 }),
+                             (_, _, _) => Task.FromResult(
+                                 new AgentTurnResponse
+                                 {
+                                     AssistantMessage = new AgentConversationMessage(
+                                         AgentConversationRole.Assistant,
+                                         [new AgentMessagePart.Text("Second answer " + new string('b', 120))]),
+                                     Usage = Usage(input: 800, output: 50),
+                                 })),
+                         CreateOptions(provider, temp.Path)))
+        {
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 140)) }).ConfigureAwait(false);
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 140)) }).ConfigureAwait(false);
+
+            var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
+            Assert.IsTrue(outcome?.Success);
+        }
+
+        var history = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        var updates = history.OfType<AgentSessionUpdateEvent>().ToArray();
+        var started = Array.FindIndex(updates, static update => update.Kind == AgentSessionUpdateKind.CompactionStarted);
+        var completed = Array.FindIndex(updates, static update => update.Kind == AgentSessionUpdateKind.CompactionCompleted);
+
+        // The request is recorded as an operation of the session, between the start and the end of the compaction.
+        var recorded = updates.Single(static update => update.Usage?.LastOperation?.Initiator == "compaction" && update.Kind == AgentSessionUpdateKind.UsageUpdated);
+        Assert.IsTrue(started < Array.IndexOf(updates, recorded) && Array.IndexOf(updates, recorded) < completed);
+        var operation = recorded.Usage!.LastOperation!;
+        Assert.AreEqual((21_000L, 900L, 1_000L, 500L), (operation.InputTokens, operation.OutputTokens, operation.CachedInputTokens, operation.CacheWriteTokens));
+        Assert.AreEqual((0.42, "AI credits"), (operation.Cost, operation.CostUnit));
+        // The window stays the one of the conversation: the summary request is not part of it.
+        var before = updates.Take(started).Last(static update => update.Usage?.Window is not null).Usage!.Window!;
+        Assert.AreEqual(before.CurrentTokens, recorded.Usage.Window!.CurrentTokens);
+        Assert.AreNotEqual(21_900L, recorded.Usage.Window.CurrentTokens);
+
+        // A statistic counts an operation when it differs from the one counted last: the two requests of the
+        // conversation and the summary request are each counted once, the end of the compaction repeats the last.
+        var counted = new List<AgentOperationUsageSnapshot>();
+        foreach (var update in updates)
+        {
+            if (update.Usage?.LastOperation is { } last && (counted.Count == 0 || counted[^1] != last))
+            {
+                counted.Add(last);
+            }
+        }
+
+        CollectionAssert.AreEqual(new long?[] { 500, 800, 21_000 }, counted.Select(static last => last.InputTokens).ToArray());
+
+        // The end of the compaction gives the totals of its summary requests beside the estimate made before them.
+        var details = updates[completed].Details!.Value;
+        Assert.IsTrue(details.GetProperty("summaryPromptInputTokens").GetInt64() > 0);
+        Assert.AreEqual(21_000, details.GetProperty("summaryInputTokens").GetInt64());
+        Assert.AreEqual(1_000, details.GetProperty("summaryCachedInputTokens").GetInt64());
+        Assert.AreEqual(500, details.GetProperty("summaryCacheWriteTokens").GetInt64());
+        Assert.AreEqual(900, details.GetProperty("summaryOutputTokens").GetInt64());
+        Assert.AreEqual(0.42, details.GetProperty("summaryCost").GetDouble(), 1e-9);
+        Assert.AreEqual("AI credits", details.GetProperty("summaryCostUnit").GetString());
+        var checkpoint = history.OfType<AgentRawEvent>().Single(static evt => evt.BackendEventType == "local.compactionCheckpoint")
+            .Raw.Deserialize(AgentJsonSerializerContext.Default.AgentCompactionCheckpoint)!;
+        Assert.AreEqual((21_000L, 900L, 0.42), (checkpoint.SummaryInputTokens, checkpoint.SummaryOutputTokens, checkpoint.SummaryCost));
+    }
+
+    [TestMethod]
     public async Task AgentSession_CompactAsync_PersistsCheckpointAndReplaysFromCheckpointPlusSuffix()
     {
         using var temp = TestTempDirectory.Create();
@@ -4020,6 +4147,30 @@ public sealed class AgentSessionTests
         Assert.AreEqual(
             150 + AgentTokenEstimator.EstimateMessage(conversation[2]) + AgentTokenEstimator.EstimateMessage(conversation[3]),
             estimate.Tokens);
+    }
+
+    [TestMethod]
+    public void AgentTokenEstimator_EstimatePromptTokens_DoesNotTakeASummaryRequestForTheSizeOfThePrompt()
+    {
+        var conversation = new[]
+        {
+            new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Prompt")]),
+            new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Answer")]),
+        };
+
+        // A compaction that failed after its summary request leaves that request as the last operation.
+        var estimate = AgentTokenEstimator.EstimatePromptTokens(
+            systemMessage: "System",
+            developerInstructions: null,
+            conversation,
+            new AgentSessionUsage(
+                LastOperation: new AgentOperationUsageSnapshot(InputTokens: 21_000, OutputTokens: 900, Initiator: AgentCompactionSummarizer.UsageInitiator),
+                Scope: AgentUsageScope.LastOperation,
+                Source: AgentUsageSource.ProviderUsage,
+                UpdatedAt: DateTimeOffset.UtcNow));
+
+        Assert.AreEqual("local-heuristic", estimate.Source);
+        Assert.IsTrue(estimate.Tokens < 1_000);
     }
 
     [TestMethod]

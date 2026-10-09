@@ -28,6 +28,15 @@ test("a local compaction is described like the terminal does", () => {
   assert.ok(markdown.endsWith("**Checkpoint summary**\n\n## Goal\nShip it."));
 });
 
+test("what the summary requests used is given beside the estimate, when the provider reports it", () => {
+  assert.ok(!compactionDetailsMarkdown(details)!.includes("Summarizer usage"));
+  const used = { ...details, summaryInputTokens: 21345, summaryCachedInputTokens: 0, summaryCacheWriteTokens: 0, summaryOutputTokens: 1234 };
+  assert.ok(compactionDetailsMarkdown(used)!.includes("- Summarizer: 1 call, 3 chunks, input ~48,000 tokens, output budget 8,000 tokens\n"
+    + "- Summarizer usage: input 21,345 tokens, output 1,234 tokens\n"));
+  const billed = { ...used, summaryCachedInputTokens: 1000, summaryCacheWriteTokens: 20345, summaryCost: 0.420049, summaryCostUnit: "AI credits" };
+  assert.ok(compactionDetailsMarkdown(billed)!.includes("- Summarizer usage: input 21,345 tokens (cache 1,000 · cache write 20,345), output 1,234 tokens, cost 0.42 AI credits\n"));
+});
+
 test("a missed target names its reason and missing counts read unknown", () => {
   const markdown = compactionDetailsMarkdown({ schema: "codealta.localCompaction.v1", tokensBefore: 1000, targetTokens: 500, targetMet: false, targetMissReason: "retained_suffix" })!;
   assert.ok(markdown.includes("- Context before: 1,000 tokens"));

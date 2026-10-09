@@ -60,6 +60,8 @@ Press `Ctrl+F11`, use `/compact`, or click the compact button beside the provide
 
 Local compaction targets a smaller post-compaction context by default so long sessions can continue without immediately hitting the context limit.
 
+A compaction asks the model for a summary, and the provider bills that request like any other. CodeAlta counts it with the requests of the session: the details of the completion notice give what the summary used (input, cached input, output and, for Copilot, the cost in AI credits), and the [context usage](workspace.md#context-usage-popup) shows it as the last operation until the next request.
+
 ## Long instructions
 
 When you give an agent many instructions at once, such as a list of tasks or numbered steps, it first writes them down in a file under `~/.alta/scratchpad/`. A long session compacts its context; the file keeps your instructions as you wrote them, and the agent reads it again after a compaction and before it reports the work as done.

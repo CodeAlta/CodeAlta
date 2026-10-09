@@ -325,6 +325,44 @@ public sealed class StatisticsPluginTests
     }
 
     [TestMethod]
+    public async Task Projection_CountsTheSummaryRequestOfACompactionWithTheRequestsOfTheTurn()
+    {
+        // What a session records around a compaction: the request before it, the summary request as an operation
+        // of its own, then the end of the compaction and the idle update, which repeat the summary request.
+        var plugin = new StatisticsPlugin();
+        var contribution = plugin.GetSessionEventProjections().Single();
+        var providerId = new ModelProviderId("provider-1");
+        var runId = new AgentRunId("run-compaction-usage");
+        var startedAt = DateTimeOffset.Parse("2026-05-08T10:00:00Z");
+        var request = new AgentSessionUsage(
+            Window: new AgentWindowUsageSnapshot(170_500, 272_000, 40),
+            LastOperation: new AgentOperationUsageSnapshot(Model: "model-1", InputTokens: 170_000, OutputTokens: 500, CachedInputTokens: 169_000));
+        var summary = request with
+        {
+            LastOperation = new AgentOperationUsageSnapshot(Model: "model-1", InputTokens: 21_000, OutputTokens: 900, CachedInputTokens: 0, Initiator: "compaction"),
+        };
+        var compacted = summary with { Window = new AgentWindowUsageSnapshot(18_000, 272_000, 6, "Post-compaction window"), Scope = AgentUsageScope.Compaction };
+        var events = new AgentEvent[]
+        {
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt, runId, AgentContentKind.User, "user-1", null, "prompt"),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(1), runId, AgentSessionUpdateKind.UsageUpdated, "Usage updated.", Usage: request),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(2), runId, AgentSessionUpdateKind.CompactionStarted, "started"),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(3), runId, AgentSessionUpdateKind.UsageUpdated, "Compaction summary usage updated.", Usage: summary),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(4), runId, AgentSessionUpdateKind.CompactionCompleted, "compacted", Usage: compacted),
+            new AgentContentCompletedEvent(providerId, "session-1", startedAt.AddSeconds(5), runId, AgentContentKind.Assistant, "assistant-1", null, "response"),
+            new AgentSessionUpdateEvent(providerId, "session-1", startedAt.AddSeconds(6), runId, AgentSessionUpdateKind.Idle, null, Usage: compacted),
+        };
+
+        var result = await contribution.ProjectAsync(CreateContext(events), CancellationToken.None);
+
+        var detailsMarkdown = (await WaitForDynamicProjectionAsync(result.Single())).DetailSections.Single().Markdown;
+        StringAssert.Contains(detailsMarkdown, "Provider operations | 2");
+        StringAssert.Contains(detailsMarkdown, "Input total (provider aggregate) | 191,000");
+        StringAssert.Contains(detailsMarkdown, "Cached input (provider aggregate) | 169,000");
+        StringAssert.Contains(detailsMarkdown, "Output total (provider aggregate) | 1,400");
+    }
+
+    [TestMethod]
     public async Task Projection_CountsTwoRequestsThatDifferOnlyByOneValue()
     {
         // Only a request equal in every value to the one counted last is the same request.

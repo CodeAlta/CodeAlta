@@ -1109,7 +1109,9 @@ Defaults from `AgentCompactionSettings`:
 | `keep_last_user_message` | `true` |
 | `allow_split_turn` | `true` |
 
-The summarizer is an ordinary provider turn executed through the same turn executor. Checkpoints are persisted as `local.compactionCheckpoint` raw events, and visible session updates mark compaction start/completion. Activated CodeAlta-managed skills can be rehydrated into composed instructions after compaction so skill guidance survives without duplicating current context.
+The summarizer is an ordinary provider turn executed through the same turn executor. Checkpoints are persisted as `local.compactionCheckpoint` raw events, and visible session updates mark compaction start/completion.
+
+A summary request is an operation of the session, and the provider bills it. `AgentCompactionSummarizer` tells the session what each request used as soon as it answers (a compaction can make several: chunks, a shrink pass, the reduction of an oversized anchor, and it can fail after some of them). The session records it as a `UsageUpdated` update whose last operation has the initiator `compaction` and whose window stays the one of the conversation, so that the turn statistics, `alta session metrics` and the usage window count the request once and the context meter does not move. The completion update repeats that operation, and its details carry the totals of the summary requests (`summaryInputTokens`, `summaryCachedInputTokens`, `summaryCacheWriteTokens`, `summaryOutputTokens`, `summaryCost`, `summaryCostUnit`) beside `summaryPromptInputTokens`, which is the estimate made before the requests. `AgentTokenEstimator` never takes an operation of initiator `compaction` for the size of the prompt. Activated CodeAlta-managed skills can be rehydrated into composed instructions after compaction so skill guidance survives without duplicating current context.
 
 ## Persistence model
 

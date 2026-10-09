@@ -73,6 +73,37 @@ public sealed record AgentCompactionCheckpoint
     public long SummaryPromptInputTokens { get; init; }
 
     /// <summary>
+    /// Gets or initializes the input tokens the summarizer calls used, as the provider reported them: all of them,
+    /// the ones read from and written to the prompt cache included. Null when the provider reported no usage.
+    /// </summary>
+    public long? SummaryInputTokens { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the part of <see cref="SummaryInputTokens"/> read from the prompt cache.
+    /// </summary>
+    public long? SummaryCachedInputTokens { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the part of <see cref="SummaryInputTokens"/> written to the prompt cache.
+    /// </summary>
+    public long? SummaryCacheWriteTokens { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the output tokens the summarizer calls produced, as the provider reported them.
+    /// </summary>
+    public long? SummaryOutputTokens { get; init; }
+
+    /// <summary>
+    /// Gets or initializes what the summarizer calls cost, when the provider reports a cost.
+    /// </summary>
+    public double? SummaryCost { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the unit of <see cref="SummaryCost"/> when the provider names one, such as <c>AI credits</c>.
+    /// </summary>
+    public string? SummaryCostUnit { get; init; }
+
+    /// <summary>
     /// Gets or initializes the number of messages serialized into summarizer requests.
     /// </summary>
     public int SummaryPromptIncludedMessageCount { get; init; }

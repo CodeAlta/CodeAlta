@@ -2,8 +2,18 @@ using System.Text.Json;
 
 namespace CodeAlta.Agent.Runtime.Compaction;
 
-internal sealed class AgentCompactionSummarizer(IAgentCompactionSummaryExecutor executor)
+/// <param name="executor">Sends a summary request to the model.</param>
+/// <param name="onSummaryUsage">
+/// Told what each summary request used, when the provider reports it, as soon as the request answers: a compaction
+/// can make several (chunks, a shrink pass, the reduction of an oversized anchor) and fail after some of them.
+/// </param>
+internal sealed class AgentCompactionSummarizer(
+    IAgentCompactionSummaryExecutor executor,
+    Func<AgentOperationUsageSnapshot, CancellationToken, ValueTask>? onSummaryUsage = null)
 {
+    /// <summary>The initiator of the usage of a summary request: an operation of the session that is not a request of its conversation.</summary>
+    public const string UsageInitiator = "compaction";
+
     private const int RecursiveChunkPassLimit = 4;
 
     private const string SummarySystemPromptTemplate =
@@ -611,7 +621,8 @@ internal sealed class AgentCompactionSummarizer(IAgentCompactionSummaryExecutor 
         string userMessage,
         int maxOutputTokens,
         CancellationToken cancellationToken)
-        => await _executor.ExecuteAsync(
+    {
+        var response = await _executor.ExecuteAsync(
                 new AgentCompactionSummaryRequest(
                     ProviderId: ProviderId,
                     Provider: provider,
@@ -625,6 +636,14 @@ internal sealed class AgentCompactionSummarizer(IAgentCompactionSummaryExecutor 
                     MaxOutputTokens: maxOutputTokens),
                 cancellationToken)
             .ConfigureAwait(false);
+        if (onSummaryUsage is not null && response.Usage?.LastOperation is { } operation)
+        {
+            // The request is paid whatever becomes of its answer: it is told before the summary is checked.
+            await onSummaryUsage(operation with { Initiator = UsageInitiator }, cancellationToken).ConfigureAwait(false);
+        }
+
+        return response;
+    }
 
     private static void ValidateSummaryShape(string summary)
     {

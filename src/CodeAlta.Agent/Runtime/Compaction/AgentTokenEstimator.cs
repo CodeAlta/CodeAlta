@@ -17,8 +17,11 @@ internal static class AgentTokenEstimator
             return windowEstimate;
         }
 
+        // The summary request of a compaction is an operation of the session, not a request of this conversation:
+        // what it read says nothing of the size of the prompt.
         if (!HasLeadingCheckpoint(conversation) &&
             usage?.LastOperation is { } lastOperation &&
+            !string.Equals(lastOperation.Initiator, AgentCompactionSummarizer.UsageInitiator, StringComparison.Ordinal) &&
             TryGetLastOperationWindowEstimate(conversation, lastOperation, out var lastOperationEstimate))
         {
             return lastOperationEstimate;

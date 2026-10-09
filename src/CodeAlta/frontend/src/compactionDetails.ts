@@ -70,6 +70,15 @@ export function compactionDetailsMarkdown(details: unknown, checkpoint: string |
   lines.push(`- Messages: summarized ${number(integer(value, "summarizedMessageCount"))}, kept ${number(integer(value, "keptMessageCount"))}, after ${number(integer(value, "messagesAfter"))}`);
   lines.push(`- Summarizer: ${plural(integer(value, "summaryCallCount"), "call", "calls")}, ${plural(integer(value, "chunkCount"), "chunk", "chunks")}, `
     + `input ~${number(integer(value, "summaryPromptInputTokens"))} tokens, output budget ${number(integer(value, "summaryMaxOutputTokens"))} tokens`);
+  // What the provider reported for the summary requests, when it reports usage: the line above is the estimate.
+  const usedInput = integer(value, "summaryInputTokens");
+  if (usedInput !== null) {
+    const cached = integer(value, "summaryCachedInputTokens"), written = integer(value, "summaryCacheWriteTokens");
+    const cache = [cached !== null && cached > 0 && `cache ${number(cached)}`, written !== null && written > 0 && `cache write ${number(written)}`].filter(Boolean);
+    const cost = ratio(value, "summaryCost"), unit = text(value, "summaryCostUnit");
+    lines.push(`- Summarizer usage: input ${number(usedInput)} tokens${cache.length ? ` (${cache.join(" · ")})` : ""}, output ${number(integer(value, "summaryOutputTokens"))} tokens`
+      + (cost === null ? "" : `, cost ${Number(cost.toFixed(4))}${unit ? ` ${unit}` : ""}`));
+  }
 
   lines.push("", "**What fed the summarizer**");
   const dropped = integer(value, "droppedMessageCount"), collapsed = integer(value, "collapsedToolCallCount");
