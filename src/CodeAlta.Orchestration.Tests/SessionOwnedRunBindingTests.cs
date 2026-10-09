@@ -81,22 +81,23 @@ public sealed class SessionOwnedRunBindingTests
     });
 
     [TestMethod]
-    public Task OwnedPermission_ReadsTheApprovalPolicyAgainForEveryRequest() => Fixture.Run(async f =>
+    public Task OwnedPermission_KeepsTheApprovalPolicyItsSendStartedWith() => Fixture.Run(async f =>
     {
-        // The user turns the review on and off while the host runs: the next request follows, with no restart.
-        // This execution reviews nothing, so the automatic-approval policy alone answers each request.
+        // The user turns the review on and off while the host runs: the next send follows, with no restart, and
+        // a send that runs keeps what it started with. These executions review nothing, so the automatic-approval
+        // policy alone answers each request.
         f.AutoApprove = true;
-        var execution = await f.CreateExecution(reviewCommands: false);
-        var callback = f.Permissions.CreateOwnedCommandHandler(execution);
+        var started = f.Permissions.CreateOwnedCommandHandler(await f.CreateExecution(reviewCommands: false));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Wait(f.Keep(started(f.Request("approved", null), CancellationToken.None)))).Kind);
 
-        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
-            (await f.Wait(f.Keep(callback(f.Request("approved", null), CancellationToken.None)))).Kind);
         f.AutoApprove = false;
-        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
-            (await f.Wait(f.Keep(callback(f.Request("refused", null), CancellationToken.None)))).Kind);
-        f.AutoApprove = true;
         Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
-            (await f.Wait(f.Keep(callback(f.Request("approved-again", null), CancellationToken.None)))).Kind);
+            (await f.Wait(f.Keep(started(f.Request("still-approved", null), CancellationToken.None)))).Kind,
+            "A send that started unreviewed is not denied when the review is turned on: it is approved until it ends.");
+        var next = f.Permissions.CreateOwnedCommandHandler(await f.CreateExecution(reviewCommands: false));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(next(f.Request("refused", null), CancellationToken.None)))).Kind);
     });
 
     private sealed class Fixture

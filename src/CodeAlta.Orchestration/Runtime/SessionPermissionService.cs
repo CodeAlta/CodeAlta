@@ -72,8 +72,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     public SessionPermissionService(bool autoApproveOwnedPermissions) : this(() => autoApproveOwnedPermissions) { }
 
     /// <summary>
-    /// Creates a permission owner whose automatic approval policy is read again for every request, so a host
-    /// whose user turns review on or off applies it to what comes next without being restarted.
+    /// Creates a permission owner whose automatic approval policy is read again for every send, and for every
+    /// request outside a send, so a host whose user turns review on or off applies it to what comes next
+    /// without being restarted. A send keeps the policy it started with until it ends.
     /// </summary>
     /// <param name="autoApproveOwnedPermissions">Whether a request no explicit review takes is granted AllowOnce.</param>
     /// <exception cref="ArgumentNullException"><paramref name="autoApproveOwnedPermissions"/> is null.</exception>
@@ -133,6 +134,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         internal bool Bound { get; set; }
         internal bool Closed { get; set; }
         internal bool ReviewCommands { get; init; }
+        // Whether a request this send does not review is granted: read once when the send starts, like its review.
+        internal bool AutoApprove { get; init; }
         internal bool EnableUserInput { get; init; }
         internal HashSet<PendingUserInput> InputDeliveries { get; } = [];
         internal HashSet<PendingPermission> Deliveries { get; } = [];
@@ -149,8 +152,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             if (_stopped || _ownedAdmissionClosed || token.IsCancellationRequested || operationId == Guid.Empty
                 || !ValidOwnedText(sessionId, OwnedIdentityLimit, required: true, identity: true)
                 || _ownedExecutions.Count >= OwnedExecutionLimit || _ownedExecutions.ContainsKey(operationId)) return null;
+            // A change of the policy applies to the next send: one that runs keeps asking, or approving, as it started.
             var execution = new OwnedPermissionExecution(this, operationId, sessionId, token)
-            { ReviewCommands = reviewCommands, EnableUserInput = enableUserInput };
+            { ReviewCommands = reviewCommands, AutoApprove = !reviewCommands && _autoApproveOwnedPermissions(), EnableUserInput = enableUserInput };
             _ownedExecutions.Add(operationId, execution);
             return execution;
         }, null);
@@ -207,7 +211,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
-            if (_autoApproveOwnedPermissions() && !execution.ReviewCommands && CanUse(execution) && !cancellationToken.IsCancellationRequested
+            if (execution.AutoApprove && CanUse(execution) && !cancellationToken.IsCancellationRequested
                 && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
                 && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId))
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));

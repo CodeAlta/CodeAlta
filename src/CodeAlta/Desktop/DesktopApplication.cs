@@ -571,7 +571,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }));
                     chrome.AddHandlers(builder);
                     var configStore = new CodeAltaConfigStore(catalog);
-                    builder.AddBootService(new BootService(epoch, options.ReviewOwnedCommandPermissions || shell.ReviewPermissions, options.EnableOwnedUserInput, options.Developer)
+                    // The window can always answer a request: the setting changes while the host runs, and a send
+                    // started with it on goes on asking after it is turned off.
+                    builder.AddBootService(new BootService(epoch, commandReview: true, options.EnableOwnedUserInput, options.Developer)
                     {
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
                     });
@@ -654,8 +656,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
                     builder.AddSessionUsageService(new SessionUsageService(host.RuntimeService, epoch));
-                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch,
-                        () => options.ReviewOwnedCommandPermissions || shell.ReviewPermissions));
+                    // A request exists only for a send that was reviewed: it stays readable and answerable after the
+                    // setting is turned off, until that send ends.
+                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, static () => true));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
                     if (!closeRequested.Task.IsCompleted)

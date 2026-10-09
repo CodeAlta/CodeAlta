@@ -1159,9 +1159,8 @@ function App() {
   });
   const sessionWidthControl = useMemo<SessionWidthControl>(() => ({ width: sessionWidth, widths: sessionWidths, setWidth: setSessionWidth }), [sessionWidth, sessionWidths, setSessionWidth]);
   function setReviewPermissions(review: boolean) {
+    // The requests the sessions show do not follow it: a send started with review on still asks until it ends.
     setShellPreferences(current => current && { ...current, reviewPermissions: review });
-    // The review the sessions show follows the setting at once: the boot flag said what the host started with.
-    writeStatus(current => current && { ...current, commandReviewEnabled: review });
     void desktopShell.setReviewPermissions({ review }, { timeoutMilliseconds: 8_000 })
       .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
   }
