@@ -1,4 +1,6 @@
+using System.Collections.Frozen;
 using System.Globalization;
+using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -104,6 +106,7 @@ internal sealed class SessionOperationsService
             cancellationToken.ThrowIfCancellationRequested();
             if (request.Selection is { } selection && (!Identity(selection.ProviderKey, 256) || !Identity(selection.AgentPromptId, 256)
                 || selection.ModelId is not null && !Identity(selection.ModelId, 256)
+                || selection.PermissionMode is not null && !Identity(selection.PermissionMode, 256)
                 || selection.ReasoningEffort is not null && (!Enum.TryParse<AgentReasoningEffort>(selection.ReasoningEffort, out var effort)
                     || !Enum.IsDefined(effort) || effort.ToString() != selection.ReasoningEffort)))
                 return new("invalid_request", _epoch, null);
@@ -111,8 +114,9 @@ internal sealed class SessionOperationsService
             {
                 Images = request.Images?.Select(image => new OwnedPromptImage(image.Title, image.MediaType, image.Base64)).ToArray(),
                 References = request.References is { } scope ? new(scope.ProjectId, scope.ProjectPath) : null,
+                // The mode is checked against the provider by the host: null keeps the session's, "provider" leaves it to the provider.
                 Selection = request.Selection is { } value ? new(value.ProviderKey, value.AgentPromptId, value.ModelId,
-                    value.ReasoningEffort is null ? null : Enum.Parse<AgentReasoningEffort>(value.ReasoningEffort)) : null,
+                    value.ReasoningEffort is null ? null : Enum.Parse<AgentReasoningEffort>(value.ReasoningEffort)) { PermissionMode = value.PermissionMode } : null,
             }, cancellationToken)); }
             catch (ArgumentException) { return new("invalid_request", _epoch, null); }
             catch (OperationCanceledException) { throw; }
@@ -182,10 +186,15 @@ internal sealed class SessionOperationsService
             var choices = _choices is null ? null : await _choices(request.SessionId, cancellationToken).ConfigureAwait(false);
             if (choices is null) return new("unavailable", _epoch, request.SessionId, null, [], []);
             return new("ok", _epoch, request.SessionId,
-                new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString()),
+                new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString())
+                    { PermissionMode = choices.Current.PermissionMode },
                 choices.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray(),
                 choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())
-                    { ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString() }).ToArray());
+                    { ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString() }).ToArray())
+            {
+                PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode, SkipsReview(mode))).ToArray(),
+                DefaultPermissionMode = choices.DefaultPermissionMode,
+            };
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return new("unavailable", _epoch, request.SessionId, null, [], []); }
@@ -486,6 +495,14 @@ internal sealed class SessionOperationsService
             && string.Equals(value, parsed.ToString("D"), StringComparison.Ordinal);
     }
 
+    // The modes in which Claude Code runs some of what the session does without asking: CodeAlta's review does
+    // not see it. dontAsk and bypassPermissions run everything; acceptEdits runs the file changes and auto lets a
+    // classifier of the CLI decide. The page shows them with a warning.
+    private static readonly FrozenSet<string> ReviewSkippingPermissionModes =
+        FrozenSet.ToFrozenSet(["acceptEdits", "auto", "dontAsk", "bypassPermissions"], StringComparer.Ordinal);
+
+    private static bool SkipsReview(string permissionMode) => ReviewSkippingPermissionModes.Contains(permissionMode);
+
     private static bool Identity(string? value, int maximum, bool trim = true)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > maximum || (trim && value != value.Trim())) return false;
@@ -511,7 +528,13 @@ internal sealed record SessionReferenceSearchResponse(string Status, string? Epo
 internal sealed record SessionReferenceObservationRequest(string ExpectedEpoch, string ProjectId, string ProjectPath, string? SessionId, string Text);
 internal sealed record SessionReferenceSpan(int Start, int Length, string Status);
 internal sealed record SessionReferenceObservationResponse(string Status, string? Epoch, IReadOnlyList<SessionReferenceSpan> Items, bool Omitted);
-internal sealed record SessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, string? ReasoningEffort);
+internal sealed record SessionSelection(string ProviderKey, string AgentPromptId, string? ModelId, string? ReasoningEffort)
+{
+    // The mode chosen for the session, or null: in a send, null keeps the session's and "provider" goes back to the
+    // provider's; in choices, null means the session runs in the provider's.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PermissionMode { get; init; }
+}
 internal sealed record SessionChoicesRequest(string ExpectedEpoch, string SessionId);
 internal sealed record SessionPromptChoice(string Id, string Name);
 internal sealed record SessionPromptImage(string Title, string MediaType, string Base64);
@@ -522,7 +545,18 @@ internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<
     public string? StartEffort { get; init; }
 }
 internal sealed record SessionChoicesResponse(string Status, string? Epoch, string SessionId, SessionSelection? Current,
-    IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models);
+    IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models)
+{
+    // The modes a session of the provider can be given, empty when it has none; the page names them. A response that
+    // is not "ok" has none. Optional on the page, as the other fields of the permission mode.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SessionPermissionModeChoice>? PermissionModes { get; init; }
+    // The mode the provider is configured with, or null when it leaves it to the CLI's own setting.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultPermissionMode { get; init; }
+}
+// SkipsReview: the CLI runs some of what the session does without CodeAlta's review in this mode.
+internal sealed record SessionPermissionModeChoice(string Id, bool SkipsReview);
 internal sealed record SessionAbortRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);
 internal sealed record SessionSteerRequest(string ExpectedEpoch, string ClientRequestId, string SessionId,
     string ExpectedRuntimeInstanceId, string ExpectedAttachmentGeneration, string ExpectedRunId, string Text);

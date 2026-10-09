@@ -363,13 +363,13 @@ internal sealed class GlobalConfigService
     private static readonly ImmutableArray<string> ReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     /// <summary>
-    /// The permission modes a provider that runs the Claude Code CLI can start its sessions in. They are the modes
-    /// of the CLI itself, and the configuration store holds <c>permission_mode</c> to the same list.
+    /// The permission modes a provider that runs the Claude Code CLI can start its sessions in, as the provider reports
+    /// them. The configuration store holds <c>permission_mode</c> to the same list.
     /// </summary>
-    private static readonly ImmutableArray<string> PermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
+    private static IReadOnlyList<string> PermissionModes => ConfiguredModelProviderRegistryBuilder.GetPermissionModes("claude-code");
 
     /// <summary>Provider types that take a permission mode: the ones that run the Claude Code CLI.</summary>
-    private static bool TakesPermissionMode(string? type) => string.Equals(type?.Trim(), "claude-code", StringComparison.OrdinalIgnoreCase);
+    private static bool TakesPermissionMode(string? type) => ConfiguredModelProviderRegistryBuilder.GetPermissionModes(type).Count > 0;
 
     /// <summary>
     /// Re-registers the enabled provider definitions and unregisters providers that are no longer

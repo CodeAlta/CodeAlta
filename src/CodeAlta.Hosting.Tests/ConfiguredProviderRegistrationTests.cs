@@ -10,6 +10,16 @@ namespace CodeAlta.Hosting.Tests;
 public sealed class ConfiguredProviderRegistrationTests
 {
     [TestMethod]
+    public void PermissionModes_AreThoseOfTheClaudeCodeCli_ForAProviderThatRunsIt()
+    {
+        CollectionAssert.AreEqual(
+            new[] { "default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions" },
+            ConfiguredModelProviderRegistryBuilder.GetPermissionModes(" Claude-Code ").ToArray());
+        Assert.AreEqual(0, ConfiguredModelProviderRegistryBuilder.GetPermissionModes("anthropic").Count);
+        Assert.AreEqual(0, ConfiguredModelProviderRegistryBuilder.GetPermissionModes(null).Count);
+    }
+
+    [TestMethod]
     [DataRow("openai-chat")]
     [DataRow("openai-responses")]
     [DataRow("azure-openai")]

@@ -79,14 +79,72 @@ public sealed class DesktopOwnedSessionTests
         var request = new SessionSendRequest("epoch", "key", "session", "text") { Selection = selection };
         Assert.AreEqual("busy", service.Send(request, CancellationToken.None).Status);
         Assert.AreEqual(new OwnedSessionSelection("provider", "plan", "model", AgentReasoningEffort.High), captured!.Selection);
+        // The mode goes to the host as it is: null keeps the session's, "provider" goes back to the provider's.
+        foreach (var mode in new[] { "acceptEdits", OwnedSessionSelection.ProviderPermissionMode })
+        {
+            Assert.AreEqual("busy", service.Send(request with { ClientRequestId = mode, Selection = selection with { PermissionMode = mode } }, CancellationToken.None).Status);
+            Assert.AreEqual(mode, captured!.Selection!.PermissionMode);
+        }
+
         captured = null;
         foreach (var invalid in new[] { selection with { ReasoningEffort = "999" }, selection with { ReasoningEffort = "1" },
-            selection with { AgentPromptId = "../bad\ud800" }, selection with { ModelId = new string('x', 257) } })
+            selection with { AgentPromptId = "../bad\ud800" }, selection with { ModelId = new string('x', 257) },
+            selection with { PermissionMode = " auto" }, selection with { PermissionMode = "" }, selection with { PermissionMode = new string('x', 257) } })
             Assert.AreEqual("invalid_request", service.Send(request with { Selection = invalid }, CancellationToken.None).Status);
         Assert.IsNull(captured);
         Assert.AreEqual("stale_epoch", service.Send(request with { ExpectedEpoch = "old" }, CancellationToken.None).Status);
         Assert.IsNull(captured);
     }
+
+    [TestMethod]
+    public Task PermissionMode_ChoicesNameTheModesOfTheProvider_AndASendGivesOneToTheSession() => RealFixture.RunAsync(async f =>
+    {
+        f.Host.ModelProviderRegistry.RegisterOrReplace(f.Provider.Descriptor with
+            { PermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], DefaultPermissionMode = "plan" },
+            () => new FakeRuntime(f.Provider));
+        f.Provider.Release.TrySetResult();
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+
+        var choices = await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)));
+        Assert.AreEqual("ok", choices.Status);
+        // Plan stays a mode of the provider's configuration; the others say whether the CLI runs things without the review.
+        CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions" }, choices.PermissionModes!.Select(mode => mode.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { false, true, true, true, true }, choices.PermissionModes!.Select(mode => mode.SkipsReview).ToArray());
+        Assert.AreEqual("plan", choices.DefaultPermissionMode);
+        Assert.IsNull(choices.Current!.PermissionMode);
+
+        async Task<OwnedSessionCommandResult> SendAsync(string key, string mode)
+        {
+            // No model keeps the one of the session.
+            var selection = new SessionSelection("owned-fixture", "default", null, null) { PermissionMode = mode };
+            Assert.AreEqual("accepted", service.Send(new("fixture-epoch", key, f.SessionId, "text") { Selection = selection }, CancellationToken.None).Status);
+            var receipt = f.Retain(f.Host.Commands.AdmitSend(new(key, f.SessionId, "text") { Selection = new("owned-fixture", "default", null, null) { PermissionMode = mode } }));
+            var result = await f.Wait(receipt.Completion);
+            if (result.Outcome != OwnedSessionCommandOutcome.Completed) return result;
+            var marker = Guid.NewGuid().ToString("N");
+            f.Provider.EmitIdle!(marker);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await f.Keep(Committed());
+            return result;
+
+            async Task Committed()
+            {
+                await foreach (var value in f.Host.RuntimeService.StreamEventsAsync(deadline.Token))
+                    if (value is SessionAgentEvent { Event: AgentSessionUpdateEvent update }
+                        && update.Kind == AgentSessionUpdateKind.Idle && update.Message == marker) return;
+                Assert.Fail("Idle marker was not committed.");
+            }
+        }
+
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await SendAsync("accept", "acceptEdits")).Outcome);
+        Assert.AreEqual("acceptEdits", f.Provider.PermissionMode);
+        Assert.AreEqual("acceptEdits", (await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)))).Current!.PermissionMode);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Failed, (await SendAsync("plan", "plan")).Outcome);
+        Assert.AreEqual("acceptEdits", f.Provider.PermissionMode);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await SendAsync("provider", OwnedSessionSelection.ProviderPermissionMode)).Outcome);
+        Assert.IsNull(f.Provider.PermissionMode);
+        Assert.IsNull((await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)))).Current!.PermissionMode);
+    });
 
     [TestMethod]
     public async Task SelectionChoices_RejectsUnconfiguredAndStaleHosts()
@@ -783,6 +841,7 @@ public sealed class DesktopOwnedSessionTests
         internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal readonly Channel<(string SessionId, AgentSendOptions Options)> Sends = Channel.CreateUnbounded<(string, AgentSendOptions)>();
         internal bool FailSend { get; set; }
+        internal string? PermissionMode { get; set; }
         internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("owned-fixture"), "Owned fixture") { DefaultModelId = "fixture-model" };
     }
 
@@ -794,15 +853,23 @@ public sealed class DesktopOwnedSessionTests
         public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("No probes.");
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("No turn executor.");
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAgentSession>(new FakeSession(provider, options.SessionId!, options.WorkingDirectory));
+        {
+            provider.PermissionMode = options.PermissionMode;
+            return Task.FromResult<IAgentSession>(new FakeSession(provider, options.SessionId!, options.WorkingDirectory));
+        }
         public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAgentSession>(new FakeSession(provider, sessionId, options.WorkingDirectory));
+        {
+            provider.PermissionMode = options.PermissionMode;
+            return Task.FromResult<IAgentSession>(new FakeSession(provider, sessionId, options.WorkingDirectory));
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class FakeSession(FakeProvider provider, string sessionId, string? cwd) : IAgentSession, IAgentIdleCompactionProvider
+    private sealed class FakeSession(FakeProvider provider, string sessionId, string? cwd) : IAgentSession, IAgentIdleCompactionProvider, IAgentPermissionModeProvider
     {
         public ModelProviderId ProviderId => provider.Descriptor.ProviderId;
+        public string? PermissionMode => provider.PermissionMode;
+        public void SetPermissionMode(string? permissionMode) => provider.PermissionMode = permissionMode;
         public string SessionId => sessionId;
         public string? WorkspacePath => cwd;
         public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
