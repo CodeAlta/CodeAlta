@@ -590,8 +590,8 @@ Agents ask for permission before running commands or changing files. **Auto appr
 In the desktop app, each session has a [permission mode](#agent-prompt-model-and-permissions). Settings >
 Permissions sets the **Default mode**, for the sessions that have none of their own: **Bypass permissions**
 (the default: requests are approved automatically) or **Ask first**. A change applies to what the sessions
-do next, not to a turn that is already running. An agent runs with the privileges of CodeAlta: a mode
-decides what you are asked, it is not a sandbox.
+do next; a turn you sent while its session asked keeps asking until it ends. An agent runs with the
+privileges of CodeAlta: a mode decides what you are asked, it is not a sandbox.
 
 When a session asks, the request appears on top of its prompt, with the command and its folder, or the
 folder of the file change. **Allow once** has the focus: press `Enter` to allow, `2` or `Escape` to deny,
@@ -602,9 +602,9 @@ A session that waits for your answer is marked in the Explorer, on its project a
 not the session on screen, a message says so, with **Show** to go to it. It is also counted in the
 activity of its space.
 
-Only a turn you start from the window can ask. A turn that starts without you, such as a sub-agent that
-another session drives or the turn that receives the result of a background job, has nobody to ask: in a
-mode that asks, its commands and file changes are refused, and the agent is told so.
+A turn that starts without you asks the same way: a sub-agent that another session drives, or the turn
+that receives the answer of a sub-agent or a reminder. Its session waits until you answer, however long
+that is, and the mark and the message tell you which one it is. Stopping the session ends the request.
 
 A session in a mode that asks cannot do what would run a command without asking you: start a
 [background job](sessions.md#background-jobs), type in a terminal, give an automation a command to run, or

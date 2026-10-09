@@ -520,7 +520,7 @@ public sealed class OwnedSessionCommandServiceTests
 
         Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, await Answer(Command("all")));
         Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, await Answer(Change("all")));
-        // File changes are approved, commands are not: outside a send of the window there is no review to wait in.
+        // File changes are approved, commands are not: these sessions have no live attachment to review them on.
         Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, await Answer(Change("edits")));
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, await Answer(Command("edits")));
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, await Answer(Command("ask")));
@@ -571,6 +571,60 @@ public sealed class OwnedSessionCommandServiceTests
         f.Provider.ReleaseSend.TrySetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
         Assert.AreEqual("default", (await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId)))!.Current.PermissionMode);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
+    public Task SessionPermissionModes_ATurnTheOwnerDidNotSendAsksOnTheCardOfItsSession() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAll();
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var permissions = f.Host.RuntimeService.Permissions;
+
+        // The host bypasses permissions; the session asks first.
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("ask", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Ask } }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        Assert.AreEqual(SessionPermissionPolicy.Review, f.Host.RuntimeService.GetPermissionPolicy(f.SessionId));
+
+        // A request that belongs to no send of the owner (a prompt the host queued, a send of another session) reaches
+        // the handler of the session: it waits for the user as a request of a send does, and takes the answer.
+        async Task<SessionOwnedPermissionSnapshot> WaitingAsync()
+        {
+            for (var attempt = 0; attempt < 2000; attempt++)
+            {
+                var page = await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask());
+                if (page.Entries.Count == 1) return page.Entries[0];
+                await Task.Delay(5);
+            }
+
+            Assert.Fail("The request did not wait for the user.");
+            throw new InvalidOperationException("Unreachable.");
+        }
+
+        var allowed = f.Permission(f.Provider.Options!.OnPermissionRequest);
+        var entry = await WaitingAsync();
+        Assert.IsFalse(allowed.IsCompleted);
+        Assert.AreEqual("inert fixture command", entry.Request.Command);
+        CollectionAssert.AreEqual(new[] { f.SessionId }, (await f.Observe(permissions.ListWaitingSessionsAsync().AsTask())).ToArray());
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(allowed)).Kind);
+
+        var denied = f.Permission(f.Provider.Options!.OnPermissionRequest);
+        var next = await WaitingAsync();
+        Assert.AreNotEqual(entry.Handle.OperationId, next.Handle.OperationId, "Each request has a review of its own.");
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(next.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(denied)).Kind);
+
+        // A request whose turn is stopped waits for nobody, and nothing is left of an answered review.
+        using var stopped = new CancellationTokenSource();
+        var cancelled = f.Track(f.Provider.Options!.OnPermissionRequest(f.Provider.CommandRequest(), stopped.Token));
+        await WaitingAsync();
+        await stopped.CancelAsync();
+        Assert.AreEqual(AgentPermissionDecisionKind.Cancel, (await f.Observe(cancelled)).Kind);
+        Assert.HasCount(0, (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
+        Assert.HasCount(0, await f.Observe(permissions.ListWaitingSessionsAsync().AsTask()));
     }, sessionPermissionModes: true);
 
     [TestMethod]

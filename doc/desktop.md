@@ -3335,8 +3335,14 @@ then), so its setup and its cleanup agree: a change applies to what the sessions
 what is already running. A send whose policy is `Approve` has no permission execution, and its requests
 reach the default handler of the host, which answers with the policy of their session. That handler
 also answers the requests outside a send of the window (a prompt the host queued, a session another
-session drives): it approves what the policy approves and denies the rest, since such a run has no
-review to wait in. The window can always answer: the boot status reports the review available
+session drives with `alta session send`, a turn the provider starts): it approves what the policy
+approves, and has the rest reviewed like a send of the window does. It opens a permission execution for
+that one request, bound to the live attachment of the session
+(`SessionPermissionService.SessionReviewTarget`), and closes it with the answer, so the request is listed
+by `sessionPermissions`, shown on the card of its session, and counted among the sessions that wait. It
+waits as long as the user does not answer, and ends as cancelled with the run. A session that has no live
+attachment is denied. The handler reads the policy at each request, so a change of the default mode
+reaches a run that has no permission execution at its next request. The window can always answer: the boot status reports the review available
 (`commandReviewEnabled`) for every owned host, and `sessionPermissions` lists and resolves requests
 whatever the modes are now.
 

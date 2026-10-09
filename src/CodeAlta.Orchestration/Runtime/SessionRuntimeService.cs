@@ -146,6 +146,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             _sessionPermissionModes = value;
             Permissions.SessionPolicy = value ? GetPermissionPolicy : null;
+            // A turn the owner did not send (a queued prompt of the host, a send of another session, a turn of the
+            // provider) asks on the attachment of its session, which is live while it runs.
+            Permissions.SessionReviewTarget = value
+                ? sessionId => _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated && !entry.Attachment.IsRetiring
+                    ? new(_runtimeInstanceId, entry.Attachment, entry.ProviderId)
+                    : null
+                : null;
         }
     }
 

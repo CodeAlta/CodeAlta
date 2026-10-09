@@ -739,7 +739,8 @@ Whether an owned send is reviewed follows from the permission mode of its sessio
 is configured with, else the policy of the host. `SessionPermissionModes.Policy` maps a mode to
 `Approve` (`bypassPermissions`), `AcceptEdits` (`acceptEdits`: file changes are granted, commands are
 reviewed) or `Review` (any other). The command owner reads it once per send, after preparation; the
-default handler reads it for a request outside an owned send. "Permission modes" in `desktop.md` has the
+default handler reads it for a request outside an owned send, and has what it does not approve reviewed
+on the live attachment of the session (`SessionReviewTarget`). "Permission modes" in `desktop.md` has the
 whole behavior.
 
 The generated `sessionPermissions.list` and `sessionPermissions.resolve` RPCs use dedicated

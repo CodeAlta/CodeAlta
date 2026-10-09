@@ -82,9 +82,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(autoApproveOwnedPermissions);
         _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
-        OwnedDefaultPermissionHandler = (request, token) => Task.FromResult(new AgentPermissionDecision(
-            token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
-            : ApprovedByDefault(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+        OwnedDefaultPermissionHandler = HandleOwnedDefaultAsync;
     }
 
     /// <summary>
@@ -93,17 +91,45 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// </summary>
     internal Func<string, SessionPermissionPolicy>? SessionPolicy { get; set; }
 
-    // A request outside a send of the owner (a prompt the host queued, a session another session drives) has no
-    // review to wait in: it is granted when the policy of its session grants it, and denied otherwise.
-    private bool ApprovedByDefault(AgentPermissionRequest request)
-        => SessionPolicy is { } policy && !string.IsNullOrWhiteSpace(request.SessionId)
-            ? policy(request.SessionId) switch
-            {
-                SessionPermissionPolicy.Approve => true,
-                SessionPermissionPolicy.AcceptEdits => request is AgentFileChangePermissionRequest,
-                _ => false,
-            }
-            : _autoApproveOwnedPermissions();
+    /// <summary>
+    /// Gets or sets what a request outside a send of the owner is reviewed on: the live attachment of its session,
+    /// or null when the session has none. Null, the default, leaves such a request without a review: it is denied
+    /// when the policy of its session does not grant it.
+    /// </summary>
+    internal Func<string, OwnedReviewTarget?>? SessionReviewTarget { get; set; }
+
+    /// <summary>The attachment a request outside a send of the owner is reviewed on.</summary>
+    /// <param name="RuntimeId">The runtime that owns the attachment.</param>
+    /// <param name="Attachment">The live attachment of the session.</param>
+    /// <param name="ProviderId">The provider of the session.</param>
+    internal sealed record OwnedReviewTarget(Guid RuntimeId, OwnedProviderEventForwarding.Attachment Attachment, ModelProviderId ProviderId);
+
+    // The answer of the host to a request outside a send of the owner: a prompt the host queued, a session another
+    // session drives, a turn its provider started by itself. It is granted when the policy of its session grants it.
+    // Otherwise it waits for the user as a request of a send does, in a review of its own that lasts as long as the
+    // request, on the card of its session; a session that cannot be reviewed has it denied.
+    private async Task<AgentPermissionDecision> HandleOwnedDefaultAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
+        if (SessionPolicy is not { } policyOf || string.IsNullOrWhiteSpace(request.SessionId))
+            return new(_autoApproveOwnedPermissions() ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny);
+        var policy = policyOf(request.SessionId);
+        if (policy == SessionPermissionPolicy.Approve || (policy == SessionPermissionPolicy.AcceptEdits && request is AgentFileChangePermissionRequest))
+            return new(AgentPermissionDecisionKind.AllowOnce);
+        if (SessionReviewTarget?.Invoke(request.SessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
+        var execution = await CreateOwnedExecutionAsync(Guid.NewGuid(), request.SessionId, cancellationToken, policy, enableUserInput: false).ConfigureAwait(false);
+        if (execution is null) return new(AgentPermissionDecisionKind.Deny);
+        try
+        {
+            return await BindOwnedExecutionAsync(execution, target.RuntimeId, target.Attachment, target.ProviderId).ConfigureAwait(false)
+                ? await HandleOwnedCommandAsync(execution, request, cancellationToken).ConfigureAwait(false)
+                : new(AgentPermissionDecisionKind.Deny);
+        }
+        finally
+        {
+            await CloseOwnedExecutionAsync(execution).ConfigureAwait(false);
+        }
+    }
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
     private readonly TaskCompletionSource _shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -124,8 +150,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     // Owned sends reject a reused coordinator whose session defaults came from another caller.
 
     /// <summary>
-    /// Gets the host's default permission decision for sessions it owns: allow once when the host approves
-    /// automatically, otherwise deny. A session created with it can later be driven by the owner's commands.
+    /// Gets the host's default permission decision for sessions it owns: allow once when the host, or the policy of
+    /// the session, approves automatically; otherwise the request waits for the user where the host reviews its
+    /// sessions by their permission mode, and is denied elsewhere. A session created with it can later be driven by
+    /// the owner's commands.
     /// </summary>
     public AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
 
