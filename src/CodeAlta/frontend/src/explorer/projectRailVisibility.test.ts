@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collapsedSessionWidth, constrainPaneLayout } from "../paneLayout";
 import { projectRailProjection } from "./projectRail";
 import { focusVisibleProject, persistProjectRailCollapsed, projectRailVisible, resetNarrowRail, restoreProjectRailCollapsed, restoreProjectRailFocus, toggleProjectRail } from "./projectRailVisibility";
 import type { WorkspaceSnapshot } from "#neoastra";
 
-test("desktop collapse/reopen and narrow reveal do not change selection, sort or preferred widths", () => {
+test("desktop collapse/reopen and narrow reveal do not change selection or sort", () => {
   let state = { desktopCollapsed: false, narrowOpen: false };
   const selected = { projectId: "p", sessionId: "s", sort: "recent" as const };
-  const preferred = { projects: 400, sessions: 420 };
   const snapshot: WorkspaceSnapshot = {
     configured: true, projects: [{ id: "p", name: "P", path: "/repo/p", archived: false }], sessions: [],
     projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -17,7 +15,6 @@ test("desktop collapse/reopen and narrow reveal do not change selection, sort or
   assert.equal(projectRailVisible(state, false), true);
   state = toggleProjectRail(state, false);
   assert.equal(projectRailVisible(state, false), false);
-  assert.equal(collapsedSessionWidth(preferred, 900), 412);
   state = toggleProjectRail(state, false);
   assert.equal(projectRailVisible(state, false), true);
   // A viewport change hides the project rail until intentionally opened, without persisting the narrow state.
@@ -28,12 +25,11 @@ test("desktop collapse/reopen and narrow reveal do not change selection, sort or
   assert.equal(state.desktopCollapsed, false);
   assert.deepEqual(projectRailProjection(snapshot, selected.sort), before);
   assert.deepEqual(selected, { projectId: "p", sessionId: "s", sort: "recent" });
-  assert.deepEqual(constrainPaneLayout(preferred, 1400), preferred);
   assert.equal(projectRailVisible(resetNarrowRail(state), true), false);
   assert.equal(projectRailVisible(resetNarrowRail(state), false), true);
 });
 
-test("narrow opening never overrides a persisted desktop collapse and does not serialize constrained widths", () => {
+test("narrow opening never overrides a persisted desktop collapse", () => {
   let state = { desktopCollapsed: restoreProjectRailCollapsed(() => "collapsed"), narrowOpen: false };
   assert.equal(projectRailVisible(state, false), false);
   state = toggleProjectRail(state, true);

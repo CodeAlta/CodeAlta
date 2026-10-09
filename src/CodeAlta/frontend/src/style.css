@@ -107,12 +107,6 @@ code, pre { font-family: var(--bp-typography-family-mono); }
 .settings-dialog-content > .settings-card-page + .configuration-page { padding-top: 18px; }
 .settings-dialog-content > :not(.configuration-page) { padding: 24px; }
 
-.workspace-shell { min-width: 0; min-height: 0; display: grid; grid-template-columns: var(--project-pane-width, 240px) 8px minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); grid-template-areas: "projects project-resize session-content"; overflow: hidden; }
-.workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 minmax(calc(var(--session-pane-width, 310px) + 488px), 1fr); }
-.project-rail { grid-area: projects; }
-.session-rail { grid-area: sessions; }
-.session-splitter { grid-area: session-resize; }
-.content { grid-area: content; }
 .project-rail[hidden], .session-rail[hidden], .pane-splitter[hidden] { display: none; }
 .project-rail, .session-rail { min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
 /* Thin, transparent separators: only the grip is drawn; the pseudo-element widens the pointer target. */
@@ -183,10 +177,6 @@ h1, h2, h3, p { margin-top: 0; }
 .workspace-layout { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0;
   --flexlayout-color-text: var(--text); --flexlayout-color-background: transparent;
   --flexlayout-color-base: transparent; --flexlayout-color-1: transparent; }
-.session-content-layout { grid-area: session-content; }
-/* App's pointer-captured control owns the 8px space inside the rail slot. */
-.session-content-rail-slot { display: grid; grid-template-columns: minmax(0, 1fr) 8px; grid-template-areas: "sessions session-resize"; height: 100%; min-height: 0; }
-.session-content-layout .content { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 /* The outer short-window access scroller must not anchor to content that is
    independently anchored/scrolled by the timeline inside it. */
 .active-session-content { flex: 1; min-height: 0; overflow: auto; overflow-anchor: none; }
@@ -610,12 +600,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .settings-dialog-group h3 { padding-inline: 6px; }
   .settings-dialog-navigation button { padding-inline: 6px; overflow-wrap: anywhere; }
   .settings-dialog-content > .configuration-page, .settings-dialog-content > :not(.configuration-page) { padding: 14px; }
-  .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(340px, 45vh) minmax(0, 1fr); grid-template-areas: "session-content" "session-content"; height: auto; }
-  .workspace-shell.project-rail-open { grid-template-areas: "projects" "session-content"; }
-  .session-content-rail-slot { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sessions"; }
   .pane-splitter { display: none; }
-  .project-rail:not([hidden]) { display: flex; border-bottom: 1px solid var(--line); }
-  .session-rail { height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .session-list { display: flex; gap: 7px; overflow-x: auto; }
   .session-row { flex: 0 0 220px; }
   .notes-pane { max-height: 65%; }
@@ -628,16 +613,11 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
   .prompt-options > * { flex: 0 0 130px; }
 }
 
-
-@media (max-width: 875px) and (max-height: 600px) {
-  .workspace-shell, .workspace-shell:not(.project-rail-open) { grid-template-rows: minmax(180px, 40vh) minmax(0, 1fr); }
-}
-
 /* IDE presentation: stable workspace slot, one hierarchical Explorer. */
-.ide-shell .workspace-shell { position: relative; grid-template-columns: min(var(--explorer-width, 272px), 60vw) 2px minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "brand brand content" "sessions explorer-resize content"; height: 100%; }
+.ide-shell .workspace-shell { position: relative; min-width: 0; min-height: 0; display: grid; overflow: hidden; grid-template-columns: min(var(--explorer-width, 272px), 60vw) 2px minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "brand brand content" "sessions explorer-resize content"; height: 100%; }
 .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: 0 0 minmax(0, 1fr); }
 .ide-shell .session-content-layout { display: contents; }
-.ide-shell .session-content-rail-slot { grid-area: sessions; min-height: 0; min-width: 0; display: flex; }
+.ide-shell .session-content-rail-slot { grid-area: sessions; height: 100%; min-height: 0; min-width: 0; display: flex; }
 .ide-shell .session-content-rail-slot[hidden] { display: none; }
 .ide-shell .session-content-main-panel { grid-area: content; min-width: 0; min-height: 0; }
 .ide-shell .session-content-main-panel > .content { height: 100%; min-width: 0; min-height: 0; display: flex; flex-direction: column; }

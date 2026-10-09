@@ -93,7 +93,6 @@ import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePositi
 import { workspaceEditingSelector, type ShortcutAction } from "./shortcuts";
 import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
 import { SessionDraftStatus } from "./SessionDraftBadge";
-import { collapsedSessionWidth, constrainPaneLayout, persistPaneLayout, restorePaneLayout } from "./paneLayout";
 import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
@@ -211,7 +210,6 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 type View = "workspace" | "appearance" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost";
 type SettingsSection = Exclude<View, "workspace">;
-const paneLayoutStorageKey = "codealta.desktop.panes.v1";
 
 function App() {
   const language = useLanguagePreference();
@@ -601,8 +599,6 @@ function App() {
   const remindersOrigin = useRef<{ element: HTMLButtonElement; lifetime: SessionInfoLifetime } | null>(null);
   const compactTrigger = useRef<HTMLButtonElement>(null);
   const timelineCommand = useRef<TimelineCommand | null>(null);
-  const [paneLayout] = useState(() => restorePaneLayout(() => localStorage.getItem(paneLayoutStorageKey), window.innerWidth));
-  const [workspaceWidth, setWorkspaceWidth] = useState(window.innerWidth);
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 875px)").matches);
   const [ideWidth, setIdeWidth] = useState(() => {
     try { return parseIdeWidth(localStorage.getItem("codealta.desktop.ide-width.v1")); } catch { return parseIdeWidth(null); }
@@ -613,9 +609,6 @@ function App() {
   const detailsPaneVisible = !(narrow && railVisible);
   const currentDetailsPaneVisible = useRef(detailsPaneVisible);
   currentDetailsPaneVisible.current = detailsPaneVisible;
-  const visiblePaneLayout = constrainPaneLayout(paneLayout, workspaceWidth);
-  const visibleSessionWidth = !narrow && railState.desktopCollapsed
-    ? collapsedSessionWidth(paneLayout, workspaceWidth) : visiblePaneLayout.sessions;
   const [clock, setClock] = useState(Date.now);
 
   // The start-up screen stays until the window has something to show in its place: the host's answer and the
@@ -632,11 +625,6 @@ function App() {
     const timer = window.setInterval(() => setClock(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-
-  useEffect(() => {
-    persistPaneLayout(value => localStorage.setItem(paneLayoutStorageKey, value), paneLayout);
-  }, [paneLayout]);
-
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 875px)");
@@ -657,16 +645,6 @@ function App() {
     if (!railVisible || !focusProjectPending.current || view !== "workspace") return;
     if (focusVisibleProject(projectRail.current)) focusProjectPending.current = false;
   }, [railVisible, view, workspaceState.kind]);
-
-  useEffect(() => {
-    if (view !== "workspace" || !workspaceShell.current) return;
-    const shell = workspaceShell.current;
-    const measure = () => setWorkspaceWidth(shell.clientWidth);
-    const observer = new ResizeObserver(measure);
-    observer.observe(shell);
-    measure();
-    return () => observer.disconnect();
-  }, [view]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -2535,8 +2513,6 @@ function App() {
           canMutate={() => !!mutation?.capability.canMutate()} /></RemindersDialog>}
       <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}`} ref={workspaceShell} style={{
           "--explorer-width": `${ideWidth.width}px`,
-          "--project-pane-width": `${visiblePaneLayout.projects}px`,
-          "--session-pane-width": `${visibleSessionWidth}px`,
         } as CSSProperties}>
         <WindowBrand developer={status?.developerMode ?? false}>
           <nav className="activity-rail" aria-label={t("Workspace navigation")}>
@@ -2560,7 +2536,7 @@ function App() {
             aria-label={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} title={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} onClick={() => setTheme(nextTheme(theme))} />
         </div>
         <WindowControls snapshot={windowSnapshot} />
-        <SessionContentLayout sessionWidth={ideWidth.width} narrow={narrow} sessionsHidden={!railVisible}
+        <SessionContentLayout sessionsHidden={!railVisible}
           projects={sessions => { const railHead = <>
           <div className="panel-title"><span title={projectListing?.evidenceNotice ?? undefined}>{t("Projects")}<span className="count">{snapshot?.projects.length ?? 0}</span></span><span>
             {snapshot && <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="collapseAll" size={16} />} aria-label={t("Collapse all")} title={t("Collapse all")}

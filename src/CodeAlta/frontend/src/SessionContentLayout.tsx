@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 export function SessionContentLayout({ sessions, content, splitter, sessionsHidden, projects }: {
   sessions: ReactNode; content: ReactNode; splitter: ReactNode;
   projects?: (sessions: ReactNode) => ReactNode;
-  sessionWidth: number; narrow: boolean; sessionsHidden: boolean;
+  sessionsHidden: boolean;
 }) {
   return <div className="session-content-layout">
     <div className="session-content-rail-slot" hidden={sessionsHidden}>{projects ? projects(sessions) : sessions}</div>
