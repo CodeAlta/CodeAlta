@@ -657,7 +657,7 @@ CodeAlta checks NuGet for a newer package when it starts. When there is one, it 
 
 CodeAlta Desktop opens its window where you left it: at the same position and size, and maximized or full screen if it was when you exited. A maximized window still goes back to the size it had before when you restore it.
 
-If the display the window was on is not connected any more, the window opens on a display that is.
+A window stretched over several displays opens over them again. If the display the window was on is not connected any more, the window opens on a display that is.
 
 ### Notification area (desktop)
 

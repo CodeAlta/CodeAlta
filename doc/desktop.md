@@ -37,10 +37,14 @@ so the normal and the developer instance each have their own. NeoAstra's `NeoWin
 writes it a moment after the window was moved, resized, maximized or restored, and once more when the
 application ends. It is given back while the window is still hidden: a hidden window takes its bounds at
 once and its state when it is shown, so the window never appears in its default place first. The
-position is given back inside a display that is there now (`NeoWindowStateRestore.Clamp`), with the
-window shrunk to the work area if it has to be; where the displays are not known when the window is
-shown, only the size and the state are given back. A file that is missing or malformed gives the
-default placement.
+position is given back inside the displays that are there now (`NeoWindowStateRestore.Clamp`): a
+window that was stretched over several displays stays over them, and a window that was on a display
+that is gone comes back whole on one that is there, shrunk to its work area if it has to be. What is
+compared with the displays is the rectangle the window shows, which the placement keeps since
+NeoAstra 1.3.0, so a window whose visible edge was at the edge of a display stays there. Where the
+displays are not known when the window is shown, only the size and the state are given back. A file
+that is missing or malformed gives the default placement, and so does a file with that rectangle for
+a CodeAlta built on NeoAstra 1.2.0 or earlier, which refuses it.
 
 The window has no separate title bar: the page draws it. The CodeAlta mark sits at the top left
 with the buttons of the workspace beside it (the name is not written, so that these buttons keep their

@@ -87,7 +87,7 @@ internal sealed class DesktopWindowState : IAsyncDisposable
 
     /// <summary>
     /// What a kept placement gives a new window on the displays there are now: its size and its state, and its
-    /// position when the displays are known, moved and shrunk to fit the one it is on.
+    /// position when the displays are known, moved and shrunk to fit the ones it is on.
     /// </summary>
     /// <param name="saved">The placement that was kept.</param>
     /// <param name="displays">The displays there are now; empty when the platform does not report them.</param>

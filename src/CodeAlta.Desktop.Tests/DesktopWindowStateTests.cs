@@ -57,6 +57,21 @@ public sealed class DesktopWindowStateTests
     }
 
     [TestMethod]
+    public void Restore_KeepsAWindowOverTwoDisplaysWhereItWas()
+    {
+        // The right third of the left display and all of the right one, as a window stretched over both is.
+        NeoDisplaySnapshot left = Display("left", 0, 0, 3840, 2160), right = Display("right", 3840, 0, 3840, 2160, primary: false);
+        var over = DesktopWindowState.Restore(Placement(2688, 0, 4992, 2120), [left, right])!.Value;
+        Assert.AreEqual(new NeoPoint(2688, 0), over.Position);
+        Assert.AreEqual(new NeoSize(4992, 2120), over.Size);
+
+        // The left display is gone: the window comes back whole on the one that is left.
+        var alone = DesktopWindowState.Restore(Placement(2688, 0, 4992, 2120), [right])!.Value;
+        Assert.AreEqual(new NeoPoint(3840, 0), alone.Position);
+        Assert.AreEqual(new NeoSize(3840, 2120), alone.Size);
+    }
+
+    [TestMethod]
     public void Restore_LeavesTheWindowWhereANewOneIsPutWhenTheDisplaysAreNotKnown()
     {
         var restored = DesktopWindowState.Restore(Placement(-1800, 100, 1280, 800, NeoWindowState.Maximized), [])!.Value;
