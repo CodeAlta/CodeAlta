@@ -412,7 +412,36 @@ internal static class OpenAIProviderSdkFactory
             options.AddPolicy(new OpenAIExtraHeadersPolicy(provider.ExtraHeaders, provider.RequestHeaderContext), PipelinePosition.BeforeTransport);
         }
 
+        if (provider.ResponseStreamObserver is { } observer)
+        {
+            options.AddPolicy(new OpenAIResponseStreamObserverPolicy(observer), PipelinePosition.BeforeTransport);
+        }
+
         return options;
+    }
+
+    private sealed class OpenAIResponseStreamObserverPolicy(Func<Stream, Stream> observer) : PipelinePolicy
+    {
+        public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            ProcessNext(message, pipeline, currentIndex);
+            Observe(message);
+        }
+
+        public override async ValueTask ProcessAsync(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
+        {
+            await ProcessNextAsync(message, pipeline, currentIndex).ConfigureAwait(false);
+            Observe(message);
+        }
+
+        private void Observe(PipelineMessage message)
+        {
+            // A buffered answer was read before this policy got it back: only a streamed one is observed.
+            if (!message.BufferResponse && message.Response is { IsError: false, ContentStream: { } stream } response)
+            {
+                response.ContentStream = observer(stream);
+            }
+        }
     }
 
     private sealed class OpenAIExtraHeadersPolicy(
@@ -479,6 +508,11 @@ internal static class OpenAIProviderSdkFactory
         if (provider.ExtraHeaders is { Count: > 0 } || provider.RequestHeaderContext is not null)
         {
             options.AddPolicy(new OpenAIExtraHeadersPolicy(provider.ExtraHeaders, provider.RequestHeaderContext), PipelinePosition.BeforeTransport);
+        }
+
+        if (provider.ResponseStreamObserver is { } observer)
+        {
+            options.AddPolicy(new OpenAIResponseStreamObserverPolicy(observer), PipelinePosition.BeforeTransport);
         }
 
         return options;

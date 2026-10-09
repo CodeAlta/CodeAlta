@@ -172,6 +172,10 @@ public sealed class OpenAIProviderOptions
 
     internal Action<OpenAIResponsesRequestCustomizationContext>? ResponsesRequestCustomizer { get; set; }
 
+    // Reads the streamed body of an answer on its way to the client: what an endpoint adds to the events beside the
+    // protocol, the client does not hand over.
+    internal Func<Stream, Stream>? ResponseStreamObserver { get; set; }
+
     internal Func<string?, ChatClient>? ChatClientFactory { get; set; }
 
     internal OpenAIRequestHeaderContext? RequestHeaderContext { get; set; }

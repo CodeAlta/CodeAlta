@@ -3,7 +3,7 @@ using System.Text;
 
 namespace CodeAlta.Agent.Copilot;
 
-internal sealed class CopilotAnthropicSseHandler : DelegatingHandler
+internal sealed class CopilotAnthropicSseHandler(CopilotRequestUsage? usage = null) : DelegatingHandler
 {
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
@@ -18,7 +18,7 @@ internal sealed class CopilotAnthropicSseHandler : DelegatingHandler
         {
             // Copilot can append the OpenAI-style `data: [DONE]` sentinel to an otherwise
             // Anthropic-shaped stream. The Anthropic SDK treats it as JSON and fails parsing.
-            response.Content = new CopilotAnthropicSseContent(content);
+            response.Content = new CopilotAnthropicSseContent(content, usage);
         }
 
         return response;
@@ -27,10 +27,12 @@ internal sealed class CopilotAnthropicSseHandler : DelegatingHandler
     private sealed class CopilotAnthropicSseContent : HttpContent
     {
         private readonly HttpContent _innerContent;
+        private readonly CopilotRequestUsage? _usage;
 
-        public CopilotAnthropicSseContent(HttpContent innerContent)
+        public CopilotAnthropicSseContent(HttpContent innerContent, CopilotRequestUsage? usage)
         {
             _innerContent = innerContent;
+            _usage = usage;
             foreach (var header in innerContent.Headers)
             {
                 Headers.TryAddWithoutValidation(header.Key, header.Value);
@@ -58,12 +60,12 @@ internal sealed class CopilotAnthropicSseHandler : DelegatingHandler
 
         protected override async Task<Stream> CreateContentReadStreamAsync()
             => new CopilotAnthropicSseStream(
-                await _innerContent.ReadAsStreamAsync().ConfigureAwait(false));
+                await _innerContent.ReadAsStreamAsync().ConfigureAwait(false), _usage);
 
         protected override async Task<Stream> CreateContentReadStreamAsync(
             CancellationToken cancellationToken)
             => new CopilotAnthropicSseStream(
-                await _innerContent.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false));
+                await _innerContent.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), _usage);
 
         protected override bool TryComputeLength(out long length)
         {
@@ -85,12 +87,14 @@ internal sealed class CopilotAnthropicSseHandler : DelegatingHandler
     private sealed class CopilotAnthropicSseStream : Stream
     {
         private readonly StreamReader _reader;
+        private readonly CopilotRequestUsage? _usage;
         private byte[] _pendingBytes = [];
         private int _pendingOffset;
         private bool _endOfStream;
 
-        public CopilotAnthropicSseStream(Stream stream)
+        public CopilotAnthropicSseStream(Stream stream, CopilotRequestUsage? usage)
         {
+            _usage = usage;
             _reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         }
 
@@ -180,6 +184,8 @@ internal sealed class CopilotAnthropicSseHandler : DelegatingHandler
                         break;
                     }
 
+                    // Copilot reports what it bills beside the usage of the protocol, in the same event.
+                    _usage?.ObserveLine(line);
                     lines.Add(line);
                 }
 

@@ -1073,6 +1073,273 @@ public sealed class CopilotDirectProviderTests
         }
     }
 
+    [TestMethod]
+    public async Task CopilotDirect_AnthropicMessages_MarksCacheBreakpointsAndReportsWhatCopilotBilled()
+    {
+        using var toolSchema = JsonDocument.Parse("""{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}""");
+        JsonElement requestBody = default;
+        string? interactionId = null;
+        var handler = new StubHandler(request =>
+        {
+            Assert.AreEqual(new Uri("https://api.individual.githubcopilot.com/v1/messages"), request.RequestUri);
+            interactionId = request.Headers.TryGetValues("X-Interaction-Id", out var values) ? values.Single() : null;
+            using (var requestDocument = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()))
+            {
+                requestBody = requestDocument.RootElement.Clone();
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    event: message_start
+                    data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-sonnet-5.5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":4,"cache_creation_input_tokens":300,"cache_read_input_tokens":9000,"output_tokens":1}}}
+
+                    event: content_block_start
+                    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+                    event: content_block_delta
+                    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+
+                    event: content_block_stop
+                    data: {"type":"content_block_stop","index":0}
+
+                    event: message_delta
+                    data: {"copilot_usage":{"token_details":[{"batch_size":1000000,"cost_per_batch":200000000000,"model":"claude-sonnet-5.5","token_count":4,"token_type":"input"},{"batch_size":1000000,"cost_per_batch":10000000000,"model":"claude-sonnet-5.5","token_count":9000,"token_type":"cache_read"},{"batch_size":1000000,"cost_per_batch":250000000000,"model":"claude-sonnet-5.5","token_count":300,"token_type":"cache_write"},{"batch_size":1000000,"cost_per_batch":1000000000000,"model":"claude-sonnet-5.5","token_count":7,"token_type":"output"}],"total_nano_aiu":172800000},"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":4,"cache_creation_input_tokens":300,"cache_read_input_tokens":9000,"output_tokens":7}}
+
+                    event: message_stop
+                    data: {"type":"message_stop"}
+
+                    data: [DONE]
+
+                    """,
+                    Encoding.UTF8,
+                    "text/event-stream"),
+            };
+        });
+        var executor = new CopilotDirectTurnExecutor(new CopilotDirectProviderOptions
+        {
+            ProviderKey = "github-copilot",
+            Auth = new CopilotDirectAuthOptions
+            {
+                AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+            },
+            HttpClient = new HttpClient(handler),
+        });
+        var provider = new ModelProviderRuntimeDescriptor
+        {
+            ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+            ProviderKey = "github-copilot",
+            DisplayName = "Copilot",
+            TransportKind = AgentTransportKind.AnthropicMessages,
+            BaseUri = new Uri("https://api.individual.githubcopilot.com"),
+        };
+        using var arguments = JsonDocument.Parse("""{"path":"a.cs"}""");
+        AgentToolDefinition Tool(string name)
+            => new(new AgentToolSpec(name, $"The {name} tool", toolSchema.RootElement.Clone()), static (_, _) => Task.FromResult(new AgentToolResult(true, [])));
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            var response = await executor.ExecuteTurnAsync(
+                new AgentTurnRequest
+                {
+                    Provider = provider,
+                    ProviderId = new ModelProviderId(provider.ProviderKey),
+                    SessionId = "session-test",
+                    RunId = new AgentRunId("run-test"),
+                    ModelId = "claude-sonnet-5.5",
+                    ModelInfo = new AgentModelInfo(
+                        "claude-sonnet-5.5",
+                        Provider: "github-copilot",
+                        Capabilities: new Dictionary<string, object?>
+                        {
+                            ["copilotEndpointKind"] = "AnthropicMessages",
+                            ["family"] = "claude",
+                            ["outputTokenLimit"] = 64000L,
+                        }),
+                    SystemMessage = "You are a test agent.",
+                    Conversation =
+                    [
+                        new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Read the files.")]),
+                        new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.ToolCall("toolu_1", "read_file", arguments.RootElement.Clone())]),
+                        new AgentConversationMessage(AgentConversationRole.Tool, [new AgentMessagePart.ToolResult("toolu_1", new AgentToolResult(true, [new AgentToolResultItem.Text("first file")]))]),
+                        new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.ToolCall("toolu_2", "read_file", arguments.RootElement.Clone())]),
+                        new AgentConversationMessage(AgentConversationRole.Tool, [new AgentMessagePart.ToolResult("toolu_2", new AgentToolResult(true, [new AgentToolResultItem.Text("second file")]))]),
+                    ],
+                    Tools = [Tool("list_dir"), Tool("read_file")],
+                    State = new AgentSessionState
+                    {
+                        SessionId = "session-test",
+                        ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+                        ProviderKey = "github-copilot",
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    },
+                },
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+            // Without these markers the Messages endpoint caches nothing: every request pays the whole prompt again.
+            static bool Marked(JsonElement block)
+                => block.TryGetProperty("cache_control", out var marker) && marker.GetProperty("type").GetString() == "ephemeral";
+            Assert.IsTrue(Marked(requestBody.GetProperty("system").EnumerateArray().Last()));
+            var tools = requestBody.GetProperty("tools").EnumerateArray().ToArray();
+            CollectionAssert.AreEqual(new[] { false, true }, tools.Select(Marked).ToArray());
+            var messages = requestBody.GetProperty("messages").EnumerateArray()
+                .Select(static message => message.GetProperty("content").EnumerateArray().Any(Marked))
+                .ToArray();
+            CollectionAssert.AreEqual(new[] { false, false, true, false, true }, messages);
+            Assert.AreEqual("session-test", interactionId);
+
+            var operation = response.Usage!.LastOperation!;
+            Assert.AreEqual(9_304L, operation.InputTokens);
+            Assert.AreEqual(9_000L, operation.CachedInputTokens);
+            Assert.AreEqual(300L, operation.CacheWriteTokens);
+            Assert.AreEqual(0.1728, operation.Cost!.Value, 1e-9);
+            Assert.AreEqual("AI credits", operation.CostUnit);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+        }
+    }
+
+    [TestMethod]
+    public async Task CopilotDirect_Responses_KeysTheCacheByTheSessionAndReportsWhatCopilotBilled()
+    {
+        JsonElement requestBody = default;
+        string? interactionId = null;
+        var handler = new StubHandler(request =>
+        {
+            Assert.AreEqual(new Uri("https://api.individual.githubcopilot.com/responses"), request.RequestUri);
+            interactionId = request.Headers.TryGetValues("X-Interaction-Id", out var values) ? values.Single() : null;
+            using (var requestDocument = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()))
+            {
+                requestBody = requestDocument.RootElement.Clone();
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    event: response.created
+                    data: {"type":"response.created","response":{"id":"resp_test","object":"response","created_at":1762845696,"status":"in_progress","model":"gpt-test","output":[]}}
+
+                    event: response.output_item.done
+                    data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_test","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}}
+
+                    event: response.completed
+                    data: {"copilot_usage":{"token_details":[{"batch_size":1000000,"cost_per_batch":10000000000,"model":"gpt-test","token_count":75,"token_type":"input"},{"batch_size":1000000,"cost_per_batch":1000000000,"model":"gpt-test","token_count":9590,"token_type":"cache_read"},{"batch_size":1000000,"cost_per_batch":12500000000,"model":"gpt-test","token_count":2392,"token_type":"cache_write"},{"batch_size":1000000,"cost_per_batch":50000000000,"model":"gpt-test","token_count":5,"token_type":"output"}],"total_nano_aiu":40490000},"type":"response.completed","response":{"id":"resp_test","object":"response","created_at":1762845696,"status":"completed","model":"gpt-test","output":[{"id":"msg_test","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"ok","annotations":[]}]}],"usage":{"input_tokens":12057,"input_tokens_details":{"cache_write_tokens":2392,"cached_tokens":9590},"output_tokens":5,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":12062}}}
+
+                    data: [DONE]
+
+                    """,
+                    Encoding.UTF8,
+                    "text/event-stream"),
+            };
+        });
+        var executor = new CopilotDirectTurnExecutor(new CopilotDirectProviderOptions
+        {
+            ProviderKey = "github-copilot",
+            Auth = new CopilotDirectAuthOptions
+            {
+                AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+            },
+            HttpClient = new HttpClient(handler),
+        });
+        var provider = new ModelProviderRuntimeDescriptor
+        {
+            ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+            ProviderKey = "github-copilot",
+            DisplayName = "Copilot",
+            TransportKind = AgentTransportKind.OpenAIResponses,
+            BaseUri = new Uri("https://api.individual.githubcopilot.com"),
+        };
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            var response = await executor.ExecuteTurnAsync(
+                new AgentTurnRequest
+                {
+                    Provider = provider,
+                    ProviderId = new ModelProviderId(provider.ProviderKey),
+                    SessionId = "session-test",
+                    RunId = new AgentRunId("run-test"),
+                    ModelId = "gpt-test",
+                    ModelInfo = new AgentModelInfo(
+                        "gpt-test",
+                        Provider: "github-copilot",
+                        Capabilities: new Dictionary<string, object?>
+                        {
+                            ["copilotEndpointKind"] = "Responses",
+                        }),
+                    Conversation =
+                    [
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("test")]),
+                    ],
+                    Tools = [],
+                    State = new AgentSessionState
+                    {
+                        SessionId = "session-test",
+                        ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+                        ProviderKey = "github-copilot",
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    },
+                },
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+            // The requests of a session stay on the cache that holds its prefix, and nothing is kept by the endpoint.
+            Assert.AreEqual("session-test", requestBody.GetProperty("prompt_cache_key").GetString());
+            Assert.IsFalse(requestBody.GetProperty("store").GetBoolean());
+            Assert.AreEqual("session-test", interactionId);
+
+            var operation = response.Usage!.LastOperation!;
+            Assert.AreEqual(12_057L, operation.InputTokens);
+            Assert.AreEqual(9_590L, operation.CachedInputTokens);
+            Assert.AreEqual(2_392L, operation.CacheWriteTokens);
+            Assert.AreEqual(0.04049, operation.Cost!.Value, 1e-9);
+            Assert.AreEqual("AI credits", operation.CostUnit);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+        }
+    }
+
+    [TestMethod]
+    public void CopilotRequestUsage_KeepsTheUsageOfATurnThatCopilotBilledNothingFor()
+    {
+        var usage = new CopilotRequestUsage();
+        usage.ObserveLine("data: {\"type\":\"response.output_text.delta\",\"delta\":\"the name copilot_usage in a text\"}");
+        usage.ObserveLine("data: {\"type\":\"response.output_text.delta\",\"delta\":\"\\\"copilot_usage\\\" quoted in a text\"}");
+        var response = new AgentTurnResponse
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("ok")]),
+            Usage = new AgentSessionUsage(LastOperation: new AgentOperationUsageSnapshot("gpt-test", InputTokens: 10, OutputTokens: 2, CachedInputTokens: 4)),
+        };
+
+        Assert.AreSame(response, usage.Apply(response));
+
+        // A stream that is cut in the middle of a line still gives the usage of the event it ends with.
+        using var stream = new CopilotUsageSseStream(
+            new MemoryStream(Encoding.UTF8.GetBytes("event: response.completed\ndata: {\"copilot_usage\":{\"total_nano_aiu\":2500000000,\"token_details\":[{\"token_type\":\"cache_write\",\"token_count\":7}]},\"type\":\"response.completed\"}")),
+            usage);
+        var buffer = new byte[16];
+        while (stream.Read(buffer) > 0)
+        {
+        }
+
+        var billed = usage.Apply(response).Usage!.LastOperation!;
+        Assert.AreEqual(2.5, billed.Cost);
+        Assert.AreEqual("AI credits", billed.CostUnit);
+        Assert.AreEqual(4L, billed.CachedInputTokens);
+        Assert.AreEqual(7L, billed.CacheWriteTokens);
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

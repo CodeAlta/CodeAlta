@@ -1,4 +1,5 @@
 #pragma warning disable OPENAI001
+#pragma warning disable SCME0001 // The request patch of the OpenAI SDK is how a field it has no property for is sent.
 
 using System.ClientModel;
 using CodeAlta.Agent.Anthropic;
@@ -114,12 +115,14 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         CancellationToken cancellationToken)
     {
         var profile = _provider.Profile ?? CreateOpenAIChatProfile(request.ModelInfo);
-        var provider = CreateOpenAIProviderOptions(credential, request, profile);
+        var usage = new CopilotRequestUsage();
+        var provider = CreateOpenAIProviderOptions(credential, request, profile, usage);
         var executor = new OpenAIChatTurnExecutor(provider);
-        return await executor.ExecuteTurnAsync(
+        var response = await executor.ExecuteTurnAsync(
             CreateDelegatedRequest(request, credential, "openai-chat", AgentTransportKind.OpenAIChatCompletions, profile),
             onUpdate,
             cancellationToken).ConfigureAwait(false);
+        return usage.Apply(response);
     }
 
     private static AgentProviderProfile CreateOpenAIChatProfile(AgentModelInfo? modelInfo)
@@ -136,13 +139,15 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         CancellationToken cancellationToken)
     {
         var profile = _provider.Profile ?? OpenAIResponsesProfile;
-        var provider = CreateOpenAIProviderOptions(credential, request, profile);
+        var usage = new CopilotRequestUsage();
+        var provider = CreateOpenAIProviderOptions(credential, request, profile, usage);
         await using var executor = new OpenAIResponsesTurnExecutor(provider);
-        return await executor.ExecuteTurnAsync(
+        var response = await executor.ExecuteTurnAsync(
             CreateDelegatedRequest(request, credential, "openai-responses", AgentTransportKind.OpenAIResponses, profile),
             onUpdate,
             onSessionUpdate,
             cancellationToken).ConfigureAwait(false);
+        return usage.Apply(response);
     }
 
     private async Task<AgentTurnResponse> ExecuteAnthropicMessagesAsync(
@@ -151,6 +156,7 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
         CancellationToken cancellationToken)
     {
+        var usage = new CopilotRequestUsage();
         var provider = new AnthropicProviderOptions
         {
             ProviderKey = _provider.ProviderKey,
@@ -158,24 +164,26 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             AuthToken = credential.Token,
             BaseUri = credential.BaseUri,
             HttpClient = _httpClient,
-            HttpHandlerFactory = static () => new CopilotAnthropicSseHandler(),
+            HttpHandlerFactory = () => new CopilotAnthropicSseHandler(usage),
             IsDefault = _provider.IsDefault,
             Profile = _provider.Profile ?? AnthropicMessagesProfile,
             Compaction = _provider.Compaction,
             ModelOverrides = _provider.ModelOverrides,
-            ExtraHeaders = CreateAnthropicHeaders(IsAgentInitiated(request), HasVisionInput(request)),
+            ExtraHeaders = CreateAnthropicHeaders(request),
         };
         var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(provider);
-        return await executor.ExecuteTurnAsync(
+        var response = await executor.ExecuteTurnAsync(
             CreateDelegatedRequest(request, credential, "anthropic-messages", AgentTransportKind.AnthropicMessages, _provider.Profile ?? AnthropicMessagesProfile),
             onUpdate,
             cancellationToken).ConfigureAwait(false);
+        return usage.Apply(response);
     }
 
     private OpenAIProviderOptions CreateOpenAIProviderOptions(
         CopilotDirectCredential credential,
         AgentTurnRequest request,
-        AgentProviderProfile profile)
+        AgentProviderProfile profile,
+        CopilotRequestUsage usage)
         => new()
         {
             ProviderKey = _provider.ProviderKey,
@@ -190,9 +198,20 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             ProtocolTracing = _provider.ProtocolTraceEnabled
                 ? new OpenAIProtocolTraceOptions { Enabled = true, StateRootPath = _provider.StateRootPath }
                 : null,
-            ResponsesRequestCustomizer = ConfigureOpenAIResponsesReasoning,
-            ExtraHeaders = CreateCopilotTurnHeaders(IsAgentInitiated(request), HasVisionInput(request), anthropicMessages: false),
+            ResponsesRequestCustomizer = ConfigureOpenAIResponsesRequest,
+            ResponseStreamObserver = stream => new CopilotUsageSseStream(stream, usage),
+            ExtraHeaders = CreateCopilotTurnHeaders(request, anthropicMessages: false),
         };
+
+    private static void ConfigureOpenAIResponsesRequest(OpenAIResponsesRequestCustomizationContext context)
+    {
+        // Nothing of the conversation is kept by the endpoint: every request carries it whole.
+        context.Options.StoredOutputEnabled = false;
+        // The key keeps the requests of a session on the cache that holds its prefix. Without it the endpoint routes
+        // by the start of the prompt, which every session of CodeAlta shares.
+        context.Options.Patch.Set("$.prompt_cache_key"u8, context.Request.SessionId);
+        ConfigureOpenAIResponsesReasoning(context);
+    }
 
     private static void ConfigureOpenAIResponsesReasoning(OpenAIResponsesRequestCustomizationContext context)
     {
@@ -219,10 +238,10 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         }
     }
 
-    private static IReadOnlyDictionary<string, string> CreateAnthropicHeaders(bool isAgentInitiated, bool hasVisionInput)
-        => CreateCopilotTurnHeaders(isAgentInitiated, hasVisionInput, anthropicMessages: true);
+    private static IReadOnlyDictionary<string, string> CreateAnthropicHeaders(AgentTurnRequest request)
+        => CreateCopilotTurnHeaders(request, anthropicMessages: true);
 
-    private static IReadOnlyDictionary<string, string> CreateCopilotTurnHeaders(bool isAgentInitiated, bool hasVisionInput, bool anthropicMessages)
+    private static IReadOnlyDictionary<string, string> CreateCopilotTurnHeaders(AgentTurnRequest request, bool anthropicMessages)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -231,14 +250,20 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
             ["Editor-Plugin-Version"] = "codealta/1.0",
             ["Copilot-Integration-Id"] = "vscode-chat",
             ["Openai-Intent"] = "conversation-edits",
-            ["X-Initiator"] = isAgentInitiated ? "agent" : "user",
+            ["X-Initiator"] = IsAgentInitiated(request) ? "agent" : "user",
         };
+        if (!string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            // The requests of one conversation, as the Copilot clients name them.
+            headers["X-Interaction-Id"] = request.SessionId;
+        }
+
         if (anthropicMessages)
         {
             headers["anthropic-beta"] = "interleaved-thinking-2025-05-14";
         }
 
-        if (hasVisionInput)
+        if (HasVisionInput(request))
         {
             headers["Copilot-Vision-Request"] = "true";
         }
