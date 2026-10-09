@@ -63,6 +63,8 @@ internal sealed partial class ClaudeCodeSession
     private bool _assistantTextInRun;
     private bool _awaitingQueuedTurns;
     private (string Kind, string Text)? _apiError;
+    // The user cancelled an action of the turn in CodeAlta, and the CLI was asked to stop the turn with it.
+    private bool _stoppedByDecision;
     private long? _contextWindow;
     private JsonElement? _lastUsage;
     private long? _lastOutputTokens;
@@ -75,6 +77,7 @@ internal sealed partial class ClaudeCodeSession
         {
             _outstandingUserMessages.Clear();
             _unansweredUserMessages.Clear();
+            _stoppedByDecision = false;
         }
 
         _pending = null;
@@ -418,7 +421,20 @@ internal sealed partial class ClaudeCodeSession
         }
 
         var subtype = ClaudeCodeJson.GetString(result, "subtype");
-        if (ClaudeCodeJson.GetBoolean(result, "is_error") || (subtype is not null && subtype.StartsWith("error", StringComparison.Ordinal)))
+        bool stopped;
+        lock (_gate)
+        {
+            stopped = _stoppedByDecision;
+            _stoppedByDecision = false;
+        }
+
+        if (stopped)
+        {
+            // The CLI ends the turn the user stopped with an error of its own (an `[ede_diagnostic]`): the turn did
+            // not fail, it ends with what it did.
+            _apiError = null;
+        }
+        else if (ClaudeCodeJson.GetBoolean(result, "is_error") || (subtype is not null && subtype.StartsWith("error", StringComparison.Ordinal)))
         {
             if (_held is { } answered)
             {

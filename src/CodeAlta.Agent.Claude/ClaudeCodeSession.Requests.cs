@@ -82,6 +82,14 @@ internal sealed partial class ClaudeCodeSession
             }
 
             var decision = await run.OnPermissionRequest(permission, prompt.Token).ConfigureAwait(false);
+            if (decision.Kind == AgentPermissionDecisionKind.Cancel)
+            {
+                lock (_gate)
+                {
+                    _stoppedByDecision = true;
+                }
+            }
+
             return decision.Kind switch
             {
                 AgentPermissionDecisionKind.AllowOnce => Allow(input, default),

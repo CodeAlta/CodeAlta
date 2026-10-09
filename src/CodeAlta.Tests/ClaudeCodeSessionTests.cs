@@ -191,6 +191,58 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task CancelledPermission_StopsTheTurnWithoutAFailure()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? decision = null;
+        var turns = 0;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            if (++turns == 2)
+            {
+                process.EmitResult("API Error: overloaded", user, isError: true, subtype: "error_during_execution");
+                return;
+            }
+
+            var input = new JsonObject { ["command"] = "echo light > light.txt" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            decision = await process.AskPermissionAsync("Bash", input, "toolu_1");
+            process.EmitToolResult("toolu_1", "The user doesn't want to proceed with this tool use. The tool use was rejected.", isError: true);
+            // What Claude Code writes for the turn it stopped on the interrupt of the answer.
+            process.Emit(new JsonObject
+            {
+                ["type"] = "result",
+                ["subtype"] = "error_during_execution",
+                ["is_error"] = true,
+                ["session_id"] = process.SessionId,
+                ["errors"] = new JsonArray("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"),
+                ["user_message_uuids"] = new JsonArray(user.GetProperty("uuid").GetString()),
+            });
+            process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "idle", ["session_id"] = process.SessionId });
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(
+            runtime,
+            directory,
+            onPermission: static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel)));
+        var events = Collect(session);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout);
+
+        Assert.AreEqual("deny", decision!.Value.GetProperty("behavior").GetString());
+        Assert.IsTrue(decision.Value.GetProperty("interrupt").GetBoolean());
+        Assert.IsTrue(events.Snapshot().OfType<AgentActivityEvent>().Any(static e => e.ActivityId == "toolu_1" && e.Phase == AgentActivityPhase.Failed));
+        Assert.IsFalse(events.Snapshot().OfType<AgentErrorEvent>().Any(), "The turn the user stopped did not fail.");
+
+        // The cancel is the one of its own turn: a failure of the next is one.
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout));
+        StringAssert.Contains(failure.Message, "overloaded");
+    }
+
+    [TestMethod]
     public async Task EditTool_WaitsForTheSessionBeforeItEditsSoThatTheChangeIsShown()
     {
         using var directory = TestTempDirectory.Create();
