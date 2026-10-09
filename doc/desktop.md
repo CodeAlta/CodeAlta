@@ -3310,22 +3310,25 @@ the complete root it asks to write under and its optional reason, with **Allow o
 Each kind is held to its own whole shape: a command that carries parsed actions, network access or a
 policy amendment is refused rather than shown as less than it is, and a request that arrives with the
 fields of the other kind, or without its own, is refused with the window it came in.
-After a manual refresh, deliberately choose **Review command permission** to open the native
-HTML dialog for that exact observed entry. Opening or dismissing it performs no read or decision;
-Close/Escape dismisses presentation, unlike the explicit **Cancel** permission decision.
-Pending and uncertain original outcomes remain retained when the dialog closes.
-Refresh pending commands manually; this is not a notification stream. Unsupported permission
-payloads remain denied, this review flag alone leaves user input cancelled, and there is no Allow for Session option.
+The panel (**Waiting for your permission**, under the timeline) is shown only while a request waits,
+a decision is being sent or reading the requests failed. It reads the pending requests of its session by
+itself: at once when the session is selected, then every 1.5 seconds while the session runs and no request
+is shown. A request that is shown is not read again while the run goes on, and never while a review
+dialog is open, so the entry being reviewed is not replaced under the user; the end of the run reads
+once more what is left. Each entry shows the command line or the root of the file change; choose
+**Review command permission** to open the native HTML dialog for that exact entry, with its complete
+details. Opening or dismissing it performs no read or decision; Close/Escape dismisses presentation,
+unlike the explicit **Cancel** permission decision.
+Unsupported permission payloads remain denied, this review flag alone leaves user input cancelled, and
+there is no Allow for Session option.
 Approval can execute a command with the host's privileges: discovery roots are not a sandbox.
 Changing selection does not cancel a pending permission or its original decision-response wait.
-Use **Observe retained decision** to check that response locally, labelled with its original session
-and complete handle; it does not contact the host or resend a decision. A pending observation does
-not unlock another decision. Explicitly observe a terminal response, then refresh for a fresh review
-before deciding again; merely displaying the result does not acknowledge it. Acceptance is not proof
-of execution, and rejection does not identify an earlier decision. Genuine uncertainty or epoch
-invalidation disables review across selections until renderer reload. Reload loses the local record;
-then manually refresh still-pending requests under the existing opt-in. An empty list cannot recover
-a lost decision, and host restart restores no old permission authority. No decision is replayed.
+The answer to a decision is acknowledged by the panel, which then reads the requests again; while
+the response is pending, no other decision can be sent. Acceptance is not proof of execution, and
+rejection does not identify an earlier decision. Genuine uncertainty or epoch invalidation disables
+review and the reads across selections until renderer reload, and the panel says so. Reload loses the
+local record; an empty list cannot recover a lost decision, and host restart restores no old
+permission authority. No decision is replayed.
 Aborting the owning submission or closing the application invalidates still-pending requests,
 but cannot revoke a decision already accepted by the backend.
 

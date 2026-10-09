@@ -753,10 +753,12 @@ reads, not that decision wait, pending permissions or the run. Resolution keeps 
 before obsolete presentation callbacks are suppressed. Epoch invalidation remains latched even
 when a late exact success arrives. Refresh/response races cannot restore actionable stale cards.
 
-**Observe retained decision** is synchronous and local-only: it reports the original session/handle
-and pending/result/error state without either RPC. Neither mounting nor live result publication
-acknowledges a terminal response; explicit terminal observation and fresh manual review are required
-before replacing the record. Pending observation grants no authority. Only an exact resolved/rejected
+Observing the retained decision (`observeDecision`) is synchronous and local-only: it reports the
+original session/handle and pending/result/error state without either RPC. Neither mounting nor live
+result publication acknowledges a terminal response; a terminal observation and a fresh list read are
+required before replacing the record. The desktop panel makes that observation itself once a terminal
+result is published, then reads the list again; it never reads while a review dialog is open. Pending
+observation grants no authority. Only an exact resolved/rejected
 response settles the decision: resolved means accepted, not executed, and rejected does not identify
 an earlier decision. The mailbox consumes attempts without replayable outcomes; pending-list absence
 cannot reconcile them. Transport failure, malformed/mismatched responses and genuine uncertainty

@@ -575,6 +575,11 @@ not to what is already running, and covers commands and file changes alike. A pe
 provider still decides what that provider resolves by itself before anything is asked here. A session that
 is waiting for you is counted in the activity of its space.
 
+A request appears under the timeline of its session, under **Waiting for your permission**, with the command
+it would run or the folder it would write under. **Review command permission** shows everything about it and
+answers with **Allow once**, **Deny** or **Cancel**. Closing that dialog does not answer: the session goes on
+waiting. Nothing appears while no request waits.
+
 > [!CAUTION]
 > With automatic approval, commands and file changes run with your user privileges. They are not limited to the project folder.
 

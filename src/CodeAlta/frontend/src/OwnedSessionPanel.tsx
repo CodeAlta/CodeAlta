@@ -993,7 +993,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
       {t("Retry exact queued-operation cancellation")}</Button>)}
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
-      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} />}
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy} />}
     {pendingAborts.length > 0 && <div className="retained-send-recovery">
     {(Array.isArray(page?.rows) ? page.rows : []).filter(row => row && typeof row.sessionId === "string" && row.sessionId.toLowerCase() === sessionId.toLowerCase()).map(row => <div key={row.operationId}>
       {row.kind === "Queue" ? <><p>Queue · {row.operationId}</p>

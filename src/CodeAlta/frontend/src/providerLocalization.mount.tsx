@@ -33,12 +33,13 @@ const permissionPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", 
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [sessionId, select] = useState("Settings");
-  useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, epoch, handle, inputPage, permissionPage,
+  const [running, run] = useState(true);
+  useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, run, epoch, handle, inputPage, permissionPage,
     permissions: permissions.calls, decisions: decisions.calls, inputs: inputs.calls, answers: answers.calls, cancels: cancels.calls,
     permission, input, capability } }); }, []);
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => {} }}>
     <main className="configuration-page">
-      <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} />
+      <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} running={running} />
       <UserInputPanel reviewer={input} capability={capability} epoch={epoch} sessionId={sessionId} />
     </main>
   </ShellLanguageContext>;
