@@ -1737,6 +1737,122 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_CompactAsync_CountsTheSummaryRequestsOfEveryPlanningAttempt()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-compact-attempts");
+        var state = CreateState("session-compact-attempts");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        // The target of this window (150 tokens) holds the last prompt and the 64 tokens reserved for a summary, not
+        // the summary that comes back: the compaction is planned again, and asks for a summary again.
+        var requests = new List<(bool Shrink, long EstimatedInputTokens)>();
+        await using (var session = new AgentSession(
+                         ModelProviderIds.OpenAIResponses,
+                         provider,
+                         summary,
+                         state,
+                         [],
+                         store,
+                         new ScriptedTurnExecutor(
+                             [
+                                 new AgentModelInfo(
+                                     "gpt-5.4",
+                                     "GPT-5.4",
+                                     Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                                     {
+                                         ["contextWindow"] = 1800L,
+                                         ["inputTokenLimit"] = 1500L,
+                                         ["outputTokenLimit"] = 300L,
+                                     }),
+                             ],
+                             (request, _, _) =>
+                             {
+                                 var text = string.Concat(request.Conversation.SelectMany(static message => message.Parts).OfType<AgentMessagePart.Text>().Select(static part => part.Value));
+                                 requests.Add((request.SystemMessage!.Contains("CodeAlta compaction summary shrinker", StringComparison.Ordinal), AgentTokenEstimator.EstimateTextTokens(text)));
+                                 return Task.FromResult(
+                                     new AgentTurnResponse
+                                     {
+                                         AssistantMessage = new AgentConversationMessage(
+                                             AgentConversationRole.Assistant,
+                                             [new AgentMessagePart.Text(
+                                                 """
+                                                 ## Objective
+                                                 Continue the coding task.
+                                                 ## Active User Request
+                                                 Second prompt
+                                                 ## Constraints
+                                                 - Preserve behavior.
+                                                 ## Progress
+                                                 ### Done
+                                                 - First answer captured.
+                                                 ### In Progress
+                                                 - Working on the second prompt.
+                                                 ### Blocked
+                                                 - None recorded.
+                                                 ## Decisions
+                                                 - Use checkpoints.
+                                                 ## Next Steps
+                                                 - Continue from the retained suffix.
+                                                 ## Critical Context
+                                                 - Keep recent context verbatim.
+                                                 ## Relevant Files
+                                                 - None tracked.
+                                                 """)]),
+                                         Usage = new AgentSessionUsage(
+                                             LastOperation: new AgentOperationUsageSnapshot("gpt-5.4", InputTokens: 2_000 + requests.Count, OutputTokens: 100),
+                                             Scope: AgentUsageScope.LastOperation,
+                                             Source: AgentUsageSource.ProviderUsage,
+                                             UpdatedAt: DateTimeOffset.UtcNow),
+                                     });
+                             },
+                             (_, _, _) => Task.FromResult(
+                                 new AgentTurnResponse
+                                 {
+                                     AssistantMessage = new AgentConversationMessage(
+                                         AgentConversationRole.Assistant,
+                                         [new AgentMessagePart.Text("First answer " + new string('a', 120))]),
+                                 }),
+                             (_, _, _) => Task.FromResult(
+                                 new AgentTurnResponse
+                                 {
+                                     AssistantMessage = new AgentConversationMessage(
+                                         AgentConversationRole.Assistant,
+                                         [new AgentMessagePart.Text("Second answer " + new string('b', 120))]),
+                                 })),
+                         CreateOptions(provider, temp.Path)))
+        {
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 140)) }).ConfigureAwait(false);
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 140)) }).ConfigureAwait(false);
+
+            var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
+            Assert.IsTrue(outcome?.Success);
+        }
+
+        var history = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        var checkpoint = history.OfType<AgentRawEvent>().Single(static evt => evt.BackendEventType == "local.compactionCheckpoint")
+            .Raw.Deserialize(AgentJsonSerializerContext.Default.AgentCompactionCheckpoint)!;
+
+        // More than one attempt asked for a summary: the count and the estimate are those of all the requests made.
+        Assert.IsTrue(checkpoint.PlanningAttemptCount > 1, $"attempts: {checkpoint.PlanningAttemptCount}");
+        Assert.IsTrue(requests.Count(static request => !request.Shrink) > 1, $"requests: {string.Join(", ", requests)}; target {checkpoint.TargetTokens}, checkpoint {checkpoint.CheckpointTokens}, retained {checkpoint.RetainedMessageTokens}");
+        Assert.AreEqual(requests.Count, checkpoint.SummaryCallCount);
+        Assert.AreEqual(requests.Sum(static request => request.EstimatedInputTokens), checkpoint.SummaryPromptInputTokens);
+
+        // They are the requests whose usage was recorded, and the end of the compaction says the same.
+        var updates = history.OfType<AgentSessionUpdateEvent>().ToArray();
+        var recorded = updates.Count(static update => update.Kind == AgentSessionUpdateKind.UsageUpdated && update.Usage?.LastOperation?.Initiator == "compaction");
+        Assert.AreEqual(checkpoint.SummaryCallCount, recorded);
+        var details = updates.Single(static update => update.Kind == AgentSessionUpdateKind.CompactionCompleted).Details!.Value;
+        Assert.AreEqual(checkpoint.SummaryCallCount, details.GetProperty("summaryCallCount").GetInt32());
+        Assert.AreEqual(checkpoint.SummaryPromptInputTokens, details.GetProperty("summaryPromptInputTokens").GetInt64());
+        Assert.AreEqual(requests.Select((_, index) => 2_001L + index).Sum(), details.GetProperty("summaryInputTokens").GetInt64());
+    }
+
+    [TestMethod]
     public async Task AgentSession_CompactAsync_PersistsCheckpointAndReplaysFromCheckpointPlusSuffix()
     {
         using var temp = TestTempDirectory.Create();

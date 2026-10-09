@@ -2353,6 +2353,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         long? checkpointTokenEstimate = null;
         var planningAttemptCount = 0;
         var shrinkAttempted = false;
+        // An attempt that is planned again made its summary requests too: they are counted with the next ones.
+        var summaryCallCount = 0;
+        long summaryPromptInputTokens = 0;
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -2422,6 +2425,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     summarizerMaxOutputTokens,
                     cancellationToken)
                 .ConfigureAwait(false);
+            summaryResult = summaryResult with
+            {
+                SummaryCallCount = summaryCallCount + summaryResult.SummaryCallCount,
+                SummaryPromptInputTokens = summaryPromptInputTokens + summaryResult.SummaryPromptInputTokens,
+            };
+            (summaryCallCount, summaryPromptInputTokens) = (summaryResult.SummaryCallCount, summaryResult.SummaryPromptInputTokens);
 
             checkpointTokenEstimate = AgentTokenEstimator.EstimateCheckpointTokens(summaryResult.Summary);
             var unprunedRetainedConversation = new List<AgentConversationMessage>(
@@ -2520,6 +2529,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         summarizerMaxOutputTokens,
                         cancellationToken)
                     .ConfigureAwait(false);
+                (summaryCallCount, summaryPromptInputTokens) = (summaryResult.SummaryCallCount, summaryResult.SummaryPromptInputTokens);
 
                 checkpointTokenEstimate = AgentTokenEstimator.EstimateCheckpointTokens(summaryResult.Summary);
                 checkpoint = checkpoint with
