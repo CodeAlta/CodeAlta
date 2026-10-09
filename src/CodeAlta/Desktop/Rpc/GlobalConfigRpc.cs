@@ -146,7 +146,7 @@ internal sealed class GlobalConfigService
                             Bound(definition?.Model), Bound(definition?.ReasoningEffort),
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
-                        { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color) };
+                        { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey) };
                     }).ToArray();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
                 var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
@@ -215,6 +215,9 @@ internal sealed class GlobalConfigService
         var color = Optional(edit.Color);
         if (color is not null && !IsHexColor(color))
             return new("invalid", null, "A color is written as #rgb or #rrggbb.", null, null, 0);
+        var anthropicApiKey = Optional(edit.AnthropicApiKey);
+        if (anthropicApiKey is not (null or "use" or "ignore"))
+            return new("invalid", null, "ANTHROPIC_API_KEY is used, ignored, or left to the answer of Claude Code.", null, null, 0);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
             var original = request.OriginalKey?.Trim();
@@ -234,6 +237,8 @@ internal sealed class GlobalConfigService
             definition.ReasoningEffort = Optional(edit.ReasoningEffort);
             definition.ApiUrl = Optional(edit.ApiUrl);
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
+            // Only the CLI of Claude Code reads that variable by itself.
+            definition.AnthropicApiKey = definition.ProviderType == "claude-code" ? anthropicApiKey : null;
             // A null key keeps the stored secret; the form never receives it back.
             if (edit.ClearApiKey) definition.ApiKey = null;
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
@@ -488,6 +493,12 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
 
     /// <summary>The color the file gives that icon, as <c>#rgb</c> or <c>#rrggbb</c>; null for the colors of the icon.</summary>
     public string? Color { get; init; }
+
+    /// <summary>
+    /// Whether a <c>claude-code</c> provider gives the CLI <c>ANTHROPIC_API_KEY</c>: <c>use</c> or <c>ignore</c>;
+    /// null to follow the answer Claude Code saved for the key.
+    /// </summary>
+    public string? AnthropicApiKey { get; init; }
 }
 
 /// <summary>What each blank field of a provider falls back to; null when nothing is known for the field.</summary>
@@ -503,6 +514,9 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
 
     /// <summary>The color of that icon, as <c>#rgb</c> or <c>#rrggbb</c>; blank for the colors of the icon.</summary>
     public string? Color { get; init; }
+
+    /// <summary><c>use</c> or <c>ignore</c> for <c>ANTHROPIC_API_KEY</c>; blank to follow Claude Code. Kept for <c>claude-code</c> only.</summary>
+    public string? AnthropicApiKey { get; init; }
 }
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
     GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);

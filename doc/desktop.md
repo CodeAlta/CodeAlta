@@ -1643,7 +1643,10 @@ account, a button per sign-in method (**Sign in with the browser**, **Sign in wi
 and **Sign out**. A sign-in opens the provider's page in the system browser and shows the address,
 and the code to enter for a device flow, each with a copy button, until it completes or is canceled;
 a provider that was disabled is enabled when its sign-in succeeds. Save a new or edited provider
-before signing in.
+before signing in. A `claude-code` provider has no API field and no **Account** block; its form has
+**ANTHROPIC_API_KEY** instead (`anthropic_api_key` of `GlobalConfigProvider`/`GlobalConfigProviderEdit`): follow the
+answer Claude Code saved for the key (blank), ignore it and use the Claude login (`ignore`), or use it (`use`). See
+"`ANTHROPIC_API_KEY`" in [providers.md](providers.md). Another adapter type does not keep the setting.
 
 **The default provider.** `ModelProviderDescriptor.IsDefault` is true for every configured provider (it is
 the default option of its own definition), so it never says which provider a new session starts with.
