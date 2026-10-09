@@ -65,6 +65,10 @@ function useSystemDark(): boolean {
 }
 export const themeStorageKey = "codealta.desktop.theme.v1";
 export const darkerStorageKey = "codealta.desktop.darker.v1";
+/** What asks before it is done, unless the user answered not to be asked again: deleting a session, archiving a project. */
+export const confirmations = ["sessionDelete", "projectArchive"] as const;
+export type Confirmation = typeof confirmations[number];
+export const confirmationStorageKey = (confirmation: Confirmation) => `codealta.desktop.confirm.${confirmation}.v1`;
 type Preference = "theme" | "scheme" | "sort" | "rail" | "recent" | "subAgents";
 export type PreferenceNotices = Partial<Record<Preference, PreferenceIssue>>;
 
@@ -104,6 +108,7 @@ export function useWindowPreferences() {
     subAgents: readSubAgentCount(() => localStorage.getItem(subAgentCountKey)),
     sort: readPreference(projectSortStorageKey, ["name", "recent"], "name"),
     rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
+    confirm: Object.fromEntries(confirmations.map(value => [value, readPreference(confirmationStorageKey(value), ["ask", "skip"], "ask").value === "ask"])) as Record<Confirmation, boolean>,
   }));
   const [theme, updateTheme] = useState<Theme>(initial.theme.value);
   const [darker, updateDarker] = useState(initial.darker.value === "on");
@@ -177,6 +182,12 @@ export function useWindowPreferences() {
     const custom = id === null ? null : listed.find(scheme => scheme.id === id) ?? (current.kept?.id === id ? current.kept : null);
     if (value !== current.scheme || JSON.stringify(custom) !== JSON.stringify(current.kept)) select(value, custom);
   }
+  // Whether each of these asks first. An answer that could not be kept still stands until the window is closed.
+  const [confirms, updateConfirms] = useState(initial.confirm);
+  function setConfirm(confirmation: Confirmation, ask: boolean) {
+    updateConfirms(current => ({ ...current, [confirmation]: ask }));
+    try { localStorage.setItem(confirmationStorageKey(confirmation), ask ? "ask" : "skip"); } catch { /* Asked again at the next start. */ }
+  }
   function setProjectSort(value: ProjectSort) {
     updateSort(value);
     save("sort", () => persistProjectSort(value => localStorage.setItem(projectSortStorageKey, value), value));
@@ -195,5 +206,5 @@ export function useWindowPreferences() {
   const shownScheme = selectedScheme(colorScheme, customSchemes, keptScheme);
   const appearance: ShownAppearance = useMemo(() => ({ theme: shownTheme, scheme: colorScheme, palette: schemePalette(shownScheme, variant) }), [shownTheme, colorScheme, shownScheme, variant]);
   return { theme, shownTheme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes,
-    projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount };
+    projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm };
 }

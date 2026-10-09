@@ -5,7 +5,7 @@ import { AppIcon } from "../AppIcon";
 import { ProviderBrandsContext, ProviderIcon, useProviderBrand } from "../ProviderIcon";
 import { SessionTabMenu } from "../SessionTabMenu";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
-import { isSessionContextKey, type SessionAction } from "../sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, type SessionAction } from "../sessionRowActions";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
 import type { SessionListEntry } from "./sessionTree";
@@ -66,7 +66,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * The sessions of an open scope of the Explorer that is not the selected one. A row opens its session, which
  * makes its scope the selected one; renaming and deleting do the same first, as they act on the selected session.
  */
-export function ExplorerSessions({ entries, global, more, extended, access, marks, onAction, onMore, onFewer, tree }: {
+export function ExplorerSessions({ entries, global, more, extended, access, marks, onAction, deleteAsks = true, onMore, onFewer, tree }: {
   /** The sessions listed, and what stands for the sub-agents that are not. */
   entries: readonly SessionListEntry[];
   /** Whether the scope is the global sessions, and not a project. */
@@ -80,6 +80,8 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
+  /** Whether deleting a session asks first, which its menu says. */
+  deleteAsks?: boolean;
   onMore: () => void;
   onFewer: () => void;
   /** The sub-agents of a session: hidden or shown, and more or fewer of them listed. */
@@ -103,7 +105,14 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
           show(session.id, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
         }}
         onKeyDown={event => {
-          if (!isSessionContextKey(event.key, event.shiftKey, event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229, false)) return;
+          const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+          // Delete on a row does what Delete of its menu does.
+          if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
+            event.preventDefault(); event.stopPropagation();
+            if (access(session).delete) onAction(session, "delete");
+            return;
+          }
+          if (!isSessionContextKey(event.key, event.shiftKey, composing, false)) return;
           event.preventDefault(); event.stopPropagation();
           show(session.id, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
         }}>
@@ -118,7 +127,7 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
           items={[
             { key: "open", label: t("Open session"), icon: "open", onSelect: () => onAction(session, "open") },
             { key: "rename", label: t("Rename…"), icon: "edit", disabled: !allowed.rename, onSelect: () => onAction(session, "rename") },
-            { key: "delete", label: t("Delete… (confirmation required)"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
+            { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
           ]} />}
       </div>;
     })}

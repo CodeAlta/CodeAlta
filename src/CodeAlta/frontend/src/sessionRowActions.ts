@@ -21,6 +21,11 @@ export function isSessionContextKey(key: string, shiftKey: boolean, composing: b
   return !composing && !editing && (key === "ContextMenu" || key === "F10" && shiftKey);
 }
 
+/** Whether a key pressed on the row of a session asks to delete it: Delete alone, pressed once. */
+export function isSessionDeleteKey(event: Readonly<{ key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; repeat: boolean }>, composing: boolean) {
+  return event.key === "Delete" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.repeat && !composing;
+}
+
 export function menuFocusIndex(key: string, current: number, count: number): number | null {
   if (count === 0) return null;
   if (key === "Home") return 0;

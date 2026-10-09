@@ -15,9 +15,10 @@ not select a project, import a folder, refresh the catalog or send a request.
   source/revision preflight, then shows the name in a popover beside the row;
   saving remains separate.
 - **Archive project… / Unarchive project…** is available only for the
-  already-selected project with current permission. It opens the existing
-  revision-bound review; confirmation remains a separate action. Archiving changes
-  catalog metadata, not project files or running work. Unarchive does not start work.
+  already-selected project with current permission. It asks in a popover beside
+  the row, unless the user answered **Do not ask again**; the write stays bound to
+  the revision read just before it. Archiving changes catalog metadata, not project
+  files or running work. Unarchive does not start work.
 
 For a nonselected row, mutation items are disabled: opening its menu never silently
 switches scope to authorize a write. Existing rename/F2 and archive controls remain.

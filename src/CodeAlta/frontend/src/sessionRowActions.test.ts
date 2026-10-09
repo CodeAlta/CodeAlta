@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
-import { isSessionContextKey, menuFocusIndex, restoreSessionMenuFocus, sessionActionAccess, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, menuFocusIndex, restoreSessionMenuFocus, sessionActionAccess, type SessionMenuTarget } from "./sessionRowActions";
 
 const project: WorkspaceProject = { id: "p", name: "Project", path: "/p", archived: false };
 const row: WorkspaceSession = { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "s", title: "Title", fullTitle: "Title", fullTitleTruncated: false,
@@ -55,4 +55,14 @@ test("context keys do not steal composer typing/IME; menu arrows and Escape rest
   restoreSessionMenuFocus({ isConnected: false, focus: () => focused++ });
   restoreSessionMenuFocus({ isConnected: true, focus: () => focused++ });
   assert.equal(focused, 1);
+});
+
+test("Delete alone, pressed once, asks to delete the session of a row", () => {
+  const key = { key: "Delete", altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false };
+  assert.equal(isSessionDeleteKey(key, false), true);
+  assert.equal(isSessionDeleteKey(key, true), false, "not while a text is being composed");
+  assert.equal(isSessionDeleteKey({ ...key, repeat: true }, false), false, "a key held down deletes one session, not the list");
+  for (const modifier of ["altKey", "ctrlKey", "metaKey", "shiftKey"] as const)
+    assert.equal(isSessionDeleteKey({ ...key, [modifier]: true }, false), false, modifier);
+  for (const other of ["Backspace", "d", "Enter"]) assert.equal(isSessionDeleteKey({ ...key, key: other }, false), false, other);
 });

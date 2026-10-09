@@ -40,6 +40,8 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 - Click the arrow of a project to show or hide its sessions. Several projects can stay open, and CodeAlta shows them the same way at the next start. **Collapse all** at the top closes them all.
 - Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open. The last one opens a [terminal](#terminal-desktop).
 - The `…` button of a project or a session, or a right-click, opens its menu.
+- **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session.
+- **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.
 - A session that has [sub-agents](sessions.md#sub-agents) lists them under it, and has an arrow of its own to show or hide them.
 - A session with a bolt was started by an [automation](automations.md).
 - A session with a tree mark works in a [worktree](worktrees.md).
@@ -406,9 +408,9 @@ Open settings with `Ctrl+G Ctrl+W` or `/settings`.
 
 The desktop app has one Settings window with a page per area: **Appearance**, **Spaces**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too.
 
-#### Files of the settings
-
 Like the other windows of the desktop app, Settings closes with `Esc`, with its close button, or with a click outside it. A window that asks you something stays open until you answer.
+
+#### Files of the settings
 
 Most settings are files on your disk. Each page shows where its files are, with three buttons beside every path:
 
@@ -448,6 +450,7 @@ The **Appearance** page sets:
 - one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own;
 - how projects are sorted, how many recent sessions are listed per project, and how many sub-agents per session;
 - the width of the conversation, as a percentage of the space of a session;
+- **Ask before deleting a session** and **Ask before archiving a project**: turn one on again after you ticked **Do not ask again** in its question;
 - what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 
 The zoom of the window is in the title bar, as a percentage before the theme switch. Click it to zoom out, to zoom in, or to go back to 100% with a click on the percentage. `Ctrl+-`, `Ctrl+=` and `Ctrl+0` do the same, and the zoom is kept for the next start.

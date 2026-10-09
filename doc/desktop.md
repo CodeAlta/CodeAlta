@@ -404,7 +404,8 @@ their own under them. A session that has sub-agents starts with a twist that hid
 again (`explorer/sessionTree.ts` makes the list). A collapsed session hides the selected session too; a
 selected session beyond a count stays listed, with the sessions it is under. A click opens
 the session, which selects its project. **Rename…** and **Delete…** act on the selected session, so in
-another project they open the session first. The form of a new session and the
+another project they open the session first. `Delete` on the row that has the focus does what
+**Delete…** does. The form of a new session and the
 notices of an unconfirmed action belong to the selected project.
 
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
@@ -427,9 +428,23 @@ as it is. A rename that is refused says why under the field. A session keeps the
 or renamed with, also when a later Send attaches it again (another model, a restart) and when it is
 continued from the terminal UI, which lists a session by the first line of its summary; a session that
 was never named shows the first line of its summary, 80 characters at most
-(`SessionRuntimeService.ListedTitle`), and its deletion is confirmed with that title. That line follows
+(`SessionRuntimeService.ListedTitle`). That line follows
 what the session says, also after a restart or another model: a Send that attaches a session again
 leaves its saved title as it is, so the line never becomes the name of the session.
+
+**Delete…** of a session, **Archive project…** and **Unarchive project…** ask in the same kind of
+popover beside the row (`ConfirmPopover.tsx`): the question, the name it is about, what it does, and
+**Cancel** and the button that does it, which has the focus. Enter answers yes; Escape, **Cancel** or a
+click elsewhere leaves everything as it is and gives the focus back to the row. What is refused is said
+in the popover. **Do not ask again** makes the next ones run at once, and their menu entries lose their
+ellipsis; what is refused is then said in a notice. The two answers are kept in this WebView's local
+storage (`codealta.desktop.confirm.sessionDelete.v1`, `codealta.desktop.confirm.projectArchive.v1`) and
+taken back with **Ask before deleting a session** and **Ask before archiving a project** of
+**Settings → Appearance**. Nothing is typed to delete a session: the request still names the session by
+its id and the title it is listed with (`confirmedTitle`), and the host refuses a session whose title
+is no longer that one. After a deletion the row that takes the place of the deleted one has the focus,
+so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
+is hidden.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. Real session
@@ -3054,6 +3069,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | In a code editor: `Ctrl+B`, `Ctrl+Shift+E`, `Ctrl+Shift+F` | Show or hide the side, go to the files, search in files |
 | In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
 | In the files of a code editor: `F2`, `Delete`, `Enter`, `Space` | Rename, delete, open, preview |
+| On a session of the Explorer: `Delete` | Delete the session, after its question unless it is not asked any more |
 | `Alt+Up`, `Alt+Down` in a Changes tab (its files or a diff) | Go to the previous or next change of the shown file, or to the previous or next file when all files are in one view |
 | ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |

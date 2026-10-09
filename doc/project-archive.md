@@ -1,11 +1,14 @@
 # Desktop single-project archive and unarchive
 
 Select an exact saved project in the project rail and choose **Archive project…**
-or **Unarchive project…**. An owned host is required; catalog-only browsing cannot
-mutate metadata. The dialog reads source evidence, then requires a separate
-confirmation of the captured project ID, project path, source, raw-byte revision
-and expected archive state. Scope, host, catalog refresh and dialog changes
-invalidate an unsubmitted confirmation, including changes away and back.
+or **Unarchive project…**, in the menu of its row or in the menu of the Projects
+header. An owned host is required; catalog-only browsing cannot mutate metadata.
+A popover beside the row asks once, with **Do not ask again** (taken back with
+**Ask before archiving a project** of **Settings → Appearance**). Once the answer
+is yes, the window reads the source evidence and writes with it in one go: the
+project ID, project path, source, raw-byte revision and expected archive state the
+read returned are the ones the write requires. A scope, host or catalog change
+between the read and the write sends nothing.
 
 This changes catalog metadata only. It does not delete directories or journals,
 cancel/stop existing work, establish readiness, create a session, or start a
@@ -27,13 +30,13 @@ wait. Canceling the caller's wait does not release the original reservation.
 Desktop shutdown drains session and catalog originals before host disposal.
 Other Desktop persistence call sites are not introduced by this feature.
 
-The App retains original operation evidence across dialog dismissal, project or
-session navigation and Settings. Reopening does not resubmit a write. A matching
-terminal reply is retained as confirmed even if a later display refresh fails.
-A definite conflict/refusal is distinct from a transport failure or an exception
-after write admission: the latter stays uncertain and blocks further archive
-writes in that window. Snapshot reads cannot unlock uncertainty. Evidence is
-window-local, not a durable operation ledger across process restart.
+The App owns the operation across project or session navigation and Settings: a
+write is never sent twice. A matching terminal reply is confirmed even if a later
+display refresh fails. A definite conflict/refusal is said in the popover (in a
+notice when nothing was asked) and leaves the project as it was. A transport
+failure or an exception after write admission stays uncertain and blocks further
+archive writes in that window, which the Explorer says under the projects.
+Snapshot reads cannot unlock uncertainty; reloading the window does.
 
 ## Persistence and limits
 
@@ -61,6 +64,6 @@ snapshots. Desktop admission is not a process-wide or external-writer lock.
 No automatic conflict retry or stronger exclusion guarantee is implied.
 
 Focused disposable tests cover the Catalog scalar update, Desktop held-worker
-admission/drain and actual App confirmation/evidence flow. They are not native
+admission/drain and the read-then-write owner of the window (`projectArchive.test.ts`). They are not native
 WebView, screen-reader, real-provider, full-suite or bulk-operation qualification.
 Bulk archive/delete and native/full parity remain separate work.

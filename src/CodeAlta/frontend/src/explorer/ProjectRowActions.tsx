@@ -21,6 +21,8 @@ export type ProjectRowAuthority = {
   open: (id: string) => void;
   rename: () => void;
   archive: () => void;
+  /** Whether archiving and unarchiving ask first, which the menu says; they do when this is absent. */
+  archiveAsks?: boolean;
   sessions?: ScopeSessionActions;
 };
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
@@ -144,7 +146,8 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
           onSelect: () => setFavorite(visible, !favorite.value) }] : []),
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
-        { key: "archive", label: t(project.archived ? "Unarchive project…" : "Archive project…"), icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },
+        { key: "archive", label: t(authority?.archiveAsks === false ? project.archived ? "Unarchive project" : "Archive project" : project.archived ? "Unarchive project…" : "Archive project…"),
+          icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },
       ]} />}
     {visible?.details && visible.context.snapshot && <ProjectDetailsDialog project={visible.project} snapshot={visible.context.snapshot}
       isCurrent={() => current(visible)} onClose={() => dismiss(true)} />}

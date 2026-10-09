@@ -18,12 +18,16 @@ function valid(value: string, maximum: number): boolean {
   return true;
 }
 
+/**
+ * Deletes one session. The request names the session by its id and by the title it is listed with: the host
+ * refuses a session whose title is no longer that one, so what is deleted is what the user saw.
+ */
 export function createSessionDeletion(invoke: Invoke) {
   let active = false;
   return async function remove(epoch: string | undefined, target: RenameTarget, id: string, title: string,
-    confirmation: string, capability: Capability | undefined): Promise<Result> {
+    capability: Capability | undefined): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
-    if (!valid(id, 256) || !valid(title, 256) || confirmation !== title || !valid(target.projectPath, 4096)
+    if (!valid(id, 256) || !valid(title, 256) || !valid(target.projectPath, 4096)
       || target.scope !== "global" && target.scope !== "project"
       || target.scope === "project" && !valid(target.projectId, 256)) return { kind: "error", code: "invalid_confirmation" };
     if (active) return { kind: "error", code: "busy" };
@@ -69,7 +73,7 @@ export function deleteSelectionCurrent(result: DeletedTarget, projectId: string 
 export function sessionDeletionMessage(code: string): string {
   switch (code) {
     case "unconfigured": return "Deleting sessions requires an owned host.";
-    case "invalid_confirmation": return "Type the exact current session title to confirm deletion.";
+    case "invalid_confirmation": return "The title of this session could not be confirmed. Refresh the sessions and try again.";
     case "scope_missing": case "session_missing": return "The session, title or project changed. Refresh before deciding whether to delete.";
     case "session_in_use": return "This session has active runtime work. Wait for it to finish and refresh before deleting.";
     case "has_children": return "This session has child sessions. Exact-session deletion will not remove them.";
