@@ -452,6 +452,9 @@ changes of that worktree. `--file` is a path relative to the repository root, se
 one of the changed files. The command emits `alta.diff.shown` with the project and the file, or
 `view.unavailable` when no window is open.
 
+The window shows one space at a time, and the tab opens only for a project of that space: see "A project
+that the shown space does not have" below.
+
 The group exists only where a host registers `IAltaChangesView`, which the desktop host does: in the
 terminal UI and the standalone tool it is not among the commands, their help or `alta tool list`.
 
@@ -482,6 +485,27 @@ host does: in the terminal UI and the standalone tool it is not among the comman
 A session that works in a git worktree has other files than the project folder, which is what the code
 editor shows: `alta editor open` answers `editor.worktree` (exit code 7) to it, unless it names the project
 with `--project`. `alta diff show` shows the changes of the worktree.
+
+### A project that the shown space does not have
+
+The window shows one space at a time, and the sessions of the other spaces keep running. `alta editor open`
+and `alta diff show` show a project only where the user is: when the space the window shows does not have
+the project, nothing is opened, the window stays on its space, and the command answers
+`project.notInShownSpace` (exit code 7) instead of `alta.editor.opened` or `alta.diff.shown`. The message
+names the shown space and the space to show for the project: the first of its spaces, else the default
+one, which has every project.
+
+- The agent tells the user. It runs `alta space switch <space>`, then the command again, when the user
+  asks to see it: a command does not move the window of the user by itself.
+- The window says it too, in a message with **Show**: that button shows the space and opens what was asked
+  there (see "Spaces" in `doc/desktop.md`).
+
+The default space has every project, so nothing is refused while it is shown, nor while no window said
+what it shows, nor in a host that keeps no spaces. A project that is not in the catalog, or an archived
+one, is `project.notFound` as before.
+
+`alta terminal show` and `alta terminal create --show` are not concerned: the tab of a terminal opens in
+the space that is shown, whatever the project of the terminal.
 
 ## Appearance commands
 

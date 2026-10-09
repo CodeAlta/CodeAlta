@@ -167,7 +167,7 @@ import { createSpacesHub } from "./spaces/spacesHub";
 import { SpaceActivityBar, SpaceSwitch } from "./spaces/SpaceViews";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
-import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers,
+import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers,
   spaceStorageKey } from "./spaces/spaces";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
@@ -801,7 +801,8 @@ function App() {
   }
   // What each space had open when the window left it: its tabs come back with it, and the dock of each space
   // keeps where its panes were. The panes of a space that is not shown are not in the page at all.
-  type SpaceTarget = Readonly<{ projectId: string | null; sessionId: string | null }>;
+  // A target can carry what is then shown of its project in the space: its code editor, its changes.
+  type SpaceTarget = Readonly<{ projectId: string | null; sessionId: string | null; then?: () => void }>;
   const spaceTabs = useRef(new Map<string, Readonly<{ tabs: SessionTabsState; files: FileTabs; projectId: string | null }>>());
   const spaceLayouts = useRef(new Map<string, ReturnType<typeof createSessionTabModel>>());
   function spaceLayout(id: string) {
@@ -822,7 +823,7 @@ function App() {
     const known = spacesHub.getSnapshot().spaces;
     const next = findSpace(known, id).id;
     if (next === shownSpace.current) {
-      if (target) selectProject(target.projectId, target.sessionId);
+      if (target) { selectProject(target.projectId, target.sessionId); target.then?.(); }
       return true;
     }
     const full = catalog.current;
@@ -853,8 +854,10 @@ function App() {
     }
     // After the selection above, which leaves any file: the tab that was in front of the space stays in front.
     setFileTabs(target ? activateFileTab(files, null) : files);
+    target?.then?.();
     return true;
   }
+  const showSpaceLatest = useRef(showSpace); showSpaceLatest.current = showSpace;
   async function saveAndLeaveSpace(leaving: NonNullable<typeof leavingSpace>) {
     setLeavingSpace({ ...leaving, busy: true });
     for (const tab of leaving.tabs) {
@@ -945,6 +948,24 @@ function App() {
     setEditorRequests(current => new Map(current).set(folder.id, { path: "SKILL.md", line: null, column: null, explorer: true }));
     openFile(skillEditorTab(folder));
   }
+  // What an agent or a link asks to show of a project: at once when the shown space has the project. For a project
+  // of another space the window stays where the user is, and a message offers that space, where it is then shown.
+  function showInSpace(kind: "editor" | "changes", id: string, show: (project: Readonly<{ id: string; path: string }>) => void) {
+    const place = () => placeProject(currentSnapshot.current?.projects ?? [], catalog.current?.projects ?? [], spacesHub.getSnapshot().spaces, shownSpace.current, id);
+    const asked = place();
+    if (!asked) return;
+    if (!asked.space) { show(asked.project); return; }
+    showToast({ intent: "primary", icon: "info-sign", timeout: 12_000,
+      message: translate(shownLocale.current, kind === "editor" ? "The editor of {project} opens in {space}" : "The changes of {project} open in {space}",
+        { project: asked.project.name, space: asked.space.name }),
+      action: { text: translate(shownLocale.current, "Show"), onClick: () => {
+        // Where the project is by now: the user may have shown its space, or taken the project out of it.
+        const found = place();
+        if (found?.space) showSpaceLatest.current(found.space.id, { projectId: id, sessionId: null, then: () => show(found.project) });
+        else if (found) show(found.project);
+      } } }, `space:${kind}:${id}`);
+  }
+  const showInSpaceLatest = useRef(showInSpace); showInSpaceLatest.current = showInSpace;
   // An agent asks for the editor of a project with `alta editor open`.
   useEffect(() => {
     const epoch = status?.hostEpoch;
@@ -964,8 +985,7 @@ function App() {
             if (request.name && request.root) openDiskEditorLatest.current({ id: request.projectId, path: request.root, name: request.name }, asked);
             continue;
           }
-          const project = currentSnapshot.current?.projects.find(value => value.id === request.projectId && !value.archived);
-          if (project) openEditorLatest.current(project, asked);
+          showInSpaceLatest.current("editor", request.projectId, project => openEditorLatest.current(project, asked));
         }
       } catch { /* The bridge is gone: the editor still opens from the window. */ }
     })();
@@ -983,8 +1003,7 @@ function App() {
       try {
         for await (const request of await projectGit.watch({ expectedEpoch: epoch }, { signal: abort.signal })) {
           if (abort.signal.aborted) return;
-          const project = currentSnapshot.current?.projects.find(value => value.id === request.projectId && !value.archived);
-          if (project) showChangesLatest.current(project, request.path, request.worktree ?? null);
+          showInSpaceLatest.current("changes", request.projectId, project => showChangesLatest.current(project, request.path, request.worktree ?? null));
         }
       } catch { /* The bridge is gone: the changes still open from the composer. */ }
     })();

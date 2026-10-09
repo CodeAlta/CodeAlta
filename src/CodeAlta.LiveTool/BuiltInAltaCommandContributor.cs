@@ -326,6 +326,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             show,
             "The view lists what the work tree changed since the last commit, untracked files included.",
             "It only shows the changes to the user: to read a diff yourself, run git.",
+            "The window shows one space at a time: for a project that space does not have, nothing is shown and the answer is `project.notInShownSpace`, with the space to show.",
             "Examples: `alta diff show`; `alta diff show --file src/app.ts`; `alta diff show --project CodeAlta`.");
         group.Add(show);
         AddHelpText(group, "Example: `alta diff show` opens the changed files of the current project for the user.");
@@ -364,11 +365,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         // A session that works in a git worktree of the project is shown the changes of that checkout.
         var worktree = NormalizeOptionalText(projectRef) is null ? CallerWorktree(context, project) : null;
+        // The window is asked in any case: for a project its space does not have, it offers the user that space.
+        var outOfView = await ProjectOutOfViewAsync(context, project).ConfigureAwait(false);
         if (!view.Show(project.Id, path, worktree))
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
                 "No CodeAlta window is open to show the changes.");
             return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (outOfView is { } elsewhere)
+        {
+            return ProjectNotInShownSpace(context, project, elsewhere.Shown, elsewhere.Home, "The changes were not shown");
         }
 
         AltaJsonlWriter.WriteRecord(context.Stdout, new
@@ -400,6 +408,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AddHelpText(
             open,
             "The editor is where the user reads and edits files: use it to show them a file, not to read one yourself.",
+            "The window shows one space at a time: for a project that space does not have, nothing is opened and the answer is `project.notInShownSpace`, with the space to show.",
             "Examples: `alta editor open`; `alta editor open --file src/app.ts`; `alta editor open --file src/app.ts --line 120`; `alta editor open --project CodeAlta`.");
         group.Add(open);
         AddHelpText(group, "Example: `alta editor open --file readme.md` opens that file of the current project for the user.");
@@ -515,11 +524,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.missingFile", "A line needs the file it is in: add `--file`.", "alta editor open");
         }
 
+        // The window is asked in any case: for a project its space does not have, it offers the user that space.
+        var outOfView = await ProjectOutOfViewAsync(context, project).ConfigureAwait(false);
         if (!view.Open(project.Id, path, lineNumber, columnNumber))
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
                 "No CodeAlta window is open to show the editor.");
             return AltaExitCodes.ServiceUnavailable;
+        }
+
+        if (outOfView is { } elsewhere)
+        {
+            return ProjectNotInShownSpace(context, project, elsewhere.Shown, elsewhere.Home, "The editor was not opened");
         }
 
         AltaJsonlWriter.WriteRecord(context.Stdout, new

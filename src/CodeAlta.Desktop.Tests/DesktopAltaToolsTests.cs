@@ -206,6 +206,88 @@ public sealed class DesktopAltaToolsTests
         }
     }
 
+    [TestMethod]
+    public async Task EditorOpenAndDiffShow_RefuseAProjectTheShownSpaceDoesNotHave()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-alta-space-view-").FullName;
+        try
+        {
+            var options = new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName };
+            var projects = new ProjectCatalog(options);
+            var work = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "work")).FullName);
+            var home = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "home")).FullName);
+            var loose = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "loose")).FullName);
+            File.WriteAllText(Path.Combine(work.ProjectPath, "readme.md"), "x");
+            var editor = new DesktopEditorView();
+            var changes = new DesktopChangesView();
+            var window = new DesktopSpaceView();
+            var services = new AltaServiceCollection().Add(options).Add(projects).Add(new SpaceCatalog(projects))
+                .Add<IAltaEditorView>(editor).Add<IAltaChangesView>(changes).Add<IAltaSpaceView>(window);
+            var registry = new AltaCommandRegistry();
+            var desktop = new AltaCommandDispatcher(registry, services);
+            services.Add(registry).Add(desktop);
+            var session = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "s", SourceProjectId = work.Id };
+            var opened = new List<ProjectFileShowEvent>();
+            var shown = new List<ProjectGitShowEvent>();
+            using var files = editor.Watch(opened.Add);
+            using var diffs = changes.Watch(shown.Add);
+            foreach (var (name, project) in new[] { ("Work", work), ("Personal", home) })
+                Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["space", "create", "--name", name, "--project", project.Id])).ExitCode);
+
+            // Until a window says what it shows, and in the default space, every project is shown.
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["editor", "open"], caller: session)).ExitCode);
+            window.SetShown("default");
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["diff", "show"], caller: session)).ExitCode);
+
+            // A session of Work asks while the window shows Personal: nothing is opened there, and the command says so.
+            window.SetShown("personal");
+            var file = await desktop.InvokeAsync(["editor", "open", "--file", "readme.md"], caller: session);
+            Assert.AreEqual(AltaExitCodes.Unsupported, file.ExitCode, file.Stdout + file.Stderr);
+            Assert.IsFalse(file.Stdout.Contains("alta.editor.opened", StringComparison.Ordinal));
+            StringAssert.Contains(file.Stdout + file.Stderr, "project.notInShownSpace");
+            StringAssert.Contains(file.Stdout + file.Stderr, "The editor was not opened");
+            StringAssert.Contains(file.Stdout + file.Stderr, "the space 'Personal'");
+            StringAssert.Contains(file.Stdout + file.Stderr, "alta space switch work");
+            var diff = await desktop.InvokeAsync(["diff", "show"], caller: session);
+            Assert.AreEqual(AltaExitCodes.Unsupported, diff.ExitCode, diff.Stdout + diff.Stderr);
+            Assert.IsFalse(diff.Stdout.Contains("alta.diff.shown", StringComparison.Ordinal));
+            StringAssert.Contains(diff.Stdout + diff.Stderr, "project.notInShownSpace");
+            StringAssert.Contains(diff.Stdout + diff.Stderr, "The changes were not shown");
+            StringAssert.Contains(diff.Stdout + diff.Stderr, "alta space switch work");
+            // A project of no space is shown in the default one, which has every project.
+            var other = await desktop.InvokeAsync(["editor", "open", "--project", loose.Id], caller: session);
+            Assert.AreEqual(AltaExitCodes.Unsupported, other.ExitCode);
+            StringAssert.Contains(other.Stdout + other.Stderr, "alta space switch default");
+            // The window was asked each time: it is the one that offers the space to the user.
+            CollectionAssert.AreEqual(new ProjectFileShowEvent[] { new(work.Id, null, null, null), new(work.Id, "readme.md", null, null), new(loose.Id, null, null, null) }, opened);
+            Assert.HasCount(2, shown);
+
+            // What the shown space has is shown, and a project is named for the first of its spaces.
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["editor", "open", "--project", home.Id], caller: session)).ExitCode);
+            window.SetShown("work");
+            var own = await desktop.InvokeAsync(["editor", "open", "--file", "readme.md"], caller: session);
+            Assert.AreEqual(AltaExitCodes.Success, own.ExitCode, own.Stdout + own.Stderr);
+            StringAssert.Contains(own.Stdout, "alta.editor.opened");
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["diff", "show"], caller: session)).ExitCode);
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["space", "add", "personal", work.Id])).ExitCode);
+            window.SetShown("personal");
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["diff", "show"], caller: session)).ExitCode);
+
+            // A space that is gone gives its place to the default one. Without a window nothing is shown at all.
+            window.SetShown("gone");
+            Assert.AreEqual(AltaExitCodes.Success, (await desktop.InvokeAsync(["editor", "open", "--project", loose.Id], caller: session)).ExitCode);
+            window.SetShown("work");
+            files.Dispose();
+            var unseen = await desktop.InvokeAsync(["editor", "open", "--project", home.Id], caller: session);
+            Assert.AreEqual(AltaExitCodes.ServiceUnavailable, unseen.ExitCode);
+            StringAssert.Contains(unseen.Stdout + unseen.Stderr, "view.unavailable");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AltaCommandDispatcher Dispatcher(Notes notes)
     {
         var services = new AltaServiceCollection().Add<IAltaNotesService>(notes);

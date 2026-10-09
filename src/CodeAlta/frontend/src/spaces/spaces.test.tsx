@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { dropChange, movedOrder } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
-import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, readSessionActivity, readSpaces, restoreShownSpace, sameMembers, sameSpaces, scopeSnapshot,
+import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, restoreShownSpace, sameMembers, sameSpaces, scopeSnapshot,
   spaceActivities, spaceBrand, spaceCalls, spaceMembers, spaceNameProblem, spaceQuiet, spaceStorageKey } from "./spaces";
 import { activityMilliseconds, createSpacesHub, type SpacesApi } from "./spacesHub";
 
@@ -101,6 +101,34 @@ test("a session that needs the user is called out only where the user is not loo
   assert.deepEqual(spaceCalls(spaces, "work", sessions).map(call => [call.space.id, call.sessionId, call.waiting]), [["personal", "in-c", true], ["default", "in-d", false]]);
   assert.deepEqual(spaceCalls(spaces, "personal", sessions).map(call => [call.space.id, call.sessionId]), [["work", "in-a"], ["default", "in-d"]]);
   assert.deepEqual(spaceCalls(spaces, "work", [doing("quiet", "c", { running: true })]), []);
+});
+
+test("what is asked of a project is shown where the user is only when the shown space has the project, and its space is offered otherwise", () => {
+  const spaces = readSpaces([item("default", ["a", "b", "c", "old"]), item("work", ["a", "b"]), item("personal", ["b", "c"])]);
+  const catalog = [project("a"), project("b"), project("c"), project("d"), project("old", true)];
+  const shownIn = (id: string) => scopeSnapshot({ configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false, projects: catalog, sessions: [] },
+    spaceMembers(spaces, id)).projects;
+  const place = (shownId: string, projectId: string) => {
+    const found = placeProject(shownIn(shownId), catalog, spaces, shownId, projectId);
+    return found && [found.project.id, found.space?.id ?? null];
+  };
+  // `alta editor open` from a session of Work while the window shows Personal: nothing opens there, and Work is the space to show.
+  assert.deepEqual(place("personal", "a"), ["a", "work"]);
+  assert.deepEqual(place("work", "c"), ["c", "personal"]);
+  // A project the shown space has is shown at once, in whatever other space it also is.
+  assert.deepEqual(place("work", "a"), ["a", null]);
+  assert.deepEqual(place("personal", "b"), ["b", null]);
+  // A project of no space is in the default one, which has every project and never sends elsewhere.
+  assert.deepEqual(place("work", "d"), ["d", "default"]);
+  for (const id of ["a", "c", "d"]) assert.deepEqual(place("default", id), [id, null]);
+  // A space that is gone shows what the default one does.
+  assert.deepEqual(place("gone", "a"), ["a", null]);
+  // Not in this space is not the same as no such project: nothing is offered for a project the catalog does not have, or an archived one.
+  assert.equal(place("work", "missing"), null);
+  assert.equal(place("work", "old"), null);
+  assert.equal(place("default", "old"), null);
+  // The space offered is never the shown one: a project that just joined it, which the window does not list yet, is offered in another.
+  assert.equal(placeProject([], catalog, spaces, "work", "a")?.space?.id, "default");
 });
 
 test("a name must be given, short enough, and not the name of another space", () => {

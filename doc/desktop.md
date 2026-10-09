@@ -640,7 +640,16 @@ terminals and work item badges), the search (projects, sessions, files), Open pr
 saved sessions, the Work items tab ("All projects" is the projects of the space), the project list of the
 Issues tab, and previous/next project. Automations are the application's: their tab lists every project.
 A session opened from a link, a work item or an automation whose project is not in the shown space
-shows the Default space first (`revealSession`). A folder added with **+** or Open project while another
+shows the Default space first (`revealSession`). The code editor or the Changes tab that an agent asks
+for (`alta editor open`, `alta diff show`), or that a link to a file opens, is shown at once only for a
+project of the shown space. For a project of another space the window stays where the user is and a
+toast says where it opens ("The editor of CodeAlta opens in Work"), with **Show**: the button shows
+that space, the first of the spaces of the project, else Default, selects the project and opens what was
+asked (`placeProject` in `spaces.ts`, `showInSpace` in `main.tsx`). A request repeated for the same
+project takes the place of its toast. The command is answered `project.notInShownSpace`, so the agent
+knows that nothing was opened (see "A project that the shown space does not have" in
+`doc/live-tool.md`). The tab of a terminal (`alta terminal show`) opens in the shown space whatever its
+project. A folder added with **+** or Open project while another
 space than Default is shown joins that space; a folder that is already a project of another space joins
 the shown one (`joinShownSpace`) instead of being opened elsewhere.
 

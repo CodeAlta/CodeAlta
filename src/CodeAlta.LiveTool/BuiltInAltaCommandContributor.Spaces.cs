@@ -235,6 +235,30 @@ internal sealed partial class BuiltInAltaCommandContributor
             ? await spaces.GetAsync(shown, context.CancellationToken).ConfigureAwait(false)
             : null;
 
+    // What stands between a project and the user: the space the window shows, which does not have the project, and
+    // the space to show for it (the first of its spaces, else the default one, which has every project). Null when
+    // the window shows the project: its space has it, no window said what it shows, or the host keeps no spaces.
+    private static async Task<(SpaceDescriptor Shown, SpaceDescriptor Home)?> ProjectOutOfViewAsync(AltaCommandContext context, ProjectDescriptor project)
+    {
+        if (context.Services.Get<SpaceCatalog>() is not { } spaces
+            || await ShownSpaceAsync(context, spaces).ConfigureAwait(false) is not { IsDefault: false } shown
+            || project.Spaces.Contains(shown.Id, StringComparer.Ordinal))
+        {
+            return null;
+        }
+
+        var all = await spaces.LoadAsync(context.CancellationToken).ConfigureAwait(false);
+        return (shown, all.FirstOrDefault(space => !space.IsDefault && project.Spaces.Contains(space.Id, StringComparer.Ordinal)) ?? all[0]);
+    }
+
+    // The answer to a command that shows a project to the user while the window shows a space without it: nothing
+    // was shown, and the window is not moved to another space unless the user asks for it.
+    private static int ProjectNotInShownSpace(AltaCommandContext context, ProjectDescriptor project, SpaceDescriptor shown, SpaceDescriptor home, string notDone)
+        => Unsupported(context, "project.notInShownSpace",
+            $"{notDone}: the window shows the space '{shown.Name}', which does not have the project '{project.DisplayName}'. " +
+            $"The project is in the space '{home.Name}', and the window offers the user a button that shows it there. " +
+            $"Tell the user so. When the user asks you to show it, run `alta space switch {home.Id}`, then this command again.");
+
     // A space by its id, then by its name, then by the start of its id when only one space starts so.
     private static async Task<(SpaceDescriptor? Space, int ExitCode)> ResolveSpaceAsync(
         AltaCommandContext context, SpaceCatalog spaces, string? reference, string commandPath)

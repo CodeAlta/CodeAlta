@@ -157,6 +157,8 @@ An agent reads **What it is for** of each space, so a clear description helps it
 
 An agent shows another space in the window only when you ask for it.
 
+A session keeps working while its space is not shown. When its agent wants to show you a file or the changes of a project that the shown space does not have, the window stays where you are: a message says in which space it opens, with a **Show** button. Click it to show that space with the editor or the Changes tab open. The agent is told that nothing was opened, so it can say so in its answer.
+
 ## Files
 
 Each space is a Markdown file in `~/.alta/spaces/`, named after the id of the space. The id comes from the first name of the space, in lower case with `-` between words, and stays the same when you rename the space.

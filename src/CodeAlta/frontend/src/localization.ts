@@ -2145,6 +2145,8 @@ export const messages = dictionary({
   "{title} waits for you in {space}": ["{title} te espera en {space}", "{title} vous attend dans {space}", "{title} wartet in {space} auf Sie", "{space} で {title} が応答を待っています", "{title} 正在 {space} 中等待你"],
   "{title} failed in {space}": ["{title} falló en {space}", "{title} a échoué dans {space}", "{title} ist in {space} fehlgeschlagen", "{space} で {title} が失敗しました", "{title} 在 {space} 中失败"],
   "A session": ["Una sesión", "Une session", "Eine Sitzung", "セッション", "一个会话"],
+  "The editor of {project} opens in {space}": ["El editor de {project} se abre en {space}", "L'éditeur de {project} s'ouvre dans {space}", "Der Editor von {project} wird in {space} geöffnet", "{project} のエディターは {space} で開きます", "{project} 的编辑器在 {space} 中打开"],
+  "The changes of {project} open in {space}": ["Los cambios de {project} se abren en {space}", "Les modifications de {project} s'ouvrent dans {space}", "Die Änderungen von {project} werden in {space} geöffnet", "{project} の変更は {space} で開きます", "{project} 的更改在 {space} 中打开"],
   "Show": ["Mostrar", "Afficher", "Anzeigen", "表示", "显示"],
   "Shown": ["Mostrado", "Affiché", "Angezeigt", "表示中", "已显示"],
   "No project in this space yet.": ["Aún no hay proyectos en este espacio.", "Aucun projet dans cet espace pour l'instant.", "Noch kein Projekt in diesem Bereich.", "このスペースにはまだプロジェクトがありません。", "此空间中还没有项目。"],

@@ -1,4 +1,4 @@
-import type { SpaceItem, SpaceSessionActivity, WorkspaceSnapshot } from "#neoastra";
+import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
 import { isBrandIcon } from "../BrandIcon";
 import { brandColor, type Brand } from "../brands";
 import { isSymbolIcon } from "../symbolIcons";
@@ -107,6 +107,27 @@ export function scopeSnapshot(snapshot: WorkspaceSnapshot, members: ReadonlySet<
     return !session.workspacePath || keptPaths.has(session.workspacePath) || !otherPaths.has(session.workspacePath);
   });
   return { ...snapshot, projects, sessions };
+}
+
+/** Where a project that something asks to show is: `space` is null in the shown space, else the space to show for it. */
+export type ProjectPlace = Readonly<{ project: WorkspaceProject; space: Space | null }>;
+
+/**
+ * Where the project of a request is (an agent asks for its code editor or its changes, a link names one of its
+ * files). The window serves the request only for a project the shown space has: for another one it stays where
+ * the user is and offers the space of the project, the first of its spaces, else the default one, which has
+ * every project. Null for a project the catalog does not have, or an archived one.
+ */
+export function placeProject(shown: readonly WorkspaceProject[], catalog: readonly WorkspaceProject[], spaces: readonly Space[], shownId: string,
+  projectId: string): ProjectPlace | null {
+  const here = shown.find(project => project.id === projectId && !project.archived);
+  if (here) return { project: here, space: null };
+  const project = catalog.find(value => value.id === projectId && !value.archived);
+  if (!project) return null;
+  const space = spaces.find(candidate => !candidate.isDefault && candidate.id !== shownId && candidate.projectIds.includes(projectId))
+    ?? spaces.find(candidate => candidate.isDefault) ?? defaultSpace;
+  // The default space has every project: one it is asked for while it is shown is shown there.
+  return { project, space: space.id === findSpace(spaces, shownId).id ? null : space };
 }
 
 /** The key the tabs of a space are kept under: the default space keeps the key the window always had. */
