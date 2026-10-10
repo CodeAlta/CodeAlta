@@ -755,6 +755,35 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
+    public async Task ReadingTheCache_DoesNotTakeTheWriteLockThatAnotherConnectionHolds()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var session = CreateSummary("session-cache-reader", updatedAt: "2026-06-18T17:00:00+00:00");
+        await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(session).ConfigureAwait(false);
+        await catalog.JournalStore.AppendStateAsync(CreateDescriptor(session), new SessionViewLocalState { ProviderKey = "openai", PermissionMode = "acceptEdits" })
+            .ConfigureAwait(false);
+        Assert.AreEqual(1, (await catalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+
+        // Another process writes the cache: a reader of a cache whose schema is current only reads.
+        await using var writer = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False");
+        await writer.OpenAsync().ConfigureAwait(false);
+        await using var transaction = (SqliteTransaction)await writer.BeginTransactionAsync().ConfigureAwait(false);
+        await using (var command = writer.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "UPDATE session_projection_cache_metadata SET value = value;";
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        var sessions = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual("acceptEdits", sessions.Single().ViewState!.PermissionMode);
+        await transaction.RollbackAsync().ConfigureAwait(false);
+    }
+
+    [TestMethod]
     public async Task ListSessionsAsync_ToleratesCorruptJournalsDuringRebuild()
     {
         using var temp = TestTempDirectory.Create();

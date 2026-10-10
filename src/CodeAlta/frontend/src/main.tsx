@@ -121,6 +121,7 @@ import { sessionHierarchy } from "./sessionHierarchy";
 import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
 import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
@@ -1329,6 +1330,11 @@ function App() {
       .catch(() => { /* The window shows what was asked. */ });
   });
   const sessionWidthControl = useMemo<SessionWidthControl>(() => ({ width: sessionWidth, widths: sessionWidths, setWidth: setSessionWidth }), [sessionWidth, sessionWidths, setSessionWidth]);
+  function setReconnectRemoteControl(reconnect: boolean) {
+    setShellPreferences(current => current && { ...current, reconnectRemoteControl: reconnect });
+    void desktopShell.setReconnectRemoteControl({ reconnect }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
+  }
   function setReviewPermissions(review: boolean) {
     // The requests the sessions show do not follow it: a send started with review on still asks until it ends.
     setShellPreferences(current => current && { ...current, reviewPermissions: review });
@@ -2258,6 +2264,13 @@ function App() {
   // A session of an open scope that is not the selected one. Opening it makes its scope the selected one; renaming
   // and deleting act on the selected session, so they open it first and start once it is the one selected.
   const pendingSessionAction = useRef<{ projectId: string | null; sessionId: string; action: SessionAction } | null>(null);
+  // The Actions menu of a session asks its composer to show its Remote Control: the session is selected, and its
+  // panel opens it when it sees the request.
+  const [remoteControlAsk, setRemoteControlAsk] = useState<{ sessionId: string; request: RemoteControlOpenRequest } | null>(null);
+  function askRemoteControl(sessionId: string) {
+    const ask = { sessionId, request: { done: () => setRemoteControlAsk(current => current === ask ? null : current) } };
+    setRemoteControlAsk(ask);
+  }
   function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction) {
     pendingSessionAction.current = { projectId: scope, sessionId: session.id, action };
     selectProject(scope, session.id);
@@ -2271,6 +2284,7 @@ function App() {
     if (!modalDialogOpen()) button?.focus({ preventScroll: true });
     button?.scrollIntoView({ block: "nearest" });
     if (pending.action === "open") return;
+    if (pending.action === "remote-control") { askRemoteControl(pending.sessionId); return; }
     const rows = snapshot?.sessions.filter(session => session.id === pending.sessionId) ?? [];
     if (rows.length !== 1) return;
     const access = sessionActionAccess(rows[0], { id: pending.sessionId, projectId, hostEpoch: status?.hostEpoch ?? null }, pending.sessionId,
@@ -2365,6 +2379,7 @@ function App() {
     const switching = selectedSessionId.current !== row.id;
     if (switching) { selectedSessionId.current = row.id; setSessionId(row.id); }
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
+    if (action === "remote-control") { dismissSessionMenu(false); if (access["remote-control"]) askRemoteControl(row.id); return; }
     dismissSessionMenu(false);
     if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
     if (action === "rename") {
@@ -3057,6 +3072,8 @@ function App() {
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
+                  ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
+                    ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
@@ -3092,7 +3109,7 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace session={row} snapshot={snapshot} selectedProjectId={tab.projectId}
+              <SessionWorkspace session={row} remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
                 origin={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
@@ -3218,6 +3235,7 @@ function App() {
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
         sessionWidth, setSessionWidth, confirms: { ...confirms, set: setConfirm },
+        remoteControl: owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null,
         closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
       : settingsSection === "permissions" ? <PermissionSettings
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
@@ -3485,9 +3503,11 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
+function SessionWorkspace({ remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
+  /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
+  remoteControlRequest?: RemoteControlOpenRequest | null;
   /** A draft prompt to send once this session's composer holds it. */
   autoSend?: { text: string; consume: () => void } | null;
   /** What started the session when it was not the user, shown above its timeline. */
@@ -3690,7 +3710,7 @@ function SessionWorkspace({ session, snapshot, selectedProjectId, preferredCompo
             const calls = backgroundCalls(background ?? []);
             setBackgroundCallStates(current => current.size === calls.size && [...calls].every(([call, state]) => current.get(call) === state) ? current : calls);
             onRunActivity?.(value, runningBackgroundTasks(background ?? []).length);
-          }} toolOutputs={toolOutputs} sessionId={session.id} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          }} toolOutputs={toolOutputs} sessionId={session.id} remoteControlRequest={remoteControlRequest} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}

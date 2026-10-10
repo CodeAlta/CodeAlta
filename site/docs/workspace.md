@@ -72,7 +72,7 @@ In the desktop app, session tabs, the code editor and the Changes tab can be arr
 - drag a tab to the center of another pane to move it there;
 - or use **Split right** and **Split below** in the tab menu (`…`) of a pane.
 
-Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions from different projects stay open together, and the layout is restored at the next start. Each [space](spaces.md) has its own tabs and its own layout. `Ctrl+W` closes the current tab and `Ctrl+Shift+T` reopens the last closed one.
+Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions from different projects stay open together, and the layout is restored at the next start. Each [space](spaces.md) has its own tabs and its own layout. `Ctrl+W` closes the current tab, a middle click on a tab closes it, and `Ctrl+Shift+T` reopens the last closed one.
 
 <div class="row g-3 my-4">
   <div class="col-md-6">
@@ -206,6 +206,33 @@ Use `F6` or the **Full Prompt** action to open a larger prompt editor. `Esc` or 
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-system-prompt-and-user-prompt.png" alt="CodeAlta timeline showing system prompt details and an agent prompt" loading="lazy">
   <figcaption class="small text-secondary mt-2">Prompt and system-prompt details are visible in the timeline, including the selected agent prompt and source path, so you can review what context was sent.</figcaption>
 </figure>
+
+### Remote Control (Claude Code)
+
+A Claude Code session can be followed and driven from claude.ai or the Claude app, on your phone for
+instance. Turn it on with the **Remote Control** button in the bar of the prompt (the radio tower), or with
+**Remote Control…** in the **Actions** menu of the session. The button's color says where it stands:
+connecting, on (green) or failed (red). Its popover has the link of the session on claude.ai, **Open in
+browser** and **Copy link**, and **Turn off**. While it is on, the popover also shows the link as a QR code:
+scan it with the camera of your phone to open the session there. In the Claude app the session is listed under
+its title.
+
+While it is on:
+
+- A prompt you send from claude.ai is shown in the timeline as yours, and the session runs it as if you had
+  sent it here.
+- A permission request is asked on both sides: answer it on the phone or in CodeAlta, whichever comes first.
+  The request leaves the other side once it is answered.
+- Stopping the session on claude.ai stops it in CodeAlta too, as the **Stop** button does here.
+- Questions of the agent (**alta ask**) are asked in the CodeAlta window only.
+- CodeAlta keeps Claude Code running for the session, and connects it again if it has to start it again
+  (another model, effort or agent prompt for a send); the link on claude.ai normally stays the same. Closing
+  CodeAlta ends it. If Claude Code stops by itself, the button turns red: the session is connected again with
+  the next prompt you send here, or with **Try again** in its popover.
+
+Remote Control needs Claude Code signed in with your claude.ai account: it does not work with an API key.
+When CodeAlta starts again, Remote Control is off unless you turned on **Turn Remote Control back on when
+CodeAlta starts** in Settings > Appearance: the sessions that had it on are then connected again.
 
 ## Session notes
 
@@ -657,7 +684,9 @@ folder it would write under, and what the agent says it is for. Answer with **Al
 write in the last field what the agent should do instead and press Enter: the request is denied and your text
 is sent to the agent. A denied request does not stop the agent, which goes on without it: to stop it, use the
 Stop button of the prompt. The choices answer a moment after the request appears,
-so a click meant for something else does not answer it.
+so a click meant for something else does not answer it. A very long command (more than 4,096 characters, such
+as a script written in one command) is shown cut, with a warning in red: allowing it allows more than what you
+see, so deny it unless you know what it does.
 
 When you have no prompt draft, the request takes the focus: press an arrow key to reach its choices, then
 Enter answers with the chosen one; 1 and 2 answer directly, and Escape denies. A key you were typing when the

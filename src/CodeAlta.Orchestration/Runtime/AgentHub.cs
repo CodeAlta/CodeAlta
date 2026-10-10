@@ -298,6 +298,25 @@ public sealed class AgentHub : IAsyncDisposable
         finally { entry.ReleaseReference(); }
     }
 
+    /// <summary>
+    /// Turns the remote control of an attached session on or off (Claude Code's Remote Control). It does not wait
+    /// for a run: it acts on the provider at once.
+    /// </summary>
+    /// <param name="sessionHandleId">The attached session.</param>
+    /// <param name="enabled">Whether the session is to be controlled remotely.</param>
+    /// <param name="name">The name the session is shown under remotely, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The remote control of the session after the request; null for a session whose provider has none.</returns>
+    /// <exception cref="InvalidOperationException">The handle no longer admits references.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or provider is disposed.</exception>
+    public async Task<AgentRemoteControl?> SetRemoteControlAsync(AgentSessionHandleId sessionHandleId, bool enabled, string? name, CancellationToken cancellationToken = default)
+    {
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        try { return await entry.Coordinator.SetRemoteControlAsync(enabled, name, cancellationToken).ConfigureAwait(false); }
+        finally { entry.ReleaseReference(); }
+    }
+
     /// <summary>Sets the permission mode the next runs of an attached session request, without attaching it again.</summary>
     /// <param name="sessionHandleId">Existing attachment identity.</param>
     /// <param name="permissionMode">One of the permission modes of the provider, or null for the one it is configured with.</param>
@@ -765,6 +784,11 @@ public sealed class AgentHub : IAsyncDisposable
 
         public Task<bool> StopBackgroundTaskAsync(string taskId, CancellationToken cancellationToken)
             => _session is IAgentBackgroundTaskProvider provider ? provider.StopBackgroundTaskAsync(taskId, cancellationToken) : Task.FromResult(false);
+
+        public async Task<AgentRemoteControl?> SetRemoteControlAsync(bool enabled, string? name, CancellationToken cancellationToken)
+            => _session is IAgentRemoteControlProvider { SupportsRemoteControl: true } provider
+                ? await provider.SetRemoteControlAsync(enabled, name, cancellationToken).ConfigureAwait(false)
+                : null;
 
         public bool SetPermissionMode(string? permissionMode)
         {

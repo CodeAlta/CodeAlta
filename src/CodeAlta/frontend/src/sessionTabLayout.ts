@@ -1,4 +1,4 @@
-import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action } from "flexlayout-react";
+import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action, type Node as LayoutNode } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
 import { emptyFileTabs, fileNodeId, fileTabLimit, isChangesTab, isTerminalTab, type FileTab, type FileTabs } from "./fileTabs";
@@ -133,6 +133,14 @@ export function fileTabAction(action: Action, files: FileTabs, current: () => bo
   const id = action.type === Actions.SELECT_TAB ? action.data.tabNode : action.data.node;
   const matches = files.open.slice(0, fileTabLimit).filter(file => fileNodeId(file) === id);
   return matches.length === 1 ? { kind: action.type === Actions.SELECT_TAB ? "select" : "close", file: matches[0] } : null;
+}
+
+/**
+ * What a click of another button than the main one on a node of the dock does: the middle button closes a tab
+ * as its close button does, where it has one. A click with a key held, another button or the bar of a pane does nothing.
+ */
+export function tabMiddleClickAction(node: LayoutNode, button: number): Action | null {
+  return button === 1 && node instanceof TabNode && node.isEnableClose() ? Actions.deleteTab(node.getId()) : null;
 }
 
 export function ownsSessionTabContent(id: string, state: SessionTabs) {

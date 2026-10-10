@@ -13,6 +13,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderSessionCleanup,
     IAgentProviderInitiatedTurns,
     IAgentProviderBackgroundTasks,
+    IAgentProviderRemoteControl,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -91,6 +92,24 @@ internal sealed class ClaudeCodeTurnExecutor :
     /// <inheritdoc />
     public string? GetPendingProviderTurn(string sessionId)
         => _sessions.TryGetValue(sessionId, out var session) ? session.PendingOwnTurn : null;
+
+    /// <inheritdoc />
+    public IDisposable OnRemoteControlChanged(string sessionId, Action<AgentRemoteControl> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        return GetSession(sessionId).OnRemoteControlChanged(handler);
+    }
+
+    /// <inheritdoc />
+    public AgentRemoteControl GetRemoteControl(string sessionId)
+        => _sessions.TryGetValue(sessionId, out var session) ? session.RemoteControl : AgentRemoteControl.Off;
+
+    /// <inheritdoc />
+    public Task<AgentRemoteControl> SetRemoteControlAsync(AgentTurnRequest request, bool enabled, string? name, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return GetSession(request.SessionId).SetRemoteControlAsync(request, enabled, name, cancellationToken);
+    }
 
     /// <inheritdoc />
     public IDisposable OnBackgroundTasksChanged(string sessionId, Action<IReadOnlyList<AgentBackgroundTask>, IReadOnlyList<AgentBackgroundTaskEnd>> handler)

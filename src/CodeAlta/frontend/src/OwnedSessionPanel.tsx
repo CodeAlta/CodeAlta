@@ -13,7 +13,7 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
+import { markdownLinks, modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -23,6 +23,8 @@ import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancel
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
+import { RemoteControlButton } from "./RemoteControlButton";
+import { entryRemoteControl, remoteControlView, sameRemoteControl, type RemoteControlOpenRequest, type RemoteControlView } from "./remoteControl";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import type { PromptInput } from "./PromptEditor";
@@ -65,8 +67,10 @@ export function sendFailureMessage(status: string, reason?: string): string {
   }
 }
 
-export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true }: {
+export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null }: {
   active?: boolean;
+  /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
+  remoteControlRequest?: RemoteControlOpenRequest | null;
   observing?: boolean;
   sessionId: string; epoch: string; submissions: ReturnType<typeof createOwnedSubmissions>; capability: ReturnType<typeof createMutationCapability>;
   projectId?: string | null;
@@ -394,6 +398,24 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     const read = invalidEpoch || runtimeState?.kind !== "ready" ? [] : backgroundTasks(runtimeState.snapshot.entry);
     setBackground(current => sameBackgroundTasks(current, read) ? current : read);
   }, [runtimeState, invalidEpoch]);
+  // Remote Control: what the runtime state says, and meanwhile what the host answered when it was turned on or off.
+  const observedRemote = invalidEpoch || runtimeState?.kind !== "ready" ? null : entryRemoteControl(runtimeState.snapshot.entry);
+  const [answeredRemote, setAnsweredRemote] = useState<RemoteControlView | null>(null);
+  const [shownRemote, setShownRemote] = useState<RemoteControlView>(remoteControlView(null));
+  useEffect(() => { setAnsweredRemote(null); }, [observedRemote?.status, observedRemote?.url, observedRemote?.error]);
+  useEffect(() => {
+    const next = answeredRemote ?? observedRemote ?? remoteControlView(null);
+    setShownRemote(current => sameRemoteControl(current, next) ? current : next);
+  }, [answeredRemote, observedRemote?.status, observedRemote?.url, observedRemote?.error]);
+  const setRemoteControl = useCallback(async (enabled: boolean) => {
+    if (!capability.canMutate()) return "unavailable";
+    const result = await sessions.setRemoteControl({ expectedEpoch: epoch, sessionId, enabled }, { timeoutMilliseconds: 90_000 });
+    if (result.status === "ok") setAnsweredRemote(remoteControlView(result.remoteControl));
+    return result.status;
+  }, [capability, epoch, sessionId]);
+  const openRemoteLink = useCallback((url: string) => {
+    void markdownLinks.open({ expectedHostEpoch: epoch, address: url, sessionId, projectId: null, directory: null }, { timeoutMilliseconds: 8_000 }).catch(() => { /* The link is shown to copy. */ });
+  }, [epoch, sessionId]);
   const stopBackgroundTask = useCallback(async (taskId: string) => {
     if (!capability.canMutate()) return;
     // The answer is not shown: the task leaves the list when its provider stopped it.
@@ -965,6 +987,8 @@ ${value}` : value);
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
         refreshKey={`${observing}:${composerBusy}:${compacting}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
+      {activeChoices?.supportsRemoteControl === true && <RemoteControlButton state={shownRemote} disabled={invalidEpoch}
+        onSet={setRemoteControl} onOpenLink={openRemoteLink} openRequest={remoteControlRequest} />}
       {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
         onClick={onOpenReminders}><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></Button>}

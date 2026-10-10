@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -34,6 +36,8 @@ internal interface IClaudeCodeConnectionHandler
 /// </remarks>
 internal sealed class ClaudeCodeConnection : IAsyncDisposable
 {
+    private const int ProtocolLogLimit = 4000;
+    private static readonly Logger ProtocolLogger = LogManager.GetLogger("CodeAlta.ClaudeCode.Protocol");
     private readonly IClaudeCodeTransport _transport;
     private readonly IClaudeCodeConnectionHandler _handler;
     private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement>> _pending = new(StringComparer.Ordinal);
@@ -150,6 +154,11 @@ internal sealed class ClaudeCodeConnection : IAsyncDisposable
             throw new IOException(DescribeExit());
         }
 
+        if (ProtocolLogger.IsEnabled(LogLevel.Debug))
+        {
+            LogLine(">", Encoding.UTF8.GetString(buffer.WrittenSpan));
+        }
+
         await _transport.WriteLineAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 
@@ -195,6 +204,11 @@ internal sealed class ClaudeCodeConnection : IAsyncDisposable
         {
             while (await _transport.ReadLineAsync(_closing.Token).ConfigureAwait(false) is { } line)
             {
+                if (ProtocolLogger.IsEnabled(LogLevel.Debug))
+                {
+                    LogLine("<", line);
+                }
+
                 Dispatch(line);
             }
         }
@@ -218,6 +232,11 @@ internal sealed class ClaudeCodeConnection : IAsyncDisposable
 
         _handler.OnClosed(failure);
     }
+
+    // The lines the CLI writes (<) and the ones written to it (>), at the Debug level of their own logger: off unless a
+    // host turns that level on to see what a version of the CLI sends. They hold the conversation itself.
+    private static void LogLine(string direction, string line)
+        => ProtocolLogger.Debug($"{direction} {(line.Length > ProtocolLogLimit ? string.Concat(line.AsSpan(0, ProtocolLogLimit), "…") : line)}");
 
     private void Dispatch(string line)
     {

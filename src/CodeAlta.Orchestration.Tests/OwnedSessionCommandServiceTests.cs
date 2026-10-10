@@ -574,6 +574,27 @@ public sealed class OwnedSessionCommandServiceTests
     }, sessionPermissionModes: true);
 
     [TestMethod]
+    public Task SessionPermissionModes_ASessionThatBypassesIsApproved_WhileTheHostAsks() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.ReviewByDefault = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+
+        // The send bypasses permissions: it has no owned execution, and its default decision approves, whatever the
+        // host does by default.
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("bypass", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Bypass } }));
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        Assert.AreEqual(SessionPermissionPolicy.Approve, f.Host.RuntimeService.GetPermissionPolicy(f.SessionId));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(f.Track(f.Provider.SendPermission!))).Kind);
+        Assert.HasCount(0, (await f.Observe(f.Host.RuntimeService.Permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task SessionPermissionModes_ATurnTheOwnerDidNotSendAsksOnTheCardOfItsSession() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
@@ -1144,7 +1165,8 @@ public sealed class OwnedSessionCommandServiceTests
         var send = f.Send();
         await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, f.Provider.PreparationDecision);
-        Assert.IsNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+        // The send reviews nothing: its default decision, fixed when it started, denies.
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!))).Kind);
         Assert.IsNull(f.Provider.FirstSendOptions.RunLifecycle);
         var denied = f.Permission(f.Provider.Options!.OnPermissionRequest);
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(denied)).Kind);
@@ -1212,6 +1234,30 @@ public sealed class OwnedSessionCommandServiceTests
         f.Provider.ReleaseSend.TrySetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
         Assert.HasCount(0, (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
+    }, reviewPermissions: true);
+
+    [TestMethod]
+    public Task OwnedPermission_TooLongToShowInFull_WaitsForTheUserShortened() => Fixture.RunAsync(async f =>
+    {
+        // A long heredoc, with a long reason: the request is shown cut, says so, and waits for the user instead of
+        // being denied unseen.
+        f.Provider.RequestedCommand = "cat > notes.md <<'EOF'\n" + new string('x', 20_000) + "\nEOF";
+        f.Provider.RequestedReason = new string('r', 5_000);
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Track(f.Provider.SendPermission!);
+        var permissions = f.Host.RuntimeService.Permissions;
+        var entry = (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries.Single();
+        Assert.IsTrue(entry.Request.Shortened);
+        Assert.AreEqual(SessionPermissionService.OwnedCommandLimit, entry.Request.Command!.Length);
+        StringAssert.StartsWith(entry.Request.Command, "cat > notes.md <<'EOF'\nxxx");
+        Assert.AreEqual(SessionPermissionService.OwnedReasonLimit, entry.Request.Reason!.Length);
+        Assert.IsFalse(pending.IsCompleted);
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(pending)).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
     }, reviewPermissions: true);
 
     [TestMethod]
@@ -1372,7 +1418,7 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome);
         Assert.AreEqual(request.ExpectedRunId, result.RunId!.Value.Value);
         Assert.AreEqual(request.ExpectedRunId, f.Provider.SteerOptions!.ExpectedRunId!.Value.Value);
-        Assert.IsNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!))).Kind);
     });
 
     [TestMethod]
@@ -2237,8 +2283,10 @@ public sealed class OwnedSessionCommandServiceTests
         internal AgentSendOptions? FirstSendOptions { get; private set; }
         internal AgentSendOptions? SecondSendOptions { get; private set; }
         internal Task? AbortDependency { get; set; }
+        internal string RequestedCommand { get; set; } = "inert fixture command";
+        internal string RequestedReason { get; set; } = "fixture";
         internal AgentCommandPermissionRequest CommandRequest() => new(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
-            null, "owned-permission", null, "inert fixture command", Options!.WorkingDirectory, null, "fixture", null, null, null);
+            null, "owned-permission", null, RequestedCommand, Options!.WorkingDirectory, null, RequestedReason, null, null, null);
         internal TaskCompletionSource PreparationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ReleasePreparation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

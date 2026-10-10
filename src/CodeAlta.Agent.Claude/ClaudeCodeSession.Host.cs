@@ -91,6 +91,7 @@ internal sealed partial class ClaudeCodeSession
                 session.FailOutstandingToolCalls("Claude Code stopped before the tool call completed.");
                 session.CancelPermissionPrompts();
                 session.ForgetBackgroundTasks();
+                session.NoteRemoteControlProcessStopped();
             }
 
             events.TryWrite(new ClosedEvent(failure));
@@ -115,6 +116,8 @@ internal sealed partial class ClaudeCodeSession
     private int _ownTurnsRead;
     private string? _ownTurnNotice;
     private string? _taskSummary;
+    // A prompt sent from claude.ai (Remote Control), which starts the next turn of the CLI.
+    private string? _remotePrompt;
     private Action? _onOwnTurn;
     private TaskCompletionSource? _runForOwnTurn;
     private bool _showsOwnTurn;
@@ -195,7 +198,9 @@ internal sealed partial class ClaudeCodeSession
             _ownTurnOpen = true;
             _turnActive = true;
             _ownTurnsStarted++;
-            _ownTurnNotice = ClaudeCodePrompts.CreateOwnTurnNotice(_taskSummary);
+            // A prompt sent from claude.ai is the prompt of its turn; any other turn is told by what started it.
+            _ownTurnNotice = _remotePrompt ?? ClaudeCodePrompts.CreateOwnTurnNotice(_taskSummary);
+            _remotePrompt = null;
             _taskSummary = null;
             notify = _onOwnTurn;
             if (notify is not null)
@@ -218,6 +223,7 @@ internal sealed partial class ClaudeCodeSession
             var ownTurn = _ownTurnOpen ? _ownTurnsStarted : 0;
             _ownTurnOpen = false;
             _taskSummary = null;
+            _remotePrompt = null;
             if (ClaudeCodeJson.TryGetArray(result, "user_message_uuids", out var uuids))
             {
                 foreach (var uuid in uuids.EnumerateArray())
@@ -252,6 +258,7 @@ internal sealed partial class ClaudeCodeSession
             _ownTurnsRead = _ownTurnsStarted;
             _ownTurnNotice = null;
             _taskSummary = null;
+            _remotePrompt = null;
             waiting = _runForOwnTurn;
             _runForOwnTurn = null;
         }
@@ -260,7 +267,8 @@ internal sealed partial class ClaudeCodeSession
     }
 
     // Whether the process still has something to do without a run: a turn of its own that goes on or that no run
-    // read yet, or a background command whose end starts one.
+    // read yet, a background command whose end starts one, or Remote Control, whose bridge ends with the process.
+    // Remote Control that failed has no bridge to keep.
     private bool WorksByItself
     {
         get
@@ -268,7 +276,8 @@ internal sealed partial class ClaudeCodeSession
             lock (_gate)
             {
                 return _connection is { IsClosed: false } &&
-                       ((_stateEventsSeen ? _cliRunning : _turnActive) || _taskSet.Count > 0 || _ownTurnsRead < _ownTurnsStarted);
+                       ((_stateEventsSeen ? _cliRunning : _turnActive) || _taskSet.Count > 0 || _ownTurnsRead < _ownTurnsStarted
+                        || (_remoteControlWanted && _remoteControl.Status != AgentRemoteControlStatus.Failed));
             }
         }
     }
@@ -420,6 +429,12 @@ internal sealed partial class ClaudeCodeSession
             case "user":
                 if (ClaudeCodeJson.GetBoolean(message, "isReplay"))
                 {
+                    // The CLI replays each prompt; one this side did not send came from claude.ai.
+                    if (isTopLevel)
+                    {
+                        NoteRemotePrompt(message);
+                    }
+
                     return null;
                 }
 
@@ -454,6 +469,10 @@ internal sealed partial class ClaudeCodeSession
                     case "task_updated":
                         // The commands and the subagents that go on in the background, whatever turn started them.
                         ReadBackgroundTaskMessage(ClaudeCodeJson.GetString(message, "subtype"), message);
+                        break;
+                    case "bridge_state":
+                        // How the bridge of Remote Control to claude.ai stands.
+                        ReadBridgeState(message);
                         break;
                     case "task_notification":
                         // What ended, as the CLI says it. It starts a turn of its own when no turn is running.
@@ -710,6 +729,10 @@ internal sealed partial class ClaudeCodeSession
                 return HandleHook(requestId, request);
             case "mcp_message":
                 return HandleMcpMessage(requestId, request);
+            case "remote_control_work_secret":
+                // Only a bridge in an environment of its own needs one: this side has none to give.
+                _ = SendSafelyAsync(connection => connection.RespondAsync(requestId, null));
+                return false;
             default:
                 // The CLI is told, instead of being left waiting, when it asks for something this side does not do.
                 _ = SendSafelyAsync(connection => connection.RespondErrorAsync(requestId, $"CodeAlta does not handle the '{subtype}' request."));

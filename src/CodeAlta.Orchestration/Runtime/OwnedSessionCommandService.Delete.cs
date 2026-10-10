@@ -21,7 +21,7 @@ public sealed partial class OwnedSessionCommandService
             if (_closed || _retained) return Task.FromResult("closed");
             if (_deleteWork is not null) return Task.FromResult("busy");
             if (_active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
-                || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
+                || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId) || _remoteControlling.ContainsKey(sessionId)
                 || _operations.Values.Any(operation => !operation.Released && string.Equals(operation.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
                 || _queues.Values.Any(operation => !operation.Released && string.Equals(operation.Request.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
                 return Task.FromResult("busy");

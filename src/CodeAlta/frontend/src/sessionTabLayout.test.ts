@@ -4,8 +4,8 @@ import { Actions, DockLocation, RowNode, TabNode, TabSetNode } from "flexlayout-
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
-import { createSessionTabModel, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation } from "./sessionTabLayout";
-import { activateFileTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
+import { createSessionTabModel, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, tabMiddleClickAction } from "./sessionTabLayout";
+import { activateFileTab, canvasTab, changesTab, closeFileTab, documentationTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -463,4 +463,32 @@ test("a terminal opens in a pane under the tabs, a third of the height; the next
   reconcileSessionTabModel(model, state, label, files, named);
   assert.equal(model.getNodeById(fileNodeId(first)), undefined);
   assert.equal(model.getNodeById(pane.getId()), undefined);
+});
+
+test("a middle click closes a tab as its close button does, and nothing else does", () => {
+  const model = createSessionTabModel();
+  reconcileSessionTabModel(model, { ...both(), active: null }, label);
+  const one = model.getNodeById(sessionNodeId(tab("one"))) as TabNode;
+  const draft = model.getNodeById(sessionDraftNodeId) as TabNode;
+  assert.deepEqual(tabMiddleClickAction(one, 1), Actions.deleteTab(one.getId()));
+  assert.deepEqual(tabMiddleClickAction(draft, 1), Actions.deleteTab(sessionDraftNodeId), "The new session goes back to an open session.");
+  assert.equal(tabMiddleClickAction(one, 0), null, "A click with a key held is not a close.");
+  assert.equal(tabMiddleClickAction(one, 2), null);
+  assert.equal(tabMiddleClickAction(one.getParent()!, 1), null, "The bar of a pane closes nothing.");
+  const alone = createSessionTabModel();
+  reconcileSessionTabModel(alone, emptySessionTabs(), label);
+  assert.equal(tabMiddleClickAction(alone.getNodeById(sessionDraftNodeId)!, 1), null, "With no session open, the new session cannot be closed.");
+});
+
+test("middle-click canvas and Documentation closes still go through file-tab ownership", () => {
+  const tabs = [canvasTab({ pluginKey: "builtin:statistics", canvasId: "statistics" }), documentationTab];
+  const files = tabs.reduce((state, file) => openFileTab(state, file), emptyFileTabs());
+  const model = createSessionTabModel();
+  reconcileSessionTabModel(model, emptySessionTabs(), label, files);
+  for (const file of tabs) {
+    const action = tabMiddleClickAction(model.getNodeById(fileNodeId(file))!, 1);
+    assert.ok(action);
+    assert.deepEqual(fileTabAction(action, files, () => true), { kind: "close", file });
+    assert.equal(fileTabAction(action, files, () => false), null, "An obsolete owner cannot close a tab.");
+  }
 });

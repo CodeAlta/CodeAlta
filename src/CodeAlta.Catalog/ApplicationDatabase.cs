@@ -285,6 +285,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
 
     /// <summary>
     /// Brings the tables of an owner to a version, once, in one write transaction.
+    /// A version that is already current is only read and does not acquire the write lock.
     /// </summary>
     /// <param name="owner">The owner, such as <c>session_cache</c> or <c>plugin:statistics</c>.</param>
     /// <param name="tablePrefix">
@@ -320,6 +321,20 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         if (tablePrefix is not null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(tablePrefix);
+        }
+
+        ThrowIfInsideWrite($"A migration of '{owner}'");
+        // Checking an already-current schema must not turn a reader into a writer. A migration that is needed
+        // still checks the version again in its write transaction, in case another connection got there first.
+        var current = await ReadAsync(
+                owner,
+                (connection, token) => ReadVersionAsync(connection, owner, transaction: null, token),
+                recoverDamagedFile,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (current == version)
+        {
+            return;
         }
 
         await WriteAsync<object?>(

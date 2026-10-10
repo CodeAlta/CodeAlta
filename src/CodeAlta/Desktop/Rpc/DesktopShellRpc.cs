@@ -73,6 +73,18 @@ internal sealed class DesktopShellService
     }
 
     /// <summary>
+    /// Changes the user's setting for Remote Control: whether the sessions that had it on when CodeAlta exited have
+    /// it turned on again when it starts.
+    /// </summary>
+    [NeoRpcMethod("setReconnectRemoteControl")]
+    public DesktopShellPreferences SetReconnectRemoteControl(DesktopShellReconnectRemoteControlRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _shell?.SetReconnectRemoteControl(request.Reconnect);
+        return Current();
+    }
+
+    /// <summary>
     /// Changes the user's setting for the width of the conversations, in percent of the space of a session (40 to
     /// 100). A width out of range changes nothing. The session the user resized follows the setting again. Every
     /// page is told with <c>session-width</c> notices of <see cref="Watch"/>.
@@ -182,7 +194,7 @@ internal sealed class DesktopShellService
         ? new("unavailable", DesktopPreferences.Name(DesktopCloseBehavior.Ask), false, Platform, false)
         : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
             [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable, _shell.Zoom,
-            _shell.ReviewPermissions, _shell.InheritPermissions);
+            _shell.ReviewPermissions, _shell.InheritPermissions) { ReconnectRemoteControl = _shell.ReconnectRemoteControl ? true : null };
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
@@ -238,7 +250,15 @@ internal sealed record DesktopShellRevealEntryResponse(string Status);
 /// </param>
 internal sealed record DesktopShellPreferences(string Status, string OnClose, bool CanKeepRunning, string Platform, bool EntryAdded,
     int SessionWidth = DesktopPreferences.DefaultSessionWidth, DesktopShellSessionWidth[]? SessionWidths = null, bool TrayIcon = false,
-    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false, bool InheritPermissions = false);
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false, bool InheritPermissions = false)
+{
+    /// <summary>
+    /// True when the user chose that the sessions that had Remote Control on when CodeAlta exited have it turned on
+    /// again when it starts; absent otherwise.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ReconnectRemoteControl { get; init; }
+}
 
 /// <summary>Asks to review the commands and the file changes of the sessions, or to approve them automatically.</summary>
 /// <param name="Review">Whether they are reviewed.</param>
@@ -247,6 +267,10 @@ internal sealed record DesktopShellReviewPermissionsRequest(bool Review);
 /// <summary>Asks to give the sessions that agents create the permission mode of their creator, or to let them not ask.</summary>
 /// <param name="Inherit">Whether they take the mode of their creator.</param>
 internal sealed record DesktopShellInheritPermissionsRequest(bool Inherit);
+
+/// <summary>Asks to turn on again, when CodeAlta starts, the Remote Control of the sessions that had it on.</summary>
+/// <param name="Reconnect">Whether it is turned on again.</param>
+internal sealed record DesktopShellReconnectRemoteControlRequest(bool Reconnect);
 
 /// <summary>The width one session is shown with instead of the user's setting.</summary>
 internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);

@@ -74,6 +74,7 @@ public interface IApplicationDatabase : IAsyncDisposable
     /// <summary>
     /// Brings the tables of an owner to a version: the steps run once, in one write transaction, when the recorded
     /// version is lower than <paramref name="version"/>, and the version is recorded with them.
+    /// A version that is already current is only read and does not acquire the write lock.
     /// </summary>
     /// <param name="owner">The owner, such as <c>session_cache</c> or <c>plugin:statistics</c>.</param>
     /// <param name="tablePrefix">

@@ -145,6 +145,79 @@ public sealed class DesktopShellTests
     }
 
     [TestMethod]
+    public void Preferences_RemoteControl_IsNotReconnectedUnlessTheUserChose_AndItsSessionsAreKept()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-remote-").FullName;
+        try
+        {
+            var file = Path.Combine(root, "preferences.json");
+            Assert.IsFalse(DesktopPreferences.Load(root).ReconnectRemoteControl);
+            Assert.AreEqual(0, DesktopPreferences.Load(root).RemoteControlSessions.Length);
+
+            // Only what differs from a new profile is written.
+            var chosen = new DesktopPreferences(DesktopCloseBehavior.Ask, ReconnectRemoteControl: true) { RemoteControlSessions = ["b", "a"] };
+            Assert.IsTrue(chosen.Save(root));
+            Assert.AreEqual("""{"onClose":"ask","reconnectRemoteControl":true,"remoteControlSessions":["b","a"]}""", File.ReadAllText(file));
+            var read = DesktopPreferences.Load(root);
+            Assert.IsTrue(read.ReconnectRemoteControl);
+            CollectionAssert.AreEqual(new[] { "b", "a" }, read.RemoteControlSessions.ToArray(), "The last turned on comes first.");
+
+            // What is not a session is left out, a session is listed once, and the list is bounded.
+            var listed = string.Join(",", Enumerable.Range(0, 40).Select(static i => $"\"s{i}\""));
+            File.WriteAllText(file, "{\"onClose\":\"ask\",\"reconnectRemoteControl\":\"true\",\"remoteControlSessions\":[\"s0\",1,\" s1\",\"\",\"s0\"," + listed + "]}");
+            read = DesktopPreferences.Load(root);
+            Assert.IsFalse(read.ReconnectRemoteControl, "Only true turns it on.");
+            Assert.AreEqual(DesktopPreferences.MaximumRemoteControlSessions, read.RemoteControlSessions.Length);
+            CollectionAssert.AreEqual(new[] { "s0", "s1", "s2" }, read.RemoteControlSessions.Take(3).ToArray());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Preferences_RemoteControlSessions_AreForgottenAtStart_WhenTheyAreNotReconnected()
+    {
+        // Started without the setting, the sessions that had Remote Control on are off now: turning the setting on
+        // later turns on again only those that are on when CodeAlta exits next.
+        var off = new DesktopPreferences(DesktopCloseBehavior.Ask) { RemoteControlSessions = ["a"] };
+        Assert.AreEqual(0, off.AtStart().RemoteControlSessions.Length);
+        var on = off with { ReconnectRemoteControl = true };
+        Assert.AreSame(on, on.AtStart());
+    }
+
+    [TestMethod]
+    public async Task Preferences_ChangedAtTheSameTime_LeaveTheFileWithTheLatest()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-writer-").FullName;
+        try
+        {
+            var gate = new Lock();
+            var current = new DesktopPreferences(DesktopCloseBehavior.Ask);
+            var writer = new DesktopPreferencesWriter(root, () => { lock (gate) return current; });
+
+            // The write of a change made first can come last: it writes the preferences as they are then.
+            lock (gate) current = current with { ReconnectRemoteControl = true };
+            lock (gate) current = current with { Zoom = 125 };
+            Assert.IsTrue(writer.Write());
+            Assert.IsTrue(writer.Write());
+            Assert.AreEqual((true, 125), (DesktopPreferences.Load(root).ReconnectRemoteControl, DesktopPreferences.Load(root).Zoom));
+
+            // Sessions that turn Remote Control on while the user changes a setting: none is lost.
+            await Parallel.ForAsync(0, DesktopPreferences.MaximumRemoteControlSessions, async (index, _) =>
+            {
+                await Task.Yield();
+                lock (gate) current = current with { RemoteControlSessions = [$"s{index}", .. current.RemoteControlSessions], McpServer = index % 2 == 0 };
+                writer.Write();
+            });
+
+            var read = DesktopPreferences.Load(root);
+            CollectionAssert.AreEquivalent(current.RemoteControlSessions.ToArray(), read.RemoteControlSessions.ToArray());
+            Assert.AreEqual(DesktopPreferences.MaximumRemoteControlSessions, read.RemoteControlSessions.Length);
+            Assert.AreEqual(current.McpServer, read.McpServer);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     [DataRow(100, 1, 110)]
     [DataRow(100, -1, 90)]
     [DataRow(300, 1, 400)]

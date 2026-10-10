@@ -8,7 +8,7 @@ import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
 import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { SessionWaitingBadge } from "./WaitingBadge";
-import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
+import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, tabMiddleClickAction } from "./sessionTabLayout";
 import { emptyFileTabs, fileNodeId, isAutomationsTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
@@ -236,6 +236,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       if (clicked && !clicked.startsWith("file:")) onSessionTabClick?.();
     }}
     onPointerCancelCapture={drag.end} onLostPointerCapture={drag.end}
+    onMouseDownCapture={event => {
+      // A middle press on a tab closes it when released: it does not start scrolling the page.
+      if (event.button === 1 && (event.target as HTMLElement).closest(".flexlayout__tab_button")) event.preventDefault();
+    }}
     onDragStartCapture={event => {
       if ((event.target as HTMLElement).closest('.flexlayout__tab_button')) { event.preventDefault(); event.stopPropagation(); }
     }} onClickCapture={event => {
@@ -258,6 +262,13 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         focusNextTabset: undefined, focusPreviousTabset: undefined, closeOverlayBorder: undefined }}
       onAction={action => dispatch(action)} onModelChange={(_model, action) => changed(action)}
       onContextMenu={(_node, event) => event.preventDefault()}
+      onAuxMouseClick={(node, event) => {
+        // A middle click closes the tab, as its close button does.
+        const close = tabMiddleClickAction(node, event.button);
+        if (!close) return;
+        event.preventDefault();
+        apply(close);
+      }}
       onRenderTab={(node, values) => {
         if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
         const file = files.open.find(value => fileNodeId(value) === node.getId());

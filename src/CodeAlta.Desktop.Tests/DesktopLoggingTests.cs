@@ -32,6 +32,42 @@ public sealed class DesktopLoggingTests
     }
 
     [TestMethod]
+    public void Startup_WritesTheDebugLevelOfTheLoggersADeveloperNames()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-logging-" + Guid.NewGuid().ToString("N"));
+        var previous = Environment.GetEnvironmentVariable("CODEALTA_DEBUG_LOGGERS");
+        Assert.IsFalse(LogManager.IsInitialized);
+        try
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_DEBUG_LOGGERS", "CodeAlta.ClaudeCode.Protocol");
+            Assert.AreEqual(0, DesktopApplication.Run(new(root, null), _ =>
+            {
+                LogManager.GetLogger("CodeAlta.ClaudeCode.Protocol").Debug("protocol line of the regression");
+                LogManager.GetLogger("CodeAlta.Desktop.Test").Debug("other debug line of the regression");
+                return 0;
+            }));
+            var text = string.Concat(Directory.GetFiles(Path.Combine(root, "logs")).Select(File.ReadAllText));
+            StringAssert.Contains(text, "protocol line of the regression");
+            Assert.IsFalse(text.Contains("other debug line of the regression", StringComparison.Ordinal), "Only the loggers named are written at the Debug level.");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_DEBUG_LOGGERS", previous);
+            LogManager.Shutdown();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void DebugLoggers_AreTheNamesOfTheList()
+    {
+        CollectionAssert.AreEqual(Array.Empty<string>(), DesktopLogging.DebugLoggers(null).ToArray());
+        CollectionAssert.AreEqual(Array.Empty<string>(), DesktopLogging.DebugLoggers("  ").ToArray());
+        CollectionAssert.AreEqual(new[] { "CodeAlta.ClaudeCode.Protocol", "CodeAlta.Desktop" },
+            DesktopLogging.DebugLoggers(" CodeAlta.ClaudeCode.Protocol ; CodeAlta.Desktop,,CodeAlta.ClaudeCode.Protocol").ToArray());
+    }
+
+    [TestMethod]
     public void Startup_DoesNotReplaceOrShutDownAnExistingLogger()
     {
         Assert.IsFalse(LogManager.IsInitialized);

@@ -234,7 +234,7 @@ public sealed class SessionPermissionServiceTests
                 new AgentGenericPermissionRequest(new ModelProviderId("test"), "session", DateTimeOffset.UnixEpoch, null, "interaction", "commandExecution", default),
                 // A file change is reviewed, but only when it says where it would write and says it completely.
                 FileChange(null), FileChange(" "), FileChange(new string('x', SessionPermissionService.OwnedDirectoryLimit + 1)),
-                FileChange("bad\udc00"), FileChange("Q:\\fixture") with { Reason = new string('x', SessionPermissionService.OwnedReasonLimit + 1) },
+                FileChange("bad\udc00"),
                 FileChange("Q:\\fixture") with { InteractionId = " " }, FileChange("Q:\\fixture") with { SessionId = "other" },
                 request with { SessionId = "other" }, request with { ProviderId = new ModelProviderId("other") },
                 request with { SessionId = "SESSION" },
@@ -242,9 +242,7 @@ public sealed class SessionPermissionServiceTests
                 request with { InteractionId = " " }, request with { RunId = new AgentRunId("bad\ud800") },
                 request with { RunId = new AgentRunId(new string('x', SessionPermissionService.OwnedIdentityLimit + 1)) },
                 request with { Command = " " }, request with { WorkingDirectory = null },
-                request with { Command = new string('x', SessionPermissionService.OwnedCommandLimit + 1) },
                 request with { WorkingDirectory = new string('x', SessionPermissionService.OwnedDirectoryLimit + 1) },
-                request with { Reason = new string('x', SessionPermissionService.OwnedReasonLimit + 1) },
                 request with { InteractionId = new string('x', SessionPermissionService.OwnedIdentityLimit + 1) },
                 request with { InteractionId = " padded" }, request with { InteractionId = "bad\0id" },
                 request with { WorkingDirectory = "bad\udc00" }, request with { Command = "bad\0command" },
@@ -257,6 +255,29 @@ public sealed class SessionPermissionServiceTests
                 deliveries.Add(denied);
                 Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await denied.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
             }
+
+            // A command or a reason longer than the review shows is not denied unseen: it waits, shown cut, and says so.
+            foreach (var (longer, shownCommand, shownReason) in new (AgentPermissionRequest, string?, string?)[]
+            {
+                (request with { Command = new string('x', SessionPermissionService.OwnedCommandLimit - 1) + "\U0001f600" },
+                    new string('x', SessionPermissionService.OwnedCommandLimit - 1), request.Reason),
+                (request with { Reason = new string('r', SessionPermissionService.OwnedReasonLimit + 1) },
+                    request.Command, new string('r', SessionPermissionService.OwnedReasonLimit)),
+                (FileChange("Q:\\fixture") with { Reason = new string('r', SessionPermissionService.OwnedReasonLimit + 1) },
+                    null, new string('r', SessionPermissionService.OwnedReasonLimit)),
+            })
+            {
+                var waiting = service.HandleOwnedCommandAsync(execution, longer, CancellationToken.None);
+                deliveries.Add(waiting);
+                var shown = (await service.ListAsync()).Single();
+                Assert.IsTrue(shown.Shortened);
+                Assert.AreEqual(shownCommand, shown.Command, "Cut without splitting a character");
+                Assert.AreEqual(shownReason, shown.Reason);
+                Assert.IsFalse(waiting.IsCompleted);
+                Assert.IsTrue(await service.ResolveAsync(shown.Handle, AgentPermissionDecisionKind.Deny));
+                Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await waiting.WaitAsync(TimeSpan.FromSeconds(5))).Kind);
+            }
+
             request = request with
             {
                 Command = new string('x', SessionPermissionService.OwnedCommandLimit - 2) + "\U0001f600",
@@ -286,6 +307,7 @@ public sealed class SessionPermissionServiceTests
             Assert.AreEqual(request.WorkingDirectory, snapshot.WorkingDirectory);
             Assert.AreEqual(request.Reason, snapshot.Reason);
             Assert.IsNull(snapshot.GrantRoot);
+            Assert.IsFalse(snapshot.Shortened, "A request at the limits is shown whole");
             var handle = snapshot.Handle;
             Assert.IsFalse(await service.ResolveAsync(handle, AgentPermissionDecisionKind.AllowForSession));
             Assert.IsTrue(await service.IsPendingAsync(handle));

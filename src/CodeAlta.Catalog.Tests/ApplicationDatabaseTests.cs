@@ -278,6 +278,47 @@ public sealed class ApplicationDatabaseTests
     }
 
     [TestMethod]
+    public async Task Migrate_CurrentVersionDoesNotTakeAnotherConnectionsWriteLock()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) =>
+            ExecuteAsync(connection, "CREATE TABLE stats_day (id INTEGER);", token));
+
+        await using var writer = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database.DatabasePath, Pooling = false }.ToString());
+        await writer.OpenAsync();
+        await using var transaction = await writer.BeginTransactionAsync();
+        await using var reader = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = database.DatabasePath,
+            BusyTimeout = TimeSpan.FromMilliseconds(200),
+        });
+        var migrated = false;
+        await reader.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) =>
+        {
+            migrated = true;
+            return ValueTask.CompletedTask;
+        });
+
+        Assert.IsFalse(migrated);
+        Assert.AreEqual(1, await reader.GetVersionAsync("plugin:stats"));
+        await transaction.RollbackAsync();
+    }
+
+    [TestMethod]
+    public async Task Migrate_CurrentVersionStillRefusesToRunInsideAWrite()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) =>
+            ExecuteAsync(connection, "CREATE TABLE stats_day (id INTEGER);", token));
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await database.WriteAsync("outer", async (connection, token) =>
+                await database.MigrateAsync("plugin:stats", "stats_", 1, (inner, from, to, innerToken) => ValueTask.CompletedTask, token)));
+    }
+
+    [TestMethod]
     public async Task Migrate_ToAnOlderVersionThanRecorded_ThrowsAndChangesNothing()
     {
         using var temp = TempFolder.Create();

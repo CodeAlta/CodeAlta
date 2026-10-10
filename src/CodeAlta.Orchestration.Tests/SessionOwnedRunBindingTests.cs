@@ -100,6 +100,23 @@ public sealed class SessionOwnedRunBindingTests
             (await f.Wait(f.Keep(next(f.Request("refused", null), CancellationToken.None)))).Kind);
     });
 
+    [TestMethod]
+    public Task OwnedPermission_OfASendWithoutExecution_KeepsTheApprovalPolicyItStartedWith() => Fixture.Run(async f =>
+    {
+        // A send that reviews nothing and asks the user nothing has no owned execution: its default decision is
+        // fixed when it starts all the same, so turning the review on while it runs does not deny what it does.
+        f.AutoApprove = true;
+        var started = f.Permissions.CreateSendDefaultPermissionHandler(null);
+        f.AutoApprove = false;
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Wait(f.Keep(started(f.Request("still-approved", null), CancellationToken.None)))).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny,
+            (await f.Wait(f.Keep(f.Permissions.CreateSendDefaultPermissionHandler(null)(f.Request("refused", null), CancellationToken.None)))).Kind);
+        // The policy of a session the send started with decides over the host.
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Wait(f.Keep(f.Permissions.CreateSendDefaultPermissionHandler(SessionPermissionPolicy.Approve)(f.Request("bypassed", null), CancellationToken.None)))).Kind);
+    });
+
     private sealed class Fixture
     {
         private readonly object _gate = new();

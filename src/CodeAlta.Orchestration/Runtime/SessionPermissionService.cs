@@ -27,7 +27,14 @@ public sealed record SessionPermissionHandle(string SessionId, string? RunId, st
 /// <param name="GrantRoot">Optional file-change grant root.</param>
 public sealed record SessionPermissionSnapshot(
     SessionPermissionHandle Handle, ModelProviderId ProviderId, DateTimeOffset Timestamp, string Kind,
-    string? Command, string? WorkingDirectory, string? Reason, string? GrantRoot);
+    string? Command, string? WorkingDirectory, string? Reason, string? GrantRoot)
+{
+    /// <summary>
+    /// Gets whether the command or the reason is longer than what the review shows: they are then cut, and what is
+    /// allowed is longer than what is shown.
+    /// </summary>
+    public bool Shortened { get; init; }
+}
 
 /// <summary>A permission registration with a read-only completion; no frontend owns its completion source.</summary>
 public sealed class SessionPermissionRegistration
@@ -156,6 +163,17 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// the owner's commands.
     /// </summary>
     public AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
+
+    // The default decision of one send that no owned execution reviews: the policy is read now, so the send keeps it
+    // until it ends, as a send with an owned execution does. The policy of its session, when it has one, is the one
+    // the send started with; otherwise the automatic approval of the host decides.
+    internal AgentPermissionRequestHandler CreateSendDefaultPermissionHandler(SessionPermissionPolicy? policy)
+    {
+        var autoApprove = policy is { } own ? own == SessionPermissionPolicy.Approve : _autoApproveOwnedPermissions();
+        return (_, token) => Task.FromResult(new AgentPermissionDecision(
+            token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
+            : autoApprove ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+    }
 
     /// <summary>Gets the host's default user-input answer for sessions it owns: the request is canceled.</summary>
     public AgentUserInputRequestHandler OwnedDefaultUserInputHandler { get; }
@@ -432,20 +450,21 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         => pending.CancellationToken.IsCancellationRequested || (pending.OwnedExecution is { } execution && !CanUse(execution));
 
     // A request the owned review can present: it is addressed to this execution, and it is one of the two kinds
-    // the review shows whole. A richer command prompt (parsed actions, network access, a policy amendment) is
-    // still refused rather than shown as less than it is.
+    // the review shows. A richer command prompt (parsed actions, network access, a policy amendment) is still
+    // refused rather than shown as less than it is. A command or a reason longer than the review shows is shown
+    // cut, and says so (`Shortened`): refused, it would be denied without the user seeing it at all.
     private static bool Eligible(OwnedPermissionExecution execution, AgentPermissionRequest request)
         => Addressed(execution, request) && request switch
         {
             AgentCommandPermissionRequest command => request.Kind == "commandExecution"
-                && ValidOwnedText(command.Command, OwnedCommandLimit, required: true)
+                && ValidOwnedText(command.Command, int.MaxValue, required: true)
                 && ValidOwnedText(command.WorkingDirectory, OwnedDirectoryLimit, required: true)
-                && ValidOwnedText(command.Reason, OwnedReasonLimit, required: false)
+                && ValidOwnedText(command.Reason, int.MaxValue, required: false)
                 && command.ApprovalId is null && command.Actions is null && command.Network is null
                 && command.ProposedExecPolicyAmendment is null && command.ProposedNetworkPolicyAmendments is null,
             AgentFileChangePermissionRequest change => request.Kind == "fileChange"
                 && ValidOwnedText(change.GrantRoot, OwnedDirectoryLimit, required: true)
-                && ValidOwnedText(change.Reason, OwnedReasonLimit, required: false),
+                && ValidOwnedText(change.Reason, int.MaxValue, required: false),
             _ => false,
         };
 
@@ -461,11 +480,25 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         => request switch
         {
             AgentCommandPermissionRequest command => new(handle, request.ProviderId, request.Timestamp, request.Kind,
-                command.Command, command.WorkingDirectory, command.Reason, null),
+                Shown(command.Command, OwnedCommandLimit), command.WorkingDirectory, Shown(command.Reason, OwnedReasonLimit), null)
+            {
+                Shortened = command.Command!.Length > OwnedCommandLimit || command.Reason?.Length > OwnedReasonLimit,
+            },
             AgentFileChangePermissionRequest change => new(handle, request.ProviderId, request.Timestamp, request.Kind,
-                null, null, change.Reason, change.GrantRoot),
+                null, null, Shown(change.Reason, OwnedReasonLimit), change.GrantRoot)
+            {
+                Shortened = change.Reason?.Length > OwnedReasonLimit,
+            },
             _ => throw new InvalidOperationException($"A permission request of kind '{request.Kind}' is not presented by the owned review."),
         };
+
+    // The start of a text the review shows, cut without splitting a character.
+    private static string? Shown(string? value, int limit)
+    {
+        if (value is null || value.Length <= limit) return value;
+        var end = char.IsHighSurrogate(value[limit - 1]) ? limit - 1 : limit;
+        return value[..end];
+    }
 
     private static bool ValidOwnedText(string? value, int limit, bool required, bool identity = false)
     {

@@ -47,7 +47,7 @@ internal sealed class DesktopShell
 
     private readonly NeoWindow _window;
     private readonly NeoDispatcher _dispatcher;
-    private readonly string _dataRoot;
+    private readonly DesktopPreferencesWriter _writer;
     private readonly Action _exit;
     private readonly Lock _gate = new();
     private readonly List<Action<DesktopShellEvent>> _watchers = [];
@@ -72,9 +72,9 @@ internal sealed class DesktopShell
         ArgumentNullException.ThrowIfNull(exit);
         _window = window;
         _dispatcher = dispatcher;
-        _dataRoot = dataRoot;
         _exit = exit;
-        _preferences = DesktopPreferences.Load(dataRoot);
+        _preferences = DesktopPreferences.Load(dataRoot).AtStart();
+        _writer = new(dataRoot, () => { lock (_gate) return _preferences; });
     }
 
     /// <summary>The number of sessions with a run in flight; zero until there is a host to ask.</summary>
@@ -286,9 +286,8 @@ internal sealed class DesktopShell
     /// <summary>Changes what closing the window does, and keeps the choice.</summary>
     internal void SetOnClose(DesktopCloseBehavior value)
     {
-        DesktopPreferences preferences;
-        lock (_gate) preferences = _preferences = _preferences with { OnClose = value };
-        preferences.Save(_dataRoot);
+        lock (_gate) _preferences = _preferences with { OnClose = value };
+        _writer.Write();
     }
 
     /// <summary>
@@ -307,7 +306,7 @@ internal sealed class DesktopShell
             if (_preferences.ReviewPermissions != value) preferences = _preferences = _preferences with { ReviewPermissions = value };
         }
 
-        preferences?.Save(_dataRoot);
+        if (preferences is not null) _writer.Write();
     }
 
     /// <summary>
@@ -326,7 +325,48 @@ internal sealed class DesktopShell
             if (_preferences.InheritPermissions != value) preferences = _preferences = _preferences with { InheritPermissions = value };
         }
 
-        preferences?.Save(_dataRoot);
+        if (preferences is not null) _writer.Write();
+    }
+
+    /// <summary>
+    /// The user's setting: whether the sessions that had Remote Control on when CodeAlta exited have it turned on
+    /// again when it starts.
+    /// </summary>
+    internal bool ReconnectRemoteControl { get { lock (_gate) return _preferences.ReconnectRemoteControl; } }
+
+    /// <summary>Changes that setting and keeps it.</summary>
+    /// <param name="value">Whether Remote Control is turned on again at start.</param>
+    internal void SetReconnectRemoteControl(bool value)
+    {
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            if (_preferences.ReconnectRemoteControl != value) preferences = _preferences = _preferences with { ReconnectRemoteControl = value };
+        }
+
+        if (preferences is not null) _writer.Write();
+    }
+
+    /// <summary>The sessions that have Remote Control on, the last turned on first.</summary>
+    internal IReadOnlyList<string> RemoteControlSessions { get { lock (_gate) return _preferences.RemoteControlSessions; } }
+
+    /// <summary>Remembers that a session has Remote Control on, or no longer has it, and keeps it.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="on">Whether its Remote Control is on.</param>
+    internal void NoteRemoteControl(string sessionId, bool on)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            var sessions = _preferences.RemoteControlSessions.Where(id => !string.Equals(id, sessionId, StringComparison.Ordinal));
+            System.Collections.Immutable.ImmutableArray<string> next = on
+                ? [.. new[] { sessionId }.Concat(sessions).Take(DesktopPreferences.MaximumRemoteControlSessions)]
+                : [.. sessions];
+            if (!next.SequenceEqual(_preferences.RemoteControlSessions)) preferences = _preferences = _preferences with { RemoteControlSessions = next };
+        }
+
+        if (preferences is not null) _writer.Write();
     }
 
     /// <summary>The most sessions that are shown with a width of their own at a time.</summary>
@@ -354,7 +394,7 @@ internal sealed class DesktopShell
 
         if (preferences is not null)
         {
-            preferences.Save(_dataRoot);
+            _writer.Write();
             Publish(new("session-width", 0, SessionWidth: value));
         }
 
@@ -425,7 +465,7 @@ internal sealed class DesktopShell
         if (preferences is not null)
         {
             ApplyZoom?.Invoke(zoom / 100d);
-            preferences.Save(_dataRoot);
+            _writer.Write();
         }
     }
 
@@ -435,9 +475,8 @@ internal sealed class DesktopShell
     /// <summary>Turns the MCP server on or off for the next starts; the server itself is started and stopped by its owner.</summary>
     internal void SetMcpServer(bool value)
     {
-        DesktopPreferences preferences;
-        lock (_gate) preferences = _preferences = _preferences with { McpServer = value };
-        preferences.Save(_dataRoot);
+        lock (_gate) _preferences = _preferences with { McpServer = value };
+        _writer.Write();
     }
 
     /// <summary>

@@ -55,6 +55,12 @@ public sealed class DesktopOwnedSessionTests
         Assert.AreEqual("stale_epoch", (await service.StopBackgroundTaskAsync(new("another", "session", "b1"), CancellationToken.None)).Status);
         foreach (var refused in new SessionStopBackgroundTaskRequest[] { new("epoch", " ", "b1"), new("epoch", "session", ""), new("epoch", "session", " b1"), new("epoch", "session", new string('x', 257)) })
             Assert.AreEqual("invalid_request", (await service.StopBackgroundTaskAsync(refused, CancellationToken.None)).Status);
+        // Remote Control is checked the same way, and a host that owns no session has none.
+        Assert.AreEqual("unconfigured", (await new SessionOperationsService().SetRemoteControlAsync(new("epoch", "session", true), CancellationToken.None)).Status);
+        Assert.AreEqual("stale_epoch", (await service.SetRemoteControlAsync(new("another", "session", true), CancellationToken.None)).Status);
+        foreach (var refused in new SessionRemoteControlRequest[] { new("epoch", " ", true), new("epoch", " session", true), new("epoch", new string('x', 257), false) })
+            Assert.AreEqual("invalid_request", (await service.SetRemoteControlAsync(refused, CancellationToken.None)).Status);
+        Assert.AreEqual("unavailable", (await service.SetRemoteControlAsync(new("epoch", "session", true), CancellationToken.None)).Status);
         // A page whose host owns no session has no task to stop.
         Assert.AreEqual(("unavailable", "session"), ((await service.StopBackgroundTaskAsync(new("epoch", "session", "b1"), CancellationToken.None)).Status, "session"));
         Assert.AreEqual("stale_epoch", (await service.SearchReferencesAsync(search with { ExpectedEpoch = "old" }, CancellationToken.None)).Status);

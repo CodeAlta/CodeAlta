@@ -115,6 +115,15 @@ public sealed class SessionPermissionsRpcTests
     }
 
     [TestMethod]
+    public async Task ARequestShownCut_SaysSoOnTheWire()
+    {
+        var entry = Entry();
+        Assert.IsFalse((await Service(new([entry], false)).ListAsync(new(Epoch, "session"), default)).Entries.Single().Shortened);
+        var cut = entry with { Request = entry.Request with { Shortened = true } };
+        Assert.IsTrue((await Service(new([cut], false)).ListAsync(new(Epoch, "session"), default)).Entries.Single().Shortened);
+    }
+
+    [TestMethod]
     public async Task GeneratedMaximumEscapingFitsBudgetAndPreservesCompleteCommands()
     {
         var id = new string('"', 128);

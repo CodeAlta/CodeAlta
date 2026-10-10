@@ -25,7 +25,16 @@ internal static class DesktopLogging
             FailureMode = FileLogWriterFailureMode.Ignore,
         }));
         config.Loggers.Add("CodeAlta", LogLevel.Info);
+        // A developer looks closer at some loggers, for instance what the Claude Code CLI sends
+        // (CODEALTA_DEBUG_LOGGERS=CodeAlta.ClaudeCode.Protocol): they are written at the Debug level.
+        foreach (var name in DebugLoggers(Environment.GetEnvironmentVariable("CODEALTA_DEBUG_LOGGERS")))
+            config.Loggers.Add(name, LogLevel.Debug);
         LogManager.InitializeForAsync(config);
         return capture;
     }
+
+    /// <summary>The names of the loggers to write at the Debug level, from a list separated by commas or semicolons.</summary>
+    internal static IReadOnlyList<string> DebugLoggers(string? value)
+        => string.IsNullOrWhiteSpace(value) ? []
+            : value.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToArray();
 }

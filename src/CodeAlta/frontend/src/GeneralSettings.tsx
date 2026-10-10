@@ -31,7 +31,7 @@ function SessionWidthSlider({ value, label, onChange }: { value: number; label: 
   </div>;
 }
 
-export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, sessionWidth, setSessionWidth, closing, confirms }: {
+export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, sort, setSort, desktopCollapsed, setDesktopCollapsed, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, sessionWidth, setSessionWidth, remoteControl, closing, confirms }: {
   theme: Theme;
   setTheme: (value: Theme) => void;
   /** Whether the dark theme is the darker one. */
@@ -55,6 +55,8 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
   closing?: { behavior: CloseBehavior; platform: string; trayIcon?: boolean; set: (value: CloseBehavior) => void } | null;
   /** What asks before it is done: the answer "do not ask again" of a question is taken back here. */
   confirms?: Readonly<Record<Confirmation, boolean>> & { set: (confirmation: Confirmation, ask: boolean) => void };
+  /** Whether the sessions that had Remote Control on have it turned on again when CodeAlta starts. */
+  remoteControl?: { reconnect: boolean; set: (value: boolean) => void } | null;
   notices: PreferenceNotices;
 }) {
   const { t, locale, choice, issue, setLanguage } = useShellLanguage();
@@ -117,6 +119,13 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
       </Field>
     </>}
     <LandingSettings />
+    {remoteControl && <Field label={t("Turn Remote Control back on when CodeAlta starts")} htmlFor="settings-reconnect-remote-control"
+      notice={<p className="settings-field-help">{t(remoteControl.reconnect
+        ? "Sessions that had Remote Control on when CodeAlta exited are connected again."
+        : "Remote Control is turned on by hand, for each session.")}</p>}>
+      <Switch id="settings-reconnect-remote-control" className="settings-checkbox" checked={remoteControl.reconnect}
+        onChange={event => remoteControl.set(event.currentTarget.checked)} />
+    </Field>}
     {closing && <Field label={t("When the window is closed")} htmlFor="settings-on-close"
       notice={closing.behavior === "keep" && <p className="settings-field-help">{t(keepRunningPlace(closing.platform, closing.trayIcon))}</p>}>
       <HTMLSelect id="settings-on-close" value={closing.behavior} onChange={event => closing.set(closeBehavior(event.target.value))}>

@@ -43,9 +43,29 @@ internal enum DesktopCloseBehavior
 /// Whether a session that another session creates takes the permission mode of its creator. Off unless the user
 /// turned it on: such a session does not ask. The host keeps it because it reads it when a session is created.
 /// </param>
+/// <param name="ReconnectRemoteControl">
+/// Whether the sessions that had Remote Control on when CodeAlta exited have it turned on again when it starts.
+/// Off unless the user turned it on.
+/// </param>
 internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true, int SessionWidth = DesktopPreferences.DefaultSessionWidth,
-    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false, bool InheritPermissions = false)
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false, bool InheritPermissions = false, bool ReconnectRemoteControl = false)
 {
+    /// <summary>The most sessions whose Remote Control is remembered, the last turned on first.</summary>
+    internal const int MaximumRemoteControlSessions = 32;
+
+    /// <summary>
+    /// The sessions that have Remote Control on, the last turned on first: those the reconnect setting turns on
+    /// again when CodeAlta starts.
+    /// </summary>
+    internal ImmutableArray<string> RemoteControlSessions { get; init; } = [];
+
+    /// <summary>
+    /// The preferences CodeAlta starts with: without the reconnect setting, the sessions that had Remote Control on
+    /// are off now, and are forgotten, so that the setting turned on later turns on again only those that are on
+    /// when CodeAlta exits next.
+    /// </summary>
+    internal DesktopPreferences AtStart() => ReconnectRemoteControl || RemoteControlSessions.IsDefaultOrEmpty ? this : this with { RemoteControlSessions = [] };
+
     /// <summary>The least width of a conversation, in percent.</summary>
     internal const int MinimumSessionWidth = CodeAlta.LiveTool.IAltaAppearance.MinimumSessionWidth;
 
@@ -105,12 +125,19 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             var inherit = root.TryGetProperty("inheritPermissions", out var inherited) && inherited.ValueKind == JsonValueKind.True;
             var zoom = root.TryGetProperty("zoom", out var zoomed) && zoomed.ValueKind == JsonValueKind.Number && zoomed.TryGetInt32(out var factor) && IsZoom(factor)
                 ? factor : DefaultZoom;
+            // Not reconnected unless the file says so; a session that is not one is left out.
+            var reconnect = root.TryGetProperty("reconnectRemoteControl", out var reconnected) && reconnected.ValueKind == JsonValueKind.True;
+            ImmutableArray<string> remote = root.TryGetProperty("remoteControlSessions", out var sessions) && sessions.ValueKind == JsonValueKind.Array
+                ? [.. sessions.EnumerateArray().Where(static id => id.ValueKind == JsonValueKind.String).Select(static id => id.GetString()!)
+                    .Where(IsSessionId).Distinct(StringComparer.Ordinal).Take(MaximumRemoteControlSessions)]
+                : [];
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server, width, zoom, review, inherit);
+                return new(behavior, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote };
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var kept) && kept.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit)
-                : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review, InheritPermissions = inherit };
+                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote }
+                : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review, InheritPermissions = inherit,
+                    ReconnectRemoteControl = reconnect, RemoteControlSessions = remote };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -131,7 +158,10 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             File.WriteAllText(temporary, "{\"onClose\":\"" + Name(OnClose) + "\"" + (McpServer ? "" : ",\"mcpServer\":false")
                 + (SessionWidth == DefaultSessionWidth ? "" : ",\"sessionWidth\":" + SessionWidth.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + (InheritPermissions ? ",\"inheritPermissions\":true" : "") + "}");
+                + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + (InheritPermissions ? ",\"inheritPermissions\":true" : "")
+                + (ReconnectRemoteControl ? ",\"reconnectRemoteControl\":true" : "")
+                + (RemoteControlSessions.IsDefaultOrEmpty ? "" : ",\"remoteControlSessions\":" + JsonSerializer.Serialize(RemoteControlSessions.ToArray(), DesktopPreferencesJson.Default.StringArray))
+                + "}");
             File.Move(temporary, path, overwrite: true);
             return true;
         }
@@ -140,6 +170,9 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             return false;
         }
     }
+
+    // A session identity as the catalog writes them: what the file says of another thing is left out.
+    private static bool IsSessionId(string value) => value.Length is > 0 and <= 128 && !value.Any(char.IsControl) && value == value.Trim();
 
     /// <summary>The name of a behavior in the file and for the page: <c>ask</c>, <c>keep</c> or <c>exit</c>.</summary>
     internal static string Name(DesktopCloseBehavior behavior) => behavior switch
@@ -161,3 +194,24 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
         return name is "ask" or "keep" or "exit";
     }
 }
+
+/// <summary>
+/// Writes the preferences of the application one write at a time, each with the preferences as they are when it is
+/// made: two changes made at the same time (a setting of the user, a session that turns Remote Control on) never
+/// leave the file with the older one.
+/// </summary>
+/// <param name="dataRoot">Where the preferences are kept.</param>
+/// <param name="latest">The preferences as they are now.</param>
+internal sealed class DesktopPreferencesWriter(string dataRoot, Func<DesktopPreferences> latest)
+{
+    private readonly Lock _gate = new();
+
+    /// <summary>Writes the preferences as they are now; false when the file could not be written.</summary>
+    internal bool Write()
+    {
+        lock (_gate) return latest().Save(dataRoot);
+    }
+}
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
+internal sealed partial class DesktopPreferencesJson : System.Text.Json.Serialization.JsonSerializerContext;
