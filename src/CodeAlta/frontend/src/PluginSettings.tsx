@@ -21,6 +21,7 @@ const builtIn: readonly { id: string; name: string; description: MessageKey }[] 
   { id: "git", name: "Git", description: "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available." },
   { id: "jira", name: "Jira", description: "The issues of a Jira project, for the projects whose configuration names one." },
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
+  { id: "landing", name: "Landing page", description: "The welcome page: recent sessions and projects, the documentation and the cards of plugins." },
   { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
 ];
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };

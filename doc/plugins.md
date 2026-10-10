@@ -713,7 +713,9 @@ project): it declares the canvas of the landing page (`landing`, scope Applicati
 and the command `landing` (`/landing`) that opens it, and nothing else. The page is drawn by the frontend of the
 application and holds no state; the cards on it are the landing cards of the other plugins. It is disabled with
 `[plugins.landing]` and `enabled = false`, which also takes the page out of the Canvases page and makes
-`alta landing open` answer `landing.unavailable`; see `doc/desktop.md`, "The landing page".
+`alta landing open` answer `landing.unavailable`; see `doc/desktop.md`, "The landing page". Settings > Plugins lists it
+with the other plugins that ship with CodeAlta ("Landing page", in the list of `PluginSettings.tsx`), with the same
+switch, which writes that entry; like every plugin that ships with CodeAlta it follows at the next start.
 
 The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
 

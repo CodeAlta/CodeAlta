@@ -111,7 +111,7 @@ Two switches at the bottom of the page are kept on your computer. The same two a
 | **Show at startup** | The page opens in front each time CodeAlta Desktop starts. On by default. Turn it off to start on your last tab |
 | **Animation** | The colored pixels at the right of the welcome move slowly. On by default. They never move when your system asks for reduced motion, or while the tab is not in front |
 
-A plugin can pin its own card on the page: see [Cards on the welcome page](plugins/developers.md#cards-on-the-welcome-page). To remove the page, turn the **Landing page** plugin off in Settings > Plugins.
+A plugin can pin its own card on the page: see [Cards on the welcome page](plugins/developers.md#cards-on-the-welcome-page). To remove the page, turn the **Landing page** plugin off in Settings > Plugins. The change applies the next time CodeAlta Desktop starts.
 
 ## Timeline cards
 

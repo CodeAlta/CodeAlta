@@ -105,6 +105,34 @@ public sealed class DesktopLandingPluginTests
         StringAssert.Contains(refused.Stdout + refused.Stderr, "landing.unavailable");
     }
 
+    [TestMethod]
+    public async Task TurnedOffInConfiguration_ThePageIsGone_AndThePluginsPageWritesThatEntry()
+    {
+        // What the switch of the row "Landing page" of Settings > Plugins writes, for the next start.
+        var settings = await Fixture.CreateAsync();
+        string global;
+        await using (settings)
+        {
+            global = settings.Global;
+            var plugins = new PluginsService(settings.Projects, Epoch, settings.Runtime);
+            var saved = await plugins.SetEnabledAsync(new(Epoch, null, "Global", AltaLanding.PluginId, false), default);
+            Assert.AreEqual("ok", saved.Status, saved.Message);
+            StringAssert.Contains(File.ReadAllText(Path.Combine(global, "config.toml")).ReplaceLineEndings("\n"), "[plugins.landing]\nenabled = false");
+            // A plugin that ships with CodeAlta follows at the next start: the page that is open stays for this run.
+            Assert.IsNotNull(settings.Broker.Find(AltaLanding.PluginKey, AltaLanding.CanvasId));
+        }
+
+        await using var fixture = await Fixture.CreateAsync(configuration: "[plugins.landing]\nenabled = false\n");
+
+        Assert.IsFalse(fixture.Runtime.ActivePlugins.Any(static plugin => plugin.Descriptor.RuntimeKey == AltaLanding.PluginKey), "the plugin is not started");
+        Assert.IsNull(fixture.Broker.Find(AltaLanding.PluginKey, AltaLanding.CanvasId), "no canvas: nothing on the Canvases page, nothing to open at startup");
+        Assert.IsFalse((await fixture.Ui.ContributionsAsync(new(Epoch, null), default)).Commands.Any(static command => command.Name == "landing"), "no /landing");
+        Assert.AreEqual("plugin_stopped", (await new CanvasesService(fixture.Broker, Epoch).OpenAsync(new(Epoch, AltaLanding.PluginKey, AltaLanding.CanvasId, "work", null, null, null, true), default)).Status,
+            "a tab of the page that was left open says its plugin does not run");
+        // The other plugins are as they were.
+        Assert.IsNotNull(fixture.Broker.Find("builtin:other", "board"));
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _root;
@@ -128,10 +156,11 @@ public sealed class DesktopLandingPluginTests
             });
         }
 
-        public static async Task<Fixture> CreateAsync(bool landing = true)
+        public static async Task<Fixture> CreateAsync(bool landing = true, string? configuration = null)
         {
             var root = Path.Combine(Path.GetTempPath(), "CodeAlta-landing-" + Guid.NewGuid().ToString("N"));
             var global = Directory.CreateDirectory(Path.Combine(root, "home", ".alta")).FullName;
+            if (configuration is not null) File.WriteAllText(Path.Combine(global, "config.toml"), configuration);
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = global });
             var ui = new DesktopPluginUi();
             var broker = new DesktopCanvases(ui);

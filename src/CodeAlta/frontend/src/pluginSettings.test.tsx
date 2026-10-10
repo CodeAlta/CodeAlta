@@ -26,17 +26,17 @@ test("the plugins that ship with CodeAlta come first and are on until configurat
   const rows = pluginRows([entry("notes", { name: "Notes", description: "Keeps notes." }), entry("bare", { name: "" }),
     entry("git", { kind: "BuiltIn", enabled: false, folder: null, path: null, loadable: false })], english);
   assert.deepEqual(rows.map(row => [row.id, row.name, row.enabled, row.builtIn]),
-    [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["ui", "UI tools", true, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
+    [["mcp", "MCP", true, true], ["git", "Git", false, true], ["jira", "Jira", true, true], ["statistics", "Statistics", true, true], ["landing", "Landing page", true, true], ["ui", "UI tools", true, true], ["notes", "Notes", true, false], ["bare", "bare", true, false]]);
   assert.equal(rows[0].entry, null);
   assert.equal(rows[1].entry?.id, "git");
-  assert.equal(rows[5].description, "Keeps notes.");
-  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "ui"]);
+  assert.equal(rows[6].description, "Keeps notes.");
+  assert.deepEqual(pluginRows([], english).map(row => row.id), ["mcp", "git", "jira", "statistics", "landing", "ui"]);
 });
 
 test("a source plugin with the id of a plugin that ships with CodeAlta keeps its own row and its actions", () => {
   const rows = pluginRows([entry("git", { enabledGlobal: false, enabled: false, state: "Disabled", runtime: null })], english);
   assert.deepEqual(rows.map(row => [row.id, row.builtIn, row.entry?.kind ?? null, row.enabled]),
-    [["mcp", true, null, true], ["git", true, null, false], ["jira", true, null, true], ["statistics", true, null, true], ["ui", true, null, true], ["git", false, "Source", false]]);
+    [["mcp", true, null, true], ["git", true, null, false], ["jira", true, null, true], ["statistics", true, null, true], ["landing", true, null, true], ["ui", true, null, true], ["git", false, "Source", false]]);
   const html = render([entry("git")]);
   assert.equal(cards(html).filter(value => value.includes("<strong>git</strong>") && value.includes('aria-label="Edit git"')).length, 1, html);
   assert.ok(!card(html, "Git").includes("Edit Git"), html);
@@ -180,4 +180,32 @@ test("a row lists the canvases its plugin declares, with their scope, before any
   }
   const html = render([entry("notes")]);
   assert.ok(!html.includes("plugin-canvas"), "Nothing is listed where nothing is declared.");
+});
+
+test("the landing page is a plugin that ships with CodeAlta: its row has its switch, its canvas and its description, in every language", () => {
+  // Without a word of configuration the page is on, as the other plugins that ship with CodeAlta.
+  const landing = pluginRows([], english).find(row => row.id === "landing") ?? assert.fail("no row for the landing page");
+  assert.deepEqual([landing.name, landing.enabled, landing.builtIn, landing.entry], ["Landing page", true, true, null]);
+  // [plugins.landing] enabled = false: the host lists the id, and the row is the same one, turned off.
+  const configured = [entry("landing", { kind: "BuiltIn", enabled: false, enabledGlobal: false, state: "Disabled", runtime: null, folder: null, path: null, loadable: false })];
+  const off = pluginRows(configured, english);
+  assert.deepEqual(off.filter(row => row.id === "landing").map(row => [row.enabled, row.builtIn, row.entry?.id ?? null]), [[false, true, "landing"]], "one row, not a second one for the id of configuration");
+  const declared = [canvas("landing", { pluginKey: "builtin:landing", plugin: "Landing page", title: "Welcome" }), canvas("stats", { pluginKey: "builtin:statistics", plugin: "Statistics" })];
+  assert.deepEqual(pluginCanvases(landing, declared).map(value => value.id), ["landing"]);
+  for (const locale of locales) {
+    const draw = (listed: readonly PluginsEntry[]) => card(renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(PluginRows, { rows: pluginRows(listed, key => translate(locale, key)), canvases: declared, disabled: false, onToggle: never, onReload: never, onEdit: never, onDelete: never,
+        platform: "windows", onReveal: never }))), "Landing page");
+    const on = draw([]);
+    assert.ok(on.includes(translate(locale, "The welcome page: recent sessions and projects, the documentation and the cards of plugins.")), `${locale}: ${on}`);
+    assert.ok(on.includes(`>${translate(locale, "Built-in")}<`), on);
+    assert.ok(on.includes(translate(locale, "Canvas: {title} ({scope})", { title: "Welcome", scope: translate(locale, "Application") })), on);
+    // A switch and nothing else: a plugin that ships with CodeAlta is neither edited nor removed.
+    const toggle = new RegExp(`<input[^>]*aria-label="${translate(locale, "Enable {name}", { name: "Landing page" })}"[^>]*>`, "u");
+    assert.match(on, toggle);
+    assert.ok(/checked=""/u.test(toggle.exec(on)![0]), on);
+    assert.ok(!/checked=""/u.test(toggle.exec(draw(configured))![0]), "turned off by configuration");
+    assert.ok(!on.includes("bp6-intent-danger") && !on.includes(translate(locale, "Edit {name}", { name: "Landing page" })), on);
+  }
+  if (locales.length > 1) assert.notEqual(translate(locales[1], "The welcome page: recent sessions and projects, the documentation and the cards of plugins."), english("The welcome page: recent sessions and projects, the documentation and the cards of plugins."));
 });
