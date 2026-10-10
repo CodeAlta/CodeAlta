@@ -26,8 +26,9 @@ export const lentLibraries: readonly LentLibrary[] = [
 ];
 
 /**
- * The text of the import map of `index.html`. It is inline, so the content security policy of the page names its SHA-256
- * (`assets.csp` of `neoastra.json`): a change here is a change of both, which `lent.test.ts` checks.
+ * The text of the import map of the entry document, which the build writes there (`vite.config.ts`). It is inline, so the content
+ * security policy of the page names its SHA-256 (`assets.csp` of `neoastra.json`): a change here is a change of the policy, which
+ * `pluginScript.test.ts` checks on this text and `ImportMapPolicyTests` on the document that was built.
  */
 export function importMapText(): string {
   return JSON.stringify({ imports: Object.fromEntries(lentLibraries.map(library => [library.name, `./${library.file}`])) });

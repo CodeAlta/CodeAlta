@@ -138,7 +138,10 @@ export function Chart(props: ChartProps) {
   const host = useRef<HTMLDivElement>(null);
   const chart = useRef<ChartInstance | null>(null);
   const [engine, setEngine] = useState<Engine | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  // Why there is no chart: ECharts could not be loaded, or could not draw the option.
+  const [failure, setFailure] = useState<Readonly<{ kind: "load" | "draw"; detail: string }> | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const failed = useRef<ChartOption | null>(null);
   const [tokens, setTokens] = useState<ChartTokens | null>(null);
   const [created, setCreated] = useState(0);
   const [showTable, setShowTable] = useState(false);
@@ -171,9 +174,29 @@ export function Chart(props: ChartProps) {
   useEffect(() => {
     let cancelled = false;
     import("./chartEngine").then(loaded => { if (!cancelled) setEngine(loaded); },
-      error => { if (!cancelled) setFailure(error instanceof Error ? error.message : String(error)); });
+      error => { if (!cancelled) setFailure({ kind: "load", detail: error instanceof Error ? error.message : String(error) }); });
     return () => { cancelled = true; };
   }, []);
+
+  // What ECharts throws is said in the place of the chart, and the page around it goes on: an option comes from a plugin as well as from the
+  // application, and an error that leaves an effect takes the whole window with it. The chart that failed is let go.
+  const fail = useCallback((error: unknown, instance: ChartInstance | null) => {
+    if (instance) {
+      try { if (!instance.isDisposed()) instance.dispose(); } catch { /* What is left of it goes with its element. */ }
+      if (chart.current === instance) chart.current = null;
+    }
+
+    applied.current = null;
+    failed.current = latest.current.option;
+    setFailure({ kind: "draw", detail: error instanceof Error ? error.message : String(error) });
+  }, []);
+  // Another option is another try.
+  useEffect(() => {
+    if (failure?.kind !== "draw" || !failed.current || sameContent(failed.current, option)) return;
+    failed.current = null;
+    setFailure(null);
+    setAttempt(value => value + 1);
+  }, [failure, option]);
 
   // The chart: created when the engine is there and the chart has been shown, disposed when anything it was built from changes.
   const canvasRatio = renderer === "canvas" ? shownRatio : 0;
@@ -181,7 +204,9 @@ export function Chart(props: ChartProps) {
     const element = host.current;
     if (!engine || !element || !everActive) return;
     const read = readChartTokens(element);
-    const created = engine.createChart(element, buildChartTheme(read), renderer);
+    let created: ChartInstance;
+    try { created = engine.createChart(element, buildChartTheme(read), renderer); }
+    catch (error) { fail(error, null); return; }
     chart.current = created;
     applied.current = null;
     if (latest.current.group) { created.group = latest.current.group; engine.connectGroup(latest.current.group); }
@@ -209,8 +234,8 @@ export function Chart(props: ChartProps) {
     });
     setTokens(read);
     setCreated(value => value + 1);
-    return () => { created.dispose(); if (chart.current === created) chart.current = null; };
-  }, [engine, everActive, renderer, shownTheme, canvasRatio]);
+    return () => { if (!created.isDisposed()) created.dispose(); if (chart.current === created) chart.current = null; };
+  }, [engine, everActive, renderer, shownTheme, canvasRatio, attempt, fail]);
 
   // The option: drawn when the chart exists and is shown, and again when its content, not its identity, changes.
   useEffect(() => {
@@ -219,29 +244,34 @@ export function Chart(props: ChartProps) {
     const previous = applied.current;
     if (previous && previous.reduced === reducedMotion && sameContent(previous.option, option)) return;
     if (previous) state.current = carryViewState(previous.option, option, state.current);
-    instance.setOption(prepareOption(option, { reducedMotion, state: state.current }), { notMerge: update === "replace" });
+    try { instance.setOption(prepareOption(option, { reducedMotion, state: state.current }), { notMerge: update === "replace" }); }
+    catch (error) { fail(error, instance); return; }
     applied.current = { option, reduced: reducedMotion };
     setHidden(state.current.hidden);
-  }, [option, active, created, reducedMotion, update]);
+  }, [option, active, created, reducedMotion, update, fail]);
 
   // The size: the chart follows its box, and is told again when it is shown.
   useEffect(() => {
     const element = host.current;
     if (!element) return;
-    const fit = () => { if (activeRef.current && element.clientWidth > 0 && element.clientHeight > 0) chart.current?.resize(); };
+    const fit = () => {
+      if (!activeRef.current || element.clientWidth === 0 || element.clientHeight === 0) return;
+      const instance = chart.current;
+      try { instance?.resize(); } catch (error) { fail(error, instance); }
+    };
     const observer = new ResizeObserver(fit);
     observer.observe(element);
     fit();
     return () => observer.disconnect();
-  }, [created, active]);
+  }, [created, active, fail]);
 
   const shown = useMemo(() => showTable ? table ?? tableFromOption(option) : null, [showTable, table, option]);
   const entries = useMemo(() => option.legend === undefined ? [] : legendEntries(option, tokens?.series ?? []), [option, tokens]);
   const toggle = useCallback((name: string) => {
     const instance = chart.current;
-    if (instance) instance.dispatchAction({ type: "legendToggleSelect", name });
+    if (instance) { try { instance.dispatchAction({ type: "legendToggleSelect", name }); } catch (error) { fail(error, instance); } }
     else setHidden(known => { const next = new Set(known); if (!next.delete(name)) next.add(name); return next; });
-  }, []);
+  }, [fail]);
   const copy = () => { if (shown) void navigator.clipboard?.writeText(tableToText(shown)); };
 
   const style = { "--chart-height": `${height}px` } as CSSProperties;
@@ -255,7 +285,7 @@ export function Chart(props: ChartProps) {
       <li key={entry.name}><button type="button" className="chart-legend-item" aria-pressed={!hidden.has(entry.name)} onClick={() => toggle(entry.name)}>
         <i style={{ background: entry.color }} aria-hidden="true" />{entry.name}</button></li>)}</ul>}
     <div className="chart-surface" role="img" aria-label={entries.length > 1 ? `${ariaLabel}. ${t("Series")}: ${entries.map(entry => entry.name).join(", ")}` : ariaLabel} hidden={showTable} ref={host} />
-    {failure && <p className="chart-failure" role="alert">{failure}</p>}
+    {failure && <p className="chart-failure" role="alert" title={failure.kind === "draw" ? failure.detail : undefined}>{failure.kind === "draw" ? t("This chart could not be drawn.") : failure.detail}</p>}
     {shown && <div className="chart-table-scroll">
       <HTMLTable compact striped className="chart-table">
         <caption>{ariaLabel}</caption>

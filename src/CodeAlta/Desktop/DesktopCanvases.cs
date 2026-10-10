@@ -212,10 +212,13 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             && string.Equals(plugin.Descriptor.RuntimeKey, pluginKey, StringComparison.Ordinal)) ?? false;
     }
 
-    /// <summary>The identifier of the instance that an identity names.</summary>
+    /// <summary>
+    /// The identifier of the instance that an identity names. A session names its instance by itself: its project is what the instance is
+    /// about, not part of its name, so the plugin that leaves the project out and the page that knows it mean the same instance.
+    /// </summary>
     internal static string InstanceId(CanvasIdentity identity)
     {
-        var text = string.Join('\0', identity.PluginKey, identity.CanvasId, identity.SpaceId ?? string.Empty, identity.ProjectId ?? string.Empty,
+        var text = string.Join('\0', identity.PluginKey, identity.CanvasId, identity.SpaceId ?? string.Empty, identity.SessionId is null ? identity.ProjectId ?? string.Empty : string.Empty,
             identity.SessionId ?? string.Empty, identity.Key ?? string.Empty);
         return Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(text)).AsSpan(0, 12));
     }
@@ -240,6 +243,12 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     internal static bool ValidLine(string? text, int maximum)
         => text is { Length: > 0 } && text.Length <= maximum && !text.Any(char.IsControl);
 
+    /// <summary>Whether what names an instance is well formed: every part of it reaches the handlers of a plugin, whoever asks.</summary>
+    internal static bool ValidIdentity(CanvasIdentity identity)
+        => ValidLine(identity.PluginKey, 512) && ValidCanvasId(identity.CanvasId) && (identity.SpaceId is null || ValidLine(identity.SpaceId, MaximumIdUnits))
+            && (identity.ProjectId is null || ValidLine(identity.ProjectId, MaximumIdUnits)) && (identity.SessionId is null || ValidLine(identity.SessionId, MaximumIdUnits))
+            && (identity.Key is null || ValidLine(identity.Key, MaximumKeyUnits));
+
     /// <summary>
     /// Opens an instance, or returns the one that is open, and says whether a tab shows it. The plugin's open handler
     /// runs once for an identity, whatever the number of callers.
@@ -250,16 +259,15 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     /// <returns>How it ended.</returns>
     internal async ValueTask<CanvasOpening> OpenAsync(CanvasIdentity identity, bool visible, CancellationToken cancellationToken)
     {
-        if (!ValidLine(identity.PluginKey, 512) || !ValidCanvasId(identity.CanvasId) || identity.SpaceId is not null && !ValidLine(identity.SpaceId, MaximumIdUnits)
-            || identity.ProjectId is not null && !ValidLine(identity.ProjectId, MaximumIdUnits) || identity.SessionId is not null && !ValidLine(identity.SessionId, MaximumIdUnits)
-            || identity.Key is not null && !ValidLine(identity.Key, MaximumKeyUnits)) return new("invalid_request", null, null);
+        if (!ValidIdentity(identity)) return new("invalid_request", null, null);
         lock (_gate) if (_runtime is null || _disposed) return new("unavailable", null, null);
-        var declaration = Find(identity.PluginKey, identity.CanvasId);
-        if (declaration is null) return new(IsActive(identity.PluginKey) ? "unknown_canvas" : "plugin_stopped", null, null);
-        if (Normalize(identity, declaration.Canvas.Scope) is not { } named) return new("invalid_request", null, declaration);
-        var id = InstanceId(named);
+        CanvasDeclaration? declaration = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
+            declaration = Find(identity.PluginKey, identity.CanvasId);
+            if (declaration is null) return new(IsActive(identity.PluginKey) ? "unknown_canvas" : "plugin_stopped", null, null);
+            if (Normalize(identity, declaration.Canvas.Scope) is not { } named) return new("invalid_request", null, declaration);
+            var id = InstanceId(named);
             Instance instance;
             lock (_gate)
             {
@@ -276,6 +284,17 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             try
             {
                 if (instance.Closed) continue;
+                // The plugins may have changed while the caller waited for the instance: it is written by the version that runs now,
+                // never by the one that was found before the wait.
+                var current = Find(identity.PluginKey, identity.CanvasId);
+                if (current is null || current.Canvas.Scope != declaration.Canvas.Scope)
+                {
+                    // The canvas is gone, or names its instances otherwise: an instance made for this call alone is let go, and the canvas is looked for again.
+                    if (!instance.Initialized) Remove(instance);
+                    continue;
+                }
+
+                declaration = current;
                 if (!instance.Initialized || !ReferenceEquals(instance.Plugin, declaration.Plugin) || instance.State != "ready")
                 {
                     if (await InitializeAsync(instance, declaration).ConfigureAwait(false) is { } failure)
@@ -286,7 +305,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
                 }
 
                 SetVisible(instance, visible);
-                return new("ok", Snapshot(instance), declaration);
+                // One state of the instance: a push that comes now is in the answer with its revision, or after it.
+                CanvasInstanceState state;
+                lock (_gate) state = Snapshot(instance);
+                return new("ok", state, declaration);
             }
             finally
             {
@@ -332,8 +354,11 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     }
 
     /// <summary>Runs the action of an element of the fragment of an open instance.</summary>
-    /// <returns>The status (<c>ok</c>, <c>unknown</c>, <c>unsupported</c>, <c>failed</c>), the new content when it changes, and whether the instance closed.</returns>
-    internal async ValueTask<(string Status, string? Html, bool Closed)> ActionAsync(string instanceId, string action, string? value,
+    /// <returns>
+    /// The status (<c>ok</c>, <c>unknown</c>, <c>unsupported</c>, <c>failed</c>), the new content when it changes with the revision it is, and whether
+    /// the instance closed.
+    /// </returns>
+    internal async ValueTask<(string Status, string? Html, bool Closed, int Revision)> ActionAsync(string instanceId, string action, string? value,
         IReadOnlyDictionary<string, string>? values, CancellationToken cancellationToken)
     {
         Instance? instance;
@@ -341,11 +366,11 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         PluginCanvasActionHandler? handler;
         lock (_gate)
         {
-            if (!_instances.TryGetValue(instanceId, out instance) || instance.Closed) return ("unknown", null, false);
+            if (!_instances.TryGetValue(instanceId, out instance) || instance.Closed) return ("unknown", null, false, 0);
             (context, handler) = (instance.Context, instance.View?.OnAction);
         }
 
-        if (context is null || handler is null) return (instance.State == "ready" ? "unsupported" : "unknown", null, false);
+        if (context is null || handler is null) return (instance.State == "ready" ? "unsupported" : "unknown", null, false, 0);
         PluginCanvasActionResult result;
         try
         {
@@ -354,23 +379,24 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             result = await handler(context, new PluginCanvasAction { Name = action, Value = value, Values = values ?? new Dictionary<string, string>() }, linked.Token).ConfigureAwait(false)
                 ?? PluginCanvasActionResult.KeepOpen;
         }
-        catch (OperationCanceledException) { return ("unknown", null, false); }
+        catch (OperationCanceledException) { return ("unknown", null, false, 0); }
         catch (Exception exception)
         {
             LogFailure(exception, instance, "action");
-            return ("failed", null, false); // The plugin's own failure: its text stays out of the page.
+            return ("failed", null, false, 0); // The plugin's own failure: its text stays out of the page.
         }
 
         if (result.Close)
         {
             await CloseInstanceAsync(instance, notifyPage: false).ConfigureAwait(false);
-            return ("ok", null, true);
+            return ("ok", null, true, 0);
         }
 
-        if (result.Html is null) return ("ok", null, false);
+        if (result.Html is null) return ("ok", null, false, 0);
         var html = Cut(result.Html, MaximumHtmlUnits);
-        // The answer carries the content, and the push of the same revision is dropped by the page: nothing is sent twice.
-        return PushHtml(instance, context, html, answered: true) ? ("ok", html, false) : ("unknown", null, false);
+        // The answer carries the content and its revision, and is not pushed besides: the page drops a push that is older than the answer,
+        // and the answer when a newer push came before it.
+        return PushHtml(instance, context, html, answered: true) is { } revision ? ("ok", html, false, revision) : ("unknown", null, false, 0);
     }
 
     /// <summary>Describes what an instance shows, in Markdown.</summary>
@@ -379,6 +405,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     /// <returns>The status (<c>ok</c>, <c>unknown_canvas</c>, <c>plugin_stopped</c>, <c>invalid_request</c>, <c>failed</c>) and the text; the text is null when the canvas cannot describe itself.</returns>
     internal async ValueTask<(string Status, string? Markdown)> DescribeAsync(CanvasIdentity identity, CancellationToken cancellationToken)
     {
+        if (!ValidIdentity(identity)) return ("invalid_request", null);
         var declaration = Find(identity.PluginKey, identity.CanvasId);
         if (declaration is null) return (IsActive(identity.PluginKey) ? "unknown_canvas" : "plugin_stopped", null);
         if (Normalize(identity, declaration.Canvas.Scope) is not { } named) return ("invalid_request", null);
@@ -415,6 +442,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     /// <returns>The status (<c>ok</c>, <c>unknown_canvas</c>, <c>unknown_action</c>, <c>plugin_stopped</c>, <c>invalid_request</c>, <c>failed</c>) and the JSON result, or null.</returns>
     internal async ValueTask<(string Status, JsonElement? Result)> InvokeAsync(CanvasIdentity identity, string action, JsonElement? input, CancellationToken cancellationToken)
     {
+        if (!ValidIdentity(identity)) return ("invalid_request", null);
         var declaration = Find(identity.PluginKey, identity.CanvasId);
         if (declaration is null) return (IsActive(identity.PluginKey) ? "unknown_canvas" : "plugin_stopped", null);
         if (Normalize(identity, declaration.Canvas.Scope) is not { } named || input is { } given && given.GetRawText().Length > MaximumInputUnits) return ("invalid_request", null);
@@ -436,14 +464,18 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
 
     /// <summary>Opens the connection of the script of an instance to its plugin: a session that the page's frames are given to.</summary>
     /// <param name="instanceId">The instance.</param>
-    /// <returns><c>ok</c> with the identifier of the connection; <c>unknown</c> when the instance is not open; <c>unavailable</c> when it has no calls or no page watches.</returns>
+    /// <returns>
+    /// <c>ok</c> with the identifier of the connection; <c>unknown</c> when the instance is not open; <c>unavailable</c> when the instance has no
+    /// calls, which does not change while it is open; <c>not_watching</c> when no page watches now, so that no answer could be carried: asking
+    /// again later can work.
+    /// </returns>
     internal (string Status, string? Connection) RpcOpen(string instanceId)
     {
         HostContext? context;
         int generation;
         lock (_gate)
         {
-            if (_disposed || _outbox is null) return ("unavailable", null);
+            if (_disposed || _outbox is null) return ("not_watching", null);
             if (!_instances.TryGetValue(instanceId, out var instance) || instance.Closed || instance.State != "ready") return ("unknown", null);
             (context, generation) = (instance.Context, _watchGeneration);
         }
@@ -656,8 +688,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         var pane = fromPane ? _ui?.Scope : null;
         var operation = fromPane ? PluginOrchestrationBridge.CurrentToolOperation : null;
         var space = options?.SpaceId ?? shown;
-        var identity = new CanvasIdentity(pluginKey, canvasId, space, options?.ProjectId ?? operation?.ProjectId ?? pane?.ProjectId,
-            options?.SessionId ?? operation?.SessionId ?? pane?.SessionId, options?.Key);
+        var (projectId, sessionId) = declaration.Canvas.Scope == PluginCanvasScope.Session
+            ? SessionContext(options, (operation?.ProjectId, operation?.SessionId), (pane?.ProjectId, pane?.SessionId))
+            : (options?.ProjectId ?? operation?.ProjectId ?? pane?.ProjectId, null);
+        var identity = new CanvasIdentity(pluginKey, canvasId, space, projectId, sessionId, options?.Key);
         if (!ValidLine(identity.PluginKey, 512) || space is not null && !ValidLine(space, MaximumIdUnits) || identity.ProjectId is not null && !ValidLine(identity.ProjectId, MaximumIdUnits)
             || identity.SessionId is not null && !ValidLine(identity.SessionId, MaximumIdUnits) || identity.Key is not null && !ValidLine(identity.Key, MaximumKeyUnits)
             || options?.Input is { } input && input.GetRawText().Length > MaximumInputUnits) return new(PluginCanvasOpenStatus.Invalid, null, null, false);
@@ -687,6 +721,21 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         }
 
         return new(PluginCanvasOpenStatus.Requested, id, named.SpaceId, named.SpaceId is null || string.Equals(named.SpaceId, shown, StringComparison.Ordinal));
+    }
+
+    // The session a request for a session canvas is about, with its project: what the request names, then the operation that asks, then the pane.
+    // A session and its project come from the same place: a session that the request names never takes the project of a pane that is about
+    // another session, and a project that the request names never takes the session of a pane of another project.
+    private static (string? ProjectId, string? SessionId) SessionContext(PluginCanvasOpenOptions? options, params ReadOnlySpan<(string? ProjectId, string? SessionId)> around)
+    {
+        foreach (var (projectId, sessionId) in around)
+        {
+            if (sessionId is null) continue;
+            if (options?.SessionId is { } named ? string.Equals(named, sessionId, StringComparison.Ordinal)
+                : options?.ProjectId is not { } wanted || string.Equals(wanted, projectId, StringComparison.Ordinal)) return (options?.ProjectId ?? projectId, sessionId);
+        }
+
+        return (options?.ProjectId, options?.SessionId);
     }
 
     private async ValueTask InvalidateAsync(string? pluginKey, string canvasId)
@@ -742,26 +791,37 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             return "failed";
         }
 
-        HostContext? previous;
-        bool shownBefore;
+        HostContext? previous = null;
+        var shownBefore = false;
+        bool gone;
         lock (_gate)
         {
-            if (instance.Closed || _disposed) { context.Retire(); return "failed"; }
-            previous = instance.Context;
-            shownBefore = instance.Initialized;
-            instance.Plugin = declaration.Plugin;
-            instance.Canvas = declaration.Canvas;
-            instance.Context = context;
-            instance.View = view;
-            instance.Input = input;
-            instance.Html = Cut(html ?? string.Empty, MaximumHtmlUnits);
-            instance.Title = Line(string.IsNullOrWhiteSpace(view.Title) ? declaration.Canvas.Title : view.Title, MaximumTitleUnits);
-            instance.StatusText = string.IsNullOrWhiteSpace(view.Status) ? null : Line(view.Status, MaximumStatusUnits);
-            instance.Revision++;
-            instance.Initialized = true;
-            instance.State = "ready";
-            instance.Script = script;
-            instance.ScriptProblem = scriptProblem;
+            gone = instance.Closed || _disposed;
+            if (!gone)
+            {
+                previous = instance.Context;
+                shownBefore = instance.Initialized;
+                instance.Plugin = declaration.Plugin;
+                instance.Canvas = declaration.Canvas;
+                instance.Context = context;
+                instance.View = view;
+                instance.Input = input;
+                instance.Html = Cut(html ?? string.Empty, MaximumHtmlUnits);
+                instance.Title = Line(string.IsNullOrWhiteSpace(view.Title) ? declaration.Canvas.Title : view.Title, MaximumTitleUnits);
+                instance.StatusText = string.IsNullOrWhiteSpace(view.Status) ? null : Line(view.Status, MaximumStatusUnits);
+                instance.Revision++;
+                instance.Initialized = true;
+                instance.State = "ready";
+                instance.Script = script;
+                instance.ScriptProblem = scriptProblem;
+            }
+        }
+
+        if (gone)
+        {
+            // What a plugin registered on the token of the instance runs when the context is retired: never under the lock of the broker.
+            context.Retire();
+            return "failed";
         }
 
         // A version that was replaced: what it held ends with it, and it is not asked to close.
@@ -788,21 +848,20 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         context?.RaiseVisibility(visible);
     }
 
-    // Pushes a fragment: false when the context is no longer the one of the instance (it was replaced or closed).
-    private bool PushHtml(Instance instance, HostContext context, string html, bool answered)
+    // Pushes a fragment and gives the revision the content of the instance is then; null when the context is no longer the one of the instance (it was replaced or closed).
+    private int? PushHtml(Instance instance, HostContext context, string html, bool answered)
     {
         lock (_gate)
         {
-            if (instance.Closed || !ReferenceEquals(instance.Context, context)) return false;
+            if (instance.Closed || !ReferenceEquals(instance.Context, context)) return null;
             html = Cut(html, MaximumHtmlUnits);
-            if (string.Equals(instance.Html, html, StringComparison.Ordinal)) return true;
+            if (string.Equals(instance.Html, html, StringComparison.Ordinal)) return instance.Revision;
             instance.Html = html;
             instance.Revision++;
             // The page that asked for this change has the content in its answer.
             if (!answered) PostUpdateLocked(instance, full: false, html);
+            return instance.Revision;
         }
-
-        return true;
     }
 
     private void PushTitle(Instance instance, HostContext context, string? title, string? status, bool setTitle, bool setStatus)
@@ -867,14 +926,19 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             instance.Gate.Release();
         }
 
+        await EndAsync(instance, context, canvas).ConfigureAwait(false);
+        return true;
+    }
+
+    // Ends what an instance that closed held for its plugin: its token is cancelled, then the handler of the plugin runs. Never under the lock of the broker.
+    private static async Task EndAsync(Instance instance, HostContext? context, PluginCanvasContribution? canvas)
+    {
         context?.Retire();
         if (context is not null && canvas?.Closed is { } closed)
         {
             try { await closed(context).ConfigureAwait(false); }
             catch (Exception exception) { LogFailure(exception, instance.Identity, "close"); }
         }
-
-        return true;
     }
 
     // An instance that is gone from the plugin: its tab waits, and the plugin's old handlers are let go of.
@@ -919,20 +983,20 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             lock (_gate) open = [.. _instances.Values.OrderBy(static instance => instance.Order)];
             foreach (var instance in open)
             {
-                var declaration = Find(instance.Identity.PluginKey, instance.Identity.CanvasId);
-                if (declaration is null)
-                {
-                    await instance.Gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-                    try { MarkStopped(instance, IsActive(instance.Identity.PluginKey) ? "unknown_canvas" : "plugin_stopped"); }
-                    finally { instance.Gate.Release(); }
-                    continue;
-                }
-
-                if (ReferenceEquals(instance.Plugin, declaration.Plugin) && instance.State == "ready") continue;
+                // The instance is looked at once nothing else opens, replaces or closes it: an open that was running has written it by then,
+                // and the handler of a plugin runs once for a version.
                 await instance.Gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
                 try
                 {
                     if (instance.Closed) continue;
+                    var declaration = Find(instance.Identity.PluginKey, instance.Identity.CanvasId);
+                    if (declaration is null)
+                    {
+                        MarkStopped(instance, IsActive(instance.Identity.PluginKey) ? "unknown_canvas" : "plugin_stopped");
+                        continue;
+                    }
+
+                    if (ReferenceEquals(instance.Plugin, declaration.Plugin) && instance.State == "ready") continue;
                     if (await InitializeAsync(instance, declaration).ConfigureAwait(false) is not null) MarkStopped(instance, "failed");
                 }
                 finally
@@ -947,15 +1011,16 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         }
     }
 
-    // Closes the oldest instance that no tab shows. The page asks for it again when its tab is shown.
+    // Closes the oldest instance that no tab shows. Its plugin is told as for a tab that was closed. Its tab is not: when it is shown again
+    // the host answers that it does not know the instance, and the tab asks for it again.
     private bool EvictOldestHiddenLocked()
     {
         var oldest = _instances.Values.Where(static instance => instance.Initialized && !instance.Visible && !instance.Closed).OrderBy(static instance => instance.Order).FirstOrDefault();
         if (oldest is null) return false;
         oldest.Closed = true;
         _instances.Remove(oldest.Id);
-        var context = oldest.Context;
-        _ = Task.Run(() => context?.Retire());
+        var (context, canvas) = (oldest.Context, oldest.Canvas);
+        _ = Task.Run(() => EndAsync(oldest, context, canvas));
         return true;
     }
 
@@ -1052,6 +1117,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         private readonly CancellationTokenSource? _closed;
         // The token outlives its source, which is disposed when the context is retired.
         private readonly CancellationToken _token;
+        private int _retired;
 
         // What the plugin registers for its script to call: only an instance that has a tab has one.
         private readonly PluginRpcRegistry? _rpc;
@@ -1119,10 +1185,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             catch (Exception exception) { LogFailure(exception, this, "visibility"); }
         }
 
-        /// <summary>Ends the instance for the plugin: its token is cancelled and what it pushes is dropped.</summary>
+        /// <summary>Ends the instance for the plugin: its token is cancelled and what it pushes is dropped. Retiring twice is retiring once.</summary>
         public void Retire()
         {
-            if (_closed is not { } closed) return;
+            if (_closed is not { } closed || Interlocked.Exchange(ref _retired, 1) != 0) return;
             Endpoint?.Retire();
             try
             {
@@ -1370,5 +1436,6 @@ internal sealed class CanvasOutbox
         {
             Html = newer.Html ?? older.Html, Title = newer.Title ?? older.Title, StatusText = newer.StatusText ?? older.StatusText,
             Actions = newer.Actions ?? older.Actions, Revision = newer.Revision ?? older.Revision, State = newer.State ?? older.State,
+            Script = newer.Script ?? older.Script, ScriptProblem = newer.ScriptProblem ?? older.ScriptProblem,
         };
 }

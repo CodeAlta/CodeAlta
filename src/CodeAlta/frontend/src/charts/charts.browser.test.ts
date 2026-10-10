@@ -216,6 +216,42 @@ test("a chart follows its box, waits while hidden, redraws at every page zoom, a
   }, { reducedMotion: true });
 });
 
+test("a chart whose option cannot be drawn says so and leaves the page around it, then draws an option that can", { skip: !edge, timeout: 120_000 }, async () => {
+  await withGallery(async page => {
+    await page.until(allDrawn, "the charts");
+    await page.until(`document.querySelector('[data-chart="fragile"] .chart-surface svg')`, "the chart drawn");
+    const failureOf = (id: string) => `document.querySelector('[data-chart="${id}"] .chart-failure')?.textContent`;
+
+    // The option comes from a plugin as well as from the application: one that ECharts refuses is said in the place of the chart.
+    await page.evaluate(`chartsFixture.set({ fragile: chartsBroken })`);
+    await page.until(`${failureOf("fragile")} === 'This chart could not be drawn.'`, "the failure said in place of the chart");
+    assert.equal(await page.evaluate(`document.querySelector('[data-chart="fragile"] .chart').hasAttribute('data-failed')`), true);
+    assert.equal(await page.evaluate(`document.querySelector('[data-chart="fragile"] .chart-surface svg')`), null, "what was drawn before is gone");
+    assert.match(await page.evaluate<string>(`document.querySelector('[data-chart="fragile"] .chart-failure').title`), /bogus/, "what ECharts said is there for the author");
+    // The page around it goes on: the other charts are there, and still follow the page.
+    await page.until(allDrawn, "the other charts");
+    await page.evaluate(`chartsFixture.set({ width: 600, fragileFromStart: true })`);
+    await page.until(`Math.round(document.querySelector('[data-chart="grouped"] .chart-surface svg').getBoundingClientRect().width) > 540`, "the other charts follow their box");
+    // A chart draws once it is on screen: the new one is below what the window shows.
+    await page.evaluate(`document.querySelector('[data-chart="fragile-start"]').scrollIntoView()`);
+    await page.until(`${failureOf("fragile-start")} === 'This chart could not be drawn.'`, "a chart that never drew says so as well");
+    // The table is still read from the option.
+    await page.evaluate(`document.querySelector('[data-chart="fragile"] .chart-table-toggle').click()`);
+    await page.until(`document.querySelector('[data-chart="fragile"] table.chart-table')`, "the table of the option");
+    await page.evaluate(`document.querySelector('[data-chart="fragile"] .chart-table-toggle').click()`);
+
+    // An option that can be drawn is drawn, and the message goes.
+    await page.evaluate(`chartsFixture.set({ fragile: chartsLate })`);
+    await page.until(`document.querySelector('[data-chart="fragile"] .chart-surface svg') && !document.querySelector('[data-chart="fragile"] .chart-failure')`, "the chart drawn again");
+    assert.equal(await page.evaluate(`chartsFixture.instance('fragile').getOption().series[0].data.length`), 2);
+    // A change of theme builds the charts on screen again: the one that cannot be drawn fails again, quietly, beside one that is drawn.
+    await page.evaluate(`chartsFixture.setTheme(false)`);
+    await page.until(`[...document.querySelectorAll('[data-chart="fragile"] .chart-surface svg path')].some(p => (p.getAttribute('fill') || '').toLowerCase() === '#147eb3')`, "the light theme");
+    assert.equal(await page.evaluate<string>(failureOf("fragile-start")), "This chart could not be drawn.");
+    assert.equal(await page.evaluate(`document.querySelector('[data-chart="fragile-start"] .chart-surface svg')`), null);
+  });
+});
+
 test("the table shows what the chart draws and copies it, and the legend is a row of buttons", { skip: !edge, timeout: 120_000 }, async () => {
   await withGallery(async page => {
     await page.until(allDrawn, "the charts");

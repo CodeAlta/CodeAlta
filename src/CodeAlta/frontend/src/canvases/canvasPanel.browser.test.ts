@@ -87,6 +87,15 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
     assert.equal(await wait(`${content}==='while hidden'`), true);
     assert.equal(await wait("canvasFixture.state.calls.at(-1) === 'visible:true'"), true);
 
+    // The host closed the instance of the hidden tab to make room for others: shown again, the tab asks for its instance again.
+    await evaluate("canvasFixture.render({ visible: false })");
+    assert.equal(await wait("canvasFixture.state.calls.at(-1) === 'visible:false'"), true);
+    const opens = await evaluate<number>("canvasFixture.state.opened");
+    await evaluate("window.firstHtml = canvasFixture.scenario.html; Object.assign(canvasFixture.scenario, { html: '<p>opened again</p>', revision: 4 }); canvasFixture.state.evicted = true; canvasFixture.render({ visible: true })");
+    assert.equal(await wait(`${content}==='opened again'`), true, "a tab whose instance the host no longer knows opens it again");
+    assert.equal(await evaluate("canvasFixture.state.opened"), opens + 1);
+    await evaluate("Object.assign(canvasFixture.scenario, { html: window.firstHtml, revision: 1 })");
+
     // The plugin stops: the tab says so and goes on listening; its new version brings the content back.
     await evaluate("canvasFixture.push({ kind: 'state', state: 'plugin_stopped' })");
     assert.equal(await wait("document.querySelector('.canvas-placeholder')?.textContent.includes('The plugin is not running.')"), true);
@@ -134,6 +143,17 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
     await evaluate("canvasFixture.clear(); canvasFixture.scenario.status = 'unknown_canvas'; canvasFixture.render()");
     assert.equal(await wait("document.querySelector('.canvas-placeholder')?.textContent.includes('The plugin no longer has this canvas.')"), true);
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.canvas-placeholder button')].map(button => button.textContent.trim())"), ["Close"]);
+
+    // A tab that goes away while the host opens its instance: the instance was opened as shown, and nothing else would tell the host it is not.
+    await evaluate("canvasFixture.clear(); canvasFixture.scenario.status = 'ok'; canvasFixture.state.holdOpens = true; canvasFixture.state.calls.length = 0; canvasFixture.render(); canvasFixture.clear(); canvasFixture.release()");
+    assert.equal(await wait("canvasFixture.state.calls.includes('visible:false')"), true, "the host is told that no tab shows the instance");
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.deepEqual(await evaluate("canvasFixture.state.calls.filter(call => call.startsWith('visible'))"), ["visible:false"], "once, and only for the tab that went away");
+    // A tab that stays is not said to be hidden by the first of the two runs React makes of its effects.
+    await evaluate("canvasFixture.state.calls.length = 0; canvasFixture.state.holdOpens = true; canvasFixture.render(); canvasFixture.release()");
+    assert.equal(await wait(`${content}==='first'`), true);
+    assert.equal(await wait("canvasFixture.state.calls.includes('visible:true')"), true);
+    assert.deepEqual(await evaluate("canvasFixture.state.calls.filter(call => call === 'visible:false')"), []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

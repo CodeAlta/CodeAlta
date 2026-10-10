@@ -48,7 +48,7 @@ export function PluginHtml({ html, pluginKey = null, pane, className, script, on
   // A script that filled the fragment is ended by putting the fragment back; the blocks are then found again.
   const [fragmentVersion, setFragmentVersion] = useState(0);
   const seen = useWhenShown(root, !!script?.whenShown && !!script.path);
-  const { state: scripted, fail } = usePluginScript(script && script.whenShown && !seen ? { ...script, path: null, problem: null } : script, pluginKey, pane, sanitize);
+  const { state: scripted, fail } = usePluginScript(script && script.whenShown && !seen ? { ...script, path: null, problem: null } : script, pluginKey, pane, sanitize, markup.__html);
   const restore = useCallback(() => {
     if (root.current) { root.current.innerHTML = markup.__html; setFragmentVersion(value => value + 1); }
   }, [markup]);

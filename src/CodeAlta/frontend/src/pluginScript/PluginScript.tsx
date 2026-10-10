@@ -93,10 +93,13 @@ export type PluginScriptState = Readonly<{
 /**
  * Loads the script of some content and gives it its `alta` object. The module is loaded when the path is set and again when it
  * changes (a reloaded plugin has a new path); the object lives as long as the content is drawn for that path, and its `closed`
- * signal aborts when either ends.
+ * signal aborts when either ends. A script that fills the fragment (`mount`) lives as long as that fragment: when the plugin writes
+ * another one, what the script made is gone with the old one, so its object ends and the script starts on the new fragment with another.
+ *
+ * @param fragment The HTML the content shows, which a `mount` fills; a component takes its place and does not depend on it.
  */
 export function usePluginScript(script: PluginScriptProps | undefined, pluginKey: string | null, pane: Partial<PluginPane> | undefined,
-  sanitize: (html: string) => string): Readonly<{ state: PluginScriptState; fail: (error: unknown, stage: "mount" | "render") => void }> {
+  sanitize: (html: string) => string, fragment: string | null = null): Readonly<{ state: PluginScriptState; fail: (error: unknown, stage: "mount" | "render") => void }> {
   const path = script?.path ?? null;
   const problem = script?.problem ?? null;
   const load = script?.load;
@@ -123,6 +126,7 @@ export function usePluginScript(script: PluginScriptProps | undefined, pluginKey
 
   // The object lives for one load of one module: a reload of the plugin ends the old one (its `closed` aborts) before the new one starts.
   const ready = loaded?.module ?? null;
+  const filled = ready?.kind === "mount" ? fragment : null;
   useLayoutEffect(() => {
     if (!ready) { setHandle(null); return; }
     const made = createAlta({
@@ -132,7 +136,7 @@ export function usePluginScript(script: PluginScriptProps | undefined, pluginKey
     });
     setHandle(made);
     return () => made.dispose();
-  }, [ready, pluginKey, instance?.canvasId, instance?.instanceId, instance?.spaceId, instance?.key, inputKey, projectId, sessionId, bridge, sanitize, rpc]);
+  }, [ready, filled, pluginKey, instance?.canvasId, instance?.instanceId, instance?.spaceId, instance?.key, inputKey, projectId, sessionId, bridge, sanitize, rpc]);
   useEffect(() => { handle?.setVisible(visible); }, [handle, visible]);
 
   const [lateFailure, setLateFailure] = useState<Readonly<{ path: string; error: ScriptError }> | null>(null);
@@ -153,9 +157,10 @@ export function usePluginScript(script: PluginScriptProps | undefined, pluginKey
 }
 
 /**
- * Calls `mount(root, alta)` of a script on the element that holds the fragment, and ends it: the `closed` signal of its `alta` aborts, the
- * function `mount` returned is called, and the element goes back to the fragment. React runs the effect twice for a new component
- * in development, so each run starts from the fragment and ends cleanly.
+ * Calls `mount(root, alta)` of a script on the element that holds the fragment, and ends it: the `closed` signal of its `alta` has aborted
+ * (the object is the one of `usePluginScript`, which ends it), the function `mount` returned is called, and the element goes back to the
+ * fragment. React runs the effect twice for a new component in development, so each run starts from the fragment and ends cleanly, and
+ * the second one is given an object that is not closed.
  */
 export function usePluginScriptMount(state: PluginScriptState, root: RefObject<HTMLElement | null>, restore: () => void, fail: (error: unknown, stage: "mount") => void) {
   const { module, handle } = state;
@@ -173,7 +178,6 @@ export function usePluginScriptMount(state: PluginScriptState, root: RefObject<H
       error => { if (!ended) fail(error, "mount"); });
     return () => {
       ended = true;
-      handle.dispose();
       end(cleanup);
       restoreLatest.current();
     };

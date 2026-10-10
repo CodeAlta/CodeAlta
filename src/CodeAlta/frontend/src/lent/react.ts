@@ -1,7 +1,7 @@
 // The module a plugin gets for `react`: the instance the application runs. A second copy of React in the page would
 // break hooks and contexts, so the build emits this file as its own entry (`lib/react.js`) that shares its code with the
 // application, and the import map of `index.html` points the bare name at it. Names are listed one by one because React
-// is CommonJS; `lent.test.ts` compares them with what the package exports.
+// is CommonJS; `pluginScript.test.ts` compares them with what the package exports.
 import * as React from "react";
 export {
   Activity, Children, Component, Fragment, Profiler, PureComponent, StrictMode, Suspense, act, cache, cacheSignal, captureOwnerStack, cloneElement,

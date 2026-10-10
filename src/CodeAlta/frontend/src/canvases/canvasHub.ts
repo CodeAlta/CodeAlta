@@ -85,14 +85,30 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
   // The scripts that call their plugin: one connection at a time for an instance, and it hears only the frames of the instance.
   const rpcListeners = new Map<string, CanvasRpcListener>();
   // The last events of the instances nobody listens to yet: a tab attaches after its open call returned, and events may have come before.
-  const retained = new Map<string, { update: Extract<CanvasInstanceEvent, { kind: "update" }> | null; last: CanvasInstanceEvent | null }>();
+  // Each is numbered as it comes, so that a tab is told only what came after it asked for its instance: what came before is older than the
+  // answer of the host, whatever it says.
+  const retained = new Map<string, { update: Extract<CanvasInstanceEvent, { kind: "update" }> | null; updateAt: number; last: CanvasInstanceEvent | null; lastAt: number }>();
+  let arrivals = 0;
 
   function retain(instanceId: string, event: CanvasInstanceEvent) {
-    const known = retained.get(instanceId) ?? { update: null, last: null };
+    const known = retained.get(instanceId) ?? { update: null, updateAt: 0, last: null, lastAt: 0 };
     retained.delete(instanceId); // The newest goes last.
-    retained.set(instanceId, event.kind === "update" ? { update: known.update ? mergeUpdates(known.update, event) : event, last: known.last }
-      : { update: known.update, last: event });
+    const at = ++arrivals;
+    retained.set(instanceId, event.kind === "update"
+      // An update that says the plugin is back makes the state that was kept moot.
+      ? { update: known.update ? mergeUpdates(known.update, event) : event, updateAt: at, ...event.state === "ready" && known.last?.kind === "state" ? { last: null, lastAt: 0 } : { last: known.last, lastAt: known.lastAt } }
+      // What waited for an instance that changed state or closed is moot, as it is for the host.
+      : { update: null, updateAt: 0, last: event, lastAt: at });
     while (retained.size > retainedLimit) retained.delete(retained.keys().next().value!);
+  }
+
+  // The host answered a tab that asked for an instance: what was kept of the instance before the tab asked is let go.
+  function forgetBefore(instanceId: string, mark: number) {
+    const known = retained.get(instanceId);
+    if (!known) return;
+    const update = known.updateAt > mark ? known.update : null, last = known.lastAt > mark ? known.last : null;
+    if (!update && !last) retained.delete(instanceId);
+    else retained.set(instanceId, { update, updateAt: update ? known.updateAt : 0, last, lastAt: last ? known.lastAt : 0 });
   }
 
   function deliver(instanceId: string, event: CanvasInstanceEvent) {
@@ -137,17 +153,18 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
   function endRpc(reason: string) { for (const listener of [...rpcListeners.values()]) listener.closed(null, reason); }
 
   const rpc: CanvasRpcCarrier = {
+    // A host that is not known yet, or that does not answer, is `unreachable`: `unavailable` is the host's own word for an instance that has no calls.
     async open(instanceId) {
       const host = epoch;
-      if (!host) return { status: "unavailable", connection: null, maximumFrameBytes: 0 };
+      if (!host) return { status: "unreachable", connection: null, maximumFrameBytes: 0 };
       try { return await api.rpcOpen({ expectedEpoch: host, instanceId }, { timeoutMilliseconds: 15_000 }); }
-      catch { return { status: "unavailable", connection: null, maximumFrameBytes: 0 }; }
+      catch { return { status: "unreachable", connection: null, maximumFrameBytes: 0 }; }
     },
     async send(instanceId, connection, frames) {
       const host = epoch;
-      if (!host) return "unavailable";
+      if (!host) return "unreachable";
       try { return (await api.rpcSend({ expectedEpoch: host, instanceId, connection, frames: [...frames] }, { timeoutMilliseconds: 30_000 })).status; }
-      catch { return "unavailable"; }
+      catch { return "unreachable"; }
     },
     async close(instanceId, connection) {
       const host = epoch;
@@ -180,8 +197,8 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     /** Whether the page is connected to a host. */
     get connected() { return epoch !== null; },
     /**
-     * Gives the events of an instance to a listener: first what came after `since` while no one listened, then what comes.
-     * The returned function ends it.
+     * Gives the events of an instance to a listener: first what came while no one listened (a state or a close, then an update newer
+     * than `since`), then what comes. The returned function ends it.
      */
     attach(instanceId: string, since: number, listener: (event: CanvasInstanceEvent) => void) {
       const known = retained.get(instanceId);
@@ -189,8 +206,9 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
       let listeners = attached.get(instanceId);
       if (!listeners) attached.set(instanceId, listeners = new Set());
       listeners.add(listener);
-      if (known?.update && known.update.revision > since) listener(known.update);
+      // A state that is kept came before the update that is kept: a later state or close would have made the update moot.
       if (known?.last) listener(known.last);
+      if (known?.update && known.update.revision > since) listener(known.update);
       return () => {
         listeners.delete(listener);
         if (listeners.size === 0 && attached.get(instanceId) === listeners) attached.delete(instanceId);
@@ -203,8 +221,10 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
       // A window that restores many tabs at once asks more at a time than the host serves: a call the host turned away for that is made again.
       for (let attempt = 1; ; attempt++) {
         try {
+          const asked = arrivals;
           const reply = await api.open({ expectedEpoch: host, ...request }, { timeoutMilliseconds: 45_000 });
           pluginIconFiles.register(request.pluginKey, reply.icon, reply.iconData);
+          if (reply.status === "ok" && reply.instanceId) forgetBefore(reply.instanceId, asked);
           return reply;
         } catch (error) {
           if (attempt >= openAttempts || (error as { code?: unknown } | null)?.code !== "too_many_requests") break;
@@ -215,11 +235,14 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
 
       return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null };
     },
-    /** Says whether a tab shows an instance; false when the host could not be told. */
-    async setVisible(instanceId: string, visible: boolean): Promise<boolean> {
+    /**
+     * Says whether a tab shows an instance. The answer is the one of the host: `ok`, or `unknown` when it has no such instance any more (it closes
+     * the oldest hidden one to make room, and the tab asks for its instance again). `unreachable` when the host could not be told.
+     */
+    async setVisible(instanceId: string, visible: boolean): Promise<string> {
       const host = epoch;
-      if (!host) return false;
-      try { return (await api.visible({ expectedEpoch: host, instanceId, visible }, { timeoutMilliseconds: 10_000 })).status === "ok"; } catch { return false; }
+      if (!host) return "unreachable";
+      try { return (await api.visible({ expectedEpoch: host, instanceId, visible }, { timeoutMilliseconds: 10_000 })).status; } catch { return "unreachable"; }
     },
     /** Closes the instance of a tab that was closed. */
     async close(instanceId: string): Promise<void> {
@@ -236,9 +259,9 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     /** Raises the action of an element of a fragment. */
     async action(instanceId: string, action: string, value: string | null, values: Record<string, string>): Promise<CanvasActionResponse> {
       const host = epoch;
-      if (!host) return { status: "unavailable", html: null, closed: false };
+      if (!host) return { status: "unavailable", html: null, closed: false, revision: 0 };
       try { return await api.action({ expectedEpoch: host, instanceId, action, value, values }, { timeoutMilliseconds: 45_000 }); }
-      catch { return { status: "unavailable", html: null, closed: false }; }
+      catch { return { status: "unavailable", html: null, closed: false, revision: 0 }; }
     },
     /** Listens to one host until the returned function is called. */
     connect(hostEpoch: string) {

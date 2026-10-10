@@ -174,11 +174,64 @@ test("a host that refuses the frames ends the connection, and a host that cannot
 
   fake.state.sendStatus = "ok";
   fake.state.openStatus = "unavailable";
-  await assert.rejects(rpc.invoke("echo", 3), (error: unknown) => error instanceof AltaError && error.code === "rpc_unavailable");
+  await assert.rejects(rpc.invoke("echo", 3), (error: unknown) => error instanceof AltaError && error.code === "rpc_unavailable" && !error.retryable, "an instance without calls has none later either");
   fake.state.openStatus = "unknown";
   await assert.rejects(rpc.invoke("echo", 4), (error: unknown) => error instanceof AltaError && error.code === "connection_closed" && error.retryable);
+  // The host could not be asked, or no page watches yet: nothing is wrong with the canvas, and the same call can work a moment later.
+  for (const status of ["unreachable", "not_watching"]) {
+    fake.state.openStatus = status;
+    await assert.rejects(rpc.invoke("echo", 4), (error: unknown) => error instanceof AltaError && error.code === "connection_closed" && error.retryable, status);
+  }
+
+  fake.state.openStatus = "stale_epoch";
+  await assert.rejects(rpc.invoke("echo", 4), (error: unknown) => error instanceof AltaError && error.code === "rpc_unavailable" && !error.retryable);
   fake.state.openStatus = "ok";
   assert.deepEqual(await rpc.invoke("echo", 5), { echo: 5 });
+});
+
+test("a script is told when its connection opens and when it ends, since its subscriptions end with it", async () => {
+  const fake = host();
+  const controller = controllerOf(fake);
+  const { rpc } = controller;
+  const heard: boolean[] = [];
+  const stop = rpc.connected!.subscribe(value => heard.push(value));
+  assert.equal(rpc.connected!.value, false, "nothing is opened until a script calls");
+
+  await rpc.subscribe("board.changed", () => { });
+  assert.equal(rpc.connected!.value, true);
+  // The host ends the connection while the script only listens: no call of its own would tell it.
+  fake.endConnection("replaced");
+  assert.equal(rpc.connected!.value, false);
+  await rpc.invoke("echo", 1);
+  assert.deepEqual(heard, [true, false, true]);
+  // The page loses the host, then the tab goes away.
+  fake.state.listener!.closed(null, "watch_ended");
+  await rpc.invoke("echo", 2);
+  controller.detach();
+  assert.deepEqual(heard, [true, false, true, false, true, false]);
+  stop();
+  controller.attach();
+  await rpc.invoke("echo", 3);
+  assert.equal(heard.length, 6, "a listener that stopped hears nothing");
+});
+
+test("the signal of one listener ends its own listening, not the one subscription the others share", async () => {
+  const fake = host();
+  const { rpc } = controllerOf(fake);
+  const first: unknown[] = [], second: unknown[] = [];
+  const controller = new AbortController();
+
+  await rpc.subscribe("board.changed", value => first.push(value), { signal: controller.signal });
+  await rpc.subscribe("board.changed", value => second.push(value));
+  fake.event("board.changed", 1);
+  await until(() => first.length === 1 && second.length === 1, "both heard the first event");
+
+  controller.abort();
+  fake.event("board.changed", 2);
+  await until(() => second.length === 2, "the other listener still hears");
+  assert.deepEqual(first, [1], "the listener whose signal aborted hears no more");
+  assert.deepEqual(fake.state.unsubscribes, [], "the subscription the others share stays");
+  await assert.rejects(rpc.subscribe("board.changed", () => { }, { signal: controller.signal }), (error: unknown) => error instanceof AltaError && error.code === "operation_canceled");
 });
 
 test("frames of another connection are dropped, and a stream gives its items in order and ends", async () => {

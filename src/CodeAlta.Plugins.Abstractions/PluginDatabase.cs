@@ -120,6 +120,9 @@ public interface IPluginDatabase
 /// </summary>
 public sealed class NoopPluginDatabase : IPluginDatabase
 {
+    /// <summary>Gets the shared instance. It holds no state.</summary>
+    public static NoopPluginDatabase Instance { get; } = new();
+
     /// <inheritdoc />
     public bool HasDatabase => false;
 

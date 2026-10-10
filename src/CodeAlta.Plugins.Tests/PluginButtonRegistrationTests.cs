@@ -72,7 +72,7 @@ public sealed class PluginButtonRegistrationTests
         var counted = entries.Single(static entry => entry.Button.Id == "counted");
         Assert.AreEqual((PluginButtonBadgeKind.Count, 4), (counted.State.Badge.Kind, counted.State.Badge.Count));
         Assert.AreEqual(PluginStatusTone.Warning, counted.State.Tone);
-        Assert.AreEqual("TitleBar:space-1:project-1:session-1", StatefulPlugin.LastContext, "the callback is given the place, space, project and session");
+        Assert.AreEqual("TitleBar:space-1:project-1:session-1", ((StatefulPlugin)result.ActivePlugin!.Instance!).LastContext, "the callback is given the place, space, project and session");
         Assert.AreEqual(PluginButtonBadgeKind.None, entries.Single(static entry => entry.Button.Id == "throws").State.Badge.Kind);
         Assert.AreSame(PluginButtonState.Default, entries.Single(static entry => entry.Button.Id == "plain").State);
 
@@ -113,14 +113,15 @@ public sealed class PluginButtonRegistrationTests
 
     public sealed class StatefulPlugin : PluginBase
     {
-        public static string? LastContext { get; private set; }
+        /// <summary>The context the state of the button was last read for: what this instance of the plugin was given.</summary>
+        public string? LastContext { get; private set; }
 
         public override IEnumerable<PluginUiContribution> GetUiContributions()
         {
             yield return PluginUi.Button(PluginButtonPlace.TitleBar, "counted", "box", "Counted") with
             {
                 Command = "go",
-                GetState = static context =>
+                GetState = context =>
                 {
                     LastContext = $"{context.Place}:{context.SpaceId}:{context.ProjectId}:{context.SessionId}";
                     return new PluginButtonState { Badge = 4, Tone = PluginStatusTone.Warning };

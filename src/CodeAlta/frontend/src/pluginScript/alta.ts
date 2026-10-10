@@ -59,6 +59,12 @@ export type AltaRpc = Readonly<{
   subscribe(name: string, handler: (value: unknown) => void, options?: Readonly<{ signal?: AbortSignal }>): Promise<() => void>;
   /** Counts the times the connection to the plugin was made again after it ended (the plugin was reloaded, the page reconnected): what was fetched before is stale. */
   generation: AltaSignal<number>;
+  /**
+   * Whether the connection to the plugin is open now. The first call opens it, and it turns false when it ends (the plugin was reloaded, the window lost
+   * its host): what `subscribe` gave on it hears nothing more, and a script that only listens subscribes again. The window always gives it; it is
+   * optional so that what stands for `alta.rpc` elsewhere need not have it.
+   */
+  connected?: AltaSignal<boolean>;
 }>;
 
 /** What a script of a plugin is given: the one object through which it reaches the window, so that it touches no global. */
@@ -124,8 +130,9 @@ export class AltaError extends Error {
 }
 
 const noGeneration: AltaSignal<number> = Object.freeze({ value: 0, subscribe: () => () => { } });
+const neverConnected: AltaSignal<boolean> = Object.freeze({ value: false, subscribe: () => () => { } });
 const unavailable = () => Promise.reject(new AltaError("rpc_unavailable", "alta.rpc is not available here: only the script of a canvas can call its plugin."));
-const unavailableRpc: AltaRpc = Object.freeze({ invoke: unavailable, stream: unavailable, subscribe: unavailable, generation: noGeneration });
+const unavailableRpc: AltaRpc = Object.freeze({ invoke: unavailable, stream: unavailable, subscribe: unavailable, generation: noGeneration, connected: neverConnected });
 
 function textOf(value: unknown, limit: number): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= limit && !/[\u0000-\u001f\u007f]/u.test(value) ? value : null;
@@ -150,14 +157,25 @@ export function createAlta(options: AltaOptions): AltaHandle {
   const themeListeners = new Set<(value: AltaTheme) => void>();
   let theme = options.readTheme();
   let unsubscribeTheme: (() => void) | null = null;
+  // The window is watched only while a script listens, so nothing tells this object of a change while none does: the theme is then read when
+  // it is asked for. The same colors are the same object, which a component that reads the value while it draws relies on.
+  const currentTheme = (): AltaTheme => {
+    if (themeListeners.size > 0 || controller.signal.aborted) return theme;
+    const read = options.readTheme();
+    if (JSON.stringify(read) !== JSON.stringify(theme)) theme = read;
+    return theme;
+  };
   const themeSignal: AltaSignal<AltaTheme> = {
-    get value() { return theme; },
+    get value() { return currentTheme(); },
     subscribe(listener) {
-      // The window is watched only while a script listens.
-      if (themeListeners.size === 0 && !controller.signal.aborted) unsubscribeTheme = options.subscribeTheme(() => {
-        theme = options.readTheme();
-        for (const each of [...themeListeners]) each(theme);
-      });
+      if (themeListeners.size === 0 && !controller.signal.aborted) {
+        theme = currentTheme();
+        unsubscribeTheme = options.subscribeTheme(() => {
+          theme = options.readTheme();
+          for (const each of [...themeListeners]) each(theme);
+        });
+      }
+
       themeListeners.add(listener);
       return () => {
         themeListeners.delete(listener);

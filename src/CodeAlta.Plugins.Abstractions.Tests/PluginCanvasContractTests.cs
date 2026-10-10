@@ -92,6 +92,18 @@ public sealed class PluginCanvasContractTests
     }
 
     [TestMethod]
+    public async Task Services_GiveADatabaseThatSaysItHasNoneToAHostThatDoesNotKnowTheDatabase()
+    {
+        // A host written before plugins had tables in the database of the application implements IPluginServices without this member either.
+        IPluginServices old = new OldHost();
+
+        Assert.AreSame(NoopPluginDatabase.Instance, old.Database);
+        Assert.IsFalse(old.Database.HasDatabase, "a plugin asks before it uses its tables");
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () => await old.Database.ReadAsync(static (_, _) => ValueTask.FromResult(0)));
+        Assert.IsFalse(NoopPluginServices.Create().Database.HasDatabase);
+    }
+
+    [TestMethod]
     public void OpenOptions_FocusTheTabByDefault()
     {
         var options = new PluginCanvasOpenOptions { Input = JsonDocument.Parse("{\"a\":1}").RootElement };
@@ -139,8 +151,6 @@ public sealed class PluginCanvasContractTests
         public IPluginTaskService Tasks => _inner.Tasks;
 
         public IPluginAltaService Alta => _inner.Alta;
-
-        public IPluginDatabase Database => _inner.Database;
     }
 
     private sealed class Context : PluginCanvasContext

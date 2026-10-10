@@ -11,7 +11,9 @@ import { useAlta } from "../pluginScript/PluginScript";
 import type { ScriptLoader } from "../pluginScript/scriptModule";
 
 const root = createRoot(document.getElementById("root")!);
-const state = { opens: 0, closes: 0, batches: [] as string[][], acks: [] as number[], connection: "", connections: 0, instances: [] as (string | null)[] };
+const state = { opens: 0, closes: 0, batches: [] as string[][], acks: [] as number[], connection: "", connections: 0, instances: [] as (string | null)[],
+  /** What the host answers to a script that asks for its connection, and the times it was asked. */
+  rpcOpenStatus: "ok", rpcOpens: 0 };
 const waiting: ((result: IteratorResult<CanvasEvent>) => void)[] = [];
 const queued: CanvasEvent[] = [];
 const blank = { actions: null, canvasId: null, focus: false, html: null, icon: null, instanceId: "instance-1", key: null, package: null, pluginKey: null, projectId: null, revision: null,
@@ -40,9 +42,14 @@ const api: CanvasApi = {
   visible: async () => ({ status: "ok" }),
   close: async () => ({ status: "ok" }),
   closeSpace: async () => ({ status: "ok" }),
-  action: async () => ({ status: "ok", html: null, closed: false }),
+  action: async () => ({ status: "ok", html: null, closed: false, revision: 0 }),
   describe: async () => ({ status: "ok", markdown: null }),
-  rpcOpen: async () => { state.connection = `c${++state.connections}`; state.opens += 0; return { status: "ok", connection: state.connection, maximumFrameBytes: 1 << 20 }; },
+  rpcOpen: async () => {
+    state.rpcOpens++;
+    if (state.rpcOpenStatus !== "ok") return { status: state.rpcOpenStatus, connection: null, maximumFrameBytes: 0 };
+    state.connection = `c${++state.connections}`;
+    return { status: "ok", connection: state.connection, maximumFrameBytes: 1 << 20 };
+  },
   rpcSend: async request => {
     if (request.connection !== state.connection) return { status: "closed" };
     state.batches.push([...request.frames ?? []]);

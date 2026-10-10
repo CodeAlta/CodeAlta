@@ -117,8 +117,8 @@ internal sealed class CanvasesService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, false);
         if (!DesktopCanvases.ValidLine(request.InstanceId, DesktopCanvases.MaximumIdUnits) || request.Action is not { Length: > 0 and <= MaximumNameUnits }
             || request.Value is { Length: > MaximumFieldUnits } || !ValidFields(request.Values)) return new("invalid_request", null, false);
-        var (status, html, closed) = await _canvases!.ActionAsync(request.InstanceId!, request.Action, request.Value, request.Values, cancellationToken).ConfigureAwait(false);
-        return new(status, html, closed);
+        var (status, html, closed, revision) = await _canvases!.ActionAsync(request.InstanceId!, request.Action, request.Value, request.Values, cancellationToken).ConfigureAwait(false);
+        return new(status, html, closed, revision);
     }
 
     /// <summary>Describes what an open instance shows, in Markdown.</summary>
@@ -296,7 +296,8 @@ internal sealed record CanvasActionRequest(string? ExpectedEpoch, string? Instan
 /// <param name="Status"><c>ok</c>, <c>unknown</c>, <c>unsupported</c>, <c>failed</c> or a refusal.</param>
 /// <param name="Html">The new content of the tab, or null to keep it.</param>
 /// <param name="Closed">The instance closed: so does its tab.</param>
-internal sealed record CanvasActionResponse(string Status, string? Html, bool Closed);
+/// <param name="Revision">The revision the new content is, as the events of the instance count it; 0 without new content.</param>
+internal sealed record CanvasActionResponse(string Status, string? Html, bool Closed, int Revision = 0);
 
 /// <summary>Asks what an open instance shows.</summary>
 internal sealed record CanvasDescribeRequest(string? ExpectedEpoch, string? InstanceId);
@@ -309,7 +310,8 @@ internal sealed record CanvasRpcOpenRequest(string? ExpectedEpoch, string? Insta
 
 /// <summary>
 /// <c>ok</c> with the identifier of the connection and the largest frame it carries, or <c>unknown</c> (no such instance),
-/// <c>unavailable</c> (the instance has no calls: its plugin registered none and its tab has no script, or no page watches), or a refusal code.
+/// <c>unavailable</c> (the instance has no calls: its plugin registered none and its tab has no script), <c>not_watching</c> (no page watches
+/// the canvases now, so no answer could be carried: the page asks again once it watches), or a refusal code.
 /// </summary>
 /// <param name="Status">The status code.</param>
 /// <param name="Connection">The identifier of the connection, which every frame after it names.</param>

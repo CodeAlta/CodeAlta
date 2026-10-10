@@ -17,8 +17,11 @@ public interface IPluginServices
     /// <summary>Gets durable plugin state services.</summary>
     IPluginStateStore State { get; }
 
-    /// <summary>Gets the tables the plugin keeps in the SQLite database of the application.</summary>
-    IPluginDatabase Database { get; }
+    /// <summary>
+    /// Gets the tables the plugin keeps in the SQLite database of the application. A host that was written before plugins had
+    /// tables there has no database for them, and this member says so (<see cref="IPluginDatabase.HasDatabase"/> is false).
+    /// </summary>
+    IPluginDatabase Database => NoopPluginDatabase.Instance;
 
     /// <summary>Gets workspace services.</summary>
     IPluginWorkspaceService Workspace { get; }

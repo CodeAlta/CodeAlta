@@ -45,6 +45,7 @@ const modules: Record<string, () => unknown> = {
     const target = rootElement.querySelector(".alta-target")!;
     note("mount", target.textContent);
     target.insertAdjacentHTML("beforeend", alta.html("<span class=\"alta-mounted\">mounted</span>"));
+    note("alta-open", !alta.closed.aborted);
     alta.closed.addEventListener("abort", () => note("closed-signal"));
     return () => note("mount-cleanup");
   } }),

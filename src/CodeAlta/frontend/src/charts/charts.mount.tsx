@@ -39,6 +39,8 @@ const calendarOption = { tooltip: { formatter: "{c}" }, visualMap: { min: 0, max
   series: [{ type: "heatmap", coordinateSystem: "calendar", data: days.slice(0, 31).map((day, index) => ["2026-" + day, index % 10]) }] };
 const empty = { xAxis: { type: "category", data: ["a"] }, yAxis: {}, series: [{ name: "Late", type: "bar", data: [1] }] };
 const late = { xAxis: { type: "category", data: ["a", "b"] }, yAxis: {}, series: [{ name: "Late", type: "bar", data: [3, 5] }] };
+// An option that is data only, and that ECharts refuses when it draws it: a kind of axis it does not have.
+const broken = { xAxis: { type: "bogus", data: ["a", "b"] }, yAxis: {}, series: [{ name: "Late", type: "bar", data: [3, 5] }] };
 
 const calendarDays = Array.from({ length: 365 }, (_, index) => ({ date: new Date(Date.UTC(2025, 6, 1 + index)).toISOString().slice(0, 10), value: random() < 0.3 ? 0 : Math.round(random() ** 3 * 60) }));
 const matrix = Array.from({ length: 7 }, (_, row) => Array.from({ length: 24 }, (_, hour) => Math.round(Math.max(0, Math.sin((hour - 6) / 3.8)) * (row > 4 ? 4 : 20) * random())));
@@ -47,7 +49,7 @@ const log: unknown[] = [];
 const nothing = () => { };
 
 function Gallery() {
-  const [state, setState] = useState({ width: 520, lateVisible: false, lateOption: empty, showExtra: true });
+  const [state, setState] = useState({ width: 520, lateVisible: false, lateOption: empty, showExtra: true, fragile: late as Record<string, unknown>, fragileFromStart: false });
   Object.assign(window, { chartsFixture: {
     log, set: (change: Partial<typeof state>) => setState(known => ({ ...known, ...change })),
     setTheme: (dark: boolean) => { document.documentElement.classList.toggle("bp6-dark", dark); document.documentElement.dataset.theme = dark ? "dark" : "light"; },
@@ -72,6 +74,8 @@ function Gallery() {
       {box("calendar-echarts", "ECharts calendar", <Chart option={calendarOption} ariaLabel="Calendar drawn by ECharts" height={160} />)}
       {box("canvas", "Canvas", <Chart option={lines} ariaLabel="The same line chart, in canvas" height={200} renderer="canvas" />)}
       {box("late", "Hidden then shown", <Chart option={state.lateOption} ariaLabel="A chart that starts hidden" height={160} visible={state.lateVisible} />)}
+      {box("fragile", "An option that may not draw", <Chart option={state.fragile} ariaLabel="A chart whose option changes" height={160} />)}
+      {state.fragileFromStart && box("fragile-start", "An option that never drew", <Chart option={broken} ariaLabel="A chart that starts with an option that cannot be drawn" height={160} />)}
       {box("calendar", "Calendar", <CalendarHeatmap data={calendarDays} from="2025-07-01" to="2026-06-30" ariaLabel="Prompts per day over a year"
         onSelect={(date, value) => log.push({ day: date, value })} />)}
       {box("weekday", "Weekday by hour", <WeekdayHourHeatmap matrix={matrix} ariaLabel="Prompts per weekday and hour" onSelect={(row, hour, value) => log.push({ row, hour, value })} />)}
@@ -89,7 +93,7 @@ function Gallery() {
   </ShellLanguageContext.Provider>;
 }
 
-Object.assign(window, { chartsLate: late });
+Object.assign(window, { chartsLate: late, chartsBroken: broken });
 document.documentElement.classList.add("bp6-dark");
 document.documentElement.dataset.theme = "dark";
 createRoot(document.getElementById("root")!).render(<StrictMode><Gallery /></StrictMode>);

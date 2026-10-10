@@ -578,7 +578,7 @@ Nothing here changes a setting of the user, and a window that is not open is `vi
 
 | Code | Exit | When |
 | --- | --- | --- |
-| `usage.ambiguousCanvas`, `usage.missingCanvas`, `usage.missingProject`, `usage.missingSession`, `usage.invalidInput`, `usage.scopeConflict`, `usage.invalidCanvasRequest` | 2 | The reference, the context or the input is wrong. |
+| `usage.ambiguousCanvas`, `usage.missingCanvas`, `usage.missingAction`, `usage.missingProject`, `usage.missingSession`, `usage.invalidInput`, `usage.scopeConflict`, `usage.invalidCanvasRequest` | 2 | The reference, the action (`invoke` without its name), the context or the input is wrong. |
 | `canvas.notFound`, `canvas.notOpen`, `canvas.actionNotFound`, `project.notFound`, `session.notFound`, `space.notFound` | 3 | What was named is not there. |
 | `view.unavailable`, `service.unavailable` | 5 | No window is open, or the service is missing. |
 | `canvas.pluginStopped`, `project.notInSpace`, `space.unavailable` | 7 | The plugin is not running, the space does not have the project, or the host keeps no spaces. |
@@ -868,7 +868,7 @@ Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPl
 
 Plugins add live-tool commands by returning `PluginAltaCommandContribution` records from `PluginBase.GetAltaCommands()`. Each contribution declares a root/path, policy flags, ordering, and a factory that creates a fresh unattached `XenoAtom.CommandLine.CommandNode`.
 
-The host reserves these root commands: `version`, `project`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, and `tool`. Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
+The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool` and `canvas`. A root is reserved on every host, also where the host has no such command (`alta canvas` is a command of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
 
 Plugin command policy flags describe whether a command mutates state, is disruptive, requires the in-process runtime, or supports catalog-only context. Mutating plugin-originated commands include plugin provenance for audit and timeline reconstruction.
 

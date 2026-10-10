@@ -77,8 +77,8 @@ internal sealed class DesktopAltaCanvases(DesktopCanvases canvases) : IAltaCanva
         // The window says which space it shows only after it said so: without a space the instance of the shown one is meant.
         var identity = DesktopCanvases.Normalize(new CanvasIdentity(target.PluginKey, target.CanvasId, space, target.ProjectId, target.SessionId, target.Key), declaration.Canvas.Scope);
         if (identity is not { } named) return false;
-        var open = canvases.OpenInstances().FirstOrDefault(instance => instance.Identity == named
-            || space is null && SameButSpace(instance.Identity, named));
+        var open = canvases.OpenInstances().FirstOrDefault(instance => Same(instance.Identity, named)
+            || space is null && Same(instance.Identity with { SpaceId = null }, named));
         return open is not null && await canvases.CloseAsync(open.InstanceId, notifyPage: true).ConfigureAwait(false);
     }
 
@@ -102,8 +102,9 @@ internal sealed class DesktopAltaCanvases(DesktopCanvases canvases) : IAltaCanva
     private static CanvasIdentity Identity(AltaCanvasTarget target)
         => new(target.PluginKey, target.CanvasId, target.SpaceId, target.ProjectId, target.SessionId, target.Key);
 
-    private static bool SameButSpace(CanvasIdentity left, CanvasIdentity right)
-        => left with { SpaceId = null } == right with { SpaceId = null };
+    // Two identities that name the same instance: a session names its instance whatever the project that is said of it.
+    private static bool Same(CanvasIdentity left, CanvasIdentity right)
+        => string.Equals(DesktopCanvases.InstanceId(left), DesktopCanvases.InstanceId(right), StringComparison.Ordinal);
 
     private static string ScopeName(PluginCanvasScope scope)
         => scope switch

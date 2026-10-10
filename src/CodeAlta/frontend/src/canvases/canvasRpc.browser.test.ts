@@ -75,6 +75,18 @@ test("a canvas script calls its plugin under StrictMode: one session, a call, an
     assert.equal(await evaluate("rpcFixture.state.acks.length"), before);
     await evaluate("rpcFixture.render({ visible: true })");
     assert.equal(await wait("document.querySelector('.rpc-board .stream')?.textContent.startsWith('latest 50')", 15_000), true);
+
+    // The window loses its host for a while: a call asks again after a wait that grows, not twice a second for as long as it lasts.
+    await evaluate("rpcFixture.state.rpcOpenStatus = 'not_watching'; rpcFixture.state.rpcOpens = 0; rpcFixture.push({ kind: 'rpcClosed', connection: rpcFixture.state.connection, reason: 'watch_ended' }); rpcFixture.render({ visible: false })");
+    await settle(100);
+    await evaluate("rpcFixture.render({ visible: true })");
+    assert.equal(await wait("document.querySelector('.rpc-board .call')?.textContent.startsWith('error')"), true);
+    await settle(2700);
+    const asked = await evaluate<number>("rpcFixture.state.rpcOpens");
+    assert.ok(asked >= 2 && asked <= 4, `${asked} tries in under three seconds`);
+    // The host is back: the next try connects, and the call is answered.
+    await evaluate("rpcFixture.state.rpcOpenStatus = 'ok'");
+    assert.equal(await wait("document.querySelector('.rpc-board .call')?.textContent === 'echo 1'", 15_000), true);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();

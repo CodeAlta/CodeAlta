@@ -561,12 +561,12 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.ServiceUnavailable;
     }
 
-    // Whether a tab of the canvas, in the space and the context named, is open.
+    // Whether a tab of the canvas, in the space and the context named, is open. A session names its instance by itself, whatever its project.
     private static bool IsCanvasOpen(IAltaCanvasView view, AltaCanvasTarget target)
         => view.ListOpen().Any(instance => string.Equals(instance.PluginKey, target.PluginKey, StringComparison.Ordinal)
             && string.Equals(instance.CanvasId, target.CanvasId, StringComparison.Ordinal)
             && (target.SpaceId is null || string.Equals(instance.SpaceId, target.SpaceId, StringComparison.Ordinal))
-            && string.Equals(instance.ProjectId, target.ProjectId, StringComparison.Ordinal)
+            && (target.SessionId is not null || string.Equals(instance.ProjectId, target.ProjectId, StringComparison.Ordinal))
             && string.Equals(instance.SessionId, target.SessionId, StringComparison.Ordinal)
             && string.Equals(instance.Key, target.Key, StringComparison.Ordinal));
 

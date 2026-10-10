@@ -82,7 +82,11 @@ public sealed record PluginCanvasContribution
     /// <summary>Gets one sentence that says what the canvas shows and does. It is written for people and for agents.</summary>
     public string? Description { get; init; }
 
-    /// <summary>Gets the name of the icon of the tab: an icon of the application's icon library, in its kebab-case name (<c>list-checks</c>).</summary>
+    /// <summary>
+    /// Gets the icon of the tab, as the icon of a button of a plugin is given (<see cref="PluginButtonContribution.Icon"/>): the name of an
+    /// icon of the Lucide icon library (<c>list-checks</c>), the name of a brand logo, or the path of an SVG file of the plugin package,
+    /// relative to its folder (<c>icons/board.svg</c>). Without one, or when it is not found, the tab has a neutral icon.
+    /// </summary>
     public string? Icon { get; init; }
 
     /// <summary>Gets what the canvas is about.</summary>

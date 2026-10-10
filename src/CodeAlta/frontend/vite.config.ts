@@ -4,7 +4,7 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { blueprintPaletteVariables } from "./src/blueprintPalette";
 import { appModuleFile, appModules } from "./src/lent/appModules";
-import { lentLibraries } from "./src/lent/libraries";
+import { importMapText, lentLibraries } from "./src/lent/libraries";
 import { splashDocument, splashMarkup, splashScript } from "./src/splashMarkup";
 
 // Blueprint's stylesheet reaches the bundle with its palette literals turned into palette variables, so a
@@ -47,8 +47,15 @@ const terminalFontLicense = (): Plugin => ({
 // their code with the application's: a module of a plugin that imports them gets the instances the application runs. Their
 // exports are kept whole (a build of the application alone drops what its entry does not export), so a library is complete and
 // the part the application does not use stays in the file of the library, loaded when a plugin first imports it.
+// The import map that gives them their bare names is written in the entry document here, from the same list, so the document cannot
+// name what the build does not emit. It is inline: the policy of the page allows it by the hash of its text (`assets.csp` of `neoastra.json`).
+const importMapPlace = "<!-- importmap -->";
 const lentModules = (): Plugin => ({
   name: "codealta:lent-modules",
+  transformIndexHtml: { order: "pre", handler: html => {
+    if (!html.includes(importMapPlace)) throw new Error(`index.html has no place for the import map of the lent libraries (${importMapPlace}).`);
+    return html.replace(importMapPlace, () => `<script type="importmap">${importMapText()}</script>`);
+  } },
   buildStart() {
     for (const library of lentLibraries) {
       this.emitFile({ type: "chunk", id: fileURLToPath(new URL(`./${library.entry}`, import.meta.url)), fileName: library.file, preserveSignature: "strict" });

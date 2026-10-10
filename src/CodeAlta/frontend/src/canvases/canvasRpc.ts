@@ -7,7 +7,10 @@
 import { NeoAstraClientError, NeoRpcClient, NeoRpcError, type NeoAstraConnection } from "@neoastra/client";
 import { AltaError, type AltaRpc, type AltaSignal } from "../pluginScript/alta";
 
-/** The host's answer to opening a connection. */
+/**
+ * The host's answer to opening a connection: `ok` with the connection, `unavailable` (the instance has no calls), `unknown` (no such instance),
+ * `not_watching` (no page watches the canvases yet) or a refusal; `unreachable` when the host could not be asked.
+ */
 export type CanvasRpcOpened = Readonly<{ status: string; connection: string | null; maximumFrameBytes: number }>;
 
 /** What the host sends for the connections of one instance. `connection` is null when it ends them all (the page lost the host). */
@@ -109,7 +112,7 @@ export function createCarrierConnection(options: CarrierConnectionOptions): Carr
     if (batch.length === 0) return;
     flushing = true;
     lastSend = now();
-    let status = "unavailable";
+    let status = "unreachable";
     try { status = await carrier.send(instanceId, id, batch); } catch { /* The host is gone: the connection ends below. */ }
     flushing = false;
     if (status !== "ok" && status !== "payload_too_large") { end(status === "closed" ? "host_closed" : status); return; }
@@ -205,8 +208,11 @@ const canceled = () => new AltaError("operation_canceled", "The call was cancele
 const closedError = () => new AltaError("connection_closed", "The canvas is closed.");
 
 function openError(status: string): AltaError {
+  // The instance has no calls, and will have none while it is open.
   if (status === "unavailable") return new AltaError("rpc_unavailable", "This canvas has no calls: its plugin registered none.");
   if (status === "unknown") return new AltaError("connection_closed", "The canvas is not open on the plugin's side.", { retryable: true });
+  // The host could not be asked, or no page watches the canvases yet (the window starts, or reconnects): the same call can work a moment later.
+  if (status === "unreachable" || status === "not_watching") return new AltaError("connection_closed", "The window cannot reach the plugin now.", { retryable: true });
   return new AltaError("rpc_unavailable", "The window cannot reach the plugin now.", { retryable: status !== "stale_epoch" });
 }
 
@@ -245,33 +251,40 @@ class EventMux {
   constructor(private readonly client: NeoRpcClient) { }
 
   async add(name: string, handler: (value: unknown) => void, signal: AbortSignal | undefined): Promise<() => void> {
+    if (signal?.aborted) throw canceled();
     let set = this.handlers.get(name);
     if (!set) this.handlers.set(name, set = new Set());
     set.add(handler);
-    try {
-      this.subscription ??= this.client.subscribe<unknown>("alta.events", value => this.dispatch(value), { signal }).then(unsubscribe => unsubscribe);
-      await this.subscription;
-    } catch (error) {
-      set.delete(handler);
-      if (set.size === 0) this.handlers.delete(name);
-      // A failed subscription is made again by the next call, not kept.
-      if (this.handlers.size === 0) this.subscription = null;
-      throw toAltaError(error);
-    }
-
     let active = true;
-    return () => {
+    const remove = () => {
       if (!active) return;
       active = false;
+      signal?.removeEventListener("abort", remove);
       const current = this.handlers.get(name);
       current?.delete(handler);
       if (current?.size === 0) this.handlers.delete(name);
+      // The last listener frees the subscription; one that failed is made again by the next call, not kept.
       if (this.handlers.size === 0 && this.subscription) {
         const ending = this.subscription;
         this.subscription = null;
         void ending.then(unsubscribe => unsubscribe()).catch(() => { });
       }
     };
+    try {
+      // The subscription serves every listener and belongs to none: the signal of a listener ends its own listening, never the others'.
+      const shared = this.subscription ??= this.client.subscribe<unknown>("alta.events", value => this.dispatch(value)).then(unsubscribe => unsubscribe);
+      await (signal ? new Promise<unknown>((resolve, reject) => {
+        const abort = () => reject(canceled());
+        signal.addEventListener("abort", abort, { once: true });
+        shared.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+      }) : shared);
+    } catch (error) {
+      remove();
+      throw toAltaError(error);
+    }
+
+    signal?.addEventListener("abort", remove, { once: true });
+    return remove;
   }
 
   private dispatch(value: unknown) {
@@ -298,9 +311,17 @@ export function createCanvasRpc(options: CanvasRpcControllerOptions): CanvasRpcC
   let session: Session | null = null;
   let opening: Promise<Session> | null = null;
   let generation = 0;
-  let connected = false;
+  let everConnected = false;
   let stopListening: (() => void) | null = null;
   const generationListeners = new Set<(value: number) => void>();
+  // Whether a connection is open, for the scripts that only listen: no call of theirs would tell them that it ended.
+  let open = false;
+  const connectedListeners = new Set<(value: boolean) => void>();
+  function setOpen(next: boolean) {
+    if (open === next) return;
+    open = next;
+    for (const each of [...connectedListeners]) { try { each(next); } catch { /* A listener that throws does not stop the others. */ } }
+  }
 
   const listener: CanvasRpcListener = {
     frames(connection, frames) { if (session?.id === connection) session.connection.deliver(frames); },
@@ -311,7 +332,9 @@ export function createCanvasRpc(options: CanvasRpcControllerOptions): CanvasRpcC
   };
 
   function drop(closing: Session) {
-    if (session === closing) session = null;
+    if (session !== closing) return;
+    session = null;
+    setOpen(false);
   }
 
   async function connect(): Promise<Session> {
@@ -326,12 +349,13 @@ export function createCanvasRpc(options: CanvasRpcControllerOptions): CanvasRpcC
     const made: Session = { id: reply.connection, connection, client, events: new EventMux(client) };
     connection.closed.addEventListener("abort", () => drop(made), { once: true });
     session = made;
-    if (connected) {
+    if (everConnected) {
       generation++;
       for (const each of [...generationListeners]) each(generation);
     }
 
-    connected = true;
+    everConnected = true;
+    setOpen(true);
     return made;
   }
 
@@ -372,6 +396,10 @@ export function createCanvasRpc(options: CanvasRpcControllerOptions): CanvasRpcC
       get value() { return generation; },
       subscribe(listenerFunction) { generationListeners.add(listenerFunction); return () => { generationListeners.delete(listenerFunction); }; },
     }),
+    connected: Object.freeze<AltaSignal<boolean>>({
+      get value() { return open; },
+      subscribe(listenerFunction) { connectedListeners.add(listenerFunction); return () => { connectedListeners.delete(listenerFunction); }; },
+    }),
   });
 
   return {
@@ -385,6 +413,7 @@ export function createCanvasRpc(options: CanvasRpcControllerOptions): CanvasRpcC
       alive = false;
       const ending = session;
       session = null;
+      setOpen(false);
       stopListening?.();
       stopListening = null;
       if (ending) {

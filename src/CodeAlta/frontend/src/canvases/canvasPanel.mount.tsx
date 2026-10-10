@@ -15,9 +15,13 @@ const root = createRoot(document.getElementById("root")!);
 const state = {
   calls: [] as string[], actions: [] as { action: string; value: string | null; values: Record<string, string> }[], looks: [] as unknown[], instances: [] as (string | null)[],
   closed: 0, activated: 0, rebuilt: 0, rebuildFails: false, probeUnknown: false, sources: [] as string[], opened: 0, scripts: [] as string[],
+  /** The host closed the instance to make room for others: it does not know it until the tab asks for it again. */
+  evicted: false,
+  /** The host takes its time to open an instance: each open waits to be released. */
+  holdOpens: false, held: [] as (() => void)[],
 };
 const scenario: Scenario = { status: "ok", html: "<p>first</p><input name=\"note\" value=\"typed\"><button data-alta-action=\"tick\" data-alta-value=\"one\">Tick</button>", title: "Board", statusText: null, revision: 1, script: null, scriptProblem: null, input: null };
-let actionAnswer: { status: string; html: string | null; closed: boolean } = { status: "ok", html: "<p>after the action</p>", closed: false };
+let actionAnswer: { status: string; html: string | null; closed: boolean; revision: number } = { status: "ok", html: "<p>after the action</p>", closed: false, revision: 2 };
 // The events the host sends on its one channel: the test pushes them.
 const waiting: ((result: IteratorResult<CanvasEvent>) => void)[] = [];
 const queued: CanvasEvent[] = [];
@@ -26,11 +30,13 @@ const api: CanvasApi = {
   open: async request => {
     state.calls.push(`open:${request.visible}`);
     state.opened++;
+    state.evicted = false;
+    if (state.holdOpens) await new Promise<void>(resolve => state.held.push(resolve));
     return scenario.status === "ok"
       ? { status: "ok", instanceId: "instance-1", title: scenario.title, statusText: scenario.statusText, html: scenario.html, actions: true, revision: scenario.revision, package: "plugin:global:board", icon: "list-checks", iconData: null, script: scenario.script, scriptProblem: scenario.scriptProblem, input: scenario.input }
       : { status: scenario.status, instanceId: null, title: scenario.title, statusText: null, html: null, actions: false, revision: 0, package: "plugin:global:board", icon: "list-checks", iconData: null, script: null, scriptProblem: null, input: null };
   },
-  visible: async request => { state.calls.push(`visible:${request.visible}`); return { status: "ok" }; },
+  visible: async request => { state.calls.push(`visible:${request.visible}`); return { status: state.evicted ? "unknown" : "ok" }; },
   close: async () => ({ status: "ok" }),
   closeSpace: async () => ({ status: "ok" }),
   action: async request => { state.actions.push({ action: request.action ?? "", value: request.value, values: request.values ?? {} }); return actionAnswer; },
@@ -87,5 +93,7 @@ const fixture = {
     }))));
   },
   clear() { flushSync(() => root.render(null)); },
+  /** Lets the host answer the opens that waited. */
+  release() { state.holdOpens = false; for (const answer of state.held.splice(0)) answer(); },
 };
 Object.assign(window, { canvasFixture: fixture });

@@ -1,10 +1,11 @@
-import { createElement, Fragment, useContext, useEffect, useMemo, useReducer, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createElement, Fragment, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { MarkdownContent } from "../MarkdownContent";
 import { SessionLinksContext } from "../SessionReference";
 import { useShellLanguage } from "../shellLanguage";
 import { AltaError, type Alta, type AltaSignal, type AltaTheme } from "./alta";
 import { createHtml } from "./html";
 import { useAlta } from "./PluginScript";
+import { retryDelay, retryLimit } from "./retry";
 
 /**
  * The `html` tag of the window's React: JSX without a build step. See {@link createHtml}.
@@ -33,39 +34,49 @@ export function useTheme(): AltaTheme {
 /** What a call of the plugin gave: `loading` while it runs, then the `data` or the `error`; `reload` calls again. */
 export type RpcResult<T> = Readonly<{ data: T | undefined; error: Error | null; loading: boolean; reload: () => void }>;
 
-/** How long a stream or a call waits before it asks again after the connection to its plugin ended, and the longest wait. */
-const retryDelayMilliseconds = 500;
-const retryDelayLimitMilliseconds = 8000;
-
 /**
  * Calls a handler of the plugin when the component is drawn and shown, and again when the name or the input change, `reload` is called, the
  * tab is shown again after it was hidden, or the connection to the plugin was made again (the data may be stale). A hidden component asks for
  * nothing. The call is dropped when the component goes away. Needs `alta.rpc`: where the window does not carry it, the result is the error
- * `rpc_unavailable`. A call that failed because the connection ended is asked again once.
+ * `rpc_unavailable`. A call that failed because the connection ended is asked again a few times, after a wait that doubles from half a second;
+ * then it keeps its error until one of the reasons above asks again.
  */
 export function useRpc<T = unknown>(name: string, input?: unknown): RpcResult<T> {
   const alta = useAlta();
   const visible = useVisible();
   const generation = useSignal(alta.rpc.generation);
-  const [version, reload] = useReducer((value: number) => value + 1, 0);
+  const [version, ask] = useReducer((value: number) => value + 1, 0);
+  const [attempt, again] = useReducer((value: number) => value + 1, 0);
   const [state, setState] = useState<Readonly<{ data: T | undefined; error: Error | null; loading: boolean }>>({ data: undefined, error: null, loading: true });
   const inputKey = JSON.stringify(input ?? null);
+  // The tries made in a row that the connection failed: a new reason to ask starts the count again, a try of its own does not.
+  const failures = useRef(0);
+  useEffect(() => { failures.current = 0; }, [alta, name, inputKey, version, visible, generation]);
+  const reload = useCallback(() => ask(), []);
   useEffect(() => {
     if (!visible) return undefined;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     setState(previous => ({ ...previous, loading: true }));
     alta.rpc.invoke(name, JSON.parse(inputKey), { signal: controller.signal }).then(
-      data => { if (!controller.signal.aborted) setState({ data: data as T, error: null, loading: false }); },
+      data => {
+        if (controller.signal.aborted) return;
+        failures.current = 0;
+        setState({ data: data as T, error: null, loading: false });
+      },
       error => {
         if (controller.signal.aborted) return;
         const failure = error instanceof Error ? error : new AltaError("rpc_failed", String(error));
         setState(previous => ({ data: previous.data, error: failure, loading: false }));
-        if (failure instanceof AltaError && failure.retryable && failure.code === "connection_closed") timer = setTimeout(reload, retryDelayMilliseconds);
+        if (!(failure instanceof AltaError) || !failure.retryable || failure.code !== "connection_closed") return;
+        const delay = retryDelay(failures.current, retryLimit);
+        if (delay === null) return;
+        failures.current++;
+        timer = setTimeout(again, delay);
       });
     return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer); };
-  }, [alta, name, inputKey, version, visible, generation]);
-  return useMemo(() => ({ ...state, reload }), [state]);
+  }, [alta, name, inputKey, version, visible, generation, attempt]);
+  return useMemo(() => ({ ...state, reload }), [state, reload]);
 }
 
 /** What a stream of the plugin gave: the `latest` item and every item so far (`items`, the last 1000), and whether it is still `active`. */
@@ -101,7 +112,7 @@ export function useStream<T = unknown>(name: string, input?: unknown): StreamRes
         const failure = error instanceof Error ? error : new AltaError("rpc_failed", String(error));
         setState(previous => ({ ...previous, error: failure, active: false }));
         if (failure instanceof AltaError && failure.retryable && failure.code === "connection_closed") {
-          timer = setTimeout(again, Math.min(retryDelayLimitMilliseconds, retryDelayMilliseconds * 2 ** Math.min(attempt, 4)));
+          timer = setTimeout(again, retryDelay(attempt) ?? 0);
         }
       }
     })();

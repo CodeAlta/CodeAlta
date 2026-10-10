@@ -35,6 +35,13 @@ function canceled(error: unknown, signal: AbortSignal | undefined): boolean {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** How long the canvas waits before it asks to listen again when the plugin could not be reached, and the longest wait: it doubles each time. */
+export const listenRetryMilliseconds = 500;
+const listenRetryLimitMilliseconds = 8000;
+
+/** What `createRpcApi` takes besides the calls: a test waits less. */
+export type RpcApiOptions = Readonly<{ retryMilliseconds?: number }>;
+
 /** Reads what the plugin sent on its event: a status, or the days that changed; anything else is not an event of the statistics. */
 export function readEvent(value: unknown): StatisticsEvent | null {
   if (!isRecord(value)) return null;
@@ -50,7 +57,8 @@ export function readEvent(value: unknown): StatisticsEvent | null {
  * Makes the API of the Statistics canvas over the calls of its plugin. A call that was canceled rejects with an `AbortError`; any other failure rejects with the
  * `AltaError` of the call, whose code (`invalid_request`, `unavailable`, `result_too_large`, `timeout`, ...) the canvas shows as it is.
  */
-export function createRpcApi(rpc: AltaRpc): RpcStatisticsApi {
+export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStatisticsApi {
+  const retryMilliseconds = options.retryMilliseconds ?? listenRetryMilliseconds;
   async function call<T>(name: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     if (signal?.aborted) throw abortError();
     try {
@@ -94,10 +102,20 @@ export function createRpcApi(rpc: AltaRpc): RpcStatisticsApi {
       let stop: (() => void) | null = null;
       let generation = rpc.generation.value;
       let latest = 0;
+      let failures = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      // Asks to listen again after a wait that grows: the plugin could not be reached, or the connection that carried the listening ended.
+      const again = () => {
+        if (!alive || timer !== undefined) return;
+        timer = setTimeout(() => { timer = undefined; void listen(true); }, Math.min(listenRetryLimitMilliseconds, retryMilliseconds * 2 ** Math.min(failures++, 4)));
+      };
 
       // Listens to the event, then reads what may have been missed before the listening began.
       const listen = async (catchUp: boolean) => {
         const ticket = ++latest;
+        if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+        let listening = false;
         try {
           const off = await rpc.subscribe(eventsName, value => {
             const event = readEvent(value);
@@ -106,26 +124,37 @@ export function createRpcApi(rpc: AltaRpc): RpcStatisticsApi {
           if (!alive || ticket !== latest) { off(); return; }
           stop?.();
           stop = off;
+          listening = true;
+          failures = 0;
           if (!catchUp) return;
           // The plugin may have been reloaded, or the page reconnected: the numbers on screen are stale and the status may be another.
           listener({ kind: "data", change: everyDay });
           const status = await call<StatisticsStatus>("statistics.status", {});
           if (alive && ticket === latest) listener({ kind: "status", status });
-        } catch {
-          // Nobody listens where the window carries no calls; a reconnection tries again.
+        } catch (error) {
+          // The window cannot reach the plugin now (it starts, it reconnects): the canvas asks again. Where the window carries no calls, nobody listens.
+          if (alive && ticket === latest && !listening && (error as { retryable?: unknown } | null)?.retryable === true) again();
         }
       };
 
       void listen(false);
-      const off = rpc.generation.subscribe(next => {
+      const offGeneration = rpc.generation.subscribe(next => {
         if (next === generation) return;
         generation = next;
         void listen(true);
       });
+      // A connection that ends takes the listening with it, and the canvas makes no call of its own that would tell it: it asks to listen again.
+      const offConnected = rpc.connected?.subscribe(open => {
+        if (open || !stop) return;
+        stop = null;
+        again();
+      });
       return () => {
         alive = false;
         latest++;
-        off();
+        if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+        offGeneration();
+        offConnected?.();
         stop?.();
         stop = null;
       };

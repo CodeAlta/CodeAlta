@@ -21,7 +21,7 @@ function host() {
     visible: async request => { calls.push(`visible:${request.instanceId}:${request.visible}`); return { status: "ok" }; },
     close: async request => { calls.push(`close:${request.instanceId}`); return { status: "ok" }; },
     closeSpace: async request => { calls.push(`closeSpace:${request.spaceId}`); return { status: "ok" }; },
-    action: async request => { calls.push(`action:${request.action}`); return { status: "ok", html: null, closed: false }; },
+    action: async request => { calls.push(`action:${request.action}`); return { status: "ok", html: null, closed: false, revision: 0 }; },
     describe: async () => ({ status: "ok", markdown: null }),
     rpcOpen: async () => ({ status: "unavailable", connection: null, maximumFrameBytes: 0 }),
     rpcSend: async () => ({ status: "closed" }),
@@ -105,14 +105,20 @@ test("a tab follows what the plugin sends: its content, its title and status, an
   assert.deepEqual(pushed, { ...opened, revision: 3, html: "<p>b</p>", statusText: "3 of 8" });
   assert.equal(canvasView(pushed, { kind: "event", event: update({ revision: 2, html: "<p>old</p>" }) }), pushed);
   assert.equal(canvasView(pushed, { kind: "event", event: update({ revision: 4, statusText: "" }) }).statusText, null, "a blank status clears it");
-  assert.equal(canvasView(pushed, { kind: "html", html: "<p>answer</p>" }).html, "<p>answer</p>", "the answer to an action replaces the content");
+  // The answer to an action replaces the content and says which revision it is: a push the plugin made before the action and that arrives after is dropped.
+  const answered = canvasView(pushed, { kind: "html", html: "<p>answer</p>", revision: 5 });
+  assert.deepEqual([answered.html, answered.revision], ["<p>answer</p>", 5]);
+  assert.equal(canvasView(answered, { kind: "event", event: update({ revision: 4, html: "<p>before the action</p>" }) }), answered);
+  // An answer that arrives after a newer push is the one that is dropped.
+  const newer = canvasView(pushed, { kind: "event", event: update({ revision: 6, html: "<p>after the action</p>" }) });
+  assert.equal(canvasView(newer, { kind: "html", html: "<p>answer</p>", revision: 5 }), newer);
   // The plugin stops: the tab keeps what identifies it and shows the placeholder; its next version brings the content back.
   const stopped = canvasView(pushed, { kind: "event", event: { kind: "state", state: "plugin_stopped" } });
   assert.deepEqual([stopped.phase, stopped.instanceId, stopped.html, stopped.title], ["stopped", "i", "", "Board"]);
   assert.equal(canvasView(stopped, { kind: "event", event: update({ revision: 5, html: "<p>new</p>", state: "ready", actions: true }) }).phase, "ready");
   assert.equal(canvasView(stopped, { kind: "event", event: update({ revision: 5, html: "<p>new</p>" }) }), stopped, "an update that does not say the plugin is back leaves the placeholder");
   assert.equal(canvasView(pushed, { kind: "event", event: { kind: "state", state: "ready" } }), pushed);
-  assert.equal(canvasView(stopped, { kind: "html", html: "x" }), stopped);
+  assert.equal(canvasView(stopped, { kind: "html", html: "x", revision: 9 }), stopped);
   // What the host refuses says why.
   assert.deepEqual(["plugin_stopped", "unknown_canvas", "failed", "limit", "unavailable", "stale_epoch"].map(refusedPhase), ["stopped", "missing", "failed", "failed", "unavailable", "unavailable"]);
   assert.equal(canvasView(opened, { kind: "refused", phase: "failed" }).phase, "failed");
@@ -175,6 +181,52 @@ test("what a plugin sent to an instance before its tab listened is given to the 
   disconnect();
 });
 
+test("a tab is told what came after it asked for its instance, in the order it came, and nothing that the answer of the host is newer than", async () => {
+  const played = host();
+  let answer: (() => void) | null = null;
+  const open = played.api.open;
+  const api: CanvasApi = { ...played.api, open: async (request, options) => { await new Promise<void>(resolve => { answer = resolve; }); return open(request, options); } };
+  const hub = createCanvasHub(api, timers());
+  const disconnect = hub.connect("epoch");
+  const ask = () => hub.open({ pluginKey: "k", canvasId: "board", spaceId: null, projectId: null, sessionId: null, key: null, visible: true });
+  const told = (since: number) => { const received: CanvasInstanceEvent[] = []; hub.attach("i1", since, value => received.push(value))(); return received; };
+
+  // The plugin stopped while the tab of the instance was not listening (it waits, and asks again when plugins change); then it runs again.
+  played.push(event("state", { instanceId: "i1", state: "plugin_stopped" }));
+  await wait(40);
+  let opening = ask();
+  await wait(10);
+  answer!();
+  assert.deepEqual(told((await opening).revision), [], "the instance the host just opened is not said to be stopped");
+
+  // What comes while the host answers is not older than its answer: the plugin closes the instance at once.
+  opening = ask();
+  await wait(10);
+  played.push(event("closed", { instanceId: "i1" }));
+  await wait(40);
+  answer!();
+  assert.deepEqual(told((await opening).revision), [{ kind: "closed" }]);
+
+  // The plugin stops and comes back while the host answers: the tab ends on what came last.
+  opening = ask();
+  await wait(10);
+  played.push(event("state", { instanceId: "i1", state: "plugin_stopped" }));
+  played.push(event("update", { instanceId: "i1", revision: 7, html: "<p>back</p>", state: "ready" }));
+  await wait(40);
+  answer!();
+  const back = told((await opening).revision);
+  assert.deepEqual(back.map(value => value.kind), ["update"], "the state that the plugin left is moot");
+  // And the other way round: an update, then the plugin stops.
+  opening = ask();
+  await wait(10);
+  played.push(event("update", { instanceId: "i1", revision: 8, html: "<p>newer</p>" }));
+  played.push(event("state", { instanceId: "i1", state: "plugin_stopped" }));
+  await wait(40);
+  answer!();
+  assert.deepEqual(told((await opening).revision), [{ kind: "state", state: "plugin_stopped" }]);
+  disconnect();
+});
+
 test("the events of instances that no tab listens to are kept within a limit", async () => {
   const played = host();
   const hub = createCanvasHub(played.api, timers());
@@ -196,7 +248,7 @@ test("the hub lists the canvases when it connects and again when the host says p
   const hub = createCanvasHub(played.api, timers());
   assert.equal(hub.connected, false);
   assert.equal((await hub.open({ pluginKey: "k", canvasId: "board", spaceId: null, projectId: null, sessionId: null, key: null, visible: true })).status, "unavailable");
-  assert.equal(await hub.setVisible("i", true), false);
+  assert.equal(await hub.setVisible("i", true), "unreachable");
   assert.equal((await hub.action("i", "tick", null, {})).status, "unavailable");
   await hub.close("i");
   await hub.closeSpace("s");
@@ -218,13 +270,25 @@ test("the hub lists the canvases when it connects and again when the host says p
   assert.equal(hub.getVersion(), 2);
 
   assert.equal((await hub.open({ pluginKey: "k", canvasId: "board", spaceId: "work", projectId: null, sessionId: null, key: null, visible: false })).instanceId, "i1");
-  assert.equal(await hub.setVisible("i1", false), true);
+  assert.equal(await hub.setVisible("i1", false), "ok");
   await hub.action("i1", "tick", "v", { a: "b" });
   await hub.close("i1");
   await hub.closeSpace("work");
   assert.deepEqual(played.calls.slice(2), ["open:board:false", "visible:i1:false", "action:tick", "close:i1", "closeSpace:work"]);
   disconnect();
   assert.equal(hub.connected, false);
+});
+
+test("the hub says whether the host knows the instance a tab shows, or could not be told", async () => {
+  const played = host();
+  let answer: "unknown" | "throw" = "unknown";
+  const api: CanvasApi = { ...played.api, visible: async () => { if (answer === "throw") throw new Error("gone"); return { status: answer }; } };
+  const hub = createCanvasHub(api, timers());
+  const disconnect = hub.connect("epoch");
+  assert.equal(await hub.setVisible("i1", true), "unknown", "the host closed the instance to make room: the tab asks for it again");
+  answer = "throw";
+  assert.equal(await hub.setVisible("i1", true), "unreachable");
+  disconnect();
 });
 
 test("the hub listens again after the host stopped telling, until the window is gone", async () => {
@@ -295,8 +359,8 @@ test("the frames of a connection reach the listener of their instance in order, 
   const hub = createCanvasHub(fake.api, timers());
   const heard: string[] = [];
   hub.rpc.listen("i1", { frames: (connection, frames) => heard.push(`${connection}:${frames.join("|")}`), closed: (connection, reason) => heard.push(`closed:${connection}:${reason}`) });
-  assert.deepEqual(await hub.rpc.open("i1"), { status: "unavailable", connection: null, maximumFrameBytes: 0 }, "nothing to ask before the host is known");
-  assert.equal(await hub.rpc.send("i1", "c1", ["x"]), "unavailable");
+  assert.deepEqual(await hub.rpc.open("i1"), { status: "unreachable", connection: null, maximumFrameBytes: 0 }, "nothing to ask before the host is known: that is not an instance without calls");
+  assert.equal(await hub.rpc.send("i1", "c1", ["x"]), "unreachable");
 
   const disconnect = hub.connect("epoch");
   await wait();
@@ -310,6 +374,12 @@ test("the frames of a connection reach the listener of their instance in order, 
   assert.deepEqual(heard, ["closed:null:watch_started", "c1:a|b", "c1:c", "closed:c1:replaced"]);
   assert.equal((await hub.rpc.open("i1")).status, "unavailable", "the host of the test has none");
   await hub.rpc.close("i1", "c1");
+  // A call that the host never answers is the host that cannot be reached, not what it would have said.
+  const silent = createCanvasHub({ ...fake.api, rpcOpen: async () => { throw new Error("gone"); }, rpcSend: async () => { throw new Error("gone"); } }, timers());
+  const leave = silent.connect("epoch");
+  assert.equal((await silent.rpc.open("i1")).status, "unreachable");
+  assert.equal(await silent.rpc.send("i1", "c1", ["x"]), "unreachable");
+  leave();
   fake.end();
   await wait();
   assert.equal(heard.at(-1), "closed:null:watch_ended");

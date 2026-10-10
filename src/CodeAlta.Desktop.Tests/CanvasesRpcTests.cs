@@ -51,7 +51,7 @@ public sealed class CanvasesRpcTests
         var response = fixture.Service.List(new(Epoch));
 
         Assert.AreEqual("ok", response.Status);
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls", "gated" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
         var board = response.Canvases[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "Application", true, 2, true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.Input, board.Actions, board.Describes));
@@ -106,6 +106,10 @@ public sealed class CanvasesRpcTests
         var run = await fixture.OpenAsync("run", project: "p1", session: "s1");
         Assert.AreEqual(("p1", "s1"), (fixture.Plugin.Contexts[run.InstanceId!].ProjectId, fixture.Plugin.Contexts[run.InstanceId!].SessionId));
         Assert.AreEqual(run.InstanceId, (await fixture.OpenAsync("run", session: "s1", project: "p1")).InstanceId);
+        // The session names the instance: whoever leaves its project out, or does not know it, means the same one.
+        Assert.AreEqual(run.InstanceId, (await fixture.OpenAsync("run", session: "s1")).InstanceId);
+        Assert.AreNotEqual(run.InstanceId, (await fixture.OpenAsync("run", session: "s2", project: "p1")).InstanceId);
+        Assert.AreEqual(2, fixture.Broker.GetOpen().Count(static info => info.CanvasId == "run"));
     }
 
     [TestMethod]
@@ -233,7 +237,7 @@ public sealed class CanvasesRpcTests
         next.Dispose();
         SpinWait.SpinUntil(() => fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r4", "where")])).Status == "closed", TimeSpan.FromSeconds(30));
         Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r5", "where")])).Status);
-        Assert.AreEqual("unavailable", fixture.Service.RpcOpen(new(Epoch, opened.InstanceId)).Status);
+        Assert.AreEqual("not_watching", fixture.Service.RpcOpen(new(Epoch, opened.InstanceId)).Status, "asking again later can work, unlike for an instance that has no calls");
         page.Dispose();
     }
 
@@ -317,6 +321,25 @@ public sealed class CanvasesRpcTests
     }
 
     [TestMethod]
+    public void TheOutbox_KeepsTheScriptOfAReloadedPlugin_WhateverThePushAroundIt()
+    {
+        // A fragment waits, then the plugin is reloaded: the page must hear of the new script.
+        var outbox = new CanvasOutbox();
+        outbox.Add(new CanvasEvent("update") { InstanceId = "a", Html = "<p>1</p>", Revision = 2 });
+        outbox.Add(new CanvasEvent("update") { InstanceId = "a", Html = "<p>2</p>", Revision = 3, State = "ready", Script = "/plugin/k/s2/main.js", ScriptProblem = "" });
+        // The other way round: the reload waits, then the new version pushes a fragment.
+        outbox.Add(new CanvasEvent("update") { InstanceId = "b", Html = "<p>1</p>", Revision = 2, State = "ready", Script = "", ScriptProblem = "The script of the canvas could not be found." });
+        outbox.Add(new CanvasEvent("update") { InstanceId = "b", Html = "<p>2</p>", Revision = 3 });
+        outbox.Complete();
+
+        var read = outbox.ReadAllAsync(default).ToBlockingEnumerable().ToArray();
+
+        Assert.AreEqual(2, read.Length);
+        Assert.AreEqual(("<p>2</p>", 3, "ready", "/plugin/k/s2/main.js", ""), (read[0].Html, read[0].Revision, read[0].State, read[0].Script, read[0].ScriptProblem));
+        Assert.AreEqual(("<p>2</p>", 3, "ready", "", "The script of the canvas could not be found."), (read[1].Html, read[1].Revision, read[1].State, read[1].Script, read[1].ScriptProblem));
+    }
+
+    [TestMethod]
     public void TheOutbox_DropsWhatAStateOrACloseMakesMoot_AndBoundsWhatWaits()
     {
         var outbox = new CanvasOutbox();
@@ -388,13 +411,15 @@ public sealed class CanvasesRpcTests
         var response = await fixture.Service.ActionAsync(new(Epoch, opened.InstanceId, "tick", "item-2", new() { ["note"] = "hello" }), default);
 
         Assert.AreEqual(("ok", "<p>ticked item-2 hello</p>", false), (response.Status, response.Html, response.Closed));
+        Assert.AreEqual(opened.Revision + 1, response.Revision, "the answer says which revision its content is, so that the page drops a push that is older");
         var seen = fixture.Plugin.Actions.Single();
         Assert.AreEqual((opened.InstanceId, "tick", "item-2", "hello"), (seen.Instance, seen.Name, seen.Value, seen.Values["note"]));
         // What the answer carries is not pushed again, and a later action sees the new content.
         Assert.IsFalse(fixture.HasEvent("update"));
         Assert.AreEqual("<p>ticked item-2 hello</p>", (await fixture.OpenAsync("board", key: "k")).Html);
         // The action that does nothing leaves the tab as it is; the one that closes closes it.
-        Assert.AreEqual(("ok", null, false), Tuple(await fixture.Service.ActionAsync(new(Epoch, opened.InstanceId, "noop", null, null), default)));
+        var kept = await fixture.Service.ActionAsync(new(Epoch, opened.InstanceId, "noop", null, null), default);
+        Assert.AreEqual(("ok", null, false, 0), (kept.Status, kept.Html, kept.Closed, kept.Revision));
         Assert.AreEqual(("ok", null, true), Tuple(await fixture.Service.ActionAsync(new(Epoch, opened.InstanceId, "close", null, null), default)));
         Assert.AreEqual("unknown", (await fixture.Service.ActionAsync(new(Epoch, opened.InstanceId, "tick", null, null), default)).Status);
         Assert.AreEqual(1, fixture.Plugin.Closed.Count, "closing by an action runs the handler of the plugin");
@@ -518,6 +543,19 @@ public sealed class CanvasesRpcTests
         var second = await fixture.NextAsync("open");
         Assert.AreEqual(("run", "play", "p1", "s1", "k", false), (second.CanvasId, second.SpaceId, second.ProjectId, second.SessionId, second.Key, second.Focus));
         Assert.AreEqual((await fixture.OpenAsync("run", space: "play", project: "p1", session: "s1", key: "k")).InstanceId, run.InstanceId);
+
+        // A session that the request names goes with its own project, never with the one of the pane, which is about another session.
+        var other = await canvases.OpenAsync("run", new PluginCanvasOpenOptions { SessionId = "s2" });
+        var third = await fixture.NextAsync("open");
+        Assert.AreEqual(("run", null, "s2"), (third.CanvasId, third.ProjectId, third.SessionId));
+        // The page knows the project of the session and opens the tab with it: that is the instance the plugin was told of.
+        Assert.AreEqual(other.InstanceId, (await fixture.OpenAsync("run", space: "work", project: "p2", session: "s2")).InstanceId);
+        // The session of the pane keeps the project of the pane.
+        await canvases.OpenAsync("run", new PluginCanvasOpenOptions { SessionId = "s1" });
+        var fourth = await fixture.NextAsync("open");
+        Assert.AreEqual(("p1", "s1"), (fourth.ProjectId, fourth.SessionId));
+        // A project that the request names does not take the session of a pane of another project.
+        Assert.AreEqual(PluginCanvasOpenStatus.MissingContext, (await canvases.OpenAsync("run", new PluginCanvasOpenOptions { ProjectId = "p9" })).Status);
     }
 
     [TestMethod]
@@ -744,6 +782,40 @@ public sealed class BoardsPlugin : PluginBase
     }
 
     [TestMethod]
+    public async Task Describe_AndTheActionsForAgents_RefuseAnIdentityThatIsNotWellFormed()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var view = new DesktopAltaCanvases(fixture.Broker);
+        var longKey = new string('k', DesktopCanvases.MaximumKeyUnits + 1);
+
+        // What names an instance reaches the handlers of the plugin: it is checked as it is for a tab.
+        Assert.AreEqual("invalid_request", (await fixture.Broker.DescribeAsync(new CanvasIdentity(Plugin, "board", null, null, null, "a\nb"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Broker.DescribeAsync(new CanvasIdentity(Plugin, "board", new string('s', DesktopCanvases.MaximumIdUnits + 1), null, null, null), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Broker.InvokeAsync(new CanvasIdentity(Plugin, "board", null, null, null, longKey), "add", JsonDocument.Parse("{\"item\":\"milk\"}").RootElement, default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Broker.InvokeAsync(new CanvasIdentity(Plugin, "run", null, "p\u0001", "s1", null), "add", null, default)).Status);
+        Assert.AreEqual("invalid_request", (await view.DescribeAsync(new AltaCanvasTarget(Plugin, "board", null, null, null, longKey), default)).Status);
+        Assert.AreEqual("invalid_request", (await view.InvokeAsync(new AltaCanvasTarget(Plugin, "run", null, null, "s\n1", null), "add", null, default)).Status);
+    }
+
+    [TestMethod]
+    public async Task WhatAPluginDoesWhenAnInstanceEnds_RunsOutsideTheLockOfTheBroker()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var asked = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // What a plugin registered on the end of its instance may ask the broker from another thread, and wait for the answer.
+        fixture.Plugin.OnGatedOpen = canvas => canvas.Closed.Register(() => asked.TrySetResult(Task.Run(() => fixture.Broker.GetOpen()).Wait(TimeSpan.FromSeconds(5))));
+        var opening = fixture.OpenAsync("gated", key: "k");
+        await fixture.Plugin.GatedEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // The window goes away while the handler of the plugin runs: the instance it was making ends once the handler returns.
+        fixture.Broker.Dispose();
+        fixture.Plugin.GatedRelease.TrySetResult();
+
+        Assert.AreEqual("failed", (await opening).Status);
+        Assert.IsTrue(await asked.Task.WaitAsync(TimeSpan.FromSeconds(30)), "the broker answers while the token of the instance is cancelled");
+    }
+
+    [TestMethod]
     public async Task AtTheLimit_TheOldestHiddenInstanceMakesRoom()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -759,7 +831,14 @@ public sealed class BoardsPlugin : PluginBase
         var ids = fixture.Broker.GetOpen().Select(static info => info.InstanceId).ToHashSet();
         Assert.IsFalse(ids.Contains(first.InstanceId!), "the oldest hidden one went");
         Assert.IsTrue(ids.Contains(shown.InstanceId!), "a shown one stays");
+        // The plugin is told as it is for a tab that was closed: the token, then its handler.
+        Assert.IsTrue(SpinWait.SpinUntil(() => fixture.Plugin.Closed.Contains(first.InstanceId!), TimeSpan.FromSeconds(30)), "the plugin hears that the instance closed");
         Assert.IsTrue(fixture.Plugin.Contexts[first.InstanceId!].Closed.IsCancellationRequested);
+        Assert.AreEqual(1, fixture.Plugin.Closed.Count);
+        // The tab of the instance is not told: when it is shown again the host says it does not know the instance, and the tab asks for it again.
+        Assert.IsFalse(fixture.HasEvent("closed"));
+        Assert.AreEqual("unknown", fixture.Service.Visible(new(Epoch, first.InstanceId, true)).Status);
+        Assert.AreEqual(first.InstanceId, (await fixture.OpenAsync("board", key: "k0", visible: true)).InstanceId);
     }
 
     [TestMethod]
@@ -792,6 +871,46 @@ public sealed class BoardsPlugin : PluginBase
         Assert.IsFalse(fixture.HasEvent("state"), "nothing changed for an instance whose plugin is the same");
         Assert.IsFalse(fixture.HasEvent("update"));
         Assert.AreEqual(1, fixture.Plugin.Opened);
+    }
+
+    [TestMethod]
+    public async Task WhenPluginsChangeWhileAnInstanceIsBeingOpened_TheHandlerRunsOnce()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var opening = fixture.OpenAsync("gated", key: "k");
+        await fixture.Plugin.GatedEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // The handler of the plugin still runs: the instance is not ready yet, and the change of the plugins waits for it.
+        var reconciling = fixture.Broker.ReconcileAsync();
+        Assert.IsFalse(reconciling.IsCompleted, "the change waits for the instance that is being opened");
+        fixture.Plugin.GatedRelease.TrySetResult();
+        var opened = await opening;
+        await reconciling.WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.AreEqual("ok", opened.Status);
+        Assert.AreEqual(1, fixture.Plugin.GatedOpened, "the plugin is the same: its handler ran for the open and not again for the change");
+        Assert.IsTrue(fixture.Plugin.Contexts[opened.InstanceId!].IsOpen, "what the instance holds is not ended");
+        Assert.IsFalse(fixture.HasEvent("update"), "the page has what the instance shows in the answer of its open");
+        Assert.AreEqual(0, fixture.Plugin.Closed.Count);
+    }
+
+    [TestMethod]
+    public async Task AnOpenThatWaitedWhileItsCanvasWentAway_IsNotAnsweredByTheVersionThatIsGone()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var first = fixture.OpenAsync("gated", key: "k");
+        await fixture.Plugin.GatedEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        // A second tab asks for the same instance: it found the canvas, and waits for the first open.
+        var second = fixture.OpenAsync("gated", key: "k");
+        Assert.IsFalse(second.IsCompleted);
+
+        // The plugin is still there but its contributions are gone: what a version without the canvas looks like.
+        fixture.Runtime.Registry.RemoveByPlugin(Plugin);
+        fixture.Plugin.GatedRelease.TrySetResult();
+
+        Assert.AreEqual("ok", (await first).Status);
+        Assert.AreEqual("unknown_canvas", (await second).Status, "the canvas is looked for again once the wait is over");
+        Assert.AreEqual(1, fixture.Plugin.GatedOpened);
     }
 
     [TestMethod]
@@ -916,7 +1035,7 @@ public sealed class NotesPlugin : PluginBase
 
         var declared = view.List();
 
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls" }, declared.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls", "gated" }, declared.Select(static canvas => canvas.Id).ToArray());
         var board = declared[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "application", "{\"type\":\"object\"}", true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.InputSchema, board.Describes));
@@ -1016,6 +1135,11 @@ public sealed class NotesPlugin : PluginBase
         Assert.AreEqual(0, view.ListOpen().Count);
         Assert.IsTrue(fixture.Plugin.Closed.Contains(opened.InstanceId!));
         Assert.IsFalse(await view.CloseAsync(target, default));
+
+        // A session names its instance: the tab that was opened without the project of the session is the one the command means.
+        var run = await fixture.OpenAsync("run", space: "work", session: "s1");
+        Assert.IsTrue(await view.CloseAsync(new AltaCanvasTarget(Plugin, "run", "work", "p1", "s1", null), default));
+        Assert.AreEqual(run.InstanceId, (await fixture.NextAsync("closed")).InstanceId);
     }
 
     [TestMethod]
@@ -1227,10 +1351,21 @@ public sealed class NotesPlugin : PluginBase
     {
         private int _opened;
         private int _brokenAttempts;
+        private int _gatedOpened;
 
         public int Opened => Volatile.Read(ref _opened);
 
         public int BrokenAttempts => Volatile.Read(ref _brokenAttempts);
+
+        /// <summary>The times the handler of the canvas <c>gated</c> ran: it waits for <see cref="GatedRelease"/> before it gives its view.</summary>
+        public int GatedOpened => Volatile.Read(ref _gatedOpened);
+
+        public TaskCompletionSource GatedEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource GatedRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>What the handler of the canvas <c>gated</c> does with its context before it waits.</summary>
+        public Action<PluginCanvasContext>? OnGatedOpen { get; set; }
 
         public int Counter { get; set; }
 
@@ -1334,6 +1469,20 @@ public sealed class NotesPlugin : PluginBase
                     });
                     return ValueTask.FromResult(PluginCanvasView.Html("<p>calls</p>") with { ScriptSource = ScriptText });
                 },
+            };
+            yield return new PluginCanvasContribution
+            {
+                Id = "gated", Title = "Gated",
+                Open = async (canvas, _) =>
+                {
+                    Interlocked.Increment(ref _gatedOpened);
+                    Contexts[canvas.InstanceId] = canvas;
+                    OnGatedOpen?.Invoke(canvas);
+                    GatedEntered.TrySetResult();
+                    await GatedRelease.Task;
+                    return PluginCanvasView.Html("<p>gated</p>");
+                },
+                Closed = canvas => { Closed.Enqueue(canvas.InstanceId); return ValueTask.CompletedTask; },
             };
         }
 

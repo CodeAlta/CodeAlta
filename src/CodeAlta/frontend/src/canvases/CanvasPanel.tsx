@@ -27,7 +27,7 @@ type Change =
     script: string | null; scriptProblem: string | null; input: string | null }>
   | Readonly<{ kind: "refused"; phase: Exclude<Phase, "loading" | "ready"> }>
   | Readonly<{ kind: "event"; event: CanvasInstanceEvent }>
-  | Readonly<{ kind: "html"; html: string }>;
+  | Readonly<{ kind: "html"; html: string; revision: number }>;
 
 const initial: View = { phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null };
 
@@ -36,14 +36,17 @@ export function refusedPhase(status: string): Exclude<Phase, "loading" | "ready"
   return status === "plugin_stopped" ? "stopped" : status === "unknown_canvas" ? "missing" : status === "failed" || status === "limit" ? "failed" : "unavailable";
 }
 
-/** What the state of a tab becomes with a change. An event older than what the tab has is dropped, and a state event of the host moves the tab between its content and its placeholder. */
+/**
+ * What the state of a tab becomes with a change. An event older than what the tab has is dropped, and so is the answer to an action when a newer
+ * push came before it; a state event of the host moves the tab between its content and its placeholder.
+ */
 export function canvasView(view: View, change: Change): View {
   switch (change.kind) {
     case "opening": return view.phase === "ready" ? view : { ...initial, phase: "loading", title: view.title };
     case "opened": return { phase: "ready", instanceId: change.instanceId, revision: change.revision, html: change.html, title: change.title, statusText: change.statusText, actions: change.actions,
       script: change.script, scriptProblem: change.scriptProblem, input: change.input };
     case "refused": return { ...initial, phase: change.phase, title: view.title };
-    case "html": return view.phase === "ready" ? { ...view, html: change.html } : view;
+    case "html": return view.phase === "ready" && change.revision >= view.revision ? { ...view, html: change.html, revision: change.revision } : view;
     case "event": {
       const { event } = change;
       if (event.kind === "closed") return view;
@@ -93,6 +96,8 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   const [shown, setShown] = useState<Readonly<{ html: string; script: string | null; problem: string | null }>>({ html: "", script: null, problem: null });
   const latest = useRef({ visible, onLook, onClose, onInstance });
   latest.current = { visible, onLook, onClose, onInstance };
+  // The last run of the effect that asks for the instance, with what it asked for: React runs the effect of a new tab twice.
+  const asking = useRef<Readonly<{ identity: string }> | null>(null);
   const pluginKey = tab.pluginKey ?? "", canvasId = tab.canvasId ?? "";
   const projectId = tab.projectId || null, sessionId = tab.sessionId ?? null, key = tab.key ?? null;
 
@@ -101,10 +106,18 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
     let cancelled = false;
     let detach = () => { };
     let opened: string | null = null;
+    const mine = { identity: JSON.stringify([pluginKey, canvasId, spaceId, projectId, sessionId, key]) };
+    asking.current = mine;
     change({ kind: "opening" });
     void (async () => {
       const reply = await hub.open({ pluginKey, canvasId, spaceId, projectId, sessionId, key, visible: latest.current.visible });
-      if (cancelled) return;
+      if (cancelled) {
+        // The tab went away, or shows another instance, while the host opened this one as shown: nothing else would tell the host that no tab
+        // shows it. A later run that asks for the same instance says itself whether it is shown.
+        const taken = asking.current !== mine && asking.current?.identity === mine.identity;
+        if (!taken && reply.status === "ok" && reply.instanceId) void hub.setVisible(reply.instanceId, false);
+        return;
+      }
       if (reply.status !== "ok" || !reply.instanceId) {
         // The plugin may still be on its way, or its new version about to come: the tab asks again when the host says plugins changed.
         latest.current.onLook({ ...reply.icon ? { icon: reply.icon } : {} });
@@ -136,14 +149,19 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   // The plugin is told whether the tab is shown. What it sends while the tab is hidden is drawn once it is shown.
   const instanceId = view.instanceId;
   useEffect(() => {
-    if (instanceId) void hub.setVisible(instanceId, visible);
+    if (!instanceId) return undefined;
+    let current = true;
+    // The host closes the oldest hidden instance to make room for another: a tab that is shown again and whose instance is gone asks for it again.
+    void hub.setVisible(instanceId, visible).then(status => { if (current && visible && status === "unknown") setRetry(value => value + 1); });
+    return () => { current = false; };
   }, [hub, instanceId, visible]);
   useEffect(() => { if (visible) setShown(current => current.html === view.html && current.script === view.script && current.problem === view.scriptProblem ? current : { html: view.html, script: view.script, problem: view.scriptProblem }); },
     [visible, view.html, view.script, view.scriptProblem]);
   // A tab that is shown draws the latest fragment at once, with the script that goes with it; one that is hidden keeps what it last drew, so a reloaded plugin does not start its script on a skeleton it has not drawn.
   const drawn = visible ? { html: view.html, script: view.script, problem: view.scriptProblem } : shown;
 
-  // What the script of the tab sets (`alta.host.setTitle`, `setStatus`, `setBadge`) wins over what the plugin gave until the plugin gives it again or the script goes.
+  // What the script of the tab sets (`alta.host.setTitle`, `setStatus`, `setBadge`) wins over what the plugin gives, until the script sets null, the script is
+  // replaced (its plugin was reloaded) or the tab shows another instance. A badge takes the place of the status while it is set.
   const [scripted, setScripted] = useState<Readonly<{ title?: string | null; status?: string | null; badge?: string | null }>>({});
   const scriptTab = useMemo<PluginScriptTab>(() => ({
     setTitle: value => setScripted(current => ({ ...current, title: value })),
@@ -152,7 +170,7 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   }), []);
   useEffect(() => { setScripted({}); }, [view.script, view.instanceId]);
 
-  // The strip follows the title and the status the plugin gives.
+  // The strip follows the title and the status: those the script set, else those the plugin gives.
   const title = scripted.title ?? view.title, statusText = scripted.badge ?? scripted.status ?? view.statusText;
   useEffect(() => {
     if (view.phase === "ready") latest.current.onLook({ ...title ? { title } : {}, status: statusText });
@@ -162,7 +180,7 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
     if (!instanceId) return;
     void hub.action(instanceId, action, value, values).then(reply => {
       if (reply.closed) { onClose(); return; }
-      if (reply.status === "ok") { if (reply.html !== null) change({ kind: "html", html: reply.html }); return; }
+      if (reply.status === "ok") { if (reply.html !== null) change({ kind: "html", html: reply.html, revision: reply.revision }); return; }
       if (reply.status === "failed") showToast({ message: t("The plugin could not complete the action."), intent: "warning", icon: "warning-sign", timeout: 6000 }, `canvas-action-${instanceId}`);
     });
   }, [hub, instanceId, onClose, t]);

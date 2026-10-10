@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import { importMapText, lentLibraries } from "../lent/libraries";
 import { AltaError, createAlta, type AltaHostBridge, type AltaOptions, type AltaTheme } from "./alta";
+import { retryDelay, retryLimit } from "./retry";
 import { createHtml, HtmlTemplateError } from "./html";
 import { isScriptPath, loadScriptModule, readScriptModule, ScriptError } from "./scriptModule";
 import { altaInterfaceVersion, lentVersions } from "./versions";
@@ -13,18 +14,15 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 
 // ---- the import map and the policy of the page ----
 
-test("the import map of the entry document is the one the build and the policy know: its hash is in the content security policy", () => {
-  const document = read("../../index.html");
-  const found = [...document.matchAll(/<script type="importmap">([^<]*)<\/script>/gu)];
-  assert.equal(found.length, 1, "one inline import map");
-  assert.equal(found[0][1], importMapText(), "index.html carries the text the libraries file produces, as one line");
-  assert.ok(!found[0][1].includes("\n") && !found[0][1].includes("\r"), "a line break would make the hash depend on the checkout");
-  const hash = `'sha256-${createHash("sha256").update(found[0][1], "utf8").digest("base64")}'`;
-  // What the build made of the document, when it was built: the map is what it was, character for character, or the policy would refuse it.
+test("the import map the build writes in the entry document is the one the policy knows: its hash is in the content security policy", () => {
+  const map = importMapText();
+  assert.ok(!/[\r\n<]/u.test(map), "one line that cannot end its script element: the hash is the one of these characters, whatever the checkout");
+  const hash = `'sha256-${createHash("sha256").update(map, "utf8").digest("base64")}'`;
+  // What the build made of the document, when it was built: the map is the text the policy names, character for character, or the page would refuse it.
   const built = new URL("../../dist/index.html", import.meta.url);
   if (existsSync(built)) {
     const output = [...readFileSync(built, "utf8").matchAll(/<script type="importmap">([^<]*)<\/script>/gu)];
-    assert.deepEqual(output.map(item => item[1]), [found[0][1]], "the built document carries the same map");
+    assert.deepEqual(output.map(item => item[1]), [map], "the built document carries one import map, the one of the libraries");
   }
 
   const policy = (JSON.parse(read("../../../neoastra.json")) as { assets: { csp: string } }).assets.csp;
@@ -48,20 +46,20 @@ test("every lent library has an entry file, a distinct file in the build output,
   }
 });
 
-test("the versions alta.versions tells are the ones the application is built with, and the lent React modules list what React exports", () => {
+test("the versions alta.versions tells are the ones the application is built with, and the lent React modules give what React exports", async () => {
   const dependencies = (JSON.parse(read("../../package.json")) as { dependencies: Record<string, string> }).dependencies;
   for (const [name, version] of Object.entries(lentVersions)) assert.equal(dependencies[name], version, name);
+  // React is CommonJS, so a lent module names what it gives one by one: the names a plugin can import are the ones of the package it stands for.
   const require = createRequire(import.meta.url);
-  const exported = (file: string, from: string) => {
-    const source = read(`../lent/${file}`);
-    const block = new RegExp(`export \\{([^}]*)\\} from "${from}"`, "u").exec(source);
-    assert.ok(block, file);
-    return block[1].split(",").map(name => name.trim()).filter(Boolean).sort();
-  };
+  const lent = (module: object) => Object.keys(module).filter(name => name !== "default").sort();
   const public_ = (module: object) => Object.keys(module).filter(name => !name.startsWith("__")).sort();
-  assert.deepEqual(exported("react.ts", "react"), public_(require("react")).filter(name => name !== "unstable_useCacheRefresh"));
-  assert.deepEqual(exported("react-dom.ts", "react-dom"), public_(require("react-dom")));
-  assert.deepEqual(exported("react-jsx-runtime.ts", "react/jsx-runtime"), public_(require("react/jsx-runtime")));
+  assert.deepEqual(lent(await import("../lent/react")), public_(require("react")).filter(name => name !== "unstable_useCacheRefresh"));
+  assert.deepEqual(lent(await import("../lent/react-dom")), public_(require("react-dom")));
+  assert.deepEqual(lent(await import("../lent/react-jsx-runtime")), public_(require("react/jsx-runtime")));
+  // The types of `react-dom/client` do not declare its `version`, which `react-dom` gives.
+  assert.deepEqual(lent(await import("../lent/react-dom-client")), public_(require("react-dom/client")).filter(name => name !== "version"));
+  // The default export is the package itself: `import React from "react"` in a plugin is the React of the application.
+  assert.equal((await import("../lent/react")).default.useState, require("react").useState);
 });
 
 // ---- the module of a script ----
@@ -155,6 +153,33 @@ test("alta.theme gives the colors as values and tells when they change, watching
   assert.equal(listeners.size, 0, "ending the object stops it too");
 });
 
+test("alta.theme.value is the theme of the window now, whether or not a script listens, and the same object while the colors are the same", () => {
+  // The window gives a new object each time it is asked, as it does when it reads its colors.
+  let dark = true, reads = 0;
+  const listeners = new Set<() => void>();
+  const { alta } = make({}, { readTheme: () => { reads++; return theme(dark); }, subscribeTheme: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; } });
+  const first = alta.theme.value;
+  assert.equal(alta.theme.value, first, "a component that reads it twice gets one object");
+
+  // The theme changes while no script listens: nothing told the object, and a script that only reads the value gets the colors of now.
+  dark = false;
+  assert.equal(alta.theme.value.dark, false);
+  const light = alta.theme.value;
+  // A script that begins to listen has the colors of now as well, and is not asked to read the window at each use while it listens.
+  dark = true;
+  const seen: boolean[] = [];
+  const stop = alta.theme.subscribe(value => seen.push(value.dark));
+  assert.equal(alta.theme.value.dark, true);
+  assert.notEqual(alta.theme.value, light);
+  const before = reads;
+  void alta.theme.value; void alta.theme.value;
+  assert.equal(reads, before, "the window tells a listener of a change: the value is kept between two of them");
+  dark = false;
+  for (const listener of [...listeners]) listener();
+  assert.deepEqual(seen, [false]);
+  stop();
+});
+
 test("alta.host checks what a script passes and does what the window serves, and nothing when it does not", () => {
   const calls: unknown[][] = [];
   const bridge: AltaHostBridge = {
@@ -233,6 +258,13 @@ test("html reads elements as JSX does: tags, components, attributes, text, child
   assert.equal((html`<${Button}>x</${Button}>` as Made).type, Button, "a closing tag may name its component");
   assert.deepEqual((html`<p>${"a"}<!-- ${"skipped"} -->${"b"}</p>` as Made).children, ["a", "b"], "holes in a comment keep their place");
   assert.equal(html`just text`, "just text");
+});
+
+test("a call asks again after a wait that doubles, a few times; a stream goes on asking at the longest wait", () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map(failures => retryDelay(failures, retryLimit)), [500, 1000, 2000, 4000, 8000, 8000]);
+  assert.equal(retryDelay(retryLimit, retryLimit), null, "a call that asked often enough waits for a reason to ask again");
+  assert.equal(retryDelay(40), 8000, "a stream is followed for as long as it is shown");
+  assert.equal(retryDelay(-1), 500);
 });
 
 test("html parses a template once and reads its values each time, and refuses what is not well formed", () => {

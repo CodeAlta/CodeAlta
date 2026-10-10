@@ -182,6 +182,86 @@ test("a window that carries no calls leaves the canvas quiet: subscribing never 
   await assert.rejects(api.status(), (error: AltaError) => error.code === "rpc_unavailable");
 });
 
+/** A plugin whose connection the test opens and ends: listening fails while it is not reachable, and ends with the connection. */
+function connection(answers: Record<string, (input: any) => unknown> = {}) {
+  const handlers = new Set<(value: unknown) => void>();
+  const listeners = new Set<(value: boolean) => void>();
+  const state = { reachable: true, open: false, subscriptions: 0, refused: 0 };
+  const set = (open: boolean) => { if (state.open === open) return; state.open = open; for (const listener of [...listeners]) listener(open); };
+  const rpc: AltaRpc = {
+    async invoke(name, input) {
+      if (!state.reachable) throw new AltaError("connection_closed", "The window cannot reach the plugin now.", { retryable: true });
+      set(true);
+      const answer = answers[name];
+      if (!answer) throw new AltaError("command_not_found", `no ${name}`);
+      return answer(input);
+    },
+    async stream() { throw new Error("not used"); },
+    async subscribe(_name, handler) {
+      if (!state.reachable) { state.refused++; throw new AltaError("connection_closed", "The window cannot reach the plugin now.", { retryable: true }); }
+      set(true);
+      state.subscriptions++;
+      handlers.add(handler);
+      return () => { handlers.delete(handler); };
+    },
+    generation: { value: 0, subscribe: () => () => { } },
+    connected: { get value() { return state.open; }, subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; } },
+  };
+  return {
+    rpc, state,
+    emit: (value: unknown) => { for (const handler of [...handlers]) handler(value); },
+    /** The connection ends: what listened on it is gone. */
+    end: () => { handlers.clear(); set(false); },
+    get listening() { return handlers.size; }, get connectedListeners() { return listeners.size; },
+  };
+}
+
+const eventually = async (condition: () => boolean, what: string) => {
+  for (let index = 0; index < 400; index++) { if (condition()) return; await settle(); }
+  assert.fail(`never happened: ${what}`);
+};
+
+test("a listening that could not begin because the plugin was not reachable begins once it is, and reads what it missed", async () => {
+  const plugin = connection({ "statistics.status": () => status({ state: "reading", revision: 4 }) });
+  plugin.state.reachable = false;
+  const api = createRpcApi(plugin.rpc, { retryMilliseconds: 5 });
+  const heard: StatisticsEvent[] = [];
+  const off = api.subscribe(event => heard.push(event));
+  await eventually(() => plugin.state.refused >= 2, "it asks again while the plugin is not reachable");
+  assert.equal(plugin.listening, 0);
+
+  plugin.state.reachable = true;
+  await eventually(() => plugin.listening === 1 && heard.length === 2, "it listens once the plugin is reached");
+  assert.deepEqual(heard[0], { kind: "data", change: everyDay }, "what was read while nobody listened may be stale");
+  assert.equal((heard[1] as { status: StatisticsStatus }).status.revision, 4);
+  plugin.emit({ kind: "status", status: status({ revision: 5 }) });
+  assert.equal(heard.length, 3);
+  off();
+  assert.equal(plugin.connectedListeners, 0);
+});
+
+test("a connection that ends while the canvas only listens is made again, with every day stale and the status read once more", async () => {
+  const plugin = connection({ "statistics.status": () => status({ revision: 7 }) });
+  const api = createRpcApi(plugin.rpc, { retryMilliseconds: 5 });
+  const heard: StatisticsEvent[] = [];
+  const off = api.subscribe(event => heard.push(event));
+  await eventually(() => plugin.listening === 1, "it listens");
+  assert.deepEqual(heard, []);
+
+  // The plugin is reloaded: the canvas makes no call of its own that would tell it that nothing is heard any more.
+  plugin.end();
+  await eventually(() => plugin.listening === 1 && heard.length === 2, "it listens again");
+  assert.equal(plugin.state.subscriptions, 2);
+  assert.deepEqual(heard[0], { kind: "data", change: everyDay });
+  assert.equal((heard[1] as { status: StatisticsStatus }).status.revision, 7);
+
+  // A canvas that went away asks for nothing more.
+  off();
+  plugin.end();
+  await settle(); await settle(); await settle();
+  assert.equal(plugin.state.subscriptions, 2);
+});
+
 // ---- what the canvas is given from the place it is opened at ----
 
 const directory: StatisticsDirectory = {
