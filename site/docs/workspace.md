@@ -178,6 +178,31 @@ Use `F6` or the **Full Prompt** action to open a larger prompt editor. `Esc` or 
   <figcaption class="small text-secondary mt-2">Prompt and system-prompt details are visible in the timeline, including the selected agent prompt and source path, so you can review what context was sent.</figcaption>
 </figure>
 
+### Remote Control (Claude Code)
+
+A Claude Code session can be followed and driven from claude.ai or the Claude app, on your phone for
+instance. Turn it on with the **Remote Control** button in the bar of the prompt (the radio tower), or with
+**Remote Control…** in the **Actions** menu of the session. The button's color says where it stands:
+connecting, on (green) or failed (red). Its popover has the link of the session on claude.ai, **Open in
+browser** and **Copy link**, and **Turn off**. In the Claude app the session is listed under its title.
+
+While it is on:
+
+- A prompt you send from claude.ai is shown in the timeline as yours, and the session runs it as if you had
+  sent it here.
+- A permission request is asked on both sides: answer it on the phone or in CodeAlta, whichever comes first.
+  The request leaves the other side once it is answered.
+- Stopping the session on claude.ai stops it in CodeAlta too, as the **Stop** button does here.
+- Questions of the agent (**alta ask**) are asked in the CodeAlta window only.
+- CodeAlta keeps Claude Code running for the session, and connects it again if it has to start it again
+  (another model, effort or agent prompt for a send); the link on claude.ai normally stays the same. Closing
+  CodeAlta ends it. If Claude Code stops by itself, the button turns red: the session is connected again with
+  the next prompt you send here, or with **Try again** in its popover.
+
+Remote Control needs Claude Code signed in with your claude.ai account: it does not work with an API key.
+When CodeAlta starts again, Remote Control is off unless you turned on **Turn Remote Control back on when
+CodeAlta starts** in Settings > Appearance: the sessions that had it on are then connected again.
+
 ## Session notes
 
 Each session has sticky Markdown notes that agents keep up to date with a checklist, a status or next actions. The TUI shows them in the **Notes** panel of the sidebar. The desktop app shows them in a **Notes** window over the timeline, which you can move, resize, collapse, copy and clear; `Ctrl+Shift+N` shows or hides it.

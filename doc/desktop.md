@@ -585,6 +585,44 @@ shows more than a task of a provider, because CodeAlta owns its process:
 - The question before the application exits counts a session whose job runs with the sessions that
   run (`CountSessionsAtWork`): exiting ends the commands.
 
+**Remote Control.** A session whose provider has it (`SessionChoicesResponse.SupportsRemoteControl`, true
+for Claude Code; absent otherwise) has a **Remote Control** button in the bar of its composer
+(`RemoteControlButton`, the `remote` icon), beside **Reminders**. Its color says the state the runtime state
+of the session gives (`SessionRuntimeStateEntry.RemoteControl`, absent while off; `remoteControl.ts` reads it,
+and a link that is not one of `https://claude.ai/` is dropped): yellow while connecting, green when on, red
+when it failed. Its popover has the link, **Open in browser** (`markdownLinks.open`; it closes the popover, whose
+button would otherwise keep the focus a permission request takes), **Copy link**, **Turn
+on**, **Turn off** and **Try again**, and says why a request was refused (`busy`, `unavailable`). The panel
+shows what the host answered until the runtime state says it too.
+
+- **Remote Control…** in the Actions menu of a Claude Code session (Explorer and session list; the provider
+  type comes from the provider brands) selects the session and opens the popover: `main.tsx` keeps the
+  request (`remoteControlAsk`, a session and a counter) and passes it to that session's panel. It takes the
+  authority of a change of the session (`sessionActionAccess`, `"remote-control"`).
+- `sessions.setRemoteControl` (epoch, session, enabled) reaches `OwnedSessionCommandService.SetRemoteControlAsync`:
+  a session that is not attached (CodeAlta was started again) is attached with the options it runs with, as a
+  send would attach it but without a run (`EnsureOwnedCoordinatorSessionAsync`), and is shown on claude.ai under
+  its title. Those options include what plugins give its runs (`PluginOrchestrationBridge.AugmentAttachmentAsync`):
+  otherwise the next send would not match them, would replace the attachment, and would end the process of Claude
+  Code that holds the bridge. It answers `ok` with the state, `busy` while its provider is being changed or it is
+  being deleted, `unavailable` for an unknown session or a provider without Remote Control. It is not a
+  command of a run and leaves no receipt.
+- A send that attaches the session again (another model, effort or agent prompt) ends the bridge with the old
+  attachment; the runtime turns Remote Control on again in the new one (see `doc/providers.md`, "Remote Control").
+- The host remembers the sessions that have it on (`preferences.json`, `remoteControlSessions`, the last
+  turned on first, at most 32). **Settings > Appearance > Turn Remote Control back on when CodeAlta starts**
+  (`reconnectRemoteControl`, written only as `true`, `desktopShell.setReconnectRemoteControl`) has them
+  connected again when the host starts (`DesktopRemoteControl.Reconnect`, one after the other, in the
+  background; an unknown session is forgotten). Off by default: otherwise Remote Control is off after a restart,
+  and the sessions remembered are forgotten when the host starts (`DesktopPreferences.AtStart`), so that the
+  setting turned on later reconnects only the sessions that are on when CodeAlta exits next.
+- **Remote Control…** in the Actions menu of a session asks its button to open the popover with a request the
+  button marks as done once it shows it: a button mounted again (another space, the tab opened again) does not
+  open it again.
+- The permission card checks, while a run goes on, that the request it shows still waits
+  (`waits` of the reviewer, a read that publishes nothing): a request answered on claude.ai is withdrawn by
+  Claude Code, and the card then reads the requests again.
+
 ### Projects and saved sessions
 
 **Open project** (`Ctrl+O`) is a resizable window with one field for a saved project's name or a
