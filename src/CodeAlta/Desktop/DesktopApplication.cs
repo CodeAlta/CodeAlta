@@ -520,7 +520,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
                 var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
                 workspace = new WorkspaceService(host, epoch, worktrees);
-                operations = new SessionOperationsService(host.Commands, epoch);
+                operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
+                if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch);
                 changesView = new DesktopChangesView();
