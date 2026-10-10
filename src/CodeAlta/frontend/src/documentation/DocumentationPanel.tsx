@@ -107,16 +107,15 @@ export function DocumentationPanel({ hub, visible, onActivate, onOpenSession, on
   // The page that is drawn is the one the tab went to: a place is shown once its own page is there.
   const arrived = readyPath !== null && location !== null && readyPath.toLowerCase() === location.page.toLowerCase();
   const placed = useRef<number | null>(null);
-  // The place the page is to be shown at, until it is shown there. The window draws the content of a tab before the
-  // tab is in its pane, and a hidden tab has no size either: a page without a size cannot be scrolled, and no
-  // heading of it has a position. The place waits for the page to have a size.
+  // The place waits for the pane's layout, not just a nonzero size. During the dock's layout effects a new tab can
+  // already be connected but still have its content's unconstrained height: its scroll range is then zero.
   const waiting = useRef<Readonly<{ path: string; anchor: string | null; restore: boolean }> | null>(null);
   const place = useCallback(() => {
-    const view = scroller.current, wanted = waiting.current;
-    if (!view || !wanted || view.clientHeight === 0) return;
-    waiting.current = null;
+    const view = scroller.current, host = article.current, wanted = waiting.current;
+    if (!view || !host || !wanted || !view.isConnected || view.clientHeight === 0 || view.clientWidth === 0 || host.clientHeight === 0) return;
     const top = wanted.anchor ? headingTop(wanted.anchor) : null;
     view.scrollTop = wanted.restore && hub.scroll.has(wanted.path) ? hub.scroll.get(wanted.path) : top !== null ? Math.max(0, top - 12) : 0;
+    waiting.current = null;
   }, [hub, headingTop]);
   useLayoutEffect(() => {
     const view = scroller.current;
@@ -125,20 +124,30 @@ export function DocumentationPanel({ hub, visible, onActivate, onOpenSession, on
     placed.current = serial;
     hub.scroll.show(serial);
     waiting.current = { path: readyPath, anchor, restore: reopened || comingBack };
-    place();
     if (!reopened) setActive(anchor);
     // A link of the page that was followed is gone with the page: the keys go on scrolling the new one.
     const focused = document.activeElement;
     if (!reopened && (!focused || focused === document.body || article.current?.contains(focused))) view.focus({ preventScroll: true });
-  }, [hub, readyPath, arrived, serial, anchor, comingBack, place]);
-  // The page gets its size when its tab is put in its pane, or shown again: the place that waited is shown then, before the page is painted.
+  }, [hub, readyPath, arrived, serial, anchor, comingBack]);
+  // Descendant layout effects run before the dock sizes the new pane. Try after that commit, and again only when
+  // the scroller or its article gains a size (a detached/hidden pane may still have none). Stop observing once
+  // placed: later content changes and reader scrolling must not replay the initial target.
   useEffect(() => {
-    const view = scroller.current;
-    if (!view || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => place());
-    observer.observe(view);
-    return () => observer.disconnect();
-  }, [place]);
+    const view = scroller.current, host = article.current;
+    if (!view || !host || !readyPath || !arrived || !waiting.current) return;
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
+      place();
+      if (!waiting.current) observer?.disconnect();
+    };
+    const schedule = () => { frame ||= requestAnimationFrame(apply); };
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedule);
+    observer?.observe(view);
+    observer?.observe(host);
+    schedule();
+    return () => { cancelAnimationFrame(frame); observer?.disconnect(); };
+  }, [place, readyPath, arrived, serial]);
 
   // The entry of the outline the reader is at, and how far the page was scrolled.
   const frame = useRef(0);

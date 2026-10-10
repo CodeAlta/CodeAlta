@@ -18,6 +18,7 @@ test("the Documentation tab shows the guide under the policy of the application:
     const config = JSON.parse(await readFile(new URL("../../../neoastra.json", import.meta.url), "utf8")) as { assets: { csp: string } };
     const bundle = await build({ entryPoints: [fileURLToPath(new URL("./documentationPanel.mount.tsx", import.meta.url))], bundle: true, platform: "browser", format: "iife", write: false });
     const style = await readFile(new URL("../../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
+      + await readFile(new URL("../../node_modules/flexlayout-react/style/dark.css", import.meta.url), "utf8")
       + await readFile(new URL("../style.css", import.meta.url), "utf8") + await readFile(new URL("./documentation.css", import.meta.url), "utf8");
     const origin = "https://documentation-production.invalid", page = origin + "/index.html";
     const assets = new Map([
@@ -326,6 +327,45 @@ test("the Documentation tab shows the guide under the policy of the application:
     await evaluate("document.querySelector('.documentation-scroll').focus()");
     await press("Escape", "Escape", 27);
     await expect("!document.querySelector('.documentation').hasAttribute('data-nav-open')");
+
+    // The native regression: a cached, multi-block prompts page in the actual production dock, not the simplified Pane above.
+    const prompts = await readFile(new URL("../../../../../site/docs/prompts.md", import.meta.url), "utf8");
+    await evaluate(`documentationFixture.unmount(); documentationFixture.prompts(${JSON.stringify(prompts)}); documentationFixture.hub.show('prompts.md'); documentationFixture.dock()`);
+    await expect(`${title} === 'Agent Prompts' && document.querySelector('.documentation-scroll').scrollHeight > 6000`);
+    assert.deepEqual(await evaluate("documentationFixture.hub.getSnapshot().page.blocks.map(block => block.kind)"), ["markdown", "figure", "markdown", "markdown"], "The unshipped screenshot is omitted, but still splits the surrounding Markdown.");
+    await expect("document.querySelector('.documentation-figure img').naturalWidth > 0");
+    const promptsRead = await evaluate<number>("documentationFixture.state.calls.page.length");
+    const settle = () => evaluate("new Promise(resolve => { let frames = 6; const tick = () => --frames ? requestAnimationFrame(tick) : resolve(); requestAnimationFrame(tick); })");
+    await evaluate("document.querySelector('.documentation-scroll').scrollTop = 800; document.querySelector('.documentation-scroll').focus()");
+    await expect("documentationFixture.hub.scroll.get('prompts.md') === 800");
+    await settle();
+    assert.equal(await evaluate(scrollTop), 800, "The manual scroll is stable before closing.");
+    await press("w", "KeyW", 87, 2);
+    await expect("!document.querySelector('.documentation')");
+    assert.equal(await evaluate("documentationFixture.hub.scroll.get('prompts.md')"), 800, "Closing the real dock tab keeps the saved place.");
+    await click("document.querySelector('.fixture-book')");
+    await expect(`${title} === 'Agent Prompts' && ${scrollTop} === 800`, "Reopening the real dock restores the cached prompts page to 800.");
+    await settle();
+    assert.equal(await evaluate(scrollTop), 800, "The restored scroll survives the dock's subsequent layout frames.");
+    await expect("document.querySelector('.documentation-outline li[data-active]')?.textContent === 'Prompt composition at a glance'");
+    // Once restored, the reader is in charge. Neither a render for new colors nor a later reopen replays 800.
+    await evaluate("document.querySelector('.documentation-scroll').scrollTop = 1100; documentationFixture.theme('light')");
+    await expect("documentationFixture.hub.scroll.get('prompts.md') === 1100");
+    await settle();
+    assert.equal(await evaluate(scrollTop), 1100);
+    await evaluate("document.querySelector('.documentation-scroll').focus()");
+    await press("w", "KeyW", 87, 2);
+    await expect("!document.querySelector('.documentation')");
+    await click("document.querySelector('.fixture-book')");
+    await expect(`${scrollTop} === 1100`, "The next close/reopen keeps the reader's new place.");
+    // An explicit heading while closed is a new navigation, not a request to restore the last manual position.
+    await evaluate("document.querySelector('.documentation-scroll').focus()");
+    await press("w", "KeyW", 87, 2);
+    await expect("!document.querySelector('.documentation')");
+    await evaluate("documentationFixture.hub.show('prompts.md', 'built-in-modes')");
+    await click("document.querySelector('.fixture-book')");
+    await expect("Math.abs(document.querySelector('[data-doc-anchor=\"built-in-modes\"]').getBoundingClientRect().top - document.querySelector('.documentation-scroll').getBoundingClientRect().top - 12) < 3", "A heading opens at its final, laid-out position in the real dock.");
+    assert.equal(await evaluate("documentationFixture.state.calls.page.length"), promptsRead, "Reopening uses the cached prompts page throughout.");
 
     // Nothing a page wrote ran, and the page asked the network for nothing but its own files.
     assert.equal(await evaluate("documentationFixture.state.executed"), 0);

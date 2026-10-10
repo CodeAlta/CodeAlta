@@ -1,9 +1,12 @@
 // Disposable page: the Documentation tab over a guide the test plays, under StrictMode as in the application.
-import { Fragment, StrictMode, createElement, useLayoutEffect, useRef } from "react";
+import { Fragment, StrictMode, createElement, useLayoutEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { DocumentationBlock, DocumentationMenuItem, DocumentationPageResponse } from "#neoastra";
 import { MarkdownLinksContext } from "../MarkdownContent";
+import { SessionTabStrip } from "../SessionTabStrip";
+import { closeFileTab, documentationTab, emptyFileTabs, openFileTab, type FileTabs } from "../fileTabs";
+import { emptySessionTabs } from "../sessionTabs";
 import { DocumentationPanel } from "./DocumentationPanel";
 import { createDocumentationHub, type DocumentationApi } from "./documentationHub";
 
@@ -100,8 +103,51 @@ function PaneSlot({ content }: { content: HTMLElement }) {
 const hub = createDocumentationHub(api);
 hub.connect(epoch);
 
+// The production dock, not an imitation of its portal: opening/closing changes its model while the hub survives.
+function Dock() {
+  const [files, setFiles] = useState<FileTabs>(() => openFileTab(emptyFileTabs(), documentationTab));
+  return <div style={{ height: "100%", position: "relative" }} onKeyDown={event => {
+    if (event.ctrlKey && event.key.toLowerCase() === "w") {
+      event.preventDefault();
+      setFiles(value => closeFileTab(value, documentationTab));
+    }
+  }}>
+    <button className="fixture-book" style={{ position: "absolute", right: 0, top: 0, zIndex: 5 }} onClick={() => {
+      hub.show(); setFiles(value => openFileTab(value, documentationTab));
+    }}>Documentation</button>
+    <SessionTabStrip state={emptySessionTabs()} select={() => setFiles(value => ({ ...value, active: null }))} close={() => { }} reopen={() => { }} capture={() => () => true}
+      files={files} selectFile={tab => setFiles(value => ({ ...value, active: tab }))} closeFile={tab => setFiles(value => closeFileTab(value, tab))}
+      renderFile={(_tab, visible) => <DocumentationPanel hub={hub} visible={visible} onActivate={() => { }} onOpenSession={() => { }} onProviders={null} onNotice={() => { }} />}>
+      <div>Another tab</div>
+    </SessionTabStrip>
+  </div>;
+}
+
 const fixture = {
   state, hub,
+  /** This shipped page only: preserve the Catalog's text/figure blocks, including the split at its unshipped screenshot. */
+  prompts(source: string) {
+    const blocks: DocumentationBlock[] = [];
+    const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "").replace(/^\{\.table\}\s*$/gm, "");
+    let start = 0;
+    for (const match of body.matchAll(/<figure\b[\s\S]*?<\/figure>/g)) {
+      blocks.push(text(body.slice(start, match.index)));
+      const figure = new DOMParser().parseFromString(match[0], "text/html");
+      const svg = figure.querySelector("svg");
+      if (svg) blocks.push({ kind: "figure", markdown: null, image: null, svg: svg.outerHTML, alt: svg.querySelector("title")?.textContent ?? "",
+        caption: figure.querySelector("figcaption")?.textContent ?? null, width: null, height: null });
+      start = match.index + match[0].length;
+    }
+    blocks.push(text(body.slice(start)));
+    pages["prompts.md"] = { status: "ok", path: "prompts.md", title: "Agent Prompts", blocks };
+  },
+  /** Shows the real FlexLayout dock; Ctrl+W closes just Documentation and the book opens it again. */
+  dock() {
+    container.style.width = "1320px";
+    container.style.height = "1000px";
+    container.style.display = "";
+    flushSync(() => root.render(<StrictMode><Dock /></StrictMode>));
+  },
   /** Shows the tab in a pane of a width. */
   mount(options: { width?: number; visible?: boolean; pane?: boolean; hidden?: boolean } = {}) {
     container.style.width = `${options.width ?? 1320}px`;
