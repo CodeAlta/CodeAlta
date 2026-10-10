@@ -356,6 +356,11 @@ A frame is at most 1 MiB; a script can have 8 calls running, 8 streams and 8 sub
 
 The `canvas-board` sample is a React canvas with Blueprint tabs and a menu, a chart and `alta.host`, whose board lives in the plugin: the script reads it with a call and a stream, changes it with calls, and hears an event; `alta board add --title ...` changes it from a terminal.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-canvas-board.webp" alt="CodeAlta Desktop with a session at the left, where an agent opened and read the board with alta canvas, and at the right the Board tab of the canvas-board sample: cards in the columns To do, Doing and Done" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The board of the <code>canvas-board</code> sample beside the session whose agent opened and read it.</figcaption>
+</figure>
+
 ## Status items and content around the prompt
 
 ```csharp
@@ -403,7 +408,17 @@ Name exactly one of `Command` (a command of the same plugin) and `Canvas` (a can
 
 The icon is the name of any [Lucide](https://lucide.dev/icons) icon, the name of a brand logo, or an SVG file of your plugin folder such as `icons/notes.svg` (at most 32 KiB, drawn in the color of the text). A button that is invalid or over its limit is left out, and `alta plugin status` says why.
 
+<figure class="alta-figure my-4" style="max-width: 52rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-plugin-buttons.webp" alt="The title bar of CodeAlta Desktop with three plugin buttons before the space switch: Statistics, and the two buttons of the canvas-checklist sample with a badge that says 3, above the Checklist tab that the first one opened" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Buttons of plugins in the title bar: Statistics, and the two of the <code>canvas-checklist</code> sample with the number of items left.</figcaption>
+</figure>
+
 People can hide any button with a right click, and turn each one back on in Settings > Plugins. In a narrow window the buttons fold into one menu.
+
+<figure class="alta-figure my-4" style="max-width: 52rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-plugin-buttons-settings.webp" alt="The Plugins page of Settings: under Statistics and under the Canvas checklist plugin, a line for each button with its place, Title bar or Project menu, and a switch" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Plugins lists the canvases and the buttons of each plugin, with a switch for each button.</figcaption>
+</figure>
 
 ## Prompt pickers
 
@@ -444,6 +459,11 @@ You do not write anything to make a canvas easy to find:
 - The search (`Ctrl+P`) has a command "Open canvas: <title>" for each canvas.
 - The menu of a project row lists the canvases about a project, and the menu of a session row those about a session.
 - Settings > Plugins lists the canvases of each plugin.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-canvases.webp" alt="The Canvases page of CodeAlta Desktop: a card for Statistics, for the board and for the three checklists of the samples, each with its scope, Application, Project or Session, and an Open button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Canvases page: one card for each canvas, with its scope and <strong>Open</strong>.</figcaption>
+</figure>
 
 Agents use `alta canvas`: `list` and `show` read what canvases exist and what each shows, `invoke` runs an action, and `open`, `focus` and `close` act on a tab. A tab belongs to a space. When an agent opens a canvas for a space that you are not looking at, the tab is added to that space and the window stays where it is.
 

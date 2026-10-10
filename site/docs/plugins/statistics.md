@@ -6,6 +6,11 @@ title: Statistics plugin
 
 The built-in statistics plugin shows how you use CodeAlta. It adds a card of statistics to each turn of a session, and CodeAlta Desktop also keeps the numbers of all your sessions, over time: sessions, runs, active time, prompts, models, tokens, tools, and the cost where a provider gives one.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-overview.webp" alt="The Statistics tab of CodeAlta Desktop on its Overview page: the period and the filters at the top, tiles for sessions, runs, active time, prompts, tokens and cost, the active time of each week by project, and a calendar of the year" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Overview of the last 90 days for a space of open-source projects.</figcaption>
+</figure>
+
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-plugin-statistics.png" alt="CodeAlta timeline statistics card contributed by a plugin" loading="lazy">
   <figcaption class="small text-secondary mt-2">The card of a turn is a plugin-owned timeline projection replayed from session events.</figcaption>
@@ -45,6 +50,11 @@ The first time, nothing is read until you choose how much of your history to use
 | Last 90 days | Only the sessions with activity in that time are read, and the statistics start at that day |
 | Start from today | Nothing of the past is read; the statistics begin with what happens from now on |
 
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-history.webp" alt="The first card of the Statistics tab: the number of sessions that can be read and since when, with the buttons Read all the history, Last 90 days and Start from today" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The first time, the page asks how much of your history to read.</figcaption>
+</figure>
+
 The most recent sessions are read first, so today and this week are right within seconds, and the older days follow. The reading runs on one thread at a low priority and never slows a session. You can pause it, resume it, stop it where it is, and later read more history; a history you stopped still follows the sessions that change from the day it starts at. If CodeAlta closes meanwhile, nothing is lost: each session that was read is kept, and the reading goes on at the next start. Sessions written by CodeAlta TUI are caught up by CodeAlta Desktop, at its next start and every few minutes while it runs.
 
 When a new version of CodeAlta computes more from your sessions, they are read again, one by one, and what you see stays until each session's new numbers are ready.
@@ -77,11 +87,41 @@ The page shows the numbers of your sessions as dashboards, one tab for each ques
 | Sessions | The sessions of the period, in a table that sorts on any number and opens the session |
 | Health | Errors, interrupted runs, compactions, how full the context gets |
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-activity.webp" alt="The Activity page of the Statistics tab: sessions started and active for each week, runs by outcome, active time, and a grid of the hours of each day of the week" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Activity: sessions, runs by outcome, active time, and when in the week the work happens.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-models.webp" alt="The Models page of the Statistics tab: tokens for each week by model, what the tokens of each model are made of, and the share of cached input over time" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Models: tokens by model, fresh and cached input, output, and how much the cache is used.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-tools.webp" alt="The Tools page of the Statistics tab: tool calls for each week by kind of tool, and a table of the tools with their calls, failures, total time, median and 90th percentile" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Tools: calls by kind, then each tool with its failures and how long it takes.</figcaption>
+</figure>
+
 One bar at the top sets the period (today, the last 7, 30 or 90 days, this month, last month, this year, all time, or two dates), the frequency (hour, day, week, month, year, or automatic), a comparison with the period before or the same period a year before, and the filters: space, project, provider, model, reasoning effort, who started the work and the kind of tool. A click on a bar, a legend entry or a row adds the filter, a click on a day of the calendar shows that day, and a drag on the strip under the main chart narrows the period. The page opens on the space the window shows, and removing the filter shows every space.
 
-Every chart can be shown as a table with the same numbers, and the legends and menus work with the keyboard. A cost is shown for each unit, dollars or AI credits, never as one total, and an estimate from public prices, when it is offered, is a separate block marked as an estimate.
+<figure class="alta-figure my-4" style="max-width: 52rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-filters.webp" alt="The bar of the Statistics tab with the period, the frequency, the comparison and a filter on a space, and the Filter menu open: Project, Provider, Model, Reasoning effort, Started by, Kind of tool" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The bar of the page, with the menu that adds a filter.</figcaption>
+</figure>
+
+Every chart can be shown as a table with the same numbers, and the legends and menus work with the keyboard. A cost is shown for each unit, dollars or AI credits, never as one total, and an estimate from public prices, when it is offered, is a separate block marked as an estimate. The page follows the theme of the window.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-overview-light.webp" alt="The Overview page of the Statistics tab in the light theme: the tokens of each day of the last 30 days by model, and the calendar of the year" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The last 30 days in the light theme, with the tokens of each day by model.</figcaption>
+</figure>
 
 While the history is read, the page is already in use: the most recent days are right first, the part not read yet is hatched, and a bar under the controls shows how many sessions are read, the date reached and the time left, with **Pause**, **Resume** and **Stop here**. The menu of the page reads more history, forgets the sessions that were deleted, and resets the statistics after asking.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-history-reading.webp" alt="The Statistics tab while the history is read: a bar says 20 of 137 sessions are read, back to which day and how long is left, with a Pause button, and the days not read yet are hatched in the chart" loading="lazy">
+  <figcaption class="small text-secondary mt-2">While the history is read: the progress, <strong>Pause</strong>, and the days not read yet.</figcaption>
+</figure>
 
 ## Ask for the numbers
 
@@ -98,6 +138,11 @@ Which tools take the most time in the CodeAlta project over the last 30 days?
 ```text
 Show my tokens per week for the last 90 days, by model.
 ```
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-canvas-agent.webp" alt="A session of CodeAlta Desktop where an agent ran alta canvas list, alta canvas open, alta canvas show and alta statistics summary, and answered with the numbers of the last 7 days in a table" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An agent reads a canvas and the statistics with <code>alta</code>, and answers with the numbers.</figcaption>
+</figure>
 
 | Command | What it answers |
 | --- | --- |

@@ -330,7 +330,13 @@ public sealed partial class StatisticsQueries
     }
 
     private SeriesLine ToLine(ResolvedQuery query, string? group, string key, double[] values, double[]? previous)
-        => new(key, group is null ? "total" : GroupLabel(query, group, key), values, previous, values.Sum(), previous?.Sum());
+    {
+        var label = group is null ? "total" : GroupLabel(query, group, key);
+
+        // A group of a fixed list is kept as a number in the facts: its line is keyed by its name, which is the value a filter takes.
+        var named = group is "kind" or "origin" or "prompt-kind" or "content-kind" or "purpose";
+        return new(named ? label : key, label, values, previous, values.Sum(), previous?.Sum());
+    }
 
     /// <summary>The numbers of the Overview: tiles with their change against the compared period and a line over the period.</summary>
     /// <param name="request">The period, the frequency, the filters and the comparison.</param>

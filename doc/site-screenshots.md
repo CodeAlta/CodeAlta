@@ -87,6 +87,10 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `theme-dark`, `theme-light`, `themes` | One scene in each theme; `themes` is a montage of six color schemes. |
 | `work-items`, `issues`, `sub-agents`, `pull-request`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with more sub-agents than the sidebar lists (five), the pull request menu (a crop), a conversation at 70%. |
 | `terminal`, `worktrees`, `automations`, `plugins` and their close-ups | They need state that is built for them (a running terminal, two worktrees, automations in the project configuration, a temporary plugin) and removed afterwards. |
+| `statistics-overview`, `statistics-overview-light`, `statistics-activity`, `statistics-models`, `statistics-tools`, `statistics-filters` | The Statistics tab beside a session tab, with the numbers of a real profile for a space of public projects. `overview` is the last 90 days by week, the time by project; `overview-light` the last 30 days by day, the tokens by model, in the light theme; the three pages are taken from their top; `filters` is a crop of the bar with the **Filter** menu open. |
+| `statistics-history`, `statistics-history-reading` | The first card of the tab (a crop) and the tab while the history is read, with the sessions of the developer instance itself. |
+| `canvases`, `canvas-board`, `canvas-agent` | The Canvases page with the two canvas samples; a session whose agent used `alta canvas` and `alta statistics`, alone, and with the Board tab of the `canvas-board` sample in a pane at its right. |
+| `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, made tall enough to show the buttons of every plugin (a crop of the Settings window). |
 
 Changes made for a capture are applied as patches and reversed after it. Record `git status`, `HEAD` and
 `git stash list` of each repository before, and compare after: they must be the same.
@@ -107,6 +111,32 @@ What the scenes with state of their own need:
   and put the file back. Automations are paused on the developer instance: let them run for the capture only.
 - **Plugins.** `alta plugin create <name>` makes a plugin of the user in `~/.alta/plugins`, which the two
   instances share: remove its folder and its build cache right after the capture.
+- **Statistics.** The developer instance only has its own sessions, a few days of tests. The numbers of a real
+  profile are computed without copying a journal and without the application that runs on that profile: the
+  engine of the Statistics plugin reads the session store read-only (a test of
+  `src/CodeAlta.Plugin.Statistics.Tests` like `RealProfileHistoryHarness`, with `CODEALTA_STATS_SESSIONS` naming
+  the `sessions` folder, that keeps its database instead of deleting it) and writes numbers only. With the
+  developer instance closed, the rows of every `statistics_*` table of that database replace those of
+  `~/.alta/dev/data/alta.sqlite3`, saved first and put back afterwards; the database of real numbers is deleted
+  at the end. The journals of the developer instance that are not in a picture are moved aside for the time of
+  the pictures, or they are counted too. Show a space that holds every project whose repository is public
+  (`gh repo view <repository> --json visibility` says so; a project without a public repository stays out) and
+  leave the filter of that space on the page: the names of projects in the legends and the lists are then all
+  public. Do not take the Sessions page, nor the bottom of the Agents page: they list titles of real sessions.
+  Read every legend, tool name and program name of a picture before keeping it.
+- **The history of the statistics.** **Reset statistics…** in the menu of the page brings the first card back.
+  **Read all the history** takes about two seconds on the developer instance: take the capture right after the
+  click, with the page dressed before. Do it last, since the numbers are deleted.
+- **Canvases and plugin buttons.** The `canvas-board` and `canvas-checklist` samples of the
+  `codealta-plugin-runtime` skill are copied to `<folder>/.alta/plugins/` of the folder the developer instance
+  is started in, and removed afterwards with their build folder under `~/.alta/cache/plugins/build/project`.
+  The canvases of a project plugin are listed for every project, but its buttons are shown, and
+  **Settings > Plugins** lists it, only for the project of the catalog it belongs to: for `plugin-buttons` the
+  sample is in a public project of the catalog, the developer instance is started in that folder, and a session
+  of that project is in front. The items of the checklist are added with `alta canvas invoke checklist add`;
+  they are kept in `~/.alta/plugin-data/plugin_canvas-checklist`, which the two instances share: remove it, or
+  put back what was there. The session of `canvas-agent` is a real one, sent with a small model: its prompt asks
+  for `alta canvas list`, `open` and `show`, then `alta statistics summary`, and for no file change.
 - **Add provider.** The menu lists the built-in providers the profile does not have: take the picture on a
   profile of its own (`--catalog-root`, `--data-root` and the other roots of an isolated launch, with
   `--mcp-port`), with one provider that is disabled in its `config.toml`. `add-provider` is the crop of the

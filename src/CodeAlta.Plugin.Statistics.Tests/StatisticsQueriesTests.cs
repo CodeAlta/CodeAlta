@@ -151,6 +151,32 @@ public sealed class StatisticsQueriesTests
     }
 
     [TestMethod]
+    public async Task ASeriesByAGroupOfAFixedList_IsKeyedByTheNameAFilterTakes()
+    {
+        await using var harness = await QueryHarness.CreateAsync("Asia/Kolkata");
+        var request = new StatisticsRequest { Period = "2026-04-01..2026-09-30", Frequency = StatisticsFrequency.Month, Limit = 100 };
+
+        // The facts keep these groups as numbers; a line is keyed by the name, which a page shows and gives back as a filter.
+        var byKind = await harness.Queries.SeriesAsync(request, "tool-calls", "kind");
+        var kinds = Enum.GetNames<ToolKind>().Select(static name => name.ToLowerInvariant()).ToArray();
+        Assert.IsGreaterThan(0, byKind.Series.Count);
+        foreach (var line in byKind.Series)
+        {
+            CollectionAssert.Contains(kinds, line.Key);
+            Assert.AreEqual(line.Label, line.Key);
+            var filtered = await harness.Queries.SeriesAsync(request with { Filter = new StatisticsFilter { ToolKind = line.Key } }, "tool-calls");
+            Assert.AreEqual(line.Total, filtered.Series.Single().Total, 0.001, line.Key);
+        }
+
+        var byOrigin = await harness.Queries.SeriesAsync(request, "prompts", "origin");
+        Assert.IsTrue(byOrigin.Series.All(static line => line.Key == line.Label && line.Key is "you" or "agent" or "automation" or "reminder" or "other" or "none"), string.Join(",", byOrigin.Series.Select(static line => line.Key)));
+        var byPromptKind = await harness.Queries.SeriesAsync(request, "prompts", "prompt-kind");
+        Assert.IsTrue(byPromptKind.Series.All(static line => line.Key == line.Label && !char.IsAsciiDigit(line.Key[0])), string.Join(",", byPromptKind.Series.Select(static line => line.Key)));
+        var byPurpose = await harness.Queries.SeriesAsync(request, "requests", "purpose");
+        CollectionAssert.IsSubsetOf(byPurpose.Series.Select(static line => line.Key).ToArray(), new[] { "turn", "compaction" });
+    }
+
+    [TestMethod]
     public async Task TheLinesBeyondTheLimit_AreAddedUpAsOther()
     {
         await using var harness = await QueryHarness.CreateAsync();
