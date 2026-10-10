@@ -83,7 +83,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
-  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; fork?: boolean; "remote-control"?: boolean }>;
+  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean }>;
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
@@ -142,6 +142,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
             { key: "fork", label: t("Fork…"), icon: "branch", disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
+            ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
             { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
             ...(menuEntries?.(session) ?? []),
             ...pluginEntries,

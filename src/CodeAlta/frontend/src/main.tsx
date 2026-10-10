@@ -23,7 +23,7 @@ import {
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
-  type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
+  type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
@@ -111,6 +111,8 @@ import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
+import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage, type MoveScope } from "./sessionMove";
+import { MoveSessionDialog } from "./MoveSessionDialog";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
 import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
@@ -605,6 +607,11 @@ function App() {
   const [createSession] = useState(() => createSessionCreation(workspace.createSession));
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
+  const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
+  // The session whose project is being chosen, with the project it is in when its menu was used.
+  const [movingSession, setMovingSession] = useState<{ id: string; title: string; from: MoveScope } | null>(null);
+  const [movingBusy, setMovingBusy] = useState(false);
+  const movingPending = useRef(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [deletingMessage, setDeletingMessage] = useState("");
@@ -2424,6 +2431,7 @@ function App() {
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access[pending.action]) return;
     if (pending.action === "fork") { branchHost.requests.open(pending.sessionId, "fork"); return; }
+    if (pending.action === "move") { beginSessionMove(rows[0]); return; }
     if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
@@ -2514,13 +2522,15 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access.open) return;
-    if (action === "rename" && !access.rename || action === "delete" && !access.delete || action === "fork" && !access.fork) return;
+    if (action === "rename" && !access.rename || action === "delete" && !access.delete || action === "fork" && !access.fork
+      || action === "move" && !access.move) return;
     const switching = selectedSessionId.current !== row.id;
     if (switching) setSessionId(row.id);
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
     if (action === "remote-control") { dismissSessionMenu(false); if (access["remote-control"]) askRemoteControl(row.id); return; }
     // The window of the fork is the one of the session's pane: the session is selected, and its pane shows it.
     if (action === "fork") { dismissSessionMenu(false); branchHost.requests.open(row.id, "fork"); return; }
+    if (action === "move") { dismissSessionMenu(false); beginSessionMove(row); return; }
     dismissSessionMenu(false);
     if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
     if (action === "rename") {
@@ -2540,6 +2550,65 @@ function App() {
       publishWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
       return fresh;
     } catch { return undefined; }
+  }
+
+  // The session is the selected one, in the selected project: the window asks which project it goes to.
+  function beginSessionMove(row: WorkspaceSession) {
+    const project = selectedProject;
+    if (!project || project.archived || row.projectId !== project.id || row.workspacePath !== project.path || movingPending.current) return;
+    setRenamingId(null);
+    setDeletingId(null);
+    setMovingSession({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
+  }
+
+  // The tabs of moved sessions follow them, in every space: the one shown, those kept in memory, and those only stored.
+  function retargetMovedTabs(moved: Parameters<typeof retargetSessionTabs>[1]) {
+    writeTabs(current => retargetSessionTabs(current, moved));
+    for (const [id, kept] of spaceTabs.current) spaceTabs.current.set(id, { ...kept, tabs: retargetSessionTabs(kept.tabs, moved) });
+    try {
+      for (const space of spacesHub.getSnapshot().spaces) {
+        if (space.id === shownSpace.current || spaceTabs.current.has(space.id)) continue;
+        const key = spaceStorageKey(sessionTabsKey, space.id);
+        const stored = restoreSessionTabs(() => localStorage.getItem(key));
+        if (stored) persistSessionTabs(value => localStorage.setItem(key, value), retargetSessionTabs(stored, moved));
+      }
+    } catch { /* Storage that cannot be read keeps what it has: those tabs are dropped when their space is shown. */ }
+  }
+
+  async function moveSessionTo(target: WorkspaceProject) {
+    const moving = movingSession;
+    const capability = mutation?.capability;
+    if (!moving || movingPending.current || !owned || !capability?.canMutate() || target.archived || target.id === moving.from.projectId) return;
+    movingPending.current = true;
+    setMovingBusy(true);
+    try {
+      const result = await moveSession(status?.hostEpoch, moving.from, { projectId: target.id, projectPath: target.path }, moving.id, capability);
+      if (!creationAlive.current) return;
+      let fresh: WorkspaceSnapshot | undefined;
+      if (result.moved.length > 0 || result.kind === "error" && result.code === "move_unconfirmed") {
+        markProjectInspection(false);
+        try { fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 }); }
+        catch { fresh = undefined; }
+        if (!creationAlive.current) return;
+      }
+      if (fresh?.configured) {
+        // Published with the tabs pointed at the new project: published alone, the list drops the tab of a moved session.
+        retargetMovedTabs(result.moved);
+        publishWorkspaceState({ kind: "ready", snapshot: fresh });
+        const selected = selectedSessionId.current;
+        if (selected && result.moved.some(value => value.sessionId === selected)) selectProject(target.id, selected);
+      }
+      setMovingSession(null);
+      if (result.kind === "moved") {
+        if (fresh && !movedSessionsVisible(fresh, result.moved))
+          showToast({ message: t("The session moved, but the refreshed list does not show it in {project} yet. Refresh to check.", { project: target.name }),
+            intent: "warning", icon: "warning-sign", timeout: 8000 });
+        else showToast({ message: t("Moved to {project}.", { project: target.name }), intent: "success", icon: "tick", timeout: 4000 });
+        // What went wrong without stopping the move, as the host says it (the log has all of it).
+        if (result.warnings.length > 0)
+          showToast({ message: `${t("The session moved, but:")} ${result.warnings[0]}`, intent: "warning", icon: "warning-sign", timeout: 12000 });
+      } else showToast({ message: t(sessionMoveMessage(result.code)), intent: "danger", icon: "error", timeout: 8000 });
+    } finally { movingPending.current = false; if (creationAlive.current) setMovingBusy(false); }
   }
 
   async function beginProjectRename() {
@@ -3297,6 +3366,7 @@ function App() {
                   { key: "fork", label: t("Fork…"), icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
+                  ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
@@ -3562,6 +3632,9 @@ function App() {
         focusPromptSoon();
         return true;
       }} onClose={() => setDialog(null)} />}
+    {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
+      projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(project)}
+      onClose={() => { if (!movingPending.current) setMovingSession(null); }} />}
     {spaceDialog && <SpaceDialog spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} create={spacesHub.create}
       // A space made from Settings is organized there; one made from the title bar is shown at once.
       onCreated={space => { setSpaceDialog(false); if (!settingsVisible.current) showSpace(space.id); }} onClose={() => setSpaceDialog(false)} />}
