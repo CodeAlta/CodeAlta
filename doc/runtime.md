@@ -914,6 +914,8 @@ A normal prompt follows this path:
 6. Normalized `AgentEvent` values are observed, persisted when applicable, and converted into `SessionRuntimeEvent` values.
 7. The runtime marks the session idle, updates usage/state, and drains at most one queued prompt for that session.
 
+Only a pending queue item (`queued`, `submitting`) needs its text again: it is what the drain submits, and it survives a restart whole. When the state is persisted (`SessionViewJournalStore.CompactForJournal`), a handled item (`submitted`, `failed`) keeps its small fields and its preview in place of its text, only the newest 20 handled items are kept, and `prompt_provenance` is capped at the newest 100 entries (plus those of pending items), so a `codealta.sessionState` record has a size that does not depend on the history of the session.
+
 Busy-session sends are queued when requested by UI or live-tool options. Queue items keep caller attribution and are durable enough for runtime recovery paths that read session state. Steering requests are sent only when a run is active and the provider/runtime supports `SteerAsync`; otherwise CodeAlta falls back to normal send or re-queues according to the caller path.
 
 Those legacy UI/live-tool paths are distinct from volatile owned deferred text execution above;

@@ -3642,8 +3642,8 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual("parent-notify", queued.Kind);
         Assert.AreEqual("submitted", queued.State);
         Assert.IsFalse(string.IsNullOrWhiteSpace(queued.RunId));
-        StringAssert.Contains(queued.Prompt, "Kind: answer");
-        StringAssert.Contains(queued.Prompt, "queued final result");
+        // A handled prompt keeps only its preview in the journal; the text was asserted on what the provider received.
+        Assert.IsLessThanOrEqualTo(160, queued.Prompt.Length);
         Assert.AreEqual(child.SessionId, queued.SubmittedBy?.SourceSessionId);
     }
 
@@ -3685,7 +3685,7 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual("parent-notify", queued.Kind);
         Assert.AreEqual("submitted", queued.State);
         Assert.IsFalse(string.IsNullOrWhiteSpace(queued.RunId));
-        StringAssert.Contains(queued.Prompt, "Kind: error");
+        Assert.IsLessThanOrEqualTo(160, queued.Prompt.Length);
         Assert.AreEqual(child.SessionId, queued.SubmittedBy?.SourceSessionId);
     }
 

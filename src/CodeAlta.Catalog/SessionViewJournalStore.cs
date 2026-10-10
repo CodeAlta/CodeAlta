@@ -465,7 +465,112 @@ public sealed partial class SessionViewJournalStore
             session.SessionId,
             DateTimeOffset.UtcNow,
             SessionStateEventType,
-            JsonSerializer.SerializeToElement(state, SessionViewJournalJsonSerializerContext.Default.SessionViewLocalState));
+            JsonSerializer.SerializeToElement(CompactForJournal(state), SessionViewJournalJsonSerializerContext.Default.SessionViewLocalState));
+
+    /// <summary>
+    /// Maximum number of prompt provenance entries a state record keeps (the newest ones).
+    /// </summary>
+    internal const int MaxPromptProvenanceRecords = 100;
+
+    /// <summary>
+    /// Maximum number of handled (submitted, failed or otherwise not pending) queued prompts a state record keeps.
+    /// </summary>
+    internal const int MaxHandledQueuedPromptRecords = 20;
+
+    /// <summary>
+    /// Builds the copy of a state that is written to the journal, so that the size of a state record does not grow with
+    /// the number of prompts already handled. Pending queued prompts (<c>queued</c>, <c>submitting</c>) are kept whole;
+    /// handled ones keep their small fields but lose their text (the preview stands in for it), and only the newest
+    /// ones are kept. Provenance entries are capped, except those of pending queued prompts.
+    /// </summary>
+    internal static SessionViewLocalState CompactForJournal(SessionViewLocalState state)
+    {
+        var queued = state.QueuedPrompts ?? [];
+        var pendingIds = new HashSet<string>(StringComparer.Ordinal);
+        var handledCount = 0;
+        foreach (var prompt in queued)
+        {
+            if (IsPendingQueueState(prompt.State))
+            {
+                pendingIds.Add(prompt.QueueItemId);
+            }
+            else
+            {
+                handledCount++;
+            }
+        }
+
+        var dropHandled = Math.Max(0, handledCount - MaxHandledQueuedPromptRecords);
+        var compactQueue = new List<SessionViewQueuedPrompt>(queued.Count - dropHandled);
+        foreach (var prompt in queued)
+        {
+            if (IsPendingQueueState(prompt.State))
+            {
+                compactQueue.Add(prompt);
+            }
+            else if (dropHandled > 0)
+            {
+                dropHandled--;
+            }
+            else
+            {
+                var preview = prompt.PromptPreview;
+                if (string.IsNullOrEmpty(preview))
+                {
+                    preview = prompt.Prompt.Length <= 160 ? prompt.Prompt : prompt.Prompt[..160];
+                }
+
+                // The text of a handled prompt is not needed again. A non-empty preview stands in for it, so that a
+                // binary that validates the field still reads the record.
+                compactQueue.Add(new SessionViewQueuedPrompt
+                {
+                    QueueItemId = prompt.QueueItemId,
+                    Kind = prompt.Kind,
+                    Prompt = preview,
+                    PromptPreview = preview,
+                    State = prompt.State,
+                    RunId = prompt.RunId,
+                    SubmittedBy = prompt.SubmittedBy,
+                    CreatedAt = prompt.CreatedAt,
+                    DrainedAt = prompt.DrainedAt,
+                    LastError = prompt.LastError,
+                });
+            }
+        }
+
+        var provenance = state.PromptProvenance ?? [];
+        var dropProvenance = Math.Max(0, provenance.Count - MaxPromptProvenanceRecords);
+        var compactProvenance = new List<SessionViewPromptProvenance>(provenance.Count - dropProvenance);
+        foreach (var entry in provenance)
+        {
+            if (dropProvenance > 0 && !pendingIds.Contains(entry.PromptId))
+            {
+                dropProvenance--;
+                continue;
+            }
+
+            compactProvenance.Add(entry);
+        }
+
+        return new SessionViewLocalState
+        {
+            ProviderKey = state.ProviderKey,
+            ModelId = state.ModelId,
+            ReasoningEffort = state.ReasoningEffort,
+            PermissionMode = state.PermissionMode,
+            AgentPromptId = state.AgentPromptId,
+            Archived = state.Archived,
+            MessageCount = state.MessageCount,
+            ParentSessionId = state.ParentSessionId,
+            CreatedBy = state.CreatedBy,
+            PromptProvenance = compactProvenance,
+            QueuedPrompts = compactQueue,
+        };
+    }
+
+    private static bool IsPendingQueueState(string? state)
+        => string.Equals(state, "queued", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(state, "submitting", StringComparison.OrdinalIgnoreCase);
 
     internal static async Task<SessionViewJournalHeader?> ReadHeaderFromPathAsync(string path, CancellationToken cancellationToken)
     {
