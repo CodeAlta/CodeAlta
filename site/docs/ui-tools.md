@@ -33,7 +33,7 @@ CodeAlta Desktop runs an MCP server on your computer. Open **Settings**, then **
 
 <figure class="alta-figure my-4" style="max-width: 44rem;">
   <img src="{{site.basepath}}/img/alta-desktop-mcp-server.webp" alt="The CodeAlta MCP page of Settings: the switch of the server, its address, the client configuration and the tools" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The address of the server and the configuration of a client.</figcaption>
+  <figcaption class="small text-secondary mt-2">The address of the server and the configuration of a client. This developer instance uses port 2583; the normal instance uses 2582.</figcaption>
 </figure>
 
 1. Click **Copy** beside **Client configuration**.

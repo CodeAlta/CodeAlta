@@ -217,6 +217,11 @@ browser** and **Copy link**, and **Turn off**. While it is on, the popover also 
 scan it with the camera of your phone to open the session there. In the Claude app the session is listed under
 its title.
 
+<figure class="alta-figure my-4" style="max-width: 36rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-remote-control.webp" alt="Remote Control is off; its popover explains how to follow a Claude Code session and offers Turn on" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Remote Control is off until you turn it on for the session.</figcaption>
+</figure>
+
 While it is on:
 
 - A prompt you send from claude.ai is shown in the timeline as yours, and the session runs it as if you had

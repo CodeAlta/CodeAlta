@@ -39,6 +39,11 @@ The choice is kept for the project. Choose **Project folder** to go back.
 
 Run `/worktree`, or right-click a project in the sidebar and choose **Worktrees…**. The window lists every worktree of the project that git knows, also the ones whose session you deleted.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-worktree-manager.webp" alt="The Worktrees window in CodeAlta Desktop, with the project folder, worktree branches, last-used sessions and actions for each checkout" loading="lazy">
+  <figcaption class="small text-secondary mt-2">See which worktrees are still in use, inspect their files and changes, and select the ones to remove.</figcaption>
+</figure>
+
 {.table}
 | You see | What it means |
 | --- | --- |

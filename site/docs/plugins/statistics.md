@@ -42,6 +42,11 @@ Each space has its own Statistics tab, which starts on the space it shows; a spa
 
 The page of a session shows the whole life of the session, with the sessions it created. Its name is in the bar and opens the session; the filters you add narrow the session, and **Reset** comes back to it.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-session-menu.webp" alt="The menu of a Markdig session in CodeAlta Desktop, with Statistics of this session below its session actions" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Open the statistics of one session and its sub-agents straight from the Explorer.</figcaption>
+</figure>
+
 ## The statistics of all your sessions
 
 CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: how many runs, how long they took, which models and tools were used, how many tokens, and what was changed in files. It keeps **numbers, and a few names** to tell them apart: providers, models, tools, and the title of each session. The text of your prompts, the answers and the tool results are never copied, a file is only counted by its extension, and of a command an agent ran only the name of its program is kept, never its arguments or a variable set before it. A session's title comes from the first sentence of its first prompt: it is kept at most 80 characters long, and a word that holds a `/` or a `\`, such as a path or an address, is left out of it. The numbers stay on your computer, in the database of CodeAlta, and are kept, with the title, after a session is deleted unless you ask for them to be forgotten.

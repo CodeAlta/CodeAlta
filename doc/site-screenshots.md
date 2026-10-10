@@ -93,8 +93,11 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `theme-dark`, `theme-light`, `themes` | One scene in each theme; `themes` is a montage of six color schemes. |
 | `work-items`, `issues`, `sub-agents`, `pull-request`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with more sub-agents than the sidebar lists (five), the pull request menu (a crop), a conversation at 70%. |
 | `terminal`, `worktrees`, `automations`, `plugins` and their close-ups | They need state that is built for them (a running terminal, two worktrees, automations in the project configuration, a temporary plugin) and removed afterwards. |
+| `worktree-manager` | The **Worktrees…** window of a public project, showing the project folder and existing worktrees. Inspect paths and session titles before capturing. View only: do not select or remove worktrees for the picture. |
+| `remote-control` | A crop of the **Remote Control: off** popover of a public-project Claude Code session and its composer bar. Do not turn it on, create a live remote link or manufacture a connected state for a picture. |
 | `statistics-overview`, `statistics-activity`, `statistics-models`, `statistics-tools`, `statistics-tools-time`, `statistics-projects`, `statistics-filters` | The Statistics tab beside a session tab, in the dark theme, with the numbers of a real profile for a space of public projects. `overview` is the last 90 days by week, the time by project; the pages are taken from their top, and `tools-time` is the Tools page scrolled to its end; `filters` is a crop of the bar with the **Filter** menu open. |
 | `statistics-history`, `statistics-history-reading`, `statistics-sessions` | With the sessions of the developer instance itself: the first card of the tab (a crop), the tab while the history is read, and the Sessions page of the last 30 days. |
+| `statistics-session-menu` | The context menu of a public-project session, showing **Statistics of this session**. This does not open or export any Statistics data. |
 | `documentation`, `landing` | The shipped guide and the Welcome tab, in the dark theme with the Explorer hidden. Use public guide content and inspect all recent project/session labels before capture; do not create shared catalog entries just to dress the page. |
 | `canvases`, `canvas-board`, `canvas-agent` | The Canvases page with the two canvas samples; a session whose agent used `alta canvas` and `alta statistics`, alone, and with the Board tab of the `canvas-board` sample in a pane at its right. |
 | `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, without the two lines of folders at its top, made tall enough to show the buttons of every plugin (a crop of the Settings window). |
@@ -148,8 +151,10 @@ What the scenes with state of their own need:
   profile of its own (`--catalog-root`, `--data-root` and the other roots of an isolated launch, with
   `--mcp-port`), with one provider that is disabled in its `config.toml`. `add-provider` is the crop of the
   Settings window. The folders of that profile are outside any `.alta` folder, or the start is refused. The
-  `mcp-server` picture is taken there too: it shows the address of a normal instance (port 2582), which the
-  page of an instance on another port does not have, so the port is changed in the text of the page.
+  `mcp-server` picture can instead be taken on the ordinary developer instance and cropped to Settings.
+  Keep the actual address and client configuration in the picture: the developer instance normally uses
+  port 2583, while the normal instance uses 2582. Explain that distinction in the caption; never rewrite
+  a port or configuration value in the page just for the capture.
 - **The sidebar.** A project lists its recent sessions only, and the sessions of the scenes get older: click
   **Show more** until they are all listed, then hide the others and the row of **Show more** itself
   (`.session-list-disclosure`).
