@@ -166,7 +166,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
         </section>
       : <>
         <Tabs id="issue-filters" className="work-stages" selectedTabId={shownFilter} onChange={next => { setFilter(next as IssueFilter); setSelected(null); }}>
-          {filters.map(candidate => <Tab key={candidate} id={candidate} title={<>{t(issueFilterLabel(candidate))}
+          {filters.map(candidate => <Tab key={candidate} id={candidate} disabled={false} title={<>{t(issueFilterLabel(candidate))}
             {candidate === shownFilter && shown && !shown.loading && <span className="work-count" data-zero={items.length === 0 || undefined}>{items.length}{shown.more ? "+" : ""}</span>}</>} />)}
         </Tabs>
         {shown?.problem && <Callout intent={shown.needsSignIn ? "warning" : "danger"} compact role="alert" className="work-notice issues-notice">

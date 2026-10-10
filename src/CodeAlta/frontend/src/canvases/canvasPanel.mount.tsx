@@ -14,7 +14,7 @@ type Scenario = { status: string; html: string; title: string; statusText: strin
 const root = createRoot(document.getElementById("root")!);
 const state = {
   calls: [] as string[], actions: [] as { action: string; value: string | null; values: Record<string, string> }[], looks: [] as unknown[], instances: [] as (string | null)[],
-  closed: 0, activated: 0, rebuilt: 0, sources: [] as string[], opened: 0, scripts: [] as string[],
+  closed: 0, activated: 0, rebuilt: 0, rebuildFails: false, probeUnknown: false, sources: [] as string[], opened: 0, scripts: [] as string[],
 };
 const scenario: Scenario = { status: "ok", html: "<p>first</p><input name=\"note\" value=\"typed\"><button data-alta-action=\"tick\" data-alta-value=\"one\">Tick</button>", title: "Board", statusText: null, revision: 1, script: null, scriptProblem: null, input: null };
 let actionAnswer: { status: string; html: string | null; closed: boolean } = { status: "ok", html: "<p>after the action</p>", closed: false };
@@ -64,8 +64,8 @@ void disconnect;
 
 const tab: FileTab = canvasTab({ pluginKey: "builtin:board", canvasId: "board", key: "k" }, { title: "Board", icon: "list-checks", plugin: "plugin:global:board" });
 const control: CanvasPluginControl = {
-  probe: async () => ({ state: "failed", message: "plugin.cs(3,1): error CS1002", folder: { id: "plugin:global:board", path: "/plugins/board", name: "board" } }),
-  rebuild: async () => { state.rebuilt++; scenario.status = "ok"; return { ok: true, message: null }; },
+  probe: async () => state.probeUnknown ? { state: "unknown", message: null, folder: null } : ({ state: "failed", message: "plugin.cs(3,1): error CS1002", folder: { id: "plugin:global:board", path: "/plugins/board", name: "board" } }),
+  rebuild: async () => { if (state.rebuildFails) return { ok: false, message: null }; state.rebuilt++; scenario.status = "ok"; return { ok: true, message: null }; },
 };
 
 const fixture = {

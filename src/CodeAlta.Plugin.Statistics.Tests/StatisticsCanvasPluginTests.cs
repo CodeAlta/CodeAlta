@@ -49,7 +49,7 @@ public sealed class StatisticsCanvasPluginTests
         var title = buttons.Single(button => button.Place == PluginButtonPlace.TitleBar);
         Assert.AreEqual(("statistics", "chart-column", "Statistics", "statistics", null), (title.Id, title.Icon, title.Label, title.Canvas, title.Command));
         var menu = buttons.Single(button => button.Place == PluginButtonPlace.ProjectMenu);
-        Assert.AreEqual(("statistics-project", null, "statistics-project"), (menu.Id, menu.Canvas, menu.Command));
+        Assert.AreEqual(("statistics-project", null, "statistics-project", "Statistics of this project"), (menu.Id, menu.Canvas, menu.Command, menu.Label));
         Assert.IsTrue(buttons.All(button => button.Validate() is null), "the host keeps both buttons");
         Assert.IsFalse(buttons.Any(button => button.Place == PluginButtonPlace.SessionMenu), "no session filter exists in the queries: the session menu has no line");
 

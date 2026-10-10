@@ -85,7 +85,7 @@ function CanvasCard({ item, tabs, projects, sessions, selection, onOpen }: {
     {item.description && <p className="canvas-card-description">{item.description}</p>}
     <p className="canvas-card-facts">
       <span>{item.plugin}</span>
-      <span>{actions === 0 ? t("No actions") : t(actions === 1 ? "{count} action" : "{count} actions", { count: actions })}</span>
+      {actions > 0 && <span>{t(actions === 1 ? "{count} action" : "{count} actions", { count: actions })}</span>}
       {open.length > 0 && <Tag minimal round intent="success" title={named.join("\n") || undefined}>
         {named.length > 0 ? t("Open: {names}", { names: named.slice(0, 3).join(", ") + (named.length > 3 ? ` +${named.length - 3}` : "") }) : t("Open in this space")}</Tag>}
     </p>

@@ -227,6 +227,36 @@ public sealed class StatisticsQueriesTests
     }
 
     [TestMethod]
+    public async Task ASpaceHasTheChats_AsTheExplorerShowsThemInEverySpace()
+    {
+        await using var harness = await QueryHarness.CreateAsync("Europe/Paris");
+        harness.Directory.Projects.AddRange(
+        [
+            new ProjectInfo("project-0", "alpha", "Alpha", ["work"]),
+            new ProjectInfo("project-1", "beta", "Beta", ["oss"]),
+            new ProjectInfo("project-2", "gamma", "Gamma", ["oss"]),
+        ]);
+        harness.Directory.Spaces.AddRange([new SpaceInfo("work", "Work", false), new SpaceInfo("empty", "Empty", false)]);
+        // A chat: a session of no project.
+        var chat = SyntheticFacts.Batch(new Random(99), "chat-1", SyntheticFacts.SpringStart + 100, 200 * 96, 150);
+        chat.Session!.ProjectRef = null;
+        await harness.AddAsync(chat);
+        var period = "2026-04-01..2026-09-30";
+
+        double Naive(Func<string?, bool> match) => harness.Naive(QueryHarness.Tokens, StatisticsFrequency.Year, new DateOnly(2026, 4, 1), new DateOnly(2026, 9, 30), DayOfWeek.Monday, batch => match(batch.Session!.ProjectRef)).Values.Sum();
+        async Task<double> Total(StatisticsFilter filter) => (await harness.Queries.SeriesAsync(new StatisticsRequest { Period = period, Filter = filter }, "tokens")).Series.Single().Total;
+
+        var chats = Naive(project => project is null);
+        Assert.IsGreaterThan(0, chats, "The chat has something to count.");
+        Assert.AreEqual(Naive(project => project is null or "project-0"), await Total(new StatisticsFilter { Space = "Work" }), 0.001, "A space has its projects and the chats.");
+        Assert.AreEqual(chats, await Total(new StatisticsFilter { Space = "Empty" }), 0.001, "A space with no project still has the chats.");
+        Assert.AreEqual(Naive(project => project == "project-0"), await Total(new StatisticsFilter { Space = "Work", Project = "alpha" }), 0.001, "A project filter leaves the chats out.");
+        Assert.AreEqual(Naive(project => project == "project-0"), await Total(new StatisticsFilter { Project = "alpha" }), 0.001);
+        Assert.AreEqual(Naive(_ => true), await Total(new StatisticsFilter { Space = "default" }), 0.001, "The default space has everything, the chats too.");
+        Assert.AreEqual(Naive(_ => true), await Total(new StatisticsFilter()), 0.001);
+    }
+
+    [TestMethod]
     public async Task TheSessionsActive_AreCountedInTheFacts_NotAdded()
     {
         await using var harness = await QueryHarness.CreateAsync("Asia/Kathmandu");

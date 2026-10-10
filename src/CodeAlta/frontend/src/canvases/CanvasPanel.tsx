@@ -204,7 +204,7 @@ function CanvasPlaceholder({ phase, title, icon, pluginKey, control, onClose, on
     const outcome = await control.rebuild();
     setBuilding(false);
     if (outcome.ok) onRebuilt();
-    else setProblem(outcome.message);
+    else setProblem(outcome.message ?? t("The plugin could not be built."));
   }
 
   const state = probe?.state;
@@ -216,7 +216,8 @@ function CanvasPlaceholder({ phase, title, icon, pluginKey, control, onClose, on
     : t("The plugin is not running.");
   const detail = problem ?? (state === "failed" ? probe?.message : null);
   const actions: ReactNode[] = [];
-  if (control) actions.push(<Button key="rebuild" size="small" icon={building ? <ActivitySpinner size={13} /> : "build"} disabled={building} onClick={() => void rebuild()}>{t("Rebuild plugin")}</Button>);
+  // A plugin that the host does not list any more has nothing to build.
+  if (control && state !== "unknown") actions.push(<Button key="rebuild" size="small" icon={building ? <ActivitySpinner size={13} /> : "build"} disabled={building} onClick={() => void rebuild()}>{t("Rebuild plugin")}</Button>);
   return <NonIdealState className="canvas-placeholder" icon={<CanvasIcon name={icon} pluginKey={pluginKey} size={32} />} title={title} description={<>
     <span className="canvas-placeholder-reason" role="status">{description}</span>
     {detail && <code className="canvas-placeholder-detail">{detail}</code>}

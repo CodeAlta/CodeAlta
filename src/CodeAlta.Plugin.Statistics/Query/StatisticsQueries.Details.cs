@@ -235,10 +235,7 @@ public sealed partial class StatisticsQueries
             ? Days.QuarterRangeOfDays(LocalDays.ToDay(query.Range.From), LocalDays.ToDay(query.Range.To))
             : (LocalDays.ToDay(query.Range.From), LocalDays.ToDay(query.Range.To) + 1);
         var where = new System.Text.StringBuilder($" WHERE {periodColumn} >= {Arg((long)lower)} AND {periodColumn} < {Arg((long)upper)}");
-        if (query.ProjectRefs is { } refs)
-        {
-            where.Append(refs.Count == 0 ? " AND 0" : " AND s.project_ref IN (" + string.Join(", ", refs.Select(reference => Arg(reference))) + ")");
-        }
+        where.Append(query.ProjectClause("s.project_ref", reference => Arg(reference)));
 
         if (query.SessionIds is { } sessions)
         {

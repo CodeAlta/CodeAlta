@@ -106,22 +106,32 @@ function AddFilter() {
   </PopoverNext>;
 }
 
-/** The menu of the canvas: more history, forget the deleted, reset. */
+/** The menu of the canvas: more history, forget the deleted, reset (which asks first). */
 function CanvasMenu() {
   const { t } = useText();
   const { status, history } = useStatistics();
+  const [confirming, setConfirming] = useState(false);
   const more = readMoreChoices(status);
   const label = (choice: HistoryChoice) => choice.kind === "all" ? t("All the history") : choice.kind === "days" ? t("Last {days} days", { days: choice.days }) : t("From today");
-  return <PopoverNext placement="bottom-end" content={<Menu>
+  const menu = <PopoverNext placement="bottom-end" content={<Menu>
     <MenuDivider title={t("Read more history…")} />
     {more.length === 0 ? <MenuItem disabled text={status?.state === "needsChoice" ? t("Choose how much to read first") : t("All the history is read")} />
       : more.map(choice => <MenuItem key={`${choice.kind}${choice.kind === "days" ? choice.days : ""}`} text={label(choice)} disabled={history.busy || status?.state === "reading"} onClick={() => void history.choose(choice)} />)}
     <MenuDivider />
     <MenuItem icon={<AppIcon name="trash" size={14} />} text={t("Forget deleted sessions")} disabled={history.busy} onClick={() => void history.forgetDeleted()} />
-    {history.reset && <MenuItem icon={<AppIcon name="reset" size={14} />} text={t("Reset statistics…")} disabled={history.busy} onClick={() => void history.reset!()} />}
+    {history.reset && <MenuItem icon={<AppIcon name="reset" size={14} />} text={t("Reset statistics…")} disabled={history.busy} onClick={() => setConfirming(true)} />}
   </Menu>}>
     <Button size="small" variant="minimal" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("Statistics menu")} title={t("Statistics menu")} />
   </PopoverNext>;
+  return <PopoverNext placement="bottom-end" isOpen={confirming} onInteraction={next => { if (!next && !history.busy) setConfirming(false); }} content={
+    <div className="stats-confirm" role="alertdialog" aria-label={t("Reset the statistics?")}>
+      <strong>{t("Reset the statistics?")}</strong>
+      <p>{t("All the numbers are deleted. You choose again how much history to read.")}</p>
+      <div className="stats-confirm-actions">
+        <Button variant="minimal" size="small" disabled={history.busy} onClick={() => setConfirming(false)}>{t("Cancel")}</Button>
+        <Button intent="danger" size="small" autoFocus loading={history.busy} onClick={() => { void history.reset!().finally(() => setConfirming(false)); }}>{t("Reset")}</Button>
+      </div>
+    </div>}>{menu}</PopoverNext>;
 }
 
 /** The bar. */

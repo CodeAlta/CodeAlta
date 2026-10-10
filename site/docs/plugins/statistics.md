@@ -31,7 +31,7 @@ In CodeAlta Desktop the numbers have a page of their own, in a tab. Open it from
 | A project | **Statistics** in the menu of a project row opens the page for that project only, in a tab of its own |
 | An agent | `alta canvas open statistics` |
 
-Each space has its own Statistics tab, which starts on the space it shows. CodeAlta TUI has no page: it keeps the card of each turn and the `alta statistics` commands.
+Each space has its own Statistics tab, which starts on the space it shows; a space counts its projects and your chats (the sessions of no project), which the Explorer lists in every space. CodeAlta TUI has no page: it keeps the card of each turn and the `alta statistics` commands.
 
 ## The statistics of all your sessions
 
@@ -81,7 +81,7 @@ One bar at the top sets the period (today, the last 7, 30 or 90 days, this month
 
 Every chart can be shown as a table with the same numbers, and the legends and menus work with the keyboard. A cost is shown for each unit, dollars or AI credits, never as one total, and an estimate from public prices, when it is offered, is a separate block marked as an estimate.
 
-While the history is read, the page is already in use: the most recent days are right first, the part not read yet is hatched, and a bar under the controls shows how many sessions are read, the date reached and the time left, with **Pause**, **Resume** and **Stop here**. The menu of the page reads more history, forgets the sessions that were deleted, and resets the statistics.
+While the history is read, the page is already in use: the most recent days are right first, the part not read yet is hatched, and a bar under the controls shows how many sessions are read, the date reached and the time left, with **Pause**, **Resume** and **Stop here**. The menu of the page reads more history, forgets the sessions that were deleted, and resets the statistics after asking.
 
 ## Ask for the numbers
 

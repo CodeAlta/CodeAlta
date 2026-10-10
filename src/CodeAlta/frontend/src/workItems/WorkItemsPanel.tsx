@@ -113,7 +113,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
             aria-label={t("Search work items")} onChange={event => setQuery(event.target.value)} />
         </div>
         <Tabs id="work-stages" className="work-stages" selectedTabId={stage} onChange={next => setStage(next as WorkFilter)}>
-          {workFilters.map(filter => <Tab key={filter} id={filter} title={<>{t(workFilterLabel(filter))}<span className="work-count" data-zero={counts[filter] === 0 || undefined}>{counts[filter]}</span></>} />)}
+          {workFilters.map(filter => <Tab key={filter} id={filter} disabled={false} title={<>{t(workFilterLabel(filter))}<span className="work-count" data-zero={counts[filter] === 0 || undefined}>{counts[filter]}</span></>} />)}
         </Tabs>
         <div className="work-body">
           <div className="work-list" role="listbox" aria-label={t(workFilterLabel(stage))}>

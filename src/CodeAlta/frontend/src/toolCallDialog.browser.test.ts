@@ -79,6 +79,12 @@ test("the window of a tool call follows it: live output, then its record, with a
     assert.equal(await evaluate(`${dialog}.querySelector('.tool-command-text').textContent`), "dotnet build\n  -c Release");
     assert.equal(await evaluate(`${dialog}.querySelector('.tool-waiting').textContent`), "Waiting for output…");
     assert.equal(await evaluate(`[...${dialog}.querySelectorAll('.tool-tabs > .bp6-tab-list [role=tab]')].map(tab=>tab.textContent).join('|')`), "Output|Details");
+    // The arrow keys move between the tabs (Blueprint skips them under React 19 unless each Tab says `disabled={false}`).
+    await evaluate(`${dialog}.querySelector('.tool-tabs > .bp6-tab-list [role=tab]').focus(); true`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+    assert.equal(await wait(`document.activeElement?.textContent==='Details'`), true, "The arrow key moves from Output to Details.");
+    await evaluate(`${dialog}.querySelector('.tool-tabs > .bp6-tab-list [role=tab]').focus(); true`);
     assert.equal(await wait("toolFixture.state.opened.length===1"), true);
     await evaluate(`toolFixture.push('call',{text:'step 1\\nstep 2\\n',start:'0',total:'14',isReset:true})`);
     assert.equal(await wait(`${terminal}.includes('step 1') && ${terminal}.includes('step 2')`), true, "The terminal shows the live output.");

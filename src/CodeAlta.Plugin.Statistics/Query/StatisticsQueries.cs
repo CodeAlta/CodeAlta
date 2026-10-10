@@ -95,7 +95,7 @@ public sealed partial class StatisticsQueries
         }
 
         var notes = new List<string>();
-        var refs = ResolveProjectRefs(filter, projects, spaces, notes);
+        var refs = ResolveProjectRefs(filter, projects, spaces, notes, out var includesChats);
         return new ResolvedQuery
         {
             Request = request,
@@ -106,14 +106,17 @@ public sealed partial class StatisticsQueries
             ComparePlan = comparePlan,
             WeekStart = weekStart,
             ProjectRefs = refs,
+            IncludesChats = includesChats,
             ProjectNames = names,
             Coverage = ReadCoverage(meta, range),
             Notes = notes,
         };
     }
 
-    private static IReadOnlyList<string>? ResolveProjectRefs(StatisticsFilter filter, IReadOnlyList<ProjectInfo> projects, IReadOnlyList<SpaceInfo> spaces, List<string> notes)
+    // A space has the projects it has today and the chats (the sessions of no project), which the Explorer shows in every space.
+    private static IReadOnlyList<string>? ResolveProjectRefs(StatisticsFilter filter, IReadOnlyList<ProjectInfo> projects, IReadOnlyList<SpaceInfo> spaces, List<string> notes, out bool includesChats)
     {
+        includesChats = false;
         IEnumerable<string>? result = null;
         if (filter.Project is { Length: > 0 } project)
         {
@@ -136,6 +139,7 @@ public sealed partial class StatisticsQueries
 
             notes.Add("space-membership-is-current");
             var members = projects.Where(item => found.IsDefault || item.SpaceIds.Contains(found.Id, StringComparer.Ordinal)).Select(static item => item.Id);
+            includesChats = result is null;
             result = result is null ? members : result.Intersect(members, StringComparer.OrdinalIgnoreCase);
         }
 
@@ -175,6 +179,33 @@ public sealed partial class StatisticsQueries
 
         /// <summary>Gets the references of the projects the query is limited to; null for no project filter.</summary>
         public IReadOnlyList<string>? ProjectRefs { get; init; }
+
+        /// <summary>Gets a value indicating whether the sessions of no project (the chats) are in the limit of <see cref="ProjectRefs"/>: the chats are in every space, as the Explorer shows them.</summary>
+        public bool IncludesChats { get; init; }
+
+        /// <summary>Gets the condition of the limit to projects, to add to a WHERE clause: empty for no limit, starting with <c> AND </c> otherwise.</summary>
+        /// <param name="column">The column that holds the project reference of a session.</param>
+        /// <param name="argument">Gives the name of a parameter for a value.</param>
+        public string ProjectClause(string column, Func<string, string> argument)
+        {
+            if (ProjectRefs is not { } refs)
+            {
+                return string.Empty;
+            }
+
+            var parts = new List<string>(2);
+            if (refs.Count > 0)
+            {
+                parts.Add($"{column} IN ({string.Join(", ", refs.Select(argument))})");
+            }
+
+            if (IncludesChats)
+            {
+                parts.Add($"({column} IS NULL OR {column} = '')");
+            }
+
+            return parts.Count == 0 ? " AND 0" : $" AND ({string.Join(" OR ", parts)})";
+        }
 
         public required IReadOnlyDictionary<string, string> ProjectNames { get; init; }
 
@@ -490,10 +521,7 @@ public sealed partial class StatisticsQueries
             }
         }
 
-        if (query.ProjectRefs is { } refs)
-        {
-            where.Append(refs.Count == 0 ? " AND 0" : " AND s.project_ref IN (" + string.Join(", ", refs.Select(reference => arg(reference))) + ")");
-        }
+        where.Append(query.ProjectClause("s.project_ref", reference => arg(reference)));
     }
 
     internal static bool TryParseEnum<T>(string text, out T value)

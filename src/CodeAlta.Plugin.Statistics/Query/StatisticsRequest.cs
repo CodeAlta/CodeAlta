@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 
 namespace CodeAlta.Plugin.Statistics.Query;
 
@@ -65,6 +66,7 @@ public sealed record StatisticsFilter
     public string? ToolKind { get; init; }
 
     /// <summary>Gets a value indicating whether no filter is set.</summary>
+    [JsonIgnore]
     public bool IsEmpty => Space is null && Project is null && Provider is null && Model is null && Effort is null && Origin is null && ToolKind is null;
 }
 

@@ -113,10 +113,22 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
     const before = await evaluate<number>("canvasFixture.state.closed");
     await evaluate(`[...${placeholder}.querySelectorAll('button')].find(button => button.textContent.trim() === 'Close').click()`);
     assert.equal(await evaluate("canvasFixture.state.closed"), before + 1);
+    // A build that fails and says nothing still says so.
+    await evaluate("canvasFixture.state.rebuildFails = true");
+    await evaluate(`[...${placeholder}.querySelectorAll('button')].find(button => button.textContent.includes('Rebuild plugin')).click()`);
+    assert.equal(await wait(`${placeholder}.querySelector('code')?.textContent === 'The plugin could not be built.'`), true);
+    await evaluate("canvasFixture.state.rebuildFails = false");
     // Building the plugin brings the tab back.
     await evaluate(`[...${placeholder}.querySelectorAll('button')].find(button => button.textContent.includes('Rebuild plugin')).click()`);
     assert.equal(await wait("canvasFixture.state.rebuilt===1"), true);
     assert.equal(await wait(`${content}==='first'`), true, "the tab opens its canvas again once the plugin runs");
+
+    // A plugin that is gone has nothing to build either.
+    await evaluate("canvasFixture.clear(); canvasFixture.state.probeUnknown = true; canvasFixture.scenario.status = 'plugin_stopped'");
+    await evaluate("canvasFixture.render({ control: true })");
+    assert.equal(await wait(`${placeholder}?.textContent.includes('The plugin is not running.')`), true);
+    assert.deepEqual(await evaluate(`[...${placeholder}.querySelectorAll('button')].map(button => button.textContent.trim())`), ["Close"]);
+    await evaluate("canvasFixture.state.probeUnknown = false");
 
     // A canvas the plugin no longer declares has its own words and nothing to build.
     await evaluate("canvasFixture.clear(); canvasFixture.scenario.status = 'unknown_canvas'; canvasFixture.render()");

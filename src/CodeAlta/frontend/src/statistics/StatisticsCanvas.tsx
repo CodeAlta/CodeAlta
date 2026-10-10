@@ -1,5 +1,5 @@
 import { Tab, Tabs } from "@blueprintjs/core";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { StatisticsApi, StatisticsContext } from "./api";
 import { FrameBar } from "./FrameBar";
 import { FirstTimeCard, HistoryBar } from "./HistoryBar";
@@ -26,11 +26,34 @@ const pages: Record<PageId, () => ReactNode> = {
   agents: () => <AgentsPage />, code: () => <CodePage />, projects: () => <ProjectsPage />, sessions: () => <SessionsPage />, health: () => <HealthPage />,
 };
 
+/**
+ * The row of the pages scrolls when the canvas is narrow: it says on which side there is more (`data-start`, `data-end`, which the
+ * style fades) and brings the page in front into view.
+ */
+function usePageTabsEdges(root: RefObject<HTMLElement | null>, page: PageId, shown: boolean) {
+  useEffect(() => {
+    const list = shown ? root.current?.querySelector<HTMLElement>(".stats-tabs > .bp6-tab-list") : null;
+    if (!list) return;
+    const update = () => {
+      list.dataset.start = String(list.scrollLeft > 1);
+      list.dataset.end = String(list.scrollLeft + list.clientWidth < list.scrollWidth - 1);
+    };
+    list.querySelector<HTMLElement>("[aria-selected=true]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    update();
+    list.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(list);
+    return () => { list.removeEventListener("scroll", update); observer.disconnect(); };
+  }, [root, page, shown]);
+}
+
 function Canvas() {
   const { t } = useText();
   const { frame, dispatch, status, visible } = useStatistics();
   const view = historyView(status);
-  return <div className="statistics-canvas" data-visible={visible} data-history={view}>
+  const root = useRef<HTMLDivElement>(null);
+  usePageTabsEdges(root, frame.page, view !== "choice");
+  return <div className="statistics-canvas" ref={root} data-visible={visible} data-history={view}>
     <FrameBar />
     <HistoryBar />
     {view === "choice" && status

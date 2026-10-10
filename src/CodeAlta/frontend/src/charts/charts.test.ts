@@ -183,6 +183,7 @@ test("the option is prepared for the page: motion, description, tooltip, legend 
   const plain = prepareOption(option, { reducedMotion: false, state: emptyViewState }) as Record<string, any>;
   assert.equal(plain.animation, undefined);
   assert.equal(plain.aria.enabled, true);
+  assert.equal(plain.aria.label.enabled, false);
   assert.equal(plain.tooltip.confine, true);
   assert.equal(plain.legend.show, false);
   const calm = prepareOption(option, { reducedMotion: true, state: { hidden: new Set(["a"]), zoom: [{ start: 10, end: 40 }] } }) as Record<string, any>;

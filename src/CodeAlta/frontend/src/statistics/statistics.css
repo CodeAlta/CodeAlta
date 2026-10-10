@@ -19,6 +19,9 @@
 .stats-chip-remove:hover { background: var(--panel-3); color: var(--text); }
 .stats-chip-remove:focus-visible, .stats-cell-link:focus-visible, .stats-ranked-row:focus-visible, .stats-record:focus-visible, .stats-link:focus-visible, .stats-table th button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .stats-popover { min-width: 220px; max-width: 320px; padding: 4px; }
+.stats-confirm { display: grid; gap: 6px; max-width: 280px; padding: 12px 14px 10px; }
+.stats-confirm p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.stats-confirm-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 .stats-range { display: grid; gap: 8px; padding: 8px 10px 10px; }
 .stats-range label { display: grid; gap: 2px; font-size: 11px; color: var(--muted); }
 .stats-range input { padding: 4px 6px; font-size: 13px; }
@@ -51,7 +54,10 @@
 
 /* The pages */
 .stats-tabs.bp6-tabs { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.stats-tabs > .bp6-tab-list { flex: none; gap: 2px; margin: 0; padding: 0 10px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--panel); scrollbar-width: none; }
+.stats-tabs > .bp6-tab-list { flex: none; gap: 2px; margin: 0; padding: 0 10px; scroll-padding-inline: 28px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--panel); scrollbar-width: none; }
+.stats-tabs > .bp6-tab-list[data-start="true"] { mask-image: linear-gradient(to right, transparent, #000 28px); }
+.stats-tabs > .bp6-tab-list[data-end="true"] { mask-image: linear-gradient(to left, transparent, #000 28px); }
+.stats-tabs > .bp6-tab-list[data-start="true"][data-end="true"] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .stats-tabs > .bp6-tab-list > .bp6-tab { flex: none; margin: 0; padding: 0 10px; line-height: 38px; font-size: 13px; }
 .stats-tabs > .bp6-tab-panel { flex: 1; min-height: 0; margin: 0; overflow: auto; }
 .stats-page { min-width: 0; padding-bottom: 8px; }
@@ -126,6 +132,8 @@ button.stats-record:hover { border-color: var(--line-strong); background: var(--
 .stats-table th button:hover { color: var(--text); }
 .stats-table th button > span { display: inline-block; width: 1em; }
 .stats-table td { padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
+/* The window breaks a word anywhere in the HTML of a plugin; a name in a narrow column stays whole, and the table scrolls. */
+.stats-table td:not([data-wide]) { overflow-wrap: normal; }
 .stats-table [data-align="end"] { font-variant-numeric: tabular-nums; text-align: right; }
 .stats-table [data-wide] { min-width: 160px; }
 .stats-table tbody tr:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
@@ -140,6 +148,9 @@ button.stats-record:hover { border-color: var(--line-strong); background: var(--
 /* Narrow: the canvas answers to its own width. */
 @container statistics (max-width: 1100px) {
   .stats-block[data-span="4"], .stats-block[data-span="3"] { --span: 6; }
+}
+@container statistics (max-width: 760px) {
+  .stats-control .stats-control-sub { display: none; }
 }
 @container statistics (max-width: 820px) {
   .stats-block { --span: 12 !important; }

@@ -77,7 +77,7 @@ test("the Canvases tab lists what plugins declare, opens a canvas for the projec
     assert.equal(await wait("document.querySelectorAll('.canvas-card').length === 3"), true);
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.canvas-card-title')].map(node => node.textContent)"), ["Stats", "Checklist", "Board"]);
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.canvas-card')].map(card => card.querySelector('.bp6-tag').textContent)"), ["Application", "Project", "Session"]);
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('.canvas-card-facts')].map(node => node.textContent)"), ["Statistics2 actions", "Tools1 action", "ToolsNo actions"]);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.canvas-card-facts')].map(node => node.textContent)"), ["Statistics2 actions", "Tools1 action", "Tools"]);
     assert.equal(await evaluate("document.querySelectorAll('.canvases-page > .work-header + .canvases-list').length"), 1);
     // The project and the session in front are the defaults of the cards that need one.
     assert.equal(await evaluate("document.querySelector('.canvases-list > li:nth-child(2) select').value"), "p1");

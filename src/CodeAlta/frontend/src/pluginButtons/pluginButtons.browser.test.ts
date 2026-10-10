@@ -110,6 +110,8 @@ test("buttons of plugins sit before the space switch, show their state, hide on 
     await evaluate("buttonsFixture.setButtons(buttonsFixture.state.buttons.map(b => b.buttonId === 'alerts' ? { ...b, count: 128, badge: 'count' } : b)); buttonsFixture.invalidate()");
     assert.equal(await wait("document.querySelector('[data-button=alerts] .plugin-button-badge')?.textContent === '99+'"), true);
     assert.deepEqual(await rect("[data-button=alerts]"), before);
+    // A wide number grows away from the icon: it never covers it.
+    assert.equal(await evaluate("(() => { const badge = document.querySelector('[data-button=alerts] .plugin-button-badge').getBoundingClientRect(), icon = document.querySelector('[data-button=alerts] .plugin-icon, [data-button=alerts] svg').getBoundingClientRect(); return badge.left >= icon.right - 7 && badge.width > 16; })()"), true, "the 99+ badge leaves the icon uncovered");
 
     // A button the plugin hides for now, and one the plugin disables.
     await evaluate("buttonsFixture.setButtons(buttonsFixture.state.buttons.map(b => b.buttonId === 'alerts' ? { ...b, hidden: true } : b.buttonId === 'statistics' ? { ...b, disabled: true } : b)); buttonsFixture.invalidate()");
@@ -139,6 +141,7 @@ test("buttons of plugins sit before the space switch, show their state, hide on 
     assert.equal(await wait("document.querySelectorAll('.plugin-button-list li').length === 3"), true);
     assert.equal(await evaluate("document.querySelector('.plugin-button-list input[aria-label=\"Show the Alerts button\"]').checked"), false);
     assert.equal(await evaluate("document.querySelector('.plugin-button-list input[aria-label=\"Show the Statistics button\"]').checked"), true);
+    assert.equal(await evaluate("(() => { const input = document.querySelector('.plugin-button-list input[aria-label=\"Show the Alerts button\"]'); return document.getElementById(input.getAttribute('aria-describedby')).textContent; })()"), "Title bar", "the place describes the switch");
     await evaluate("document.querySelector('.plugin-button-list input[aria-label=\"Show the Alerts button\"]').click()");
     assert.equal(await wait("document.querySelector('.plugin-button-list input[aria-label=\"Show the Alerts button\"]').checked"), true);
     assert.deepEqual(JSON.parse((await evaluate<string>("buttonsFixture.storage()"))!), []);
@@ -151,6 +154,8 @@ test("buttons of plugins sit before the space switch, show their state, hide on 
     assert.equal(await wait("document.querySelectorAll('.window-actions .plugin-button:not(.plugin-buttons-more)').length === 0 && document.querySelector('.window-actions .plugin-buttons-more')"), true);
     assert.equal(await evaluate("document.querySelector('.space-switch .bp6-button-text') !== null"), true, "the space switch kept its name: no application control moved yet");
     assert.ok(Math.abs((await rect(".space-switch"))!.width - switchBefore!.width) < 1);
+    // Drawn as a puzzle piece, not as the ellipsis of the tabs beside it.
+    assert.equal(await evaluate("document.querySelector('.window-actions .plugin-buttons-more svg').classList.contains('lucide-puzzle')"), true);
     await evaluate("document.querySelector('.window-actions .plugin-buttons-more').click()");
     assert.equal(await wait("document.querySelectorAll('.bp6-menu .bp6-menu-item').length === 2"), true);
     assert.deepEqual(await text(".bp6-menu .bp6-menu-item .bp6-text-overflow-ellipsis"), ["Statistics", "Alerts"]);

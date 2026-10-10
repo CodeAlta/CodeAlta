@@ -121,7 +121,7 @@ export function PluginButtons({ place, context }: { place: "TitleBar" | "Rail"; 
         title={button.tooltip ?? undefined} labelElement={badgeText(button) ?? (button.badge === "dot" ? "•" : undefined)}
         onClick={() => host.activate(button, context)} />)}
     </Menu>}>
-      <Button variant="minimal" size="small" className="plugin-button plugin-buttons-more" icon={<AppIcon name="ellipsis" size={16} />}
+      <Button variant="minimal" size="small" className="plugin-button plugin-buttons-more" icon={<AppIcon name="plugin" size={16} />}
         aria-haspopup="menu" aria-label={t("More plugin buttons")} title={t("More plugin buttons")} />
     </PopoverNext>}
     {menu && <SessionTabMenu anchor={menu.anchor} at={menu.at} container={document.body} title={menu.button.label} current={() => true} onClose={() => setMenu(null)}

@@ -87,7 +87,7 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
     return words.credits(Math.abs(value) < 100 ? small.format(value) : grouped.format(value));
   };
   const usdWhole = new Intl.NumberFormat(safe, { style: "currency", currency: "USD", maximumFractionDigits: 0 });
-  const costShort = (unit: string, value: number) => !Number.isFinite(value) ? words.none : unit.toLowerCase() === "usd" ? (Math.abs(value) >= 1000 ? usdWhole : usd).format(value) : (Math.abs(value) >= 10000 ? compact(value) : grouped.format(value));
+  const costShort = (unit: string, value: number) => !Number.isFinite(value) ? words.none : unit.toLowerCase() === "usd" ? (Math.abs(value) >= 1000 ? usdWhole : usd).format(value) : (Math.abs(value) >= 10000 ? compact(value) : Math.abs(value) < 100 ? small.format(value) : grouped.format(value));
   const percent = (ratio: number, digits?: number) => !Number.isFinite(ratio) ? words.none
     : new Intl.NumberFormat(safe, { style: "percent", maximumFractionDigits: digits ?? (Math.abs(ratio) >= 0.1 ? 0 : 1) }).format(ratio);
   const value = (unit: string, amount: number) => {

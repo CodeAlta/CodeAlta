@@ -158,13 +158,13 @@ export function ToolCallDialog({ item, reader, outputs, imageSource, current, on
       </div>}
       {error && <Callout compact intent="danger" className="tool-error">{error}</Callout>}
       <Tabs id={`${id}-tabs`} className="tool-tabs" selectedTabId={tab} onChange={value => setTab(String(value))} renderActiveTabPanelOnly>
-        <Tab id="main" title={t(family === "shell" ? "Output" : family === "read" ? "File" : family === "edit" ? "Changes" : "Result")} panel={<div className="tool-panel" data-view={family}>
+        <Tab id="main" disabled={false} title={t(family === "shell" ? "Output" : family === "read" ? "File" : family === "edit" ? "Changes" : "Result")} panel={<div className="tool-panel" data-view={family}>
           {family === "shell" ? <><ShellView call={shown} live={live} settled={settled} />{images}</>
             : family === "edit" ? <><EditView call={shown} args={args} />{images}</>
               : family === "read" ? <ReadView call={shown} args={args} images={images} />
                 : <GenericView call={shown} args={args} images={images} />}
         </div>} />
-        <Tab id="details" title={t("Details")} panel={<div className="tool-panel" data-view="details"><DetailsView item={item} call={call} duration={duration} /></div>} />
+        <Tab id="details" disabled={false} title={t("Details")} panel={<div className="tool-panel" data-view="details"><DetailsView item={item} call={call} duration={duration} /></div>} />
       </Tabs>
     </AppWindowSurface>
   </dialog>;

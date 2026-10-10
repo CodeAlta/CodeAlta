@@ -111,7 +111,10 @@ test("every kind of chart is drawn under the production policy, in both themes, 
     // The accessible name, and the description ECharts generates for the picture.
     const names = await page.evaluate<string[]>(`[...document.querySelectorAll('.chart')].map(chart => chart.getAttribute('aria-labelledby') && document.getElementById(chart.getAttribute('aria-labelledby')).textContent)`);
     assert.ok(names.includes("Prompts, answers and errors per day"));
-    assert.match(await page.evaluate<string>(`document.querySelector('[data-chart="lines"] .chart-surface').getAttribute('aria-label')`), /line chart|chart/i);
+    // The picture is named by the page, with its series: not by the description ECharts writes, which reads the internal columns of a stack ("is 0, 0, 0, NaN").
+    const surfaceName = await page.evaluate<string>(`document.querySelector('[data-chart="lines"] .chart-surface').getAttribute('aria-label')`);
+    assert.match(surfaceName, /^Prompts, answers and errors per day\. Series: /);
+    assert.doesNotMatch(await page.evaluate<string>(`[...document.querySelectorAll('.chart-surface')].map(surface => surface.getAttribute('aria-label')).join(' ')`), /NaN|The first \d+ items/);
     // The series take the palette of the page, in order.
     const paletteOf = (dark: boolean) => dark ? ["#3fa6da", "#43bf4d", "#f0b726"] : ["#147eb3", "#29a634", "#866103"];
     const strokes = () => page.evaluate<string[]>(`[...document.querySelectorAll('[data-chart="lines"] .chart-surface svg path')].map(p => (p.getAttribute('stroke') || '').toLowerCase()).filter(c => /^#[0-9a-f]{6}$/.test(c))`);

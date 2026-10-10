@@ -154,7 +154,7 @@ export function EditView({ call, args }: { call: ToolCall; args: ToolArguments |
       {files.map((file, index) => {
         const path = (file.movedTo ?? file.path).replaceAll("\\", "/");
         const look = fileAppearance(path, false);
-        return <Tab key={index} id={index} panel={<FileChange file={file} />} title={<span className="tool-file-tab" title={path}>
+        return <Tab key={index} id={index} disabled={false} panel={<FileChange file={file} />} title={<span className="tool-file-tab" title={path}>
           <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={13} /></span>
           <span className="tool-file-tab-name">{path.slice(path.lastIndexOf("/") + 1)}</span><FileCounts file={file} />
         </span>} />;

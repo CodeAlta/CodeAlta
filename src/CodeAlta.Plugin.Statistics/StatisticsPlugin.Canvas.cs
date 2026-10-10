@@ -51,7 +51,7 @@ public sealed partial class StatisticsPlugin
         {
             Id = CanvasId,
             Title = "Statistics",
-            Description = "Your sessions in numbers and charts: activity, models and tokens, cost, tools, prompts, agents, code, projects, sessions and health. Open it with the key 'project:<project id>' for one project.",
+            Description = "Your sessions in numbers and charts: activity, models and tokens, cost, tools, prompts, agents, code, projects, sessions and health.",
             Icon = "chart-column",
             Scope = PluginCanvasScope.Application,
             Open = OpenCanvasAsync,
@@ -73,7 +73,7 @@ public sealed partial class StatisticsPlugin
             Canvas = CanvasId,
             GetState = _ => GetButtonState(),
         };
-        yield return PluginUi.Button(PluginButtonPlace.ProjectMenu, "statistics-project", "chart-column", "Statistics") with
+        yield return PluginUi.Button(PluginButtonPlace.ProjectMenu, "statistics-project", "chart-column", "Statistics of this project") with
         {
             Command = ProjectCommandName,
         };
@@ -205,7 +205,7 @@ public sealed partial class StatisticsPlugin
             HistoryState.Failed => "The statistics could not start.",
             _ => "The statistics are starting.",
         });
-        builder.Append("\n\nThe numbers are those of `alta statistics summary`, `series`, `top` and `session`.");
+        builder.Append("\n\nThe numbers are those of `alta statistics summary`, `series`, `top` and `session`. Open it with the key `project:<project id>` for the statistics of one project.");
         return new ValueTask<string?>(builder.ToString());
     }
 

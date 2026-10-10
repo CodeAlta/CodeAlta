@@ -24,7 +24,8 @@ export type PrepareContext = Readonly<{ reducedMotion: boolean; state: ChartView
 export function prepareOption(option: Readonly<Record<string, unknown>>, context: PrepareContext): Dict {
   const result: Dict = { ...option };
   if (context.reducedMotion) { result.animation = false; }
-  result.aria = { enabled: true, ...(isDict(option.aria) ? option.aria : {}) };
+  // The name of the chart is the one the page gives it (with its series): the description ECharts writes reads the internal columns of a stack ("is 0, 0, 0, NaN").
+  result.aria = { enabled: true, ...(isDict(option.aria) ? option.aria : {}), label: { enabled: false } };
   if (option.tooltip !== undefined) result.tooltip = Array.isArray(option.tooltip) ? option.tooltip : { confine: true, ...(isDict(option.tooltip) ? option.tooltip : {}) };
   if (option.legend !== undefined) {
     const selected = Object.fromEntries([...context.state.hidden].map(name => [name, false]));

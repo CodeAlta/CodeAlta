@@ -117,6 +117,8 @@ test("numbers, durations, costs and dates are written as the locale writes them"
   assert.equal(fmt.cost("usd", 1511.44), "$1,511.44");
   assert.equal(fmt.cost("AI credits", 8952), "8,952 AI credits");
   assert.equal(fmt.costShort("AI credits", 8952), "8,952");
+  assert.equal(fmt.costShort("AI credits", 0.560457), "0.56", "a few credits are not rounded to a whole one");
+  assert.equal(fmt.costShort("AI credits", 42.4), "42.4");
   assert.equal(fmt.costShort("usd", 1511.44), "$1,511");
   assert.equal(fmt.day("2026-04-20"), "Apr 20");
   assert.equal(fmt.range("2026-09-10", "2026-10-09"), "Sep 10 – Oct 9, 2026");

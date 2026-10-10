@@ -229,6 +229,35 @@ test("the first time asks how much history to read, then shows the progress, the
     await page.until(`!document.querySelector('.stats-history') && !document.querySelector('.stat-hatch')`, "the end");
     await page.until(`document.querySelector('.bp6-toast')?.textContent.includes('Your statistics are ready: 906 sessions since Apr 20, 2026.')`, "the notification");
     assert.equal(await page.evaluate(`document.querySelectorAll('.bp6-toast').length`), 1, "once");
+    // Reset asks first: Cancel changes nothing, the answer yes deletes the numbers and asks again how much to read.
+    const resets = () => page.evaluate<number>(`statsFixture.calls().filter(call => call.method === 'resetStatistics').length`);
+    await page.click('button[aria-label="Statistics menu"]');
+    await page.clickText('.bp6-menu-item', "Reset statistics…");
+    await page.until(`document.querySelector('.stats-confirm')`, "the question");
+    assert.equal(await page.evaluate(`document.querySelector('.stats-confirm strong').textContent`), "Reset the statistics?");
+    assert.equal(await resets(), 0, "nothing is deleted before the answer");
+    await page.clickText('.stats-confirm button', "Cancel");
+    await page.until(`!document.querySelector('.stats-confirm')`, "the question closed");
+    assert.equal(await resets(), 0);
+    await page.click('button[aria-label="Statistics menu"]');
+    await page.clickText('.bp6-menu-item', "Reset statistics…");
+    await page.until(`document.querySelector('.stats-confirm')`, "the question again");
+    await page.clickText('.stats-confirm button', "Reset");
+    await page.until(`document.querySelector('.stats-first') && !document.querySelector('.stats-confirm')`, "the first-time card");
+    assert.equal(await resets(), 1);
+  });
+});
+
+test("one session is one session, in the card of the first time and in the notification of the end", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    await render(page, { scenario: "first-time", sessionCount: 1 });
+    await page.until(`document.querySelector('.stats-first')`, "the choice");
+    assert.match(await page.evaluate<string>(`document.querySelector('.stats-first p').textContent`), /^1 session since [A-Z][a-z]{2} \d+, 2026 can be read /);
+    await page.clickText('.stats-first button', "Read all the history");
+    await page.until(`document.querySelector('.stats-history[data-view="reading"]')`, "the reading");
+    await page.evaluate(`statsFixture.control.advance(10000)`);
+    await page.until(`document.querySelector('.bp6-toast')?.textContent.includes('Your statistics are ready: 1 session since')`, "the notification of one session");
+    assert.doesNotMatch(await page.evaluate<string>(`document.querySelector('.bp6-toast').textContent`), /1 sessions/);
   });
 });
 
@@ -370,6 +399,8 @@ test("the canvas is used with the keyboard: tabs, menus, the table of a chart, t
     await page.evaluate(`document.querySelector('button[aria-label^="Compare:"]').focus()`);
     await page.key("Enter", 13, "\r");
     await page.until(`document.querySelector('.bp6-menu')`, "the menu");
+    // The popover ignores an Escape while it is still opening.
+    await idle(400);
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.bp6-menu')`, "the menu closed");
     assert.equal(await page.evaluate(`document.activeElement.getAttribute('aria-label')?.startsWith('Compare:')`), true, "the focus comes back to the button");
@@ -418,6 +449,27 @@ test("the canvas is calm for people who ask for less motion, and keeps working a
     assert.ok(await page.evaluate<number>(`document.querySelector('.statistics-canvas').scrollWidth - document.querySelector('.statistics-canvas').clientWidth`) <= 0);
     assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.stats-block')).getPropertyValue('--span').trim()`), "12", "a narrow tab stacks its blocks");
     await page.shot("overview-dark-420");
+    // The days under a time chart are regular, however narrow the tab: the same step from one to the next, none crowded.
+    const labelSteps = await page.evaluate<number[]>(`(() => { const xs = [...document.querySelector('.stat-chart .chart-surface').querySelectorAll('svg text')].filter(text => /^[A-Z][a-z]{2}\\s\\d+$/.test(text.textContent)).map(text => { const box = text.getBoundingClientRect(); return (box.left + box.right) / 2; }).sort((a, b) => a - b); return xs.slice(1).map((x, index) => Math.round(x - xs[index])); })()`);
+    assert.ok(labelSteps.length >= 2, `some days are named under the chart: ${labelSteps.join()}`);
+    assert.ok(Math.max(...labelSteps) - Math.min(...labelSteps) <= 3, `the days under the chart are evenly spaced: ${labelSteps.join()}`);
+    // The row of the pages scrolls and says on which side there is more; the page in front is brought into view.
+    assert.equal(await page.evaluate(`document.querySelector('.stats-tabs > .bp6-tab-list').dataset.end`), "true", "the row of pages has more on its right");
+    assert.equal(await page.evaluate(`document.querySelector('.stats-tabs > .bp6-tab-list').dataset.start`), "false");
+    await page.evaluate(`[...document.querySelectorAll('.stats-tabs [role=tab]')].find(tab => tab.textContent === 'Health').click()`);
+    await page.until(`document.querySelector('.stats-tabs > .bp6-tab-list').dataset.start === 'true' && document.querySelector('.stats-tabs > .bp6-tab-list').dataset.end === 'false'`, "the last page in view");
+    const edges = await page.evaluate<number[]>(`(() => { const list = document.querySelector('.stats-tabs > .bp6-tab-list').getBoundingClientRect(), tab = document.querySelector('.stats-tabs [aria-selected=true]').getBoundingClientRect(); return [tab.left - list.left, list.right - tab.right]; })()`);
+    assert.ok(edges[0] >= -1 && edges[1] >= -1, `the selected page is inside the row: ${edges.join(", ")}`);
+    // The bar keeps its menu on the first row: the dates of the period give way before it wraps alone.
+    await page.evaluate(`statsFixture.update({ width: 700 })`);
+    await idle(400);
+    assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.stats-control-sub')).display`), "none", "the dates of the period are hidden in a narrow tab");
+    assert.equal(await page.evaluate(`(() => { const menu = document.querySelector('.stats-frame [aria-label="Statistics menu"]').getBoundingClientRect(), first = document.querySelector('.stats-frame .stats-control').getBoundingClientRect(); return menu.top - first.top < first.height; })()`), true, "the menu is on the first row");
+    // A name in a narrow column of a table stays whole: the window breaks words anywhere in the HTML of a plugin, a table scrolls instead.
+    await page.evaluate(`document.querySelector('.statistics-canvas').parentElement.style.overflowWrap = 'anywhere'`);
+    await openPage(page, "Sessions");
+    await page.until(`document.querySelector('.stats-table td:not([data-wide])')`, "the table of sessions");
+    assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.stats-table td:not([data-wide])')).overflowWrap`), "normal");
   }, { reducedMotion: true });
 });
 

@@ -38,7 +38,8 @@ export function FirstTimeCard({ status }: Readonly<{ status: StatisticsStatus }>
     <div className="stats-first-mark" aria-hidden="true"><AppIcon name="usage" size={26} /></div>
     <h2 id="stats-first-title">{t("Statistics of your sessions")}</h2>
     <p>{known && since
-      ? t("{count} sessions since {date} can be read to build your statistics. It takes {time} and runs in the background.", { count: status.sessionsTotal.toLocaleString(locale), date: since, time: takes })
+      ? status.sessionsTotal === 1 ? t("1 session since {date} can be read to build your statistics. It takes {time} and runs in the background.", { date: since, time: takes })
+        : t("{count} sessions since {date} can be read to build your statistics. It takes {time} and runs in the background.", { count: status.sessionsTotal.toLocaleString(locale), date: since, time: takes })
       : t("Your sessions can be read to build your statistics. It runs in the background.")}</p>
     <div className="stats-first-actions">
       <Button intent="primary" disabled={disabled} onClick={() => void history.choose({ kind: "all" })}>{t("Read all the history")}</Button>
@@ -65,8 +66,11 @@ export function HistoryBar() {
     if (before.state === "reading" && status.state === "done" && status.sessionsTotal > 0) {
       const summary = doneSummary(status);
       showToast({ intent: "success", icon: "tick-circle", timeout: 6000,
-        message: summary.since ? t("Your statistics are ready: {count} sessions since {date}.", { count: summary.sessions.toLocaleString(locale), date: fmt.dayLong(summary.since) })
-          : t("Your statistics are ready: {count} sessions.", { count: summary.sessions.toLocaleString(locale) }) }, "statistics-ready");
+        message: summary.since
+          ? summary.sessions === 1 ? t("Your statistics are ready: 1 session since {date}.", { date: fmt.dayLong(summary.since) })
+            : t("Your statistics are ready: {count} sessions since {date}.", { count: summary.sessions.toLocaleString(locale), date: fmt.dayLong(summary.since) })
+          : summary.sessions === 1 ? t("Your statistics are ready: 1 session.")
+            : t("Your statistics are ready: {count} sessions.", { count: summary.sessions.toLocaleString(locale) }) }, "statistics-ready");
     }
   }, [status, visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -80,14 +84,16 @@ export function HistoryBar() {
       <ProgressBar className="stats-progress" value={progressOf(status)} intent="primary" stripes={false} animate={false} aria-label={t("Reading the history")} />
       <div className="stats-history-line">
         <span>{reason === "facts-improved" ? t("Statistics were improved in this version. The history is being read again; what you see stays until then.")
-          : reason === "catch-up" ? t("Catching up with {count} sessions…", { count: left.toLocaleString(locale) })
+          : reason === "catch-up" ? left === 1 ? t("Catching up with 1 session…") : t("Catching up with {count} sessions…", { count: left.toLocaleString(locale) })
           : <>{reason === "extended" ? t("Reading more history") : t("Reading the history")}: {t("{done} of {total} sessions", { done: status.sessionsDone.toLocaleString(locale), total: status.sessionsTotal.toLocaleString(locale) })}
             {reached && <>, {t("back to {date}", { date: fmt.day(reached) })}</>}.{timeLeft(status) && <> {sentenceCase(t("{time} left.", { time: duration(timeLeft(status)) }), locale)}</>}</>}</span>
         <Button size="small" icon={<AppIcon name="pause" size={13} />} disabled={history.busy} onClick={() => void history.pause()}>{t("Pause")}</Button>
       </div>
     </>}
     {view === "paused" && <div className="stats-history-line">
-      <span>{reached ? t("History paused at {date}. {count} sessions left.", { date: fmt.day(reached), count: left.toLocaleString(locale) }) : t("History paused. {count} sessions left.", { count: left.toLocaleString(locale) })}</span>
+      <span>{reached
+        ? left === 1 ? t("History paused at {date}. 1 session left.", { date: fmt.day(reached) }) : t("History paused at {date}. {count} sessions left.", { date: fmt.day(reached), count: left.toLocaleString(locale) })
+        : left === 1 ? t("History paused. 1 session left.") : t("History paused. {count} sessions left.", { count: left.toLocaleString(locale) })}</span>
       <span className="stats-history-buttons">
         <Button size="small" intent="primary" icon={<AppIcon name="play" size={13} />} disabled={history.busy} onClick={() => void history.resume()}>{t("Resume")}</Button>
         <Button size="small" variant="minimal" icon={<AppIcon name="stop" size={13} />} disabled={history.busy} onClick={() => void history.stopHere()}>{t("Stop here")}</Button>

@@ -177,10 +177,7 @@ public sealed partial class StatisticsQueries
             }
         }
 
-        if (query.ProjectRefs is { } refs)
-        {
-            where.Append(refs.Count == 0 ? " AND 0" : " AND s.project_ref IN (" + string.Join(", ", refs.Select(reference => Arg(reference))) + ")");
-        }
+        where.Append(query.ProjectClause("s.project_ref", reference => Arg(reference)));
 
         if (query.SessionIds is { } sessions)
         {

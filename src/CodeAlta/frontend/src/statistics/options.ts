@@ -89,7 +89,7 @@ export function timeSeriesOption(spec: TimeSeriesSpec): PlottedOption {
     tooltip: { trigger: "axis", axisPointer: { type: spec.kind === "bar" ? "shadow" : "line" }, valueFormatter: (value: unknown) => typeof value === "number" ? fmt.value(unit, sign(value)) : String(value ?? "") },
     legend: result.series.length > 1 || previous.length > 0 ? { data: series.map(item => item.name as string) } : undefined,
     grid: { left: plot.left, right: plot.right, top: plot.top, bottom: plot.bottom, containLabel: false },
-    xAxis: { type: "category", data: labels.long, boundaryGap, axisLabel: { interval: 0, hideOverlap: true, formatter: (_: string, index: number) => labels.short[index] ?? "" }, axisTick: { alignWithLabel: true } },
+    xAxis: { type: "category", data: labels.long, boundaryGap, axisLabel: { hideOverlap: true, formatter: (_: string, index: number) => labels.short[index] ?? "" }, axisTick: { alignWithLabel: true } },
     yAxis: { type: "value", axisLabel: { formatter: (value: number) => fmt.axis(unit, sign(value)) }, ...(unit === "count" ? { minInterval: 1 } : {}) },
     series,
     ...(spec.brush ? { dataZoom: [{ type: "slider", xAxisIndex: 0, height: 16, bottom: 6, brushSelect: false, filterMode: "none", showDetail: false, moveHandleSize: 6 }] } : {}),

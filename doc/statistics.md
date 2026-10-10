@@ -131,7 +131,7 @@ The reading is **gentle**: one thread of its own with a priority below normal fo
 | `period` | `today`, `yesterday`, `Nd` (the last N days, today included), `week`, `month`, `last-month`, `year`, `all`, or `yyyy-MM-dd..yyyy-MM-dd` (an end left out is today, a start left out is the first day with data). Local days |
 | `frequency` | `auto`, `hour`, `day`, `week` (from `weekStart`, or the culture), `month`, `year`. `auto`: hours for one day, days up to 90 days, weeks up to a year, months beyond. At most 5,000 buckets |
 | `comparison` | `none`, `previousPeriod` (the period of the same length before), `samePeriodLastYear` |
-| `filter` | `space` (the projects it has **today**), `project`, `provider`, `model`, `effort`, `origin` (`you`, `agent`, `automation`, `reminder`), `toolKind` |
+| `filter` | `space` (the projects it has **today**, and the chats: the sessions of no project, which the Explorer shows in every space), `project`, `provider`, `model`, `effort`, `origin` (`you`, `agent`, `automation`, `reminder`), `toolKind` |
 | `weekStart`, `limit` | The first day of the week; the most rows or lines (default 50, 20 for series lines, 10 for rankings; at most 500) |
 
 Counts and sums are read from the roll-ups (days, and months or years when the period is made of whole months or years); a question that needs the session (a project, a space, a session) or the hour reads the quarter hours. A filter the facts cannot honor for a question (the origin of a prompt on the tokens of a quarter hour) is **not applied** and the result names it in `query.ignoredFilters`: provider and model apply to activity, requests and cost (not to tools or prompts), effort to activity and requests, tool kind to tools, origin to prompts, project and space to everything.
@@ -200,7 +200,7 @@ A chart is never alone: each has "Show as table" (the same numbers), a name for 
 | Filters | Space, project, provider, model, reasoning effort, who started the work, kind of tool, as chips. A chip of a filter that a page cannot honor (`query.ignoredFilters`) is dashed |
 | Reset | Back to the frame the canvas opened with: the shown space or project, 30 days |
 
-The canvas opens filtered on the space the window shows (`context.spaceId`) or on a project (`context.projectId`), and removing the chip shows everything.
+The canvas opens filtered on the space the window shows (`context.spaceId`) or on a project (`context.projectId`), and removing the chip shows everything. In a narrow canvas (the canvas answers to its own width) the dates of the period go first, so the menu stays on the first row, and the row of pages scrolls: it fades on the side that has more and brings the page in front into view.
 
 ### The history in the canvas
 
@@ -213,7 +213,7 @@ The canvas opens filtered on the space the window shows (`context.spaceId`) or o
 | `done` with skipped sessions | "3 sessions could not be read", with their reasons and **Try again** |
 | `failed` | The reason, and **Try again** |
 
-The menu of the canvas also has "Forget deleted sessions" and, when the binding offers `resetStatistics`, "Reset statistics…". "Read more history…" lists the choices that go further back than the one made.
+The menu of the canvas also has "Forget deleted sessions" and, when the binding offers `resetStatistics`, "Reset statistics…", which asks first ("Reset the statistics?", a small popover under the menu with Cancel and Reset). "Read more history…" lists the choices that go further back than the one made.
 
 ### Lifecycle
 
@@ -305,7 +305,7 @@ A cold disk was not measured. `dotnet test src -c Release --filter RealProfileHi
 ## Limits
 
 - The facts count what is in the journals (`doc/statistics-facts.md`, "Limits"). A session that was deleted before it was read cannot be counted.
-- The spaces of a project are the ones it has today.
+- The spaces of a project are the ones it has today. A space has the chats too (a chat belongs to no project, and the Explorer shows it in every space); a project filter leaves them out.
 - The origin of a prompt filters prompts and runs; time and tokens of a quarter hour have no sender, and a result says so in `query.ignoredFilters`.
 - A run that is still going when the application is closed is closed as interrupted by the next start once its session has been quiet for an hour.
 - The statistics of the developer instance are its own (`<state root>/data/alta.sqlite3`, its own sessions).

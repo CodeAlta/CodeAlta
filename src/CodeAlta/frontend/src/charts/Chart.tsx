@@ -254,7 +254,7 @@ export function Chart(props: ChartProps) {
     {entries.length > 0 && !showTable && <ul className="chart-legend" aria-label={t("Series")}>{entries.map(entry =>
       <li key={entry.name}><button type="button" className="chart-legend-item" aria-pressed={!hidden.has(entry.name)} onClick={() => toggle(entry.name)}>
         <i style={{ background: entry.color }} aria-hidden="true" />{entry.name}</button></li>)}</ul>}
-    <div className="chart-surface" role="img" aria-label={ariaLabel} hidden={showTable} ref={host} />
+    <div className="chart-surface" role="img" aria-label={entries.length > 1 ? `${ariaLabel}. ${t("Series")}: ${entries.map(entry => entry.name).join(", ")}` : ariaLabel} hidden={showTable} ref={host} />
     {failure && <p className="chart-failure" role="alert">{failure}</p>}
     {shown && <div className="chart-table-scroll">
       <HTMLTable compact striped className="chart-table">

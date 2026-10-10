@@ -70,6 +70,20 @@ internal sealed class QueryHarness : IAsyncDisposable
         return harness;
     }
 
+    /// <summary>Adds the facts of one more session to the store and to the facts the naive recomputation reads.</summary>
+    public async Task AddAsync(FactBatch batch)
+    {
+        Batches.Add(batch);
+        await Store.Store.ApplyAsync(new ApplyRequest
+        {
+            SessionId = batch.SessionId,
+            Batch = batch,
+            Cursor = new JournalCursor(100, null, new SessionFactsState()),
+            FileLength = 100,
+            FileStampTicks = 1,
+        });
+    }
+
     public ValueTask DisposeAsync() => Store.DisposeAsync();
 
     public TimeZoneInfo TimeZone => Store.TimeZone;

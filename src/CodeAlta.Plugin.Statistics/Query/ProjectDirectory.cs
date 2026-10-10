@@ -30,13 +30,21 @@ internal interface IProjectDirectory
     ValueTask<IReadOnlyList<SpaceInfo>> ListSpacesAsync(CancellationToken cancellationToken = default);
 }
 
-/// <summary>The directory read through the <c>alta project</c> and <c>alta space</c> commands, which every host has.</summary>
-internal sealed class AltaProjectDirectory(IPluginAltaService alta) : IProjectDirectory
+/// <summary>
+/// The directory read through the <c>alta project</c> and <c>alta space</c> commands, which every host has. A read that fails, or finds
+/// no project or no space (the commands are not ready at the start of the host), is read again after a few seconds, not after the long time.
+/// </summary>
+/// <param name="alta">The <c>alta</c> commands of the host.</param>
+/// <param name="timeProvider">The clock; the system clock when null.</param>
+internal sealed class AltaProjectDirectory(IPluginAltaService alta, TimeProvider? timeProvider = null) : IProjectDirectory
 {
     private static readonly TimeSpan CacheTime = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RetryTime = TimeSpan.FromSeconds(2);
 
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly object _gate = new();
     private DateTimeOffset _readAt;
+    private bool _complete;
     private IReadOnlyList<ProjectInfo>? _projects;
     private IReadOnlyList<SpaceInfo>? _spaces;
 
@@ -64,7 +72,7 @@ internal sealed class AltaProjectDirectory(IPluginAltaService alta) : IProjectDi
     {
         lock (_gate)
         {
-            if (_projects is not null && DateTimeOffset.UtcNow - _readAt < CacheTime)
+            if (_readAt != default && _time.GetUtcNow() - _readAt < (_complete ? CacheTime : RetryTime))
             {
                 return;
             }
@@ -74,20 +82,32 @@ internal sealed class AltaProjectDirectory(IPluginAltaService alta) : IProjectDi
         var spaces = await ReadAsync(["space", "list"], "alta.space.item", ParseSpace, cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
-            _projects = projects;
-            _spaces = spaces;
-            _readAt = DateTimeOffset.UtcNow;
+            // What an earlier read found stays when this one failed.
+            _projects = projects ?? _projects;
+            _spaces = spaces ?? _spaces;
+            _complete = projects is { Count: > 0 } && spaces is { Count: > 0 };
+            _readAt = _time.GetUtcNow();
         }
     }
 
-    private async ValueTask<IReadOnlyList<T>> ReadAsync<T>(string[] args, string type, Func<JsonElement, T?> parse, CancellationToken cancellationToken)
+    // Null when the command failed, an empty list when it ran and found nothing.
+    private async ValueTask<IReadOnlyList<T>?> ReadAsync<T>(string[] args, string type, Func<JsonElement, T?> parse, CancellationToken cancellationToken)
         where T : class
     {
-        var result = await alta.InvokeAsync(args, null, null, cancellationToken).ConfigureAwait(false);
+        PluginAltaCommandResult result;
+        try
+        {
+            result = await alta.InvokeAsync(args, null, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+
         var items = new List<T>();
         if (result.ExitCode != 0)
         {
-            return items;
+            return null;
         }
 
         foreach (var line in result.TranscriptJsonl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
