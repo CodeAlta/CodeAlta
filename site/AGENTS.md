@@ -53,6 +53,7 @@ CodeAlta has two apps: **CodeAlta Desktop** (`alta`, package `CodeAlta`) and **C
 ## Screenshots
 
 - TUI screenshots are named `alta-<screen>.png`; desktop screenshots are named `alta-desktop-<screen>.webp` (lossless WebP, 2400x1500, captured from a 1600x1000 window at 1.5x).
+- Use the app's **Dark** theme for feature screenshots to match the website's default dark background. Avoid white-background captures; light-theme pictures belong only in an explicit theme comparison. Select the real theme before capturing, rather than recoloring an image.
 - When a screen exists in both apps, show both with the switch:
 
   ```scriban

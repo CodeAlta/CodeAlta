@@ -132,11 +132,6 @@ One bar at the top sets the period (today, the last 7, 30 or 90 days, this month
 
 Every chart can be shown as a table with the same numbers, and the legends and menus work with the keyboard. A cost is shown for each unit, dollars or AI credits, never as one total, and an estimate from public prices, when it is offered, is a separate block marked as an estimate. The page follows the theme of the window.
 
-<figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-statistics-overview-light.webp" alt="The Overview page of the Statistics tab in the light theme: the tokens of each day of the last 30 days by model, and the calendar of the year" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The last 30 days in the light theme, with the tokens of each day by model.</figcaption>
-</figure>
-
 While the history is read, the page is already in use: the most recent days are right first, the part not read yet is hatched, and a bar under the controls shows how many sessions are read, the date reached and the time left, with **Pause**, **Resume** and **Stop here**. The menu of the page reads more history, forgets the sessions that were deleted, and resets the statistics after asking.
 
 <figure class="alta-figure my-4">

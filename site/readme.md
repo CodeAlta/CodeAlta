@@ -19,6 +19,10 @@ og_type: website
   <p class="alta-hero-lead">
     CodeAlta Desktop runs coding agents on your local projects: sessions in tabs you can split, a code editor, terminals and git changes in one window, with the model providers, agent prompts, MCP tools and plugins you choose.
   </p>
+  <p class="text-secondary">
+    <span class="alta-badge"><i class="bi bi-shield-check" aria-hidden="true"></i> No telemetry</span>
+    CodeAlta does not send usage analytics to its developers.
+  </p>
   <div class="alta-hero-actions">
     <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
     <a href="#desktop-or-tui" class="btn btn-outline-secondary btn-lg"><i class="bi bi-window-split"></i> Desktop or TUI?</a>
