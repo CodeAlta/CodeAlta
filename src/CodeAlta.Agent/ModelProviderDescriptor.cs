@@ -84,4 +84,10 @@ public sealed record ModelProviderDescriptor
     /// Gets the configured permission mode, when any: the mode of a session that is given none.
     /// </summary>
     public string? DefaultPermissionMode { get; init; }
+
+    /// <summary>
+    /// Gets whether a session of this provider can be followed and driven from elsewhere
+    /// (<see cref="IAgentRemoteControlProvider"/>, Claude Code's Remote Control).
+    /// </summary>
+    public bool SupportsRemoteControl { get; init; }
 }

@@ -32,6 +32,9 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
 
     /// <summary>Gets the permission mode the provider is configured with, or null when it leaves the mode to the provider itself.</summary>
     public string? DefaultPermissionMode { get; init; }
+
+    /// <summary>Gets whether the session can be followed and driven from elsewhere (Claude Code's Remote Control).</summary>
+    public bool SupportsRemoteControl { get; init; }
 }
 
 public sealed partial class OwnedSessionCommandService
@@ -94,6 +97,7 @@ public sealed partial class OwnedSessionCommandService
             PermissionModes = modes,
             // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.
             DefaultPermissionMode = _runtime.SessionPermissionModes ? _runtime.GetDefaultPermissionMode(provider) : configured?.DefaultPermissionMode,
+            SupportsRemoteControl = configured?.SupportsRemoteControl ?? false,
         };
     }
 

@@ -7,6 +7,7 @@ import { SessionTabMenu } from "../SessionTabMenu";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
 import { isSessionContextKey, isSessionDeleteKey, type SessionAction } from "../sessionRowActions";
 import { plainTitle } from "../sessionTitle";
+import { providerHasRemoteControl } from "../remoteControl";
 import { useShellLanguage } from "../shellLanguage";
 import type { SessionListEntry } from "./sessionTree";
 
@@ -76,7 +77,7 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
-  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean }>;
+  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; "remote-control"?: boolean }>;
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
@@ -88,6 +89,7 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
   tree: Readonly<{ toggle: (session: WorkspaceSession, collapsed: boolean) => void; more: (sessionId: string) => void; fewer: (sessionId: string) => void }>;
 }) {
   const { t } = useShellLanguage();
+  const brands = useContext(ProviderBrandsContext);
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
   const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
   return <div className="session-rail"><div className="session-list">
@@ -127,6 +129,8 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
           items={[
             { key: "open", label: t("Open session"), icon: "open", onSelect: () => onAction(session, "open") },
             { key: "rename", label: t("Rename…"), icon: "edit", disabled: !allowed.rename, onSelect: () => onAction(session, "rename") },
+            ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
+              ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
             { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
           ]} />}
       </div>;

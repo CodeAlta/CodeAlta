@@ -31,6 +31,9 @@ internal sealed class SessionOperationsService
     private readonly OwnedSessionCommandService? _commands;
 
     internal SessionOperationsService() { }
+
+    /// <summary>Told when the Remote Control of a session is turned on or off, with whether it is on.</summary>
+    internal Action<string, bool>? RemoteControlChanged { get; init; }
     internal SessionOperationsService(OwnedSessionCommandService commands, string epoch)
     {
         ArgumentNullException.ThrowIfNull(commands);
@@ -193,6 +196,7 @@ internal sealed class SessionOperationsService
             {
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
                 DefaultPermissionMode = choices.DefaultPermissionMode,
+                SupportsRemoteControl = choices.SupportsRemoteControl ? true : null,
             };
         }
         catch (OperationCanceledException) { throw; }
@@ -249,6 +253,23 @@ internal sealed class SessionOperationsService
             if (_commands is null) return new("unavailable", _epoch, request.SessionId);
         }
         return new(await _commands.StopBackgroundTaskAsync(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
+    }
+
+    // Remote Control acts on the provider at once, outside the runs: it leaves no receipt. Its state is read in the
+    // runtime state of the session, which follows the provider.
+    [NeoRpcMethod("setRemoteControl")]
+    public async Task<SessionRemoteControlResult> SetRemoteControlAsync(SessionRemoteControlRequest request, CancellationToken cancellationToken)
+    {
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null);
+        }
+        var result = await _commands.SetRemoteControlAsync(request.SessionId, request.Enabled, cancellationToken).ConfigureAwait(false);
+        if (result.Status == "ok") RemoteControlChanged?.Invoke(request.SessionId, request.Enabled);
+        return new(result.Status, _epoch, request.SessionId, result.RemoteControl is { } remote ? SessionRemoteControlResponse.From(remote) : null);
     }
 
     [NeoRpcMethod("abort")]
@@ -545,6 +566,9 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // The mode the provider is configured with, or null when it leaves it to the CLI's own setting.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultPermissionMode { get; init; }
+    // True when the session can be followed and driven from claude.ai (Claude Code's Remote Control); absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? SupportsRemoteControl { get; init; }
 }
 // A mode a session can be given, by its identifier: the page names it.
 internal sealed record SessionPermissionModeChoice(string Id);

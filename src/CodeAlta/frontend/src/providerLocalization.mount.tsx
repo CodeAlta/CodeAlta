@@ -19,7 +19,9 @@ const inputs = transport<Parameters<Parameters<typeof createUserInputReviewer>[0
 const answers = transport<Parameters<Parameters<typeof createUserInputReviewer>[1]>[0], unknown>();
 const cancels = transport<Parameters<Parameters<typeof createUserInputReviewer>[2]>[0], unknown>();
 const instructions: ["Steer" | "Queue", string][] = [];
-const permission = createPermissionReviewer(permissions.invoke, decisions.invoke);
+// The checks that a shown request still waits are recorded apart from the reads of the requests.
+const checks = transport<Parameters<Parameters<typeof createPermissionReviewer>[0]>[0], Awaited<ReturnType<Parameters<typeof createPermissionReviewer>[0]>>>();
+const permission = createPermissionReviewer(permissions.invoke, decisions.invoke, checks.invoke);
 const input = createUserInputReviewer(inputs.invoke, answers.invoke, cancels.invoke);
 const capability = createMutationCapability(epoch);
 const handle = { operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1", sessionId: "Settings",
@@ -30,7 +32,7 @@ const inputPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMo
 ] }] };
 const permissionPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMore: false, entries: [{ handle, providerId: "Settings",
   kind: "commandExecution", grantRoot: null,
-  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny" }] };
+  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny", shortened: false }] };
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [sessionId, select] = useState("Settings");
@@ -38,7 +40,7 @@ function Fixture() {
   const [focusable, focus] = useState(false);
   useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, run, focus, epoch, handle, inputPage, permissionPage,
     permissions: permissions.calls, decisions: decisions.calls, inputs: inputs.calls, answers: answers.calls, cancels: cancels.calls,
-    instructions, permission, input, capability } }); }, []);
+    checks: checks.calls, instructions, permission, input, capability } }); }, []);
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => {} }}>
     <main className="configuration-page">
       <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} running={running}

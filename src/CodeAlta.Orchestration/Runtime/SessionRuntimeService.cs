@@ -40,6 +40,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private readonly ConcurrentDictionary<string, RuntimeSessionEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
     private readonly OwnedProviderEventForwarding _forwarding = new();
     private readonly ConcurrentDictionary<string, Task> _transitions = new(StringComparer.OrdinalIgnoreCase);
+    // The sessions whose remote control is wanted, with the name it was last turned on with; written under the
+    // actor of the session. It outlives the attachment it was turned on in: the one that replaces it turns it on
+    // again, unless it was turned off meanwhile.
+    private readonly ConcurrentDictionary<string, RemoteControlRequest> _remoteControlWanted = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _identityGate = new();
     private readonly HashSet<string> _newSessionIds = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
@@ -1221,6 +1225,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return new CoordinatorPreparation(existing, null);
         }
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Remote Control ends with the attachment it runs in (its bridge with the process of the provider): the
+        // attachment that replaces it turns it on again, under the same name, when it is still wanted then.
+        var carriesRemoteControl = existing is not null;
         var retirement = existing is null ? Task.CompletedTask : _forwarding.RetireAsync(existing.Attachment);
         Task? ticket = null;
         transition = _forwarding.RunAsync(async () =>
@@ -1259,6 +1266,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     throw new AggregateException(bodyFailure, cleanupFailure);
                 }
             }
+
+            // Once the new attachment is published, and without holding back the send that waits for it: the
+            // provider connects a process that a turn starts meanwhile.
+            if (carriesRemoteControl && _remoteControlWanted.ContainsKey(session.SessionId))
+                _ = _forwarding.RunAsync(() => CarryRemoteControlAsync(session.SessionId), external: false);
         }, external: false);
         _transitions[session.SessionId] = transition;
         ticket = transition;
@@ -1267,6 +1279,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     private sealed record CoordinatorPreparation(RuntimeSessionEntry? Entry, Task? Transition, string? SelectedPrompt = null);
+
+    // The remote control an attachment was asked for, with the name the session is shown under remotely.
+    private sealed record RemoteControlRequest(string? Name);
+
+    // Turns the remote control of a replaced attachment on again in the one that replaced it. Nobody waits for it:
+    // a session that is gone again, or a runtime that closes, has nothing to turn on, and the state of the
+    // session says whether it connected.
+    private async Task CarryRemoteControlAsync(string sessionId)
+    {
+        try
+        {
+            await AdmitAsync(() => SetRemoteControlBodyAsync(sessionId, true, null, carried: true, CancellationToken.None), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (failure is ObjectDisposedException or OperationCanceledException or InvalidOperationException or NotSupportedException)
+        {
+        }
+    }
 
     private async ValueTask<AgentSessionHandleId> CreateCoordinatorSessionAsync(
         SessionViewDescriptor session,
@@ -2121,6 +2150,69 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         finally { handleUse?.Dispose(); }
     }
 
+    /// <summary>
+    /// Turns the remote control of an attached session on or off (Claude Code's Remote Control). Neither a run nor
+    /// a queue that drains holds it back: it acts on the provider at once.
+    /// </summary>
+    /// <param name="sessionId">The session, which must be attached in this runtime.</param>
+    /// <param name="enabled">Whether the session is to be controlled remotely.</param>
+    /// <param name="name">The name the session is shown under remotely, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The remote control after the request; null when the session is not attached or its provider has none.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="OperationCanceledException">The request was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public Task<AgentRemoteControl?> SetRemoteControlAsync(string sessionId, bool enabled, string? name, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return AdmitAsync(() => SetRemoteControlBodyAsync(sessionId, enabled, name, carried: false, cancellationToken), cancellationToken);
+    }
+
+    private void ForgetRemoteControl(string sessionId) => _remoteControlWanted.TryRemove(sessionId, out _);
+
+    // Carried, it is turned on again only while it is still wanted, under the name it was wanted with.
+    private async Task<AgentRemoteControl?> SetRemoteControlBodyAsync(string sessionId, bool enabled, string? name, bool carried, CancellationToken cancellationToken)
+    {
+        if (!_sessionActors.TryGet(sessionId, out var actor))
+        {
+            if (!enabled) ForgetRemoteControl(sessionId);
+            return null;
+        }
+
+        OwnedProviderEventForwarding.Use? handleUse = null;
+        try
+        {
+            var handle = await actor.QueryAsync(_ =>
+            {
+                // Turned off, it is no longer wanted, whatever the attachment: one being replaced does not turn it on again.
+                if (!enabled) ForgetRemoteControl(sessionId);
+                if (carried)
+                {
+                    if (!_remoteControlWanted.TryGetValue(sessionId, out var wanted)) return ValueTask.FromResult<AgentSessionHandleId?>(null);
+                    name = wanted.Name;
+                }
+
+                if (_transitions.ContainsKey(sessionId) || !_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
+                    return ValueTask.FromResult<AgentSessionHandleId?>(null);
+                handleUse = entry.Attachment.TryAcquireHandleUse();
+                if (handleUse is null) return ValueTask.FromResult<AgentSessionHandleId?>(null);
+                if (enabled) _remoteControlWanted[sessionId] = new RemoteControlRequest(name);
+                return ValueTask.FromResult<AgentSessionHandleId?>(entry.SessionHandleId);
+            }, CancellationToken.None).ConfigureAwait(false);
+            if (handle is null) return null;
+            var lifetime = new RuntimeCommandLifetime(new { Runtime = this, Use = handleUse });
+            return await lifetime.RunAsync(token => _agentHub.SetRemoteControlAsync(handle.Value, enabled, name, token),
+                cancellationToken, handleUse!.Attachment.Cancellation.Token).ConfigureAwait(false);
+        }
+        catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))
+        {
+            handleUse?.Retain(failure);
+            _forwarding.RetainDependencies(failure, this);
+            throw;
+        }
+        finally { handleUse?.Dispose(); }
+    }
+
     internal Task<AgentTargetedAbortOutcome?> AbortRunOwnedCommandAsync(OwnedAbortRunRequest request, CancellationToken executionCancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -2202,7 +2294,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             snapshot = new(entry.Attachment.Ordinal, entry.IsTerminated, entry.Attachment.IsRetiring,
                 entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
                 entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
-            { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = WithJobTasks(entry.BackgroundTasks, sessionId) };
+            { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = WithJobTasks(entry.BackgroundTasks, sessionId),
+              RemoteControl = entry.RemoteControl };
         return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
@@ -4255,6 +4348,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ObserveBackgroundTasks(tasks);
             }
 
+            if (@event is AgentRemoteControlEvent remote)
+            {
+                RemoteControl = remote.RemoteControl;
+            }
+
             if (@event is AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown })
             {
                 ActiveRunId = null;
@@ -4265,11 +4363,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 IsTerminated = true;
                 BackgroundTasks = [];
+                RemoteControl = AgentRemoteControl.Off;
             }
         }
 
         /// <summary>The background tasks of the provider: those that go on, then the last that failed or were stopped.</summary>
         public IReadOnlyList<SessionRuntimeBackgroundTask> BackgroundTasks { get; private set; } = [];
+
+        /// <summary>The remote control of the session, as its provider last told it.</summary>
+        public AgentRemoteControl RemoteControl { get; private set; } = AgentRemoteControl.Off;
 
         // The tasks that go on are the ones the event lists, all of them. A task that failed or was stopped is
         // kept after them for the call that started it, which otherwise only says that it returned; a task that

@@ -80,6 +80,7 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime
             DefaultReasoningEffort = options.DefaultReasoningEffort,
             PermissionModes = ClaudeCodeModelProviderRuntimeOptions.PermissionModes,
             DefaultPermissionMode = string.IsNullOrWhiteSpace(options.PermissionMode) ? null : options.PermissionMode.Trim(),
+            SupportsRemoteControl = true,
         };
     }
 

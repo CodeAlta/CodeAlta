@@ -54,6 +54,12 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
     /// first, then the last ones that ended. Bounded; empty when there is none.
     /// </summary>
     public IReadOnlyList<SessionRuntimeBackgroundTask> BackgroundTasks { get; init; } = [];
+
+    /// <summary>
+    /// Whether the session can be followed and driven from elsewhere (Claude Code's Remote Control), as the last
+    /// event of its provider told it; off for a provider that has none.
+    /// </summary>
+    public AgentRemoteControl RemoteControl { get; init; } = AgentRemoteControl.Off;
 }
 
 /// <summary>A background task of a session, as the runtime last heard of it.</summary>

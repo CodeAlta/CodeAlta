@@ -429,11 +429,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         string? current;
         string? target;
         bool unknown;
+        bool remote;
         lock (_gate)
         {
             current = _cliPermissionMode;
             target = permissionMode ?? _settingsPermissionMode;
             unknown = _cliPermissionModeUnknown;
+            remote = _remoteControlWanted;
         }
 
         if (target is null)
@@ -443,7 +445,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             return current is null && !unknown;
         }
 
-        if (!unknown && string.Equals(current, target, StringComparison.Ordinal))
+        // While Remote Control is on, the mode can be changed from claude.ai without this side being told: it is
+        // asked for again before each turn.
+        if (!unknown && !remote && string.Equals(current, target, StringComparison.Ordinal))
         {
             return true;
         }
@@ -520,6 +524,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         try
         {
             await StartConnectionCoreAsync(executable, key, newSessionId, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A process given up before it was ready is not kept: the next start would take it as one that is, with
+            // a conversation it was never told it has.
+            await CloseConnectionAsync().ConfigureAwait(false);
+            throw;
         }
         catch (IOException) when (_showReasoning && _connection?.DescribeExit().Contains(ReasoningDisplayOption, StringComparison.Ordinal) == true)
         {
@@ -606,6 +617,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 cancellationToken)
             .ConfigureAwait(false);
 
+        ReadRemoteControlAvailability(initialized);
+
         // The CLI says which mode it is in: a process started without one is in the mode of the user's settings.
         if (ClaudeCodeJson.GetString(initialized, "current_permission_mode") is { Length: > 0 } reported)
         {
@@ -631,6 +644,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         {
             // An older CLI does not answer this request: the window is learnt from the first result.
         }
+
+        // A process that starts while Remote Control is on is connected, with the link the session had.
+        await ResumeRemoteControlAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task CloseConnectionAsync()
@@ -656,6 +672,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         if (connection is not null)
         {
             await connection.DisposeAsync().ConfigureAwait(false);
+            NoteRemoteControlProcessEnded();
         }
     }
 

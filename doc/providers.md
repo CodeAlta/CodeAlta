@@ -348,6 +348,16 @@ sequenceDiagram
 - A session is resumed with `--resume <id>`. When the transcript is missing (another folder or machine, a cleaned profile), or when another provider wrote part of the conversation, the CLI starts a new conversation and receives a rendering of the recorded one as context (`<codealta_previous_conversation>`).
 - One process per session is kept between turns and closed after `IdleTimeout` (10 minutes); the next turn resumes. A change of model, reasoning effort or working folder restarts it the same way. A process that still works by itself is not closed: the timer starts again while the CLI runs a turn, while a turn it started by itself has not been read, and while it lists a background task (`background_tasks_changed`), because closing the process ends its background commands and the turn their end starts.
 
+### What the CLI sends
+
+`ClaudeCodeConnection` writes every line it reads from the CLI (`<`) and writes to it (`>`) at the Debug level of
+the `CodeAlta.ClaudeCode.Protocol` logger, each cut at 4000 characters. The desktop application writes that level for
+the loggers named in `CODEALTA_DEBUG_LOGGERS` (separated by commas or semicolons), for instance
+`CODEALTA_DEBUG_LOGGERS=CodeAlta.ClaudeCode.Protocol` before starting `alta --dev`; its log is under
+`%LOCALAPPDATA%\CodeAlta\desktop-dev\logs` (`desktop` for the normal instance). It is how a message of a new version
+of the CLI is seen before CodeAlta reads it. The lines hold the conversation itself: the variable is for a developer,
+and is not set otherwise.
+
 ### Turns Claude Code starts by itself
 
 The CLI does not only run a turn when it is sent a prompt. A command the model left running in the background (`run_in_background`) ends after the turn, or a wake-up the model scheduled fires: the CLI then starts a turn by itself, in which the model reads the output and answers. Its tool description tells the model so, and the model relies on it ("I'll report once it finishes"). No user message of CodeAlta started that turn, so no run of the session reads it. `ClaudeCodeSession` therefore has a run started for it:
@@ -373,7 +383,7 @@ sequenceDiagram
 - **Detection** is done by the reader of the connection (`ClaudeCodeSession.NoteModelOutput`), in the order of the lines the CLI writes. A user message is answered by the turn whose `result` names it (`user_message_uuids`). Model output of the main conversation (`assistant`, `stream_event`) while no user message waits for its answer is a turn of the CLI. Such turns are numbered; the `result` that ends one carries its number to the run that reads it (`MessageEvent.OwnTurn`), which is how the session knows a turn was read, whatever run read it.
 - **The run** is started by `AgentHub`, which registers with the session when it attaches it (`IAgentProviderInitiatedRuns`, implemented by `AgentSession` over `IAgentProviderInitiatedTurns` of the executor). It goes through the run gate of the session coordinator like a run that was sent, so it is ordered with a prompt sent at the same moment and with a manual compaction. The options are taken once the run has its turn: when a run that was waiting before it read the turn of the CLI, nothing is left to show and no run starts.
 - **What is recorded.** The run has a message in the place of a prompt, `Claude Code started a turn by itself: <summary>`, where the summary is what the CLI said ended (`task_notification`). It is a user message of the conversation of CodeAlta, so that the conversation stays well formed for another provider. The CLI is not sent it (`AgentProviderRunContext.ProviderInitiated`): it has the notification in its own words. The run never starts or restarts the process, since another process would not have what this one wrote.
-- **Permissions and tools.** A permission prompt of the CLI in such a turn waits until the run attaches, and is answered with its handlers. These are the defaults of the session, as for a queued prompt: the terminal UI asks as usual; the desktop application allows when it approves automatically and denies when it reviews commands (`--review-owned-command-permissions`). A tool of CodeAlta the model calls in the turn (`alta ...`) is run by the run, as in any turn; without a run the CLI would wait for it for ever.
+- **Permissions and tools.** A permission prompt of the CLI in such a turn waits until the run attaches, and is answered with its handlers. These are the defaults of the session, as for a queued prompt: the terminal UI asks as usual; the desktop application allows what the permission mode of the session grants, and otherwise opens a review for that one request on the live attachment of the session (`SessionPermissionService.HandleOwnedDefaultAsync`), so the request waits on the card of the session as in a send. A tool of CodeAlta the model calls in the turn (`alta ...`) is run by the run, as in any turn; without a run the CLI would wait for it for ever.
 - **Without a run.** A host that does not register (a session used without `AgentHub`) starts no run. What the CLI wrote is then read with the next prompt, before its answer, and is never dropped. The same happens when a prompt gets its turn before the run that was started for the CLI.
 - A prompt sent while a turn of the CLI still runs is queued by the CLI. The run reads the end of that turn first: its `result` names no message, so the answer is the one of the turn that follows. A failure of the turn of the CLI does not fail the run of the prompt.
 - Stopping a run interrupts the CLI and withdraws what it wrote, a turn of its own included.
@@ -404,6 +414,71 @@ connection turns into the tasks of the session (`ClaudeCodeSession.BackgroundTas
   meanwhile, answers that nothing was stopped.
 
 What the desktop application shows of them is in `doc/desktop.md`, "Running sessions".
+
+### Remote Control
+
+Claude Code can connect a session to claude.ai (Remote Control), where it is followed and driven from the
+browser or the Claude app. The provider implements `IAgentRemoteControlProvider` (`SupportsRemoteControl`,
+`RemoteControl`, `SetRemoteControlAsync`), through `IAgentProviderRemoteControl` of the turn executor
+(`ClaudeCodeSession.RemoteControl.cs`); `ModelProviderDescriptor.SupportsRemoteControl` says it for the
+choices of a session.
+
+- **Turning it on** sends the control request `remote_control` (`enabled: true`, `name`: the title of the
+  session, `reattach_session_id`: the bridge of a process started again). The answer gives `session_url`
+  (`https://claude.ai/code/session_…`) and `bridge_session_id` (`cse_…`). With no process running, one is
+  started for it from a request `AgentSession` builds as for a compaction (no prompt, no tools: the tools of
+  CodeAlta are announced at the first turn); while a turn starts one, the turn connects it. `initialize`
+  says whether it is available (`remote_control_available`, also `remote_control_auto_enable` and
+  `remote_control_auto_connect_default`, which CodeAlta does not follow); with an API key the CLI refuses
+  it, and the state says so (`Failed` with the CLI's error). A caller that stops waiting (the window's request
+  timed out) does not cancel the request to the CLI: it keeps its own timeout (`ControlTimeout`), and its answer
+  sets the state. Given up while the process starts, the process is closed (as for any start given up, since it
+  is not ready), and the state is `Failed`: nothing connects it before the next prompt or **Try again**.
+- **State.** `AgentRemoteControl` (`Off`, `Connecting`, `Connected`, `Failed`; the link; the error) follows
+  the answer and the `system`/`bridge_state` messages (`ready`, `connected`, and those of a bridge that
+  connects again). A bridge that says `connected` before the answer that gives its link is read stays
+  `Connecting` until the link is known. Each change is computed from the state it replaces, under the gate:
+  the reader of the CLI and the answer change it at the same time. It is told by `AgentRemoteControlEvent`,
+  which, like `AgentBackgroundTasksEvent`, is never recorded.
+- **Keeping it.** While it is on, `WorksByItself` keeps the process past the idle timeout: the bridge ends
+  with the process. A Remote Control that failed keeps nothing, and its failure stays shown once the idle
+  process is closed. A process started again (another model, effort or folder, a permission mode the CLI
+  could not switch to) is connected again in `StartConnectionCoreAsync`, with `reattach_session_id`, so the
+  link stays the same. A process that stops by itself (`OnClosed` of the current connection) shows it as
+  `Failed` ("Claude Code stopped"): nothing starts another one before the next prompt sent in CodeAlta, or
+  **Try again**, which connects the new process. Turning it off sends `enabled: false` and lets the idle
+  timeout close the process; turned off while it is being connected, the bridge the answer connected is turned
+  off again, and its `bridge_session_id` is not kept for the next connection.
+  While it is on, the permission mode can be changed from claude.ai without CodeAlta being told: before each
+  turn of CodeAlta, `SwitchPermissionModeAsync` sends `set_permission_mode` with the mode of the turn even when
+  it believes the CLI is in it already.
+  A send that does not match the attachment of the session (another model, effort or agent prompt, a tool a
+  plugin adds) makes `SessionRuntimeService` replace it: the provider session, its process and its bridge end
+  with the old attachment. The runtime keeps the request per session, not per attachment
+  (`_remoteControlWanted`, with the name), and turns Remote Control on again in the new attachment once it is
+  published, in the background (`CarryRemoteControlAsync`), if it is still wanted then: turning it off while
+  the session is attached again is not undone. That new provider session has no bridge to name: Claude Code
+  2.1.295 gives a resumed conversation the link it had (seen across restarts of CodeAlta), but nothing in
+  CodeAlta ensures it.
+- **Prompts from claude.ai.** The CLI replays them as `user` messages (`isReplay`, `origin.kind == "human"`)
+  with a uuid CodeAlta did not send, then runs their turn by itself (`command_lifecycle`). The run that shows
+  that turn records the prompt as its user message (`NoteRemotePrompt`), instead of "Claude Code started a
+  turn by itself". The prompts of CodeAlta are replayed the same way and are told apart by their uuid.
+- **Requests answered on claude.ai.** A permission request is sent to both sides, also in a turn started from claude.ai, which asks as described in "Turns Claude Code starts by itself". When the phone answers,
+  the CLI sends `control_cancel_request` for it, which withdraws the pending request, and the tool result
+  says who decided (`tool_result_meta[].permission_decision`, `source: "user_temporary"`). The card of CodeAlta
+  then ends as cancelled: that is not a decision of the user, and the withdrawn request gets no answer and does
+  not mark the turn as stopped (`HandlePermissionAsync`).
+- **A turn stopped on claude.ai.** The CLI ends it with a `result` `error_during_execution` whose
+  `terminal_reason` is `aborted_tools` or `aborted_streaming` (seen with 2.1.295, with an `[ede_diagnostic]` in
+  `errors`, then `command_lifecycle` `cancelled`). A turn CodeAlta did not stop itself ends as a stop in CodeAlta
+  does (`OperationCanceledException`, "Run cancelled before the assistant response completed."), not as a
+  failure.
+- **Work secret.** The CLI may ask `remote_control_work_secret` (bridge environments only): it is answered
+  with nothing.
+
+Not followed yet: a mode the CLI changes by itself (an approved `ExitPlanMode`, a `setMode` suggestion
+allowed for the session) is not known to `ClaudeCodeSession`.
 
 ### Tool calls of one message
 

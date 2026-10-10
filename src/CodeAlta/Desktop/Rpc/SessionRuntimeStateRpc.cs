@@ -98,7 +98,8 @@ internal sealed class SessionRuntimeStateService
             projected = new(entry.AttachmentGeneration.ToString(CultureInfo.InvariantCulture), entry.IsTerminated, entry.IsRetiring,
                 entry.ActiveRunId, entry.QueueDrainInProgress, entry.ProviderId, entry.ProviderKey, entry.ModelId,
                 entry.ReasoningEffort?.ToString(), entry.AgentPromptId, entry.PendingAgentPromptId)
-            { Activity = activity, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)] };
+            { Activity = activity, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)],
+              RemoteControl = entry.RemoteControl.Status == CodeAlta.Agent.AgentRemoteControlStatus.Off ? null : SessionRemoteControlResponse.From(entry.RemoteControl) };
         }
         // Seven strings <=256 UTF-16 units at six-byte worst-case JSON escaping, fixed GUIDs,
         // ordinal/enums/keys plus 4 KiB framing fit below 32 KiB. No values are truncated.
@@ -155,6 +156,10 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
 
     /// <summary>What the provider does in the background outside its runs: the tasks that go on, then the last that failed or were stopped.</summary>
     public IReadOnlyList<SessionRuntimeBackgroundTaskResponse> BackgroundTasks { get; init; } = [];
+
+    /// <summary>The Remote Control of the session (Claude Code's, from claude.ai); absent while it is off.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public SessionRemoteControlResponse? RemoteControl { get; init; }
 }
 
 /// <summary>A background task of a session.</summary>

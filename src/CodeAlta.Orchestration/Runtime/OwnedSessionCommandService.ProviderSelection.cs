@@ -44,6 +44,7 @@ public sealed partial class OwnedSessionCommandService
             if (Asks.List(expected.SessionId).Head is not null) return Task.FromResult("interaction_pending");
             if (_deleteWork is not null || _active.ContainsKey(expected.SessionId) || _steering.Contains(expected.SessionId)
                 || _compacting.Contains(expected.SessionId) || _abortingRuns.Contains(expected.SessionId) || _queueing.Contains(expected.SessionId)
+                || _remoteControlling.ContainsKey(expected.SessionId)
                 || _operations.Values.Any(operation => !operation.Released && operation.SessionId == expected.SessionId)
                 || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == expected.SessionId)) return Task.FromResult("busy");
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);

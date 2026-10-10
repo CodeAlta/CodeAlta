@@ -2,8 +2,11 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Plugins;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;
 
@@ -191,6 +194,29 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task RemoteControl_IsACapabilityOfTheSession_ToldByEventsThatAreNotRecorded()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+        var remote = (IAgentRemoteControlProvider)session;
+        Assert.IsTrue(remote.SupportsRemoteControl);
+        Assert.AreEqual(AgentRemoteControl.Off, remote.RemoteControl);
+
+        var state = await remote.SetRemoteControlAsync(true, "Fix the parser").WaitAsync(Timeout);
+
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, state.Status);
+        Assert.AreEqual(state, remote.RemoteControl);
+        Assert.AreEqual("Fix the parser", cli.Last.RemoteControlRequests.Single().GetProperty("name").GetString());
+        Assert.IsTrue(events.Snapshot().OfType<AgentRemoteControlEvent>().Any(e => e.RemoteControl == state));
+        Assert.IsFalse((await session.GetHistoryAsync()).OfType<AgentRemoteControlEvent>().Any(), "The state of a running provider is not history.");
+
+        Assert.AreEqual(AgentRemoteControl.Off, await remote.SetRemoteControlAsync(false, null).WaitAsync(Timeout));
+    }
+
+    [TestMethod]
     public async Task CancelledPermission_StopsTheTurnWithoutAFailure()
     {
         using var directory = TestTempDirectory.Create();
@@ -267,6 +293,122 @@ public sealed class ClaudeCodeSessionTests
             () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
 
         StringAssert.Contains(failure.Message, "turn limit");
+    }
+
+    [TestMethod]
+    public async Task TurnStoppedOnClaudeAi_EndsAsAStopInCodeAlta()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var turns = 0;
+        cli.OnUserMessage = (process, user) =>
+        {
+            if (++turns == 2)
+            {
+                process.EmitTextTurn("msg_2", "still here", user);
+                return Task.CompletedTask;
+            }
+
+            var input = new JsonObject { ["command"] = "ping -n 61 127.0.0.1" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            // What Claude Code 2.1.295 writes when the turn is stopped on claude.ai while the command runs.
+            process.EmitToolResult("toolu_1", "The user doesn't want to proceed with this tool use. The tool use was rejected.", isError: true);
+            process.Emit(new JsonObject
+            {
+                ["type"] = "user",
+                ["session_id"] = process.SessionId,
+                ["parent_tool_use_id"] = null,
+                ["message"] = new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "[Request interrupted by user for tool use]" }),
+                },
+            });
+            process.Emit(new JsonObject
+            {
+                ["type"] = "result",
+                ["subtype"] = "error_during_execution",
+                ["is_error"] = true,
+                ["terminal_reason"] = "aborted_tools",
+                ["stop_reason"] = "tool_use",
+                ["session_id"] = process.SessionId,
+                ["errors"] = new JsonArray("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"),
+                ["user_message_uuids"] = new JsonArray(user.GetProperty("uuid").GetString()),
+            });
+            process.Emit(new JsonObject { ["type"] = "command_lifecycle", ["command_uuid"] = user.GetProperty("uuid").GetString(), ["state"] = "cancelled", ["session_id"] = process.SessionId });
+            process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "idle", ["session_id"] = process.SessionId });
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
+
+        // The record of a stop in CodeAlta, not the diagnostic of the CLI.
+        var error = events.Snapshot().OfType<AgentErrorEvent>().Single();
+        Assert.AreEqual("Run cancelled before the assistant response completed.", error.Message);
+        Assert.IsTrue(events.Snapshot().OfType<AgentActivityEvent>().Any(static e => e.ActivityId == "toolu_1" && e.Phase == AgentActivityPhase.Failed));
+
+        // The session goes on with the next message.
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
+        Assert.IsTrue(events.Snapshot().OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "still here"));
+    }
+
+    [TestMethod]
+    public async Task PermissionAnsweredOnClaudeAi_IsNotAnsweredAgainNorTakenForAStop()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<JsonElement>? answer = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            var input = new JsonObject { ["command"] = "ping -n 61 127.0.0.1" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            var (requestId, response) = process.BeginRequest(new JsonObject
+            {
+                ["subtype"] = "can_use_tool",
+                ["tool_name"] = "Bash",
+                ["input"] = input.DeepClone(),
+                ["tool_use_id"] = "toolu_1",
+            });
+            answer = response;
+            await asked.Task.WaitAsync(Timeout).ConfigureAwait(false);
+            // The prompt was answered on claude.ai: the CLI withdraws it here, and the command runs.
+            process.Emit(new JsonObject { ["type"] = "control_cancel_request", ["request_id"] = requestId });
+            process.EmitToolResult("toolu_1", "Reply from 127.0.0.1");
+            // The turn then fails on its own.
+            process.EmitResult("API Error: overloaded", user, isError: true, subtype: "error_during_execution");
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(
+            runtime,
+            directory,
+            onPermission: async (_, cancellationToken) =>
+            {
+                // As the permission card of CodeAlta does, a prompt closed from elsewhere ends as cancelled.
+                asked.TrySetResult();
+                try
+                {
+                    await Task.Delay(-1, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel);
+            });
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "overloaded");
+        Assert.IsNotNull(answer);
+        Assert.IsFalse(answer.IsCompleted, "A withdrawn prompt is not answered.");
     }
 
     [TestMethod]
@@ -1287,6 +1429,118 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task PermissionAskedInATurnStartedFromClaudeAi_WaitsForTheUserAsInASend()
+    {
+        // The whole composition of the desktop application without its window: a session it owns, whose sends it
+        // reviews. A prompt sent from claude.ai starts a turn the CLI runs by itself; what the CLI asks in it is
+        // put before the user as in a send, not answered by the defaults of the session (a denial).
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        var providerId = new ModelProviderId(options.ProviderKey);
+        await using var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                // As the desktop application: the permission mode of the session decides, and it asks by default.
+                SessionPermissionModes = true,
+                ReviewOwnedPermissionsPolicy = static () => true,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        var permissions = host.RuntimeService.Permissions;
+        var execution = new SessionExecutionOptions
+        {
+            ProviderId = providerId,
+            ProviderKey = providerId.Value,
+            WorkingDirectory = projectRoot,
+            ProjectRoots = [projectRoot],
+            Model = "sonnet",
+            OnPermissionRequest = permissions.OwnedDefaultPermissionHandler,
+            OnUserInputRequest = permissions.OwnedDefaultUserInputHandler,
+        };
+        var events = new EventLog();
+        using var streaming = new CancellationTokenSource();
+        var stream = Task.Run(async () =>
+        {
+            await foreach (var runtimeEvent in host.RuntimeService.StreamEventsAsync(streaming.Token))
+            {
+                if (runtimeEvent is SessionAgentEvent { Event: var agentEvent })
+                {
+                    events.Add(agentEvent);
+                }
+            }
+        });
+
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, execution, title: "Claude Code", CancellationToken.None);
+        var firstRun = await host.RuntimeService.SendAsync(
+            session,
+            execution,
+            new AgentSendOptions { Input = AgentInput.Text("hello") },
+            CancellationToken.None).WaitAsync(Timeout);
+        await events.WaitForAsync(e => e is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } && e.RunId == firstRun, Timeout);
+
+        var process = SessionProcess(cli);
+        process.Emit(new JsonObject
+        {
+            ["type"] = "user",
+            ["message"] = new JsonObject { ["role"] = "user", ["content"] = "Write the file" },
+            ["session_id"] = process.SessionId,
+            ["parent_tool_use_id"] = null,
+            ["uuid"] = "6f1c2a8e-5d0b-4a43-9a8e-1f7c0b6d2e91",
+            ["isReplay"] = true,
+            ["origin"] = new JsonObject { ["kind"] = "human" },
+        });
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
+        var input = new JsonObject { ["command"] = "echo phone > out.txt", ["description"] = "Write the file" };
+        process.EmitBlockStart("msg_remote", 0, "tool_use");
+        process.EmitAssistant("msg_remote", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_remote", "Bash", input)));
+        process.EmitMessageStop("tool_use");
+        var decision = process.AskPermissionAsync("Bash", input, "toolu_remote");
+
+        SessionOwnedPermissionSnapshot waiting;
+        using (var limit = new CancellationTokenSource(Timeout))
+        {
+            while (true)
+            {
+                Assert.IsFalse(decision.IsCompleted, "The request waits for the user: it is not answered by the defaults of the session.");
+                if ((await permissions.ListOwnedCommandsAsync(session.SessionId, limit.Token)).Entries is [var entry])
+                {
+                    waiting = entry;
+                    break;
+                }
+
+                await Task.Delay(20, limit.Token);
+            }
+        }
+
+        Assert.AreEqual("echo phone > out.txt", waiting.Request.Command);
+        Assert.IsTrue(await permissions.ResolveOwnedCommandAsync(waiting.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask().WaitAsync(Timeout));
+        Assert.AreEqual("allow", (await decision.WaitAsync(Timeout)).GetProperty("behavior").GetString());
+
+        process.EmitToolResult("toolu_remote", string.Empty);
+        process.EmitAssistant("msg_remote2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("Written.")));
+        process.EmitMessageStop();
+        process.EmitResult("Written.");
+        await events.WaitForAsync(e => e is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle } && e.RunId is { } runId && runId != firstRun, Timeout);
+        await streaming.CancelAsync();
+        await stream.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
+        Assert.AreEqual(0, (await permissions.ListOwnedCommandsAsync(session.SessionId, CancellationToken.None)).Entries.Count, "The review of the run ends with it.");
+        Assert.AreEqual("Write the file", events.Snapshot().Where(e => e.RunId is { } runId && runId != firstRun)
+            .OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.User).Content);
+    }
+
+    [TestMethod]
     public async Task TasksTheCliRunsInTheBackground_AreInTheRuntimeStateOfTheSession_WhichStopsThem()
     {
         // The whole composition of an application without a window: what the window reads of a session, and what it asks to stop.
@@ -1364,6 +1618,297 @@ public sealed class ClaudeCodeSessionTests
         process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "task_notification", ["task_id"] = "b2", ["status"] = "completed", ["summary"] = "Done", ["tool_use_id"] = "toolu_bg", ["session_id"] = process.SessionId });
         process.Emit(BackgroundTasks(process));
         await StateAsync(static entry => entry.BackgroundTasks.Count == 0);
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_AttachesASessionThatRanNothing_AndIsInItsRuntimeState()
+    {
+        // The whole composition of an application without a window: what the window asks, and what it reads.
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        Task<CodeAltaHost> StartAsync() => CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        SessionViewDescriptor session;
+        await using (var first = await StartAsync())
+        {
+            session = await first.Commands.CreateDraftSessionAsync(first.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Fix the parser");
+        }
+
+        // CodeAlta started again: the session is in the catalog, and nothing is attached.
+        await using var host = await StartAsync();
+        async Task<SessionRuntimeCurrentEntry> StateAsync(Func<SessionRuntimeCurrentEntry, bool> reached)
+        {
+            using var limit = new CancellationTokenSource(Timeout);
+            while (true)
+            {
+                if ((await host.RuntimeService.GetCurrentStateAsync(session.SessionId, limit.Token)).Entry is { } entry && reached(entry)) return entry;
+                await Task.Delay(20, limit.Token);
+            }
+        }
+
+        Assert.IsTrue((await host.Commands.GetSelectionChoicesAsync(session.SessionId))!.SupportsRemoteControl, "The window offers it for this provider.");
+        Assert.IsNull((await host.RuntimeService.GetCurrentStateAsync(session.SessionId, CancellationToken.None)).Entry, "Nothing is attached yet.");
+        Assert.AreEqual(new OwnedRemoteControlResult("ok", AgentRemoteControl.Off), await host.Commands.SetRemoteControlAsync(session.SessionId, false).WaitAsync(Timeout),
+            "Turning it off where nothing runs changes nothing.");
+
+        var on = await host.Commands.SetRemoteControlAsync(session.SessionId, true).WaitAsync(Timeout);
+
+        Assert.AreEqual("ok", on.Status);
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, on.RemoteControl!.Status);
+        var process = SessionProcess(cli);
+        Assert.AreEqual("Fix the parser", process.RemoteControlRequests.Single().GetProperty("name").GetString(), "It is found under its title in the Claude app.");
+        Assert.AreEqual(0, process.UserMessages.Count, "Attached without a run.");
+        var entry = await StateAsync(static entry => entry.RemoteControl.Status == AgentRemoteControlStatus.Connected);
+        Assert.AreEqual(on.RemoteControl.SessionUrl, entry.RemoteControl.SessionUrl);
+        Assert.IsNull(entry.ActiveRunId);
+
+        var off = await host.Commands.SetRemoteControlAsync(session.SessionId, false).WaitAsync(Timeout);
+
+        Assert.AreEqual(new OwnedRemoteControlResult("ok", AgentRemoteControl.Off), off);
+        Assert.IsFalse(process.RemoteControlOn);
+        await StateAsync(static entry => entry.RemoteControl.Status == AgentRemoteControlStatus.Off);
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_TurnedOn_HoldsOffAProviderChangeAndADeletionOfItsSession_UntilItsRequestEnds()
+    {
+        // Turned on, it attaches the session with the provider it read: a provider changed meanwhile would be
+        // attached as it was before. A change, or a deletion, is busy until the request ends.
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        await using var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Fix the parser");
+        var selection = await host.Commands.GetProviderSelectionAsync(session.SessionId).WaitAsync(Timeout);
+        Assert.IsNotNull(selection);
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        cli.RemoteControlAnswer = answer.Task;
+
+        var on = host.Commands.SetRemoteControlAsync(session.SessionId, true);
+        using (var limit = new CancellationTokenSource(Timeout))
+        {
+            while (cli.Processes.LastOrDefault() is not { RemoteControlRequests.Count: > 0 }) await Task.Delay(10, limit.Token);
+        }
+
+        Assert.IsFalse(on.IsCompleted);
+        Assert.AreEqual("busy", await host.Commands.SelectProviderAsync(selection, selection.ProviderKey).WaitAsync(Timeout));
+        Assert.AreEqual("busy", await host.Commands.DeleteCatalogSessionAsync(session.SessionId, host.CurrentProject.Id, projectRoot, "Fix the parser").WaitAsync(Timeout));
+        answer.SetResult();
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await on.WaitAsync(Timeout)).RemoteControl!.Status);
+        var after = await host.Commands.GetProviderSelectionAsync(session.SessionId).WaitAsync(Timeout);
+        Assert.IsNotNull(after);
+        Assert.AreEqual("ok", await host.Commands.SelectProviderAsync(after, after.ProviderKey).WaitAsync(Timeout), "The request ended: a change is taken again.");
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_OfASessionItAttached_IsKeptByTheNextSend_WhenPluginsAddToItsRuns()
+    {
+        // A send attaches its session with what the plugins add to its runs; an attachment that differs is
+        // replaced, and the process of Claude Code with it, which holds the bridge to claude.ai.
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        Task<CodeAltaHost> StartAsync() => CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                AutoApproveOwnedPermissions = true,
+                PluginBuiltIns = [new BuiltInPluginDefinition { Id = "guidance", DisplayName = "Guidance", PluginType = typeof(GuidancePlugin), Factory = static () => new GuidancePlugin() }],
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        SessionViewDescriptor session;
+        await using (var first = await StartAsync())
+        {
+            session = await first.Commands.CreateDraftSessionAsync(first.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Fix the parser");
+        }
+
+        // CodeAlta started again: Remote Control attaches the session, then the user sends from the window.
+        await using var host = await StartAsync();
+        var on = await host.Commands.SetRemoteControlAsync(session.SessionId, true).WaitAsync(Timeout);
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, on.RemoteControl!.Status);
+        var process = SessionProcess(cli);
+
+        var sent = await host.Commands.AdmitSend(new("after-remote-control", session.SessionId, "hello")).Receipt!.Completion.WaitAsync(Timeout);
+
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
+        Assert.AreEqual(1, cli.Processes.Count(static p => p.Launch.Arguments.Contains("--mcp-config")), "The send keeps the attachment, and the process of Claude Code.");
+        Assert.IsFalse(process.IsDisposed);
+        Assert.AreEqual(1, process.UserMessages.Count);
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await host.RuntimeService.GetCurrentStateAsync(session.SessionId, CancellationToken.None)).Entry!.RemoteControl.Status);
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_IsTurnedOnAgain_WhenASendOfAnotherModelAttachesTheSessionAgain()
+    {
+        // Another model for a send attaches the session again: a new attachment, a new process of Claude Code. The
+        // bridge to claude.ai ended with the old one; it is connected again in the new one, under the same name.
+        // (Claude Code 2.1.295 gives a resumed conversation the link it had; this fake gives every bridge its own.)
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        await using var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                AutoApproveOwnedPermissions = true,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Fix the parser");
+        var hello = await host.Commands.AdmitSend(new("hello", session.SessionId, "hello")).Receipt!.Completion.WaitAsync(Timeout);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, hello.Outcome, hello.Code);
+        var on = await host.Commands.SetRemoteControlAsync(session.SessionId, true).WaitAsync(Timeout);
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, on.RemoteControl!.Status);
+        var first = SessionProcess(cli);
+        var choices = (await host.Commands.GetSelectionChoicesAsync(session.SessionId))!;
+        var other = choices.Models.First(model => !string.Equals(model.Id, choices.Current.ModelId, StringComparison.Ordinal));
+
+        var sent = await host.Commands.AdmitSend(new("other-model", session.SessionId, "again")
+        {
+            Selection = new OwnedSessionSelection(choices.Current.ProviderKey, choices.Current.AgentPromptId, other.Id, null),
+        }).Receipt!.Completion.WaitAsync(Timeout);
+
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
+        var second = SessionProcess(cli);
+        Assert.AreNotSame(first, second, "Another model is another process.");
+        Assert.IsTrue(first.IsDisposed);
+        using var limit = new CancellationTokenSource(Timeout);
+        SessionRuntimeCurrentEntry? entry;
+        while ((entry = (await host.RuntimeService.GetCurrentStateAsync(session.SessionId, limit.Token)).Entry) is not { RemoteControl.Status: AgentRemoteControlStatus.Connected })
+            await Task.Delay(20, limit.Token);
+        StringAssert.StartsWith(entry.RemoteControl.SessionUrl, "https://claude.ai/code/session_");
+        Assert.AreEqual("Fix the parser", second.RemoteControlRequests.Single().GetProperty("name").GetString());
+
+        // Turned off, it is not turned on again by the next attachment.
+        Assert.AreEqual(AgentRemoteControl.Off, (await host.Commands.SetRemoteControlAsync(session.SessionId, false).WaitAsync(Timeout)).RemoteControl);
+        var back = await host.Commands.AdmitSend(new("first-model", session.SessionId, "back")
+        {
+            Selection = new OwnedSessionSelection(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, null),
+        }).Receipt!.Completion.WaitAsync(Timeout);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, back.Outcome, back.Code);
+        var third = SessionProcess(cli);
+        Assert.AreNotSame(second, third);
+        await Task.Delay(300);
+        Assert.AreEqual(0, third.RemoteControlRequests.Count);
+        Assert.AreEqual(AgentRemoteControlStatus.Off, (await host.RuntimeService.GetCurrentStateAsync(session.SessionId, CancellationToken.None)).Entry!.RemoteControl.Status);
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_TurnedOffWhileASendAttachesTheSessionAgain_IsNotTurnedOnAgain()
+    {
+        using var directory = TestTempDirectory.Create();
+        var globalRoot = Path.Combine(directory.Path, "global");
+        var projectRoot = Path.Combine(directory.Path, "project");
+        Directory.CreateDirectory(globalRoot);
+        Directory.CreateDirectory(projectRoot);
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        await using var host = await CodeAltaHost.CreateAsync(
+            new CodeAltaHostOptions
+            {
+                GlobalRoot = globalRoot,
+                CurrentProjectPath = projectRoot,
+                IsHeadless = true,
+                HasInteractiveUi = false,
+                StartPlugins = false,
+                AutoApproveOwnedPermissions = true,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(
+                    ClaudeCodeModelProviderRuntime.CreateDescriptor(options),
+                    () => new ClaudeCodeModelProviderRuntime(options)),
+            });
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Fix the parser");
+        var hello = await host.Commands.AdmitSend(new("hello", session.SessionId, "hello")).Receipt!.Completion.WaitAsync(Timeout);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, hello.Outcome, hello.Code);
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await host.Commands.SetRemoteControlAsync(session.SessionId, true).WaitAsync(Timeout)).RemoteControl!.Status);
+        var first = SessionProcess(cli);
+        var choices = (await host.Commands.GetSelectionChoicesAsync(session.SessionId))!;
+        var other = choices.Models.First(model => !string.Equals(model.Id, choices.Current.ModelId, StringComparison.Ordinal));
+
+        // The old process stops slowly: the session is being attached again while it is turned off.
+        var stop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        cli.StopHeldUntil = stop.Task;
+        var sending = host.Commands.AdmitSend(new("other-model", session.SessionId, "again")
+        {
+            Selection = new OwnedSessionSelection(choices.Current.ProviderKey, choices.Current.AgentPromptId, other.Id, null),
+        }).Receipt!.Completion;
+        using (var limit = new CancellationTokenSource(Timeout))
+        {
+            while (!first.IsStopping) await Task.Delay(10, limit.Token);
+        }
+
+        var off = await host.Commands.SetRemoteControlAsync(session.SessionId, false).WaitAsync(Timeout);
+        stop.SetResult();
+        cli.StopHeldUntil = null;
+        var sent = await sending.WaitAsync(Timeout);
+
+        Assert.AreEqual(new OwnedRemoteControlResult("ok", AgentRemoteControl.Off), off);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
+        var second = SessionProcess(cli);
+        Assert.AreNotSame(first, second);
+        await Task.Delay(300);
+        Assert.AreEqual(0, second.RemoteControlRequests.Count, "Turned off, it is not turned on again by the attachment that replaces the old one.");
+        Assert.AreEqual(AgentRemoteControlStatus.Off, (await host.RuntimeService.GetCurrentStateAsync(session.SessionId, CancellationToken.None)).Entry!.RemoteControl.Status);
+    }
+
+    /// <summary>A plugin that adds instructions to every run, as built-in plugins of the application do.</summary>
+    public sealed class GuidancePlugin : PluginBase
+    {
+        /// <summary>The instructions it adds.</summary>
+        public const string Guidance = "Guidance-of-the-fixture-plugin for every run.";
+
+        /// <inheritdoc />
+        public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContributions()
+        {
+            yield return Prompt.Static(PluginPromptChannel.Developer, Guidance);
+        }
     }
 
     // What the CLI asks before it runs a tool call of the main conversation.

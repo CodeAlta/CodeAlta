@@ -66,7 +66,8 @@ internal sealed class SessionPermissionsService
                     handle.AttachmentGeneration.ToString(CultureInfo.InvariantCulture), handle.Attempt.SessionId,
                     handle.Attempt.RunId, handle.Attempt.InteractionId, handle.Attempt.AttemptId.ToString("D"));
                 if (!TryHandle(wireHandle, out _)) return Error("wire_limit");
-                entries.Add(new(wireHandle, summary.ProviderId.Value, summary.Kind, summary.Command, summary.WorkingDirectory, summary.GrantRoot, summary.Reason));
+                entries.Add(new(wireHandle, summary.ProviderId.Value, summary.Kind, summary.Command, summary.WorkingDirectory, summary.GrantRoot, summary.Reason)
+                    { Shortened = summary.Shortened });
             }
             // Four complete commands, each <=6,144 text + 512 identity UTF-16 units. Worst-case six-byte
             // JSON escaping plus GUIDs/decimal identities/keys and 4 KiB framing fit in 192 KiB. Never truncate.
@@ -134,7 +135,11 @@ internal sealed record SessionPermissionCommandHandle(string OperationId, string
 /// <paramref name="GrantRoot"/>; a <c>fileChange</c> carries only <paramref name="GrantRoot"/>.
 /// </summary>
 internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle Handle, string ProviderId, string Kind,
-    string? Command, string? WorkingDirectory, string? GrantRoot, string? Reason);
+    string? Command, string? WorkingDirectory, string? GrantRoot, string? Reason)
+{
+    /// <summary>True when the command or the reason is cut: what is allowed is longer than what is shown.</summary>
+    public bool Shortened { get; init; }
+}
 internal sealed record SessionPermissionsPage(string Status, string HostEpoch, string? SessionId, SessionPermissionCommand[] Entries, bool HasMore);
 internal sealed record SessionPermissionResolveRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle, string Decision);
 internal sealed record SessionPermissionResolution(string Status, string HostEpoch, SessionPermissionCommandHandle? Handle);

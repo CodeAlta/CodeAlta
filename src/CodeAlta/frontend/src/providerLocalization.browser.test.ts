@@ -65,7 +65,7 @@ test("provider presentation preserves literal decisions and input owners across 
         assert.equal(await evaluate(`document.querySelector('main > section:last-child h3').textContent===${JSON.stringify(translate(locale, "Nonsecret provider input"))}`), true);
         assert.equal(await evaluate(`(()=>{const panel=document.querySelector('main > section.command-permission-panel');return !panel||panel.getAttribute('aria-label')===${JSON.stringify(translate(locale, "Pending command permissions"))}&&(!panel.querySelector('h3')||panel.querySelector('h3').textContent===${JSON.stringify(translate(locale, "Allow this command?"))})})()`), true);
         assert.equal(await evaluate(`kept.calls===JSON.stringify([providerFixture.permissions.length,providerFixture.decisions.length,providerFixture.inputs.length,providerFixture.answers.length,providerFixture.cancels.length]) && kept.original===providerFixture.input.readOriginal()?.request && kept.decision===providerFixture.permission.readOriginal()?.origin && kept.capability===providerFixture.capability.canMutate() && kept.focus===document.activeElement && kept.nodes.every(v=>v.node.isConnected&&v.value===v.node.value&&v.disabled===v.node.disabled)`), true, `${locale}: no reads, grants, owner replacement, reset or focus loss`);
-        assert.equal(await evaluate(`(()=>{const d=document.querySelector('.command-permission-panel');return !d?.querySelector('h3')||d.querySelector('[data-permission-command]').textContent===providerFixture.permissionPage.entries[0].command&&d.querySelector('[data-permission-directory]').textContent===providerFixture.permissionPage.entries[0].workingDirectory&&d.querySelector('[data-permission-reason]').textContent===providerFixture.permissionPage.entries[0].reason&&d.querySelector('[data-permission-decision=deny]').textContent.endsWith(${JSON.stringify(translate(locale, "Deny"))})})()`), true);
+        assert.equal(await evaluate(`(()=>{const d=document.querySelector('.command-permission-panel');return !d?.querySelector('h3')||d.querySelector('[data-permission-command]').textContent===providerFixture.permissionPage.entries[0].command&&d.querySelector('[data-permission-directory]').textContent===providerFixture.permissionPage.entries[0].workingDirectory&&d.querySelector('[data-permission-reason]').textContent===providerFixture.permissionPage.entries[0].reason&&d.querySelector('[data-permission-decision=deny]').textContent.endsWith(${JSON.stringify(translate(locale, "Deny"))})&&!d.querySelector('[data-permission-shortened]')})()`), true);
         assert.equal(await evaluate(`(()=>{const option=document.querySelector('[aria-pressed]');return !option||option.textContent==='Settings — Complete'})()`), true);
         assert.equal(await evaluate(`(()=>{const d=document.querySelector('.provider-input-dialog');return !d||d.querySelector('h2').textContent===${JSON.stringify(translate(locale, "Review provider input"))}&&[...d.querySelectorAll('[data-input-question]')].every((p,i)=>p.textContent===providerFixture.inputPage.entries[0].prompts[i].question)})()`), true);
       }
@@ -174,8 +174,10 @@ test("provider presentation preserves literal decisions and input owners across 
     await evaluate("window.oldDecision=document.querySelector('[data-permission-decision=allow_once]');providerFixture.select('other')"); await paint();
     await evaluate("providerFixture.select('Settings')");
     assert.equal(await wait("providerFixture.permissions.length===3"), true, "Each selection reads its own requests");
-    await evaluate("providerFixture.permissions[2].resolve(structuredClone(providerFixture.permissionPage))");
+    await evaluate("providerFixture.permissions[2].resolve({...structuredClone(providerFixture.permissionPage),entries:[{...providerFixture.permissionPage.entries[0],shortened:true}]})");
     assert.equal(await wait("!!document.querySelector('[data-permission-decision=allow_once]')"), true);
+    assert.equal(await evaluate("document.querySelector('[data-permission-shortened]')?.textContent"),
+      "This request is too long to show in full: allowing it allows more than what is shown here.", "A request shown cut says so");
     await evaluate("oldDecision.click()"); assert.equal(await evaluate("providerFixture.decisions.length"), 0, "A session selected again never reactivates old controls");
     assert.equal(await evaluate("document.querySelector('[data-permission-decision=allow_once]').disabled"), true, "A card shown again arms again");
     assert.equal(await armed(), true);
@@ -218,13 +220,28 @@ test("provider presentation preserves literal decisions and input owners across 
     for (const [name, code, keyCode, text] of [[" ", "Space", 32, " "], ["Enter", "Enter", 13, "\r"], ["1", "Digit1", 49, "1"]] as const) await key(name, code, keyCode, text);
     assert.equal(await evaluate("providerFixture.decisions.length===0 && document.activeElement===document.querySelector('.permission-choices')"), true, "Typing that lands on the list answers nothing");
     await key("ArrowDown", "ArrowDown", 40); assert.equal(await focused("[data-permission-decision=allow_once]"), true, "Down enters the list at its first choice");
-    await evaluate("new Promise(resolve=>setTimeout(resolve,2000))");
-    assert.equal(await evaluate("providerFixture.permissions.length"), 3, "A request that is shown is not read again while the run goes on");
+    await evaluate("window.focusedBeforeCheck=document.activeElement;new Promise(resolve=>setTimeout(resolve,2000))");
+    assert.equal(await evaluate("providerFixture.permissions.length===3 && providerFixture.checks.length===1"), true, "A shown request is only checked while the run goes on, one check at a time");
+    assert.equal(await evaluate("!document.querySelector('[data-permission-decision=allow_once]').disabled && document.activeElement===window.focusedBeforeCheck"), true, "A check leaves the choices and the focus as they are");
     await evaluate("providerFixture.run(false)");
     assert.equal(await wait("providerFixture.permissions.length===4"), true, "The end of the run reads what is left");
     assert.equal(await evaluate("document.querySelector('[data-permission-decision=allow_once]').disabled"), true, "A request being read again cannot be answered");
     await evaluate("providerFixture.permissions[3].resolve({...providerFixture.permissionPage,entries:[]})");
     assert.equal(await wait("!document.querySelector('.command-permission-panel')"), true, "A request that no longer waits disappears");
+    // A request answered elsewhere (on claude.ai, with Remote Control) is withdrawn by its provider: the check sees
+    // it, and the card reads the requests again.
+    await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+    await evaluate("providerFixture.permissions[0].resolve(providerFixture.permissionPage)");
+    assert.equal(await armed(), true);
+    assert.equal(await wait("providerFixture.checks.length===1"), true, "The shown request is checked");
+    await evaluate("providerFixture.checks[0].resolve(structuredClone(providerFixture.permissionPage))");
+    assert.equal(await wait("providerFixture.checks.length===2"), true, "It still waits: it is checked again");
+    assert.equal(await evaluate("!document.querySelector('[data-permission-decision=allow_once]').disabled && providerFixture.permissions.length===1"), true, "A check reads nothing again");
+    await evaluate("providerFixture.checks[1].resolve({...providerFixture.permissionPage,entries:[]})");
+    assert.equal(await wait("providerFixture.permissions.length===2"), true, "Gone: the requests are read again");
+    await evaluate("providerFixture.permissions[1].resolve({...providerFixture.permissionPage,entries:[]})");
+    assert.equal(await wait("!document.querySelector('.command-permission-panel')"), true, "A request answered elsewhere disappears");
+    assert.equal(await evaluate("providerFixture.decisions.length"), 0, "Nothing was decided here");
     // Denying with what to do instead: the text follows a denial the agent took, and a draft keeps its focus.
     await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
     await evaluate("providerFixture.focus(true);document.querySelector('[data-input-refresh], button')?.focus()");

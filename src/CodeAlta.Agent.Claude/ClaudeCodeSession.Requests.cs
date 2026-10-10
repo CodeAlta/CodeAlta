@@ -82,6 +82,13 @@ internal sealed partial class ClaudeCodeSession
             }
 
             var decision = await run.OnPermissionRequest(permission, prompt.Token).ConfigureAwait(false);
+            if (prompt.IsCancellationRequested)
+            {
+                // The prompt was withdrawn (answered on claude.ai, over Remote Control) or the turn was interrupted:
+                // the cancel that closed the prompt in CodeAlta is not a decision of the user.
+                return null;
+            }
+
             if (decision.Kind == AgentPermissionDecisionKind.Cancel)
             {
                 lock (_gate)

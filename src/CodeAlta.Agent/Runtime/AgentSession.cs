@@ -17,7 +17,7 @@ namespace CodeAlta.Agent.Runtime;
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
 public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns,
-    IAgentBackgroundTaskProvider, IAgentPermissionModeProvider
+    IAgentBackgroundTaskProvider, IAgentPermissionModeProvider, IAgentRemoteControlProvider
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -53,6 +53,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // the runs, from the thread that reads it, reach them one at a time.
     private readonly Lock _publication = new();
     private readonly IDisposable? _backgroundTasksRegistration;
+    private readonly IDisposable? _remoteControlRegistration;
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
@@ -136,6 +137,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         });
         Provider = provider;
         // A provider that goes on working outside the runs says so to those who listen to the session.
+        _remoteControlRegistration = turnExecutor is IAgentProviderRemoteControl remote
+            ? remote.OnRemoteControlChanged(summary.SessionId, PublishRemoteControl)
+            : null;
         _backgroundTasksRegistration = turnExecutor is IAgentProviderBackgroundTasks background
             ? background.OnBackgroundTasksChanged(summary.SessionId, PublishBackgroundTasks)
             : null;
@@ -205,6 +209,56 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // The tasks are the state of a provider that runs now: they are told to those who listen and are neither
     // kept in the history of the session nor recorded, so that a session read again later shows none. The
     // event names no run: the tasks go on outside the runs.
+    /// <inheritdoc />
+    public bool SupportsRemoteControl => _turnExecutor is IAgentProviderRemoteControl;
+
+    /// <inheritdoc />
+    public AgentRemoteControl RemoteControl
+        => !_disposed && _turnExecutor is IAgentProviderRemoteControl provider ? provider.GetRemoteControl(SessionId) : AgentRemoteControl.Off;
+
+    /// <inheritdoc />
+    public async Task<AgentRemoteControl> SetRemoteControlAsync(bool enabled, string? name, CancellationToken cancellationToken = default)
+    {
+        using var operation = EnterOperation();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_turnExecutor is not IAgentProviderRemoteControl provider)
+        {
+            throw new NotSupportedException("The provider of this session has no remote control.");
+        }
+
+        // The request a turn would have, without its prompt nor its tools, as for a compaction: the provider
+        // starts its process from it when none runs. A run that goes on keeps what it started with.
+        AgentTurnRequest request;
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+            var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
+            request = CreateTurnRequest(
+                new AgentRunId($"provider-remote-control:{Guid.CreateVersion7()}"),
+                instructionBundle.SystemMessage,
+                CombineDeveloperInstructions(instructionBundle.DeveloperInstructions, instructionBundle.RuntimeContext),
+                modelInfo,
+                tools: []);
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+
+        return await provider.SetRemoteControlAsync(request, enabled, NormalizeOptionalText(name), cancellationToken).ConfigureAwait(false);
+    }
+
+    // Like the background tasks, the remote control is the state of a provider that runs now: told, never recorded.
+    private void PublishRemoteControl(AgentRemoteControl remoteControl)
+    {
+        if (!_disposed)
+        {
+            Publish(new AgentRemoteControlEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, remoteControl));
+        }
+    }
+
     private void PublishBackgroundTasks(IReadOnlyList<AgentBackgroundTask> tasks, IReadOnlyList<AgentBackgroundTaskEnd> ended)
     {
         if (!_disposed)
@@ -986,6 +1040,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         finally { _stateGate.Release(); }
         run?.SignalCancellation();
         _backgroundTasksRegistration?.Dispose();
+        _remoteControlRegistration?.Dispose();
         List<Exception> failures = [];
         // Start cancellation before joining operation scopes, which include actual hooks and all
         // registration/traversal disposal. No new operation can enter after _disposed was published.
