@@ -52,6 +52,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         ProjectCatalog = projectCatalog;
         SpaceCatalog = new SpaceCatalog(projectCatalog);
         SessionViewCatalog = sessionViewCatalog;
+        SessionJournals = sessionViewCatalog.JournalStore.CreateJournalCatalog();
         SkillCatalog = skillCatalog;
         ModelProviderRegistry = modelProviderRegistry;
         ModelProviderInitializationService = modelProviderInitializationService;
@@ -136,6 +137,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// Gets the session-view catalog.
     /// </summary>
     public SessionViewCatalog SessionViewCatalog { get; }
+
+    /// <summary>
+    /// Gets the catalog of the journal files of every session of the store, for readers that follow journals from an offset (the
+    /// statistics of the history). It lists the sessions of removed projects too, which the session lists of the application hide.
+    /// </summary>
+    public ISessionJournalCatalog SessionJournals { get; }
 
     /// <summary>
     /// Gets the skill catalog.

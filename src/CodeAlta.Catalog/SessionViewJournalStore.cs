@@ -70,6 +70,13 @@ public sealed partial class SessionViewJournalStore
     public FileSystemAgentSessionStore CreateSessionStore()
         => new(_layout, _journalFile, _sessionCache);
 
+    /// <summary>
+    /// Creates a catalog of the journal files of the sessions folder of this store, for readers that follow the journals from an
+    /// offset without holding the lock of a session.
+    /// </summary>
+    /// <returns>A catalog that lists every journal of the store, whatever its session.</returns>
+    public ISessionJournalCatalog CreateJournalCatalog() => new FileSystemSessionJournalCatalog(_layout);
+
     internal IAgentSessionProjectionCache ProjectionCache => _sessionCache;
 
     /// <summary>

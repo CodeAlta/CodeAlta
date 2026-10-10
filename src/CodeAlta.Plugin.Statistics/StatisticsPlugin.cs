@@ -278,23 +278,7 @@ public sealed class StatisticsPlugin : PluginBase
         => kind is AgentContentKind.CommandOutput or AgentContentKind.FileChangeOutput or AgentContentKind.ToolOutput;
 
     private static string ToolBucketName(AgentActivityKind kind, string? name)
-    {
-        if (kind == AgentActivityKind.CommandExecution ||
-            Contains(name, "shell") ||
-            Contains(name, "command") ||
-            Contains(name, "bash") ||
-            Contains(name, "pwsh") ||
-            Contains(name, "powershell"))
-        {
-            return "shell";
-        }
-
-        var normalizedName = string.IsNullOrWhiteSpace(name) ? kind.ToString() : name.Trim();
-        return FormattableString.Invariant($"{kind}:{normalizedName}");
-
-        static bool Contains(string? text, string value)
-            => text?.Contains(value, StringComparison.OrdinalIgnoreCase) == true;
-    }
+        => Facts.StatisticsToolBuckets.Bucket(kind, name);
 
     private sealed class TurnStatisticsBuilder
     {

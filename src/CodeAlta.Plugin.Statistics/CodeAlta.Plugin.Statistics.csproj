@@ -15,5 +15,6 @@
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
     <InternalsVisibleTo Include="altatui" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Plugin.Statistics.Tests" />
   </ItemGroup>
 </Project>

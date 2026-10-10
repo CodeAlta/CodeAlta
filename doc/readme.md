@@ -47,6 +47,7 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 | 11 | [CodeAlta Desktop](desktop.md) | Desktop window, workspace, composer, timeline, Settings pages, host RPC services, and isolated-root launches. |
 | 12 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow. |
 | 13 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
+| 14 | [Statistics: the journal reader and the facts](statistics-facts.md) | The streaming reader of session journals, the facts a session is reduced to, the journal catalog of the store, and how the numbers differ from `alta session metrics`. |
 
 ## System map
 

@@ -57,6 +57,7 @@
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
     <Project Path="CodeAlta.Hosting.Tests/CodeAlta.Hosting.Tests.csproj" />
     <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
+    <Project Path="CodeAlta.Plugin.Statistics.Tests/CodeAlta.Plugin.Statistics.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Tests/CodeAlta.Plugins.Tests.csproj" />
     <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
