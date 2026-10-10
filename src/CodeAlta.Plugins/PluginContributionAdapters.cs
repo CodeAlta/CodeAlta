@@ -861,8 +861,8 @@ public sealed class PluginContributionAdapterService
     /// </summary>
     /// <param name="activePlugins">Active plugins.</param>
     /// <param name="spaceId">The space the landing page is shown in, or <see langword="null"/>.</param>
-    /// <param name="spaceProjectIds">The projects of that space, or <see langword="null"/> when every project is in it: the cards of a plugin of a project are asked for only when its project is in the space.</param>
-    /// <param name="timeout">How long one card may take.</param>
+    /// <param name="spaceProjectIds">The eligible projects of that space, or <see langword="null"/> to allow every project. Catalog-backed callers supply only existing, unarchived project IDs, including for the default space.</param>
+    /// <param name="timeout">How long to wait for one card. The activation retains a callback that outlives this wait until it ends.</param>
     /// <param name="cancellationToken">A token to cancel the reading.</param>
     /// <returns>The cards in contribution order; a card that its plugin leaves out is not in the list.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="activePlugins"/> is null.</exception>
@@ -948,8 +948,8 @@ public sealed class PluginContributionAdapterService
     }
 
     // The call of a card for a space that is running, or a new one. A card is asked once at a time for the same space and project, so a
-    // handler that never returns holds one thread and one token, however often the page asks. The call ends with its time limit or with
-    // its plugin, not with the reading that started it, since other readings may wait for it.
+    // handler that never returns holds one thread and one token, however often the page asks. Its time limit and plugin lifetime signal
+    // cancellation, but the activation retains the original until it ends; the reader's wait is not the callback's lifetime.
     private (Task<PluginLandingCard?> Reading, bool Started) StartOrJoinLandingRead(PluginLandingCardContribution card, ActivePluginInstance active, PluginLandingCardContext context, TimeSpan timeout)
     {
         var reads = _landingReads.GetValue(card, static _ => new LandingReads());
@@ -957,16 +957,12 @@ public sealed class PluginContributionAdapterService
         {
             // A call that ended is not an answer to a new question, whether or not it was taken out of the table yet.
             if (reads.Running.TryGetValue(context, out var running) && !running.IsCompleted) return (running, false);
-            var limit = CancellationTokenSource.CreateLinkedTokenSource(active.RuntimeContext.LifetimeCancellationToken);
-            limit.CancelAfter(timeout);
-            var reading = Task.Run(() => card.GetCard(context, limit.Token).AsTask(), CancellationToken.None);
+            var reading = ReadOwnedLandingCardAsync(card, active, context, timeout);
             reads.Running[context] = reading;
-            // The token is the plugin's for as long as its handler runs: a handler that outlives the wait is not left with a disposed source,
-            // and what it throws afterwards is looked at here, since nobody may wait for it any more.
+            // Observe late failures even when no reader remains. Token cleanup is inside activation ownership, before it releases the callback.
             _ = reading.ContinueWith(task =>
             {
                 _ = task.Exception;
-                limit.Dispose();
                 lock (reads.Gate)
                 {
                     if (reads.Running.TryGetValue(context, out var current) && ReferenceEquals(current, task)) reads.Running.Remove(context);
@@ -974,6 +970,24 @@ public sealed class PluginContributionAdapterService
             }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
             return (reading, true);
         }
+    }
+
+    private static async Task<PluginLandingCard?> ReadOwnedLandingCardAsync(PluginLandingCardContribution card, ActivePluginInstance active,
+        PluginLandingCardContext context, TimeSpan timeout)
+    {
+        PluginLandingCard? shown = null;
+        // Admission and close share the activation gate. Retain the real callback, not the reader's WaitAsync wrapper, and preserve
+        // the event scope so that a card cannot join its own activation through stop/reload or shutdown.
+        var admission = await active.ObserveOwnedAgentEventAsync(async () =>
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(active.RuntimeContext.LifetimeCancellationToken);
+            limit.CancelAfter(timeout);
+            // Even a synchronous prefix that blocks must stay off the window and inside the admitted original.
+            shown = await Task.Run(() => card.GetCard(context, limit.Token).AsTask(), CancellationToken.None).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        if (admission == PluginAgentEventAdmission.Capacity)
+            throw new InvalidOperationException("Plugin landing card callback admission is at capacity.");
+        return shown; // Closing admits nothing and leaves the card out.
     }
 
     private sealed class LandingReads

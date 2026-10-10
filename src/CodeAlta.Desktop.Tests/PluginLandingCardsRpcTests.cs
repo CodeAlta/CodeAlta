@@ -119,10 +119,13 @@ public sealed class PluginLandingCardsRpcTests
     }
 
     [TestMethod]
-    public async Task ACardWhoseContentCannotBeRead_Failed_AndTheOthersAreListed()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ACardWhoseContentCannotBeRead_Failed_AndTheOthersAreListed(bool unsolicitedCancellation)
     {
         await using var fixture = await Fixture.CreateAsync();
-        fixture.Plugin.Shown = new PluginLandingCard { Html = "<p>numbers</p>", Actions = new ThrowingActions() };
+        var failure = unsolicitedCancellation ? new OperationCanceledException("unsolicited") : (Exception)new InvalidOperationException("boom");
+        fixture.Plugin.Shown = new PluginLandingCard { Html = "<p>numbers</p>", Actions = new ThrowingActions(() => failure) };
 
         var response = await fixture.Service.LandingCardsAsync(new(Epoch, null), default);
 
@@ -130,6 +133,20 @@ public sealed class PluginLandingCardsRpcTests
         var numbers = response.Cards.Single(static card => card.CardId == "numbers");
         Assert.AreEqual(("failed", (string?)null, 0), (numbers.State, numbers.Html, numbers.Actions.Length));
         Assert.AreEqual("ok", response.Cards.Single(static card => card.CardId == "first").State);
+    }
+
+    [TestMethod]
+    public async Task ACardWhoseActionsCancelTheRequest_PropagatesRequestedCancellation()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        using var cancellation = new CancellationTokenSource();
+        fixture.Plugin.Shown = new PluginLandingCard
+        {
+            Html = "<p>numbers</p>",
+            Actions = new ThrowingActions(() => { cancellation.Cancel(); return new OperationCanceledException(cancellation.Token); }),
+        };
+
+        await Assert.ThrowsExactlyAsync<OperationCanceledException>(() => fixture.Service.LandingCardsAsync(new(Epoch, null), cancellation.Token));
     }
 
     [TestMethod]
@@ -156,13 +173,18 @@ public sealed class PluginLandingCardsRpcTests
         var other = (await spaces.CreateAsync("Other")).Space!;
         Assert.IsTrue((await spaces.AssignAsync(fixture.Project.Id, [work.Id], null)).Succeeded);
         var descriptor = fixture.Runtime.ActivePlugins.Single(static plugin => plugin.Descriptor.RuntimeKey == "builtin:fixture").Descriptor;
+        var projectCalls = 0;
         fixture.Runtime.Registry.Register(descriptor, PluginScope.Project, fixture.Project.Id, fixture.Project.ProjectPath, PluginPoint.LandingCard,
         [
             new PluginLandingCardContribution
             {
                 Id = "of-project", Title = "Of the project", Order = 50,
-                GetCard = static (context, _) => new ValueTask<PluginLandingCard?>(PluginLandingCard.Of($"<p>{context.ProjectId}</p>",
-                    PluginLandingCardAction.RunCommand("Release", "release.open"), PluginLandingCardAction.OpenCanvas("Plan", "plan"), PluginLandingCardAction.OpenCanvas("Run", "run"))),
+                GetCard = (context, _) =>
+                {
+                    Interlocked.Increment(ref projectCalls);
+                    return new ValueTask<PluginLandingCard?>(PluginLandingCard.Of($"<p>{context.ProjectId}</p>",
+                        PluginLandingCardAction.RunCommand("Release", "release.open"), PluginLandingCardAction.OpenCanvas("Plan", "plan"), PluginLandingCardAction.OpenCanvas("Run", "run")));
+                },
             },
         ], 1);
 
@@ -179,16 +201,44 @@ public sealed class PluginLandingCardsRpcTests
         Assert.IsTrue(withoutSpaces.Any(static card => card.CardId == "of-project"));
         Assert.IsFalse(inOther.Any(static card => card.CardId == "of-project"), "a space without the project does not show the card of its plugin");
         Assert.IsTrue(inOther.Any(static card => card.CardId == "numbers"), "the cards of the application are in every space");
+        Assert.AreEqual(3, projectCalls, "the excluded space never invokes the project callback");
 
         // An archived project is not on the page: neither is the card of its plugin, in any space.
         var archive = (await fixture.Projects.ReadArchiveAsync(fixture.Project.Id, fixture.Project.ProjectPath))!;
         Assert.AreEqual(ProjectDisplayNameRenameStatus.Updated,
             await fixture.Projects.SetArchivedAsync(fixture.Project.Id, fixture.Project.ProjectPath, archive.SourcePath, archive.Revision, expectedArchived: false, archived: true));
+        projectCalls = 0;
         foreach (var space in new[] { work.Id, SpaceDescriptor.DefaultId, null })
         {
             var archived = (await fixture.Service.LandingCardsAsync(new(Epoch, space), default)).Cards;
             Assert.IsFalse(archived.Any(static card => card.CardId == "of-project"), space ?? "no space");
             Assert.IsTrue(archived.Any(static card => card.CardId == "numbers"));
+            Assert.AreEqual(0, projectCalls, "an archived project's callback must not run, including in the default space or without spaces");
+        }
+    }
+
+    [TestMethod]
+    public async Task ACardOfAProjectMissingFromTheCatalog_IsNeverAskedInAnySpace()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var descriptor = fixture.Runtime.ActivePlugins.Single(static plugin => plugin.Descriptor.RuntimeKey == "builtin:fixture").Descriptor;
+        var calls = 0;
+        fixture.Runtime.Registry.Register(descriptor, PluginScope.Project, "missing-project", fixture.Project.ProjectPath, PluginPoint.LandingCard,
+        [
+            new PluginLandingCardContribution
+            {
+                Id = "missing-project", Title = "Missing project",
+                GetCard = (_, _) => { Interlocked.Increment(ref calls); return ValueTask.FromResult<PluginLandingCard?>(PluginLandingCard.Of("<p>invisible</p>")); },
+            },
+        ], 1);
+
+        foreach (var space in new[] { "work", SpaceDescriptor.DefaultId, null })
+        {
+            var response = await fixture.Service.LandingCardsAsync(new(Epoch, space), default);
+            Assert.AreEqual("ok", response.Status);
+            Assert.IsFalse(response.Cards.Any(static card => card.CardId == "missing-project"));
+            Assert.IsTrue(response.Cards.Any(static card => card.CardId == "numbers"));
+            Assert.AreEqual(0, calls, "an invisible project's callback must not run");
         }
     }
 
@@ -418,13 +468,13 @@ public sealed class PluginLandingCardsRpcTests
     }
 
     /// <summary>A list of actions that cannot be read.</summary>
-    private sealed class ThrowingActions : IReadOnlyList<PluginLandingCardAction>
+    private sealed class ThrowingActions(Func<Exception> failure) : IReadOnlyList<PluginLandingCardAction>
     {
-        public int Count => throw new InvalidOperationException("boom");
+        public int Count => throw failure();
 
-        public PluginLandingCardAction this[int index] => throw new InvalidOperationException("boom");
+        public PluginLandingCardAction this[int index] => throw failure();
 
-        public IEnumerator<PluginLandingCardAction> GetEnumerator() => throw new InvalidOperationException("boom");
+        public IEnumerator<PluginLandingCardAction> GetEnumerator() => throw failure();
 
         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
     }

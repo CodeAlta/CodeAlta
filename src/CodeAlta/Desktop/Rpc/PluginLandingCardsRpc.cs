@@ -33,10 +33,12 @@ internal sealed partial class PluginUiService
         try
         {
             var projects = await _projects!.LoadAsync(cancellationToken).ConfigureAwait(false);
-            // The default space, and a window without spaces, have every project.
-            var inSpace = request.SpaceId is null || string.Equals(request.SpaceId, SpaceDescriptor.DefaultId, StringComparison.Ordinal)
-                ? null
-                : projects.Where(project => project.Spaces.Contains(request.SpaceId, StringComparer.Ordinal)).Select(static project => project.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Filter before calling plugins, not just before rendering: invisible projects must not start expensive callbacks.
+            // The default space, and a window without spaces, include every existing, unarchived project.
+            var inSpace = projects.Where(project => !project.Archived && (request.SpaceId is null
+                    || string.Equals(request.SpaceId, SpaceDescriptor.DefaultId, StringComparison.Ordinal)
+                    || project.Spaces.Contains(request.SpaceId, StringComparer.Ordinal)))
+                .Select(static project => project.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var active = _plugins!.ActivePlugins;
             var entries = await _plugins.Adapter.GetLandingCardEntriesAsync(active, request.SpaceId, inSpace, LandingCardTimeout, cancellationToken).ConfigureAwait(false);
             var cards = new List<PluginUiLandingCard>();
@@ -50,7 +52,11 @@ internal sealed partial class PluginUiService
                 {
                     cards.Add(LandingCard(entry, active, project));
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception)
                 {
                     // What a plugin gave could not be read (a list of actions that throws): its card failed, the others are listed.
                     cards.Add(LandingCard(entry with { Card = null, Failed = true }, active, project));
@@ -63,7 +69,7 @@ internal sealed partial class PluginUiService
         {
             throw;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception)
         {
             return Failed("read_failed"); // A plugin failing in a property getter must not break the page.
         }

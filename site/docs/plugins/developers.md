@@ -454,7 +454,7 @@ public override IEnumerable<PluginLandingCardContribution> GetLandingCards()
 
 `context.SpaceId` is the space the page is shown in. A plugin of a project folder also gets `context.ProjectId`: its card is shown only in the spaces that have that project, and its commands run for it.
 
-The page asks for the card when it is shown, when a command of your plugin ends, and when you call `Services.Ui.InvalidateLandingCards()` after a change. A card that throws, or is too slow, is shown as a card that could not be loaded; the page and the other cards are not affected.
+The page asks for the card when it is shown, when a command of your plugin ends, and when you call `Services.Ui.InvalidateLandingCards()` after a change. A card that throws, or is too slow, is shown as a card that could not be loaded; the page and the other cards are not affected. Honor the cancellation token: each wait for a card is limited to five seconds, but your plugin cannot finish stopping until its card callback returns. Cards of an archived or removed project are not asked for.
 
 The `landing-card` sample of the `codealta-plugin-runtime` skill is a complete plugin with a card, two commands and a canvas.
 

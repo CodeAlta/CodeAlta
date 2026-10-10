@@ -3,7 +3,7 @@ using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugins;
 
-/// <summary>The result of finite, nonwaiting admission of one plugin event callback.</summary>
+/// <summary>The result of finite, nonwaiting admission of one plugin event or landing-card callback.</summary>
 public enum PluginAgentEventAdmission
 {
     /// <summary>The original callback and adapter tail were admitted.</summary>
@@ -90,7 +90,7 @@ public sealed partial class ActivePluginInstance
     // left to the collector, without the forced collections that verify it.
     internal bool VerifiesUnload { get; set; } = true;
 
-    /// <summary>Gets bounded event admission statistics for this activation, including stale-snapshot rejection.</summary>
+    /// <summary>Gets bounded admission statistics for this activation's event and landing-card callbacks, including stale-snapshot rejection.</summary>
     public PluginAgentEventAdmissionSnapshot AgentEventAdmission
     {
         get { lock (_eventGate) return new(_eventAttempts.Count, _capacityRejected, _closingRejected, _eventClosed); }
@@ -151,7 +151,7 @@ public sealed partial class ActivePluginInstance
     internal void CloseAgentEventAdmission()
     { lock (_eventGate) _eventClosed = true; }
 
-    /// <summary>Closes event and background-task admission, signals cancellation, and joins originals without releasing the activation.</summary>
+    /// <summary>Closes event, landing-card and background-task admission, signals cancellation, and joins originals without releasing the activation.</summary>
     /// <remarks>Cancellation may invalidate contexts immediately; retained does not mean valid. No timeout proves termination.</remarks>
     /// <returns>The one retained quiescence task; failures retain activation dependencies.</returns>
     /// <exception cref="InvalidOperationException">The caller would await its own event attempt.</exception>

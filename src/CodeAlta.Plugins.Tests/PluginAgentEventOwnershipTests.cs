@@ -316,6 +316,140 @@ public sealed class PluginAgentEventOwnershipTests
         });
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public Task LandingRead_ReaderTimeoutOrCancellationRetainsCallbackUntilTerminal(bool cancelReader)
+        => Fixture.Run(async f =>
+        {
+            var active = f.Add((_, _) => Task.CompletedTask);
+            var entered = f.Gate();
+            var release = f.Gate();
+            f.Registry.Register(active.Descriptor, PluginScope.Global, null, null, PluginPoint.LandingCard,
+            [
+                new PluginLandingCardContribution
+                {
+                    Id = "held", Title = "Held",
+                    GetCard = (_, _) => new ValueTask<PluginLandingCard?>(f.Keep(async () =>
+                    {
+                        entered.TrySetResult();
+                        await release.Task;
+                        Assert.AreEqual(0, f.Plugins[0].Disposals, "the original callback still uses its activation");
+                        return (PluginLandingCard?)PluginLandingCard.Of("<p>late</p>");
+                    })),
+                },
+            ], 0);
+            using var cancellation = new CancellationTokenSource();
+            var reading = f.Keep(() => f.Adapter.GetLandingCardEntriesAsync([active], null, null,
+                cancelReader ? TimeSpan.FromSeconds(30) : TimeSpan.FromMilliseconds(50), cancellation.Token).AsTask());
+            await entered.Task;
+            if (cancelReader)
+            {
+                await cancellation.CancelAsync();
+                var failure = await Fixture.ObserveOutcome(reading);
+                Assert.IsInstanceOfType<OperationCanceledException>(failure);
+                await f.AcceptFailureAsync(reading, failure);
+            }
+            else
+            {
+                Assert.IsTrue((await reading).Single().Failed, "the reader ends without joining a noncooperative callback");
+            }
+
+            Assert.AreEqual(1, active.AgentEventAdmission.Outstanding, "the original, not the bounded reader, remains activation-owned");
+            var diagnostics = await f.Keep(() => active.DeactivateAsync(TimeSpan.Zero).AsTask());
+            StringAssert.Contains(diagnostics.Single().Message, "remain retained");
+            var close = f.Keep(() => active.DisposeAsync().AsTask());
+            Assert.IsFalse(close.IsCompleted);
+            Assert.IsNotNull(active.Instance);
+            Assert.AreEqual(0, f.Plugins[0].Disposals);
+            release.TrySetResult();
+            await close;
+            Assert.AreEqual(1, f.Plugins[0].Disposals);
+            Assert.AreEqual(0, active.AgentEventAdmission.Outstanding);
+        });
+
+    [TestMethod]
+    public Task LandingRead_ClosedAdmissionRejectsTheCallbackEvenBeforeLifetimeCancellation()
+        => Fixture.Run(async f =>
+        {
+            var active = f.Add((_, _) => Task.CompletedTask);
+            var calls = 0;
+            f.Registry.Register(active.Descriptor, PluginScope.Global, null, null, PluginPoint.LandingCard,
+            [
+                new PluginLandingCardContribution
+                {
+                    Id = "closed", Title = "Closed",
+                    GetCard = (_, _) => { Interlocked.Increment(ref calls); return ValueTask.FromResult<PluginLandingCard?>(PluginLandingCard.Of("<p>late</p>")); },
+                },
+            ], 0);
+            active.CloseAgentEventAdmission();
+            Assert.IsFalse(active.LifetimeToken.IsCancellationRequested);
+
+            var cards = await f.Keep(() => f.Adapter.GetLandingCardEntriesAsync([active], null, null, TimeSpan.FromSeconds(5)).AsTask());
+
+            Assert.AreEqual(0, calls, "a stale snapshot must not start a callback after activation admission closes");
+            Assert.AreEqual(0, cards.Count);
+            Assert.AreEqual(1L, active.AgentEventAdmission.ClosingRejected);
+        });
+
+    [TestMethod]
+    public Task LandingRead_SharesBoundedAdmissionWithoutInvokingARejectedCallback()
+        => Fixture.Run(async f =>
+        {
+            var entered = f.Gate();
+            var release = f.Gate();
+            var eventCalls = 0;
+            var active = f.Add(async (_, _) =>
+            {
+                if (Interlocked.Increment(ref eventCalls) == 64) entered.TrySetResult();
+                await release.Task;
+            });
+            var cardCalls = 0;
+            f.Registry.Register(active.Descriptor, PluginScope.Global, null, null, PluginPoint.LandingCard,
+            [
+                new PluginLandingCardContribution
+                {
+                    Id = "capacity", Title = "Capacity",
+                    GetCard = (_, _) => { Interlocked.Increment(ref cardCalls); return ValueTask.FromResult<PluginLandingCard?>(null); },
+                },
+            ], 0);
+            for (var i = 0; i < 64; i++) _ = f.Keep(() => f.Observe(active));
+            await entered.Task;
+
+            var cards = await f.Keep(() => f.Adapter.GetLandingCardEntriesAsync([active], null, null, TimeSpan.FromSeconds(5)).AsTask());
+
+            Assert.IsTrue(cards.Single().Failed);
+            Assert.AreEqual(0, cardCalls);
+            Assert.AreEqual(64, active.AgentEventAdmission.Outstanding);
+            Assert.AreEqual(1L, active.AgentEventAdmission.CapacityRejected);
+            release.TrySetResult();
+        });
+
+    [TestMethod]
+    public Task LandingRead_SelfJoinGuardFlowsIntoTheWorkerBeforeCallbackEntry()
+        => Fixture.Run(async f =>
+        {
+            var active = f.Add((_, _) => Task.CompletedTask);
+            f.Registry.Register(active.Descriptor, PluginScope.Global, null, null, PluginPoint.LandingCard,
+            [
+                new PluginLandingCardContribution
+                {
+                    Id = "self-join", Title = "Self-join",
+                    GetCard = (_, _) =>
+                    {
+                        Assert.ThrowsExactly<InvalidOperationException>(() => active.QuiesceAgentEventsAsync());
+                        Assert.IsFalse(active.AgentEventAdmission.Closed, "reject a self-join before changing admission");
+                        return ValueTask.FromResult<PluginLandingCard?>(PluginLandingCard.Of("<p>still active</p>"));
+                    },
+                },
+            ], 0);
+
+            var cards = await f.Keep(() => f.Adapter.GetLandingCardEntriesAsync([active], null, null, TimeSpan.FromSeconds(5)).AsTask());
+
+            Assert.IsFalse(cards.Single().Failed);
+            Assert.IsFalse(active.AgentEventAdmission.Closed);
+        });
+
+    [TestMethod]
     public Task TaskService_CloseRegistersCancellationBeforeJoinAndRejectsRun()
         => Fixture.Run(async f =>
         {
