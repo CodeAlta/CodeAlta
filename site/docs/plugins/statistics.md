@@ -34,10 +34,13 @@ In CodeAlta Desktop the numbers have a page of their own, in a tab. Open it from
 | The keyboard | `Ctrl+G`, then `C` |
 | The search | **Statistics**, or `/statistics` |
 | A project | **Statistics of this project** in the menu of a project row opens the page for that project only, in a tab of its own |
+| A session | **Statistics of this session** in the menu of a session opens the page for that session and its sub-agents, in a tab of its own. So does **Session statistics**, at the foot of the details of the card of a turn |
 | An agent | `alta canvas open statistics` |
 | The welcome page | The **Statistics** card shows the sessions, your prompts, the tokens and the active time of the last seven days, and **Open Statistics** opens the page |
 
 Each space has its own Statistics tab, which starts on the space it shows; a space counts its projects and your chats (the sessions of no project), which the Explorer lists in every space. CodeAlta TUI has no page: it keeps the card of each turn and the `alta statistics` commands.
+
+The page of a session shows the whole life of the session, with the sessions it created. Its name is in the bar and opens the session; the filters you add narrow the session, and **Reset** comes back to it.
 
 ## The statistics of all your sessions
 
@@ -166,7 +169,7 @@ Show my tokens per week for the last 90 days, by model.
 | `alta statistics series <metric>` | One metric over time, by hour, day, week, month or year, optionally by provider, model, project or tool. Among them `sessions-at-once`, the most sessions with a run going at the same moment, and `context-fill`, the average fill of the context window |
 | `alta statistics top <tools\|models\|projects\|sessions>` | A ranking by tokens, time or calls |
 | `alta statistics details <list>` | The programs of the shell commands agents ran, the commands of `alta` they called, the kinds of files they changed, and how deep the sub-agents go (`sub-agent-depth`) |
-| `alta statistics session <session>` | The numbers of one session, with its sub-agents when asked |
+| `alta statistics session <session>` | The numbers of one session, with its sub-agents when asked. `--session <session>` on `summary`, `series`, `top` and `details` gives the same session over a period, with `--with-children` for its sub-agents |
 | `alta statistics status` | Whether the history is read, how far, and what is left |
 | `alta statistics history ...` | Choose how much history to read, pause, resume, stop, or forget the sessions that were deleted |
 | `alta statistics estimate <text>` | The size of a text in bytes and approximate tokens |

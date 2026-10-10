@@ -81,9 +81,17 @@ public sealed partial class StatisticsQueries
             },
             cancellationToken).ConfigureAwait(false);
 
+        var notes = new List<string>();
+        var sessionIds = await ResolveSessionIdsAsync(filter, notes, cancellationToken).ConfigureAwait(false);
         var weekStart = request.WeekStart ?? DefaultWeekStart;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(_time.GetUtcNow().UtcDateTime, Days.TimeZone));
         var range = PeriodParser.Resolve(request.Period ?? "30d", today, firstDay is { } first ? LocalDays.ToDate(first) : null, weekStart);
+        if (sessionIds is { Count: > 0 } && IsAllPeriod(request.Period))
+        {
+            // The whole history of one session is its life: from its first day to its last, not every day since the first session.
+            range = await SessionLifeAsync(sessionIds, range, cancellationToken).ConfigureAwait(false);
+        }
+
         var frequency = request.Frequency == StatisticsFrequency.Auto ? BucketPlan.AutoFrequency(range) : request.Frequency;
         var plan = BucketPlan.Create(range, frequency, weekStart, Days);
         DayRange? compare = request.Comparison switch
@@ -100,7 +108,6 @@ public sealed partial class StatisticsQueries
             names[project.Id] = project.Name;
         }
 
-        var notes = new List<string>();
         var refs = ResolveProjectRefs(filter, projects, spaces, notes, out var includesChats);
         return new ResolvedQuery
         {
@@ -116,7 +123,96 @@ public sealed partial class StatisticsQueries
             ProjectNames = names,
             Coverage = ReadCoverage(meta, range),
             Notes = notes,
+            SessionIds = sessionIds,
         };
+    }
+
+    // A session filter is a limit that is always applied: a session the statistics do not know limits the numbers to nothing
+    // (an empty list), and never to every session (null).
+    private async ValueTask<IReadOnlyList<string>?> ResolveSessionIdsAsync(StatisticsFilter filter, List<string> notes, CancellationToken cancellationToken)
+    {
+        if (filter.Session is not { } session)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(session))
+        {
+            throw new ArgumentException("The session of the filter is empty: give its identifier.");
+        }
+
+        var scope = await _store.ReadAsync(sql => FindSessionScope(sql, session.Trim(), filter.WithChildren), cancellationToken).ConfigureAwait(false);
+        if (scope is null)
+        {
+            notes.Add("session-not-found");
+            return [];
+        }
+
+        return scope.Ids;
+    }
+
+    private static bool IsAllPeriod(string? period) => string.Equals(period?.Trim(), "all", StringComparison.OrdinalIgnoreCase);
+
+    // The days from the first record to the last record of the sessions, inside the days the period already has.
+    private async ValueTask<DayRange> SessionLifeAsync(IReadOnlyList<string> sessionIds, DayRange range, CancellationToken cancellationToken)
+    {
+        var (first, last) = await _store.ReadAsync(
+            sql => sql.Query(
+                    $"SELECT COALESCE(MIN(first_ms), 0), COALESCE(MAX(last_ms), 0) FROM {P}session WHERE session_id IN ({string.Join(", ", sessionIds.Select(static (_, index) => "@p" + index.ToString(CultureInfo.InvariantCulture)))})",
+                    static reader => (First: reader.GetInt64(0), Last: reader.GetInt64(1)),
+                    [.. sessionIds.Cast<object?>()])
+                .FirstOrDefault(),
+            cancellationToken).ConfigureAwait(false);
+        if (first <= 0 || last < first)
+        {
+            return range;
+        }
+
+        DateOnly Day(long milliseconds) => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime, Days.TimeZone));
+        var from = Day(first) > range.From ? Day(first) : range.From;
+        var to = Day(last) < range.To ? Day(last) : range.To;
+        return to < from ? range : new DayRange(from, to);
+    }
+
+    /// <summary>A session and, when asked, the sessions it created at any depth.</summary>
+    /// <param name="Root">The identifier of the session.</param>
+    /// <param name="Ids">The identifiers the numbers are limited to: <paramref name="Root"/> first, then its sub-agents.</param>
+    internal sealed record SessionScope(string Root, IReadOnlyList<string> Ids);
+
+    /// <summary>Finds the session a text names, by its identifier or by the start of it when only one session matches.</summary>
+    /// <returns>The session with its sub-agents when asked; null when no session matches.</returns>
+    /// <exception cref="ArgumentException">The text is the start of several sessions.</exception>
+    private SessionScope? FindSessionScope(SqlSession sql, string text, bool withChildren)
+    {
+        // The session of that exact identifier comes first, whatever the number of sessions that start with it.
+        var matches = sql.Query(
+            $"SELECT session_id FROM {P}session WHERE session_id = @p0 OR session_id LIKE @p1 ESCAPE '\\' ORDER BY (session_id = @p0) DESC LIMIT 3",
+            static reader => reader.GetString(0),
+            text,
+            EscapeLike(text) + "%");
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        var exact = matches.FirstOrDefault(match => string.Equals(match, text, StringComparison.OrdinalIgnoreCase));
+        if (exact is null && matches.Count > 1)
+        {
+            throw new ArgumentException($"'{text}' is the start of several sessions: give more of its identifier.");
+        }
+
+        var id = exact ?? matches[0];
+        if (!withChildren)
+        {
+            return new SessionScope(id, [id]);
+        }
+
+        // UNION keeps a session once: parents that name each other in a circle end the walk instead of going round.
+        var tree = sql.Query(
+            $"WITH RECURSIVE tree(id) AS (SELECT @p0 UNION SELECT s.session_id FROM {P}session s JOIN tree t ON s.parent_session_id = t.id) SELECT id FROM tree",
+            static reader => reader.GetString(0),
+            id);
+        return new SessionScope(id, [id, .. tree.Where(other => !string.Equals(other, id, StringComparison.Ordinal))]);
     }
 
     // A space has the projects it has today and the chats (the sessions of no project), which the Explorer shows in every space.

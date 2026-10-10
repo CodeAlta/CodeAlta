@@ -133,11 +133,7 @@ public sealed partial class StatisticsPlugin : PluginBase
             Markdown = StatisticsMarkdownRenderer.RenderTurnSummary(statistics),
             DetailSections =
             [
-                new PluginDerivedSessionEventDetailSection
-                {
-                    Header = "Detailed statistics",
-                    Markdown = StatisticsMarkdownRenderer.RenderTurnDetails(statistics),
-                },
+                DetailSection(StatisticsMarkdownRenderer.RenderTurnDetails(statistics)),
             ],
             RenderTarget = RenderTarget,
             Payload = new
@@ -173,6 +169,15 @@ public sealed partial class StatisticsPlugin : PluginBase
             () => StatisticsMarkdownRenderer.RenderUsageTable(statistics),
             () => StatisticsMarkdownRenderer.RenderToolBucketTable(statistics)));
     }
+
+    // CodeAlta Desktop shows the HTML form, which ends with the way to the statistics of the session; CodeAlta TUI and Copy keep the Markdown.
+    private static PluginDerivedSessionEventDetailSection DetailSection(string markdown)
+        => new()
+        {
+            Header = "Detailed statistics",
+            Markdown = markdown,
+            Html = LinkedDetailsHtml(markdown),
+        };
 
     /// <summary>
     /// Estimates token count using CodeAlta's current approximation rule.

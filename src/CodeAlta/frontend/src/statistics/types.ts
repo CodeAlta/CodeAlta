@@ -24,6 +24,10 @@ export type StatisticsFilter = Readonly<{
   effort?: string;
   origin?: Origin;
   toolKind?: ToolKind;
+  /** One session, by its id. A session the plugin does not know gives numbers of nothing (`notes`: `session-not-found`), never those of every session. */
+  session?: string;
+  /** With `session`: also the sessions that session created, at any depth (its sub-agents). */
+  withChildren?: boolean;
 }>;
 
 /** What a page asks for: a period, a frequency, filters and a comparison. */

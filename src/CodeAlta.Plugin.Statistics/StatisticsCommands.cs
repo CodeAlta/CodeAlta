@@ -398,7 +398,8 @@ internal static class StatisticsCommands
         private string? _compare;
         private string? _weekStart;
         private int? _limit;
-        private string? _space, _project, _provider, _model, _effort, _origin, _toolKind;
+        private string? _space, _project, _provider, _model, _effort, _origin, _toolKind, _session;
+        private bool _withChildren;
 
         public void AddTo(Command command, bool frequency)
         {
@@ -412,6 +413,8 @@ internal static class StatisticsCommands
 
             command.Add("project=", "Only the sessions of this project: its id, slug or name.", value => _project = value);
             command.Add("space=", "Only the sessions of the projects this space has today: its id or name.", value => _space = value);
+            command.Add("session=", "Only this session: its identifier, or the start of it.", value => _session = value);
+            command.Add("with-children", "With --session: add the sessions that session created, at any depth.", value => _withChildren = value is not null);
             command.Add("provider=", "Only this provider.", value => _provider = value);
             command.Add("model=", "Only this model.", value => _model = value);
             command.Add("effort=", "Only this reasoning effort.", value => _effort = value);
@@ -446,6 +449,17 @@ internal static class StatisticsCommands
                 throw new ArgumentException("--limit is at least 1.");
             }
 
+            // A session that is named and empty, or sub-agents of no session, would be the numbers of every session.
+            if (_session is not null && string.IsNullOrWhiteSpace(_session))
+            {
+                throw new ArgumentException("--session needs the identifier of a session.");
+            }
+
+            if (_withChildren && _session is null)
+            {
+                throw new ArgumentException("--with-children goes with --session.");
+            }
+
             return new StatisticsRequest
             {
                 Period = _period,
@@ -462,6 +476,8 @@ internal static class StatisticsCommands
                     Effort = Clean(_effort),
                     Origin = Clean(_origin),
                     ToolKind = Clean(_toolKind),
+                    Session = Clean(_session),
+                    WithChildren = _withChildren,
                 },
             };
         }

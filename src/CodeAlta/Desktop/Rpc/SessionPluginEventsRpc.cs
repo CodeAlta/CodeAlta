@@ -36,7 +36,9 @@ internal sealed class SessionPluginEventsService
     internal const int MaximumDetailSections = 4;
     internal const int MaximumHtmlUnits = 16 * 1024;
     private const int MaximumHeaderUnits = 128;
-    private const int MaximumResponseUnits = 96 * 1024;
+    // A card that gives an HTML form of its details gives them twice (the Markdown stays, for Copy): room for the most cards
+    // of a response with both forms of a long turn, far under what the transport carries.
+    internal const int MaximumResponseUnits = 192 * 1024;
 
     private static readonly PluginContributionHandle StatisticsHandle = new()
     {

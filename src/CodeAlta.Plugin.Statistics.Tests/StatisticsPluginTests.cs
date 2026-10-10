@@ -307,6 +307,48 @@ public sealed class StatisticsPluginTests
     }
 
     [TestMethod]
+    public async Task TheSessionOfAQuestion_AndItsSubAgents_ReachTheQuery()
+    {
+        await using var harness = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
+        var plugin = new StatisticsPlugin();
+        var services = new TestServices(harness.Store.Database, new FakeAlta());
+        string[] period = ["--period", "2026-01-01..2026-10-09", "--by", "month"];
+        var request = new StatisticsRequest { Period = "2026-01-01..2026-10-09", Frequency = StatisticsFrequency.Month };
+
+        // session-1 created session-2 (QueryHarness).
+        var alone = await RunAsync(plugin, services, ["series", "tokens", .. period, "--session", "session-1"]);
+        var tree = await RunAsync(plugin, services, ["series", "tokens", .. period, "--session", "session-1", "--with-children"]);
+        var summary = await RunAsync(plugin, services, ["summary", .. period, "--session", "session-1", "--with-children"]);
+        var top = await RunAsync(plugin, services, ["top", "sessions", "--period", "2026-01-01..2026-10-09", "--session", "session-1", "--with-children"]);
+        var unknown = await RunAsync(plugin, services, ["series", "tokens", .. period, "--session", "nobody"]);
+
+        foreach (var result in new[] { alone, tree, summary, top, unknown })
+        {
+            Assert.AreEqual(0, result.ExitCode, result.Stderr);
+        }
+
+        var single = new StatisticsFilter { Session = "session-1" };
+        var both = new StatisticsFilter { Session = "session-1", WithChildren = true };
+        AssertRecordIs("alta.statistics.series", await harness.Queries.SeriesAsync(request with { Filter = single }, "tokens", null), Single(alone.Stdout));
+        AssertRecordIs("alta.statistics.series", await harness.Queries.SeriesAsync(request with { Filter = both }, "tokens", null), Single(tree.Stdout));
+        AssertRecordIs("alta.statistics.summary", await harness.Queries.SummaryAsync(request with { Filter = both }), Single(summary.Stdout));
+        static double Total(JsonElement record) => record.GetProperty("series")[0].GetProperty("total").GetDouble();
+        Assert.IsTrue(Total(Single(tree.Stdout)) > Total(Single(alone.Stdout)), "The tokens of the sub-agent are added to those of the session.");
+        CollectionAssert.AreEquivalent(new[] { "session-1", "session-2" }, Single(top.Stdout).GetProperty("rows").EnumerateArray().Select(static row => row.GetProperty("key").GetString()).ToArray());
+        // A session the statistics do not know: nothing, and the result says why. Never the numbers of every session.
+        Assert.AreEqual(0, Total(Single(unknown.Stdout)));
+        Assert.AreEqual("session-not-found", Single(unknown.Stdout).GetProperty("query").GetProperty("notes").EnumerateArray().Single().GetString());
+
+        // What cannot name one session is a usage error.
+        foreach (var bad in new string[][] { ["--session", ""], ["--with-children"], ["--session", "session-"] })
+        {
+            var refused = await RunAsync(plugin, services, ["series", "tokens", .. period, .. bad]);
+            Assert.AreEqual(2, refused.ExitCode, string.Join(' ', bad));
+            StringAssert.Contains(refused.Stderr, "usage.invalidQuery");
+        }
+    }
+
+    [TestMethod]
     public async Task TheComparison_TheOriginAndTheKindOfTool_ReachTheQuery()
     {
         await using var harness = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));

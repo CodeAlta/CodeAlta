@@ -606,6 +606,13 @@ test("a question that fails is told with a way to try again, and an empty period
     await page.until(`document.querySelectorAll('.stats-block[data-state="empty"]').length >= 3`, "the empty blocks");
     assert.equal(await page.evaluate(`document.querySelector('.stats-block[data-state="empty"] .stats-empty').textContent`), "Nothing in this period.");
     await page.shot("empty-dark");
+    // No page waits for ever in a period without anything: the durations of no tool are not asked, and their block says that there is nothing.
+    for (const title of tabTitles) {
+      await openPage(page, title);
+      assert.equal(await page.evaluate(`document.querySelectorAll('.stats-block[data-state="loading"]').length`), 0, title);
+    }
+    await openPage(page, "Tools");
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('[data-page="tools"] .stats-block')].find(block => block.querySelector('h3').textContent === 'Duration of one tool')?.dataset.state`), "empty");
   });
 });
 

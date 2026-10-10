@@ -209,9 +209,22 @@ export function requestOf(frame: Frame, weekStart: number, extra: Partial<Statis
   };
 }
 
-/** The frame a canvas opens with when the window shows a space or the menu of a project opened it. */
-export function initialFrame(context: Readonly<{ spaceId?: string | null; spaceName?: string | null; projectId?: string | null; projectName?: string | null }>): Frame {
+/**
+ * The request of a canvas opened for one session: the same request, limited to that session and its sub-agents. The limit is added
+ * last, so that neither a filter of the frame nor what a page adds to its request (a filter emptied to list every model) lifts it.
+ */
+export function sessionScoped(request: StatisticsRequest, sessionId: string | null | undefined): StatisticsRequest {
+  return sessionId ? { ...request, filter: { ...request.filter, session: sessionId, withChildren: true } } : request;
+}
+
+/**
+ * The frame a canvas opens with when the window shows a space or the menu of a project opened it. A canvas of a session opens with
+ * no filter (the session is its limit, and its sub-agents may be of another project than the one the window shows) and on the whole
+ * life of the session, which the plugin gives for `all`: a session of last spring has nothing in the last 30 days.
+ */
+export function initialFrame(context: Readonly<{ spaceId?: string | null; spaceName?: string | null; projectId?: string | null; projectName?: string | null; sessionId?: string | null }>): Frame {
   let filters: Filters = {};
+  if (context.sessionId) return { ...defaultFrame, period: { kind: "preset", preset: "all" } };
   if (context.projectId) filters = { ...filters, project: { value: context.projectId, label: context.projectName ?? undefined } };
   else if (context.spaceId) filters = { ...filters, space: { value: context.spaceId, label: context.spaceName ?? undefined } };
   return { ...defaultFrame, filters };

@@ -8,7 +8,7 @@ import { readMoreChoices } from "./history";
 import { comparisonLabel, filterKindLabel, filterValueLabel, frequencyLabel, periodLabel } from "./labels";
 import { useStatistics } from "./runtime";
 import { queryKey, useStatisticsQuery } from "./useQuery";
-import type { Comparison, HistoryChoice, RequestFrequency } from "./types";
+import type { Comparison, HistoryChoice, RequestFrequency, StatisticsRequest } from "./types";
 
 // The bar every page shares: period, frequency, comparison, the filters as chips, "Reset" and the menu of the canvas.
 
@@ -106,6 +106,24 @@ function AddFilter() {
   </PopoverNext>;
 }
 
+/**
+ * The chip of a canvas opened for one session: the session its numbers are limited to, with its sub-agents. It is the subject of the
+ * canvas and no filter: it has no way to remove it, and it opens the session.
+ */
+function SessionScope({ sessionId }: Readonly<{ sessionId: string }>) {
+  const { t } = useText();
+  const { api, context } = useStatistics();
+  // The row of the session alone, over its whole life: a session that is not read yet has none, and gets one when it is read.
+  const alone = useMemo<StatisticsRequest>(() => ({ period: "all", filter: { session: sessionId }, limit: 1 }), [sessionId]);
+  const own = useStatisticsQuery(queryKey("sessions", alone, "recent"), signal => api.sessions(alone, "recent", signal));
+  // The title the statistics read for the session; the start of its id until then.
+  const text = `${t("Session")}: ${own.data?.rows[0]?.title?.trim() || sessionId.slice(0, 8)}`;
+  const open = context.openSession;
+  return <span className="stats-chip stats-chip-scope" role="group" aria-label={text}>
+    {open ? <button type="button" className="stats-chip-text" title={t("Open the session")} onClick={() => open(sessionId)}>{text}</button> : <span className="stats-chip-text">{text}</span>}
+  </span>;
+}
+
 /** The menu of the canvas: more history, forget the deleted, reset (which asks first). */
 function CanvasMenu() {
   const { t } = useText();
@@ -137,7 +155,7 @@ function CanvasMenu() {
 /** The bar. */
 export function FrameBar() {
   const { t } = useText();
-  const { frame, dispatch, resetFrame, header, openFrame, providerName } = useStatistics();
+  const { frame, dispatch, resetFrame, header, openFrame, providerName, context } = useStatistics();
   const ignored = ignoredKinds(header?.ignoredFilters ?? []);
   const set = filterKeys.filter(key => frame.filters[key]);
   const changed = encodeFrame({ ...frame, page: openFrame.page, view: openFrame.view }) !== encodeFrame(openFrame);
@@ -147,6 +165,7 @@ export function FrameBar() {
     <ComparePicker />
     <span className="stats-frame-sep" aria-hidden="true" />
     <div className="stats-chips" role="group" aria-label={t("Filters")}>
+      {context.sessionId && <SessionScope sessionId={context.sessionId} />}
       {set.map(key => {
         const entry = frame.filters[key]!;
         const text = `${filterKindLabel(t, key)}: ${filterChipValue(key, entry, { word: (kind, value) => filterValueLabel(t, kind, value), provider: providerName })}`;

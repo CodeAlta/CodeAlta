@@ -35,6 +35,13 @@ export type PluginUiValue = Readonly<{
 export const PluginUiContext = createContext<PluginUiValue>({ epoch: null, projectId: null, contributions: noPluginContributions, run: () => { }, runNamed: () => { } });
 
 /**
+ * The pane the plugin content below is shown for, where the place knows it better than the focus does: the timeline of a
+ * session gives its session and its project, so that a command of a card runs for the session of the card, whatever pane has
+ * the keyboard. Content that is given a pane of its own keeps it.
+ */
+export const PluginPaneContext = createContext<Partial<PluginPane> | undefined>(undefined);
+
+/**
  * A request the shell addresses to the composer of a session, as a `codealta:plugin` window event: to read
  * its draft and state before a plugin command runs (`state`), or to do what a plugin asked (`send`,
  * `enqueue`, `steer`, `compact`, `draft`). `sessionId` null means the composer of the focused pane. The

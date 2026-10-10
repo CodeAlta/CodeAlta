@@ -368,25 +368,13 @@ public sealed partial class StatisticsQueries
 
     private SessionDetailResult? BuildSession(SqlSession sql, ResolvedQuery query, string text, bool withChildren)
     {
-        var matches = sql.Query($"SELECT session_id FROM {P}session WHERE session_id = @p0 OR session_id LIKE @p1 ESCAPE '\\' LIMIT 3", static reader => reader.GetString(0), text, EscapeLike(text) + "%");
-        if (matches.Count == 0)
+        if (FindSessionScope(sql, text, withChildren) is not { } scope)
         {
             return null;
         }
 
-        var exact = matches.FirstOrDefault(match => string.Equals(match, text, StringComparison.OrdinalIgnoreCase));
-        if (exact is null && matches.Count > 1)
-        {
-            throw new ArgumentException($"'{text}' is the start of several sessions: give more of its identifier.");
-        }
-
-        var id = exact ?? matches[0];
-        IReadOnlyList<string> ids = withChildren
-            ? sql.Query(
-                $"WITH RECURSIVE tree(id) AS (SELECT @p0 UNION SELECT s.session_id FROM {P}session s JOIN tree t ON s.parent_session_id = t.id) SELECT id FROM tree",
-                static reader => reader.GetString(0),
-                id)
-            : [id];
+        var id = scope.Root;
+        var ids = scope.Ids;
         query.SessionIds = ids;
         var rootRow = SessionEntries(sql, query, [id], "recent", 1, out _).FirstOrDefault()
             ?? sql.Query(
@@ -414,6 +402,19 @@ public sealed partial class StatisticsQueries
         var models = ModelRows(sql, query, 20);
         var tools = ToolRows(sql, query, null, out _, out _, 10);
         return new SessionDetailResult(Header(query), rootRow, children, [.. summary.Tiles, .. summary.Costs], runs, models, tools);
+    }
+
+    /// <summary>Gets the title of a session the statistics know, for the name of a page limited to it.</summary>
+    /// <param name="sessionId">The identifier of the session.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The title; null when the session is not known or has none.</returns>
+    internal async ValueTask<string?> SessionTitleAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var titles = await _store.ReadAsync(
+            sql => sql.Query($"SELECT title FROM {P}session WHERE session_id = @p0", static reader => reader.IsDBNull(0) ? null : reader.GetString(0), sessionId),
+            cancellationToken).ConfigureAwait(false);
+        return titles.FirstOrDefault(static title => !string.IsNullOrWhiteSpace(title));
     }
 
     private static string EscapeLike(string text)

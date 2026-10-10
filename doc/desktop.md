@@ -1186,6 +1186,9 @@ with `PluginScript.App("statistics")`) and fed by the plugin through `alta.rpc`.
 - **Statistics** in the search of the window, `/statistics`, and `Ctrl+G` then `C`;
 - the **Statistics of this project** line of the menu of a project, which opens the canvas for that project only (its own tab,
   key `project:<project id>`);
+- the **Statistics of this session** line of the menu of a session, and the **Session statistics** button at the foot of the
+  details of the card of a turn, which open the canvas for that session and its sub-agents (its own tab, key
+  `session:<session id>`): the session of the row or of the card, whatever is selected;
 - `alta canvas open statistics`, and `alta statistics` for the numbers themselves.
 
 Each space has its own Statistics tab, which starts on the space it shows (nothing for the space that holds every

@@ -26,7 +26,9 @@ export function ToolsPage() {
   const rows = useMemo(() => mergeToolRows(tools.data?.rows ?? []), [tools.data]);
   const top = useMemo(() => [...rows].sort((a, b) => b.calls - a.calls).slice(0, 6), [rows]);
   const topKeys = useMemo(() => top.flatMap(row => row.keys).slice(0, 12), [top]);
-  const durations = useToolDurations(topKeys, { extra: { comparison: "none" } });
+  const asked = useToolDurations(topKeys, { extra: { comparison: "none" } });
+  // A period without a tool has no duration to ask for: the block then follows the table, and says that there is nothing.
+  const durations = topKeys.length === 0 ? { ...asked, loading: tools.loading, error: tools.error, retry: tools.retry } : asked;
   const shell = useDetails("shell-program", { extra: { limit: 8, comparison: "none" } });
   const alta = useDetails("alta-command", { extra: { limit: 8, comparison: "none" } });
 
@@ -74,7 +76,7 @@ export function ToolsPage() {
     <Block title={t("Where time goes")} span={6} minHeight={280} query={tools} empty={tools.data !== undefined && rows.every(row => row.timeMs === 0)}>
       {tools.data && <StatChart option={tree.option} table={tree.table} ariaLabel={t("Tool time by kind, then by tool")} height={260} group="tools-tree" />}
     </Block>
-    <Block title={t("Duration of one tool")} span={6} minHeight={280} query={durations} empty={durations.data !== undefined && boxes === null}>
+    <Block title={t("Duration of one tool")} span={6} minHeight={280} query={durations} empty={!durations.loading && boxes === null}>
       {boxes && <StatChart option={boxes} ariaLabel={t("Duration of the most called tools, on a logarithmic scale")} height={260} group="tools-box" />}
     </Block>
     <Block title={t("Shell")} span={4} minHeight={170} query={shell} empty={shell.data !== undefined && shell.data.rows.length === 0}>

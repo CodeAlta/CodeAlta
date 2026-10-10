@@ -65,9 +65,19 @@ public sealed record StatisticsFilter
     /// <summary>Gets the kind of tool: <c>files</c>, <c>search</c>, <c>shell</c>, <c>web</c>, <c>alta</c>, <c>mcp</c>, <c>skill</c> or <c>other</c>.</summary>
     public string? ToolKind { get; init; }
 
+    /// <summary>
+    /// Gets the session the numbers are limited to: its identifier, or the start of it when only one session matches. A session the
+    /// statistics do not know gives numbers of nothing, with the note <c>session-not-found</c>, never the numbers of every session.
+    /// </summary>
+    public string? Session { get; init; }
+
+    /// <summary>Gets a value indicating whether the limit to <see cref="Session"/> includes the sessions that session created, at any depth: its sub-agents.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool WithChildren { get; init; }
+
     /// <summary>Gets a value indicating whether no filter is set.</summary>
     [JsonIgnore]
-    public bool IsEmpty => Space is null && Project is null && Provider is null && Model is null && Effort is null && Origin is null && ToolKind is null;
+    public bool IsEmpty => Space is null && Project is null && Provider is null && Model is null && Effort is null && Origin is null && ToolKind is null && Session is null;
 }
 
 /// <summary>What a page of the statistics asks for: a period, a frequency, filters and a comparison.</summary>

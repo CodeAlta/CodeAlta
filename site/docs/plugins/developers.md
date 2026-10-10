@@ -485,7 +485,7 @@ new PluginDerivedSessionEvent
 }
 ```
 
-Keep the `EventId` stable for the same turn so the card is updated, not duplicated. A detail section can also carry `Html`. For a native TUI card, use `PluginTerminalDerivedSessionEvent` with a `VisualFactory`.
+Keep the `EventId` stable for the same turn so the card is updated, not duplicated. A detail section can also carry `Html`. A `data-alta-command` element of a card runs its command for the session of the card. For a native TUI card, use `PluginTerminalDerivedSessionEvent` with a `VisualFactory`.
 
 ## Canvases
 

@@ -213,8 +213,20 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     };
   }
 
+  // The session a filter names and, when asked, the sessions it created at any depth; nothing for a session that is not known.
+  function sessionTree(id: string, withChildren: boolean): ReadonlySet<string> {
+    const root = data.sessions.find(item => item.id === id) ?? data.sessions.find(item => item.id.startsWith(id));
+    const ids = new Set<string>(root ? [root.id] : []);
+    for (let grown = withChildren && ids.size > 0; grown;) {
+      grown = false;
+      for (const item of data.sessions) if (item.parent && ids.has(item.parent) && !ids.has(item.id)) { ids.add(item.id); grown = true; }
+    }
+    return ids;
+  }
+
   function accepts(cell: Cell, request: StatisticsRequest, family: Family): boolean {
     const filter = request.filter ?? {};
+    if (filter.session && !sessionTree(filter.session, filter.withChildren === true).has(cell.session)) return false;
     if (filter.space) { const projects = spaceProjects(filter.space); if (projects && !projects.has(cell.project)) return false; }
     if (filter.project) { const id = projectId(filter.project); if (id && cell.project !== id) return false; }
     if (honored[family].includes("provider") && filter.provider && cell.provider !== filter.provider) return false;

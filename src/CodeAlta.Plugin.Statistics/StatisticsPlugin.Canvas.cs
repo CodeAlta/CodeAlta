@@ -78,6 +78,7 @@ public sealed partial class StatisticsPlugin
         {
             Command = ProjectCommandName,
         };
+        yield return SessionMenuButton();
     }
 
     /// <inheritdoc />
@@ -104,6 +105,9 @@ public sealed partial class StatisticsPlugin
             ShowInCommandBar = false,
             ShowInHelp = false,
         };
+
+        // Run by the line of a session menu and by the card of a turn, for the session of the row or of the card.
+        yield return SessionCommand();
     }
 
     /// <summary>Gets the state of the button of the title bar from the state of the history: a ring while it is read, a dot while the choice waits.</summary>
@@ -178,6 +182,11 @@ public sealed partial class StatisticsPlugin
 
     private async ValueTask<string> TitleOfAsync(string? key, CancellationToken cancellationToken)
     {
+        if (SessionOfKey(key) is { } session)
+        {
+            return await SessionTabTitleAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+
         if (ProjectOfKey(key) is not { } project || _directory is not { } directory)
         {
             return "Statistics";
@@ -206,7 +215,7 @@ public sealed partial class StatisticsPlugin
             HistoryState.Failed => "The statistics could not start.",
             _ => "The statistics are starting.",
         });
-        builder.Append("\n\nThe numbers are those of `alta statistics summary`, `series`, `top` and `session`. Open it with the key `project:<project id>` for the statistics of one project.");
+        builder.Append("\n\nThe numbers are those of `alta statistics summary`, `series`, `top` and `session`. Open it with the key `project:<project id>` for the statistics of one project, or `session:<session id>` for those of one session and its sub-agents.");
         return new ValueTask<string?>(builder.ToString());
     }
 

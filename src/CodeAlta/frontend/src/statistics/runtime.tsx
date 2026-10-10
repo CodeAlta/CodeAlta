@@ -3,7 +3,7 @@ import { useText } from "./text";
 import type { StatisticsApi, StatisticsContext, StatisticsEvent } from "./api";
 import { createFormatter, type Formatter } from "./format";
 import { providerNamer } from "./labels";
-import { decodeFrame, encodeFrame, firstDayOfWeek, frameReducer, initialFrame, localToday, requestOf, type Frame, type FrameAction } from "./frame";
+import { decodeFrame, encodeFrame, firstDayOfWeek, frameReducer, initialFrame, localToday, requestOf, sessionScoped, type Frame, type FrameAction } from "./frame";
 import { QueryStore, joinRanges, type DayRange } from "./queryStore";
 import type { HistoryChoice, QueryHeader, StatisticsRequest, StatisticsStatus } from "./types";
 
@@ -48,7 +48,7 @@ export type StatisticsRuntime = Readonly<{
   /** True while the canvas is shown: hidden, it asks nothing. */
   visible: boolean;
   history: HistoryControls;
-  /** The request of a page: the frame, plus what the page adds. */
+  /** The request of a page: the frame, plus what the page adds, limited to the session of the canvas when it has one. */
   request: (extra?: Partial<StatisticsRequest>) => StatisticsRequest;
   /** The name of a provider from its key, as the window names it; the key when the window does not know it. */
   providerName: (key: string) => string;
@@ -93,8 +93,8 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
   const [store] = useState(() => new QueryStore());
   const colors = useRef(new Map<string, number>());
   const spaceName = context.spaces?.find(space => space.id === context.spaceId)?.name ?? null;
-  const open = useMemo(() => initialFrame({ spaceId: context.spaceId, spaceName, projectId: context.projectId, projectName: context.projectName }),
-    [context.spaceId, spaceName, context.projectId, context.projectName]);
+  const open = useMemo(() => initialFrame({ spaceId: context.spaceId, spaceName, projectId: context.projectId, projectName: context.projectName, sessionId: context.sessionId }),
+    [context.spaceId, spaceName, context.projectId, context.projectName, context.sessionId]);
   const openRef = useRef(open);
   openRef.current = open;
   const [frame, dispatch] = useReducer(frameReducer, undefined, () => decodeFrame(storage?.getItem(frameKey(context.instanceId)), open));
@@ -166,7 +166,8 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
   // The weeks are those of the plugin when it says where they start, so that a chart and `alta statistics` cut the same weeks.
   const weekStart = useMemo(() => context.weekStart ?? firstDayOfWeek(locale), [context.weekStart, locale]);
   const fmt = useMemo(() => createFormatter(locale, { credits: amount => t("{amount} AI credits", { amount }), none: "–" }), [locale]); // eslint-disable-line react-hooks/exhaustive-deps
-  const request = useCallback((extra?: Partial<StatisticsRequest>) => requestOf(frame, weekStart, extra), [frame, weekStart]);
+  const sessionId = context.sessionId ?? null;
+  const request = useCallback((extra?: Partial<StatisticsRequest>) => sessionScoped(requestOf(frame, weekStart, extra), sessionId), [frame, weekStart, sessionId]);
   const colorIndex = useCallback((key: string) => {
     let index = colors.current.get(key);
     if (index === undefined) { index = colors.current.size; colors.current.set(key, index); }

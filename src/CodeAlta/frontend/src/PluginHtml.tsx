@@ -5,7 +5,7 @@ import { markdownLinkActivation, safeMarkdownHref } from "./markdownLinks";
 import { collectPluginFields, createPluginHtmlSanitizer, pluginActionAttribute, pluginChartClass, pluginChartLabelAttribute, pluginChartOptionAttribute,
   pluginCommandAttribute, pluginMarkdownClass, pluginMarkdownSource, pluginValueAttribute } from "./pluginHtmlSanitizer";
 import { PluginChartBlock, readPluginChart, type PluginChartSource } from "./pluginScript/PluginChartBlock";
-import { PluginUiContext, type PluginPane } from "./pluginUi";
+import { PluginPaneContext, PluginUiContext, type PluginPane } from "./pluginUi";
 import { AltaReactContext, ScriptBoundary, ScriptFailure, usePluginScript, usePluginScriptMount, useWhenShown, type PluginScriptProps } from "./pluginScript/PluginScript";
 
 type MarkdownBlock = Readonly<{ element: HTMLElement; source: string }>;
@@ -14,7 +14,8 @@ type ChartBlock = Readonly<{ element: HTMLElement; source: PluginChartSource }>;
 /**
  * Shows an HTML fragment given by a plugin. The fragment is sanitized first, so nothing in it runs: the
  * window acts for it. An element with `data-alta-command` runs the plugin command of that name for the
- * pane the fragment is shown in; one with `data-alta-action` reports the action with the values of the
+ * pane the fragment is shown in (`pane`, or the one the place around it names: the timeline of a session names that
+ * session); one with `data-alta-action` reports the action with the values of the
  * fragment's named fields to `onAction` (a dialog). A link opens its page of the web in the system browser, and
  * never navigates the window.
  *
@@ -26,16 +27,20 @@ type ChartBlock = Readonly<{ element: HTMLElement; source: PluginChartSource }>;
  * plugin, and either it is a component, which replaces the fragment in the tree of the window, or its `mount(root, alta)` fills the
  * element that holds the fragment.
  */
-export function PluginHtml({ html, pluginKey = null, pane, className, script, onAction, onSubmit, ref }: {
+export function PluginHtml({ html, pluginKey = null, pane: ownPane, className, script, onAction, onCommand, onSubmit, ref }: {
   html: string; pluginKey?: string | null; pane?: Partial<PluginPane>; className?: string;
   /** The script of the content, when it has one (see {@link PluginScriptProps}). */
   script?: PluginScriptProps;
   onAction?: (action: string, value: string | null, values: Record<string, string>) => void;
+  /** Called when an element of the fragment ran a command: a window that covers the rest closes, since what a command shows is behind it. */
+  onCommand?: () => void;
   /** Enter in a single-line field, for a dialog that has a default button. */
   onSubmit?: () => void;
   ref?: Ref<HTMLDivElement>;
 }) {
   const ui = useContext(PluginUiContext);
+  const around = useContext(PluginPaneContext);
+  const pane = ownPane ?? around;
   const openLink = useContext(MarkdownLinksContext);
   const sanitize = useMemo(() => createPluginHtmlSanitizer(window), []);
   // React compares this prop by identity: equivalent refreshes must not replace fields the user is editing.
@@ -106,7 +111,7 @@ export function PluginHtml({ html, pluginKey = null, pane, className, script, on
     if (["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName) && !["checkbox", "radio"].includes((element as HTMLInputElement).type)) return;
     const command = element.getAttribute(pluginCommandAttribute);
     const action = element.getAttribute(pluginActionAttribute);
-    if (command) { event.preventDefault(); ui.runNamed(command, pluginKey, pane); }
+    if (command) { event.preventDefault(); ui.runNamed(command, pluginKey, pane); onCommand?.(); }
     else if (action && onAction) { event.preventDefault(); onAction(action, element.getAttribute(pluginValueAttribute), collectPluginFields(event.currentTarget)); }
   }
 

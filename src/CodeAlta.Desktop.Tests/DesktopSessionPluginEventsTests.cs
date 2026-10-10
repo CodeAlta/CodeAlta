@@ -42,6 +42,51 @@ public sealed class DesktopSessionPluginEventsTests
     }
 
     [TestMethod]
+    public async Task Read_GivesEachStatisticsCardTheButtonOfItsSession_AndStillKeepsTheMostCards()
+    {
+        // More finished turns than a response holds, each with a dozen tools: long details, given as Markdown and as HTML.
+        string[] tools = ["read_file", "grep", "list_dir", "apply_patch", "write_file", "webget", "alta", "view_image", "replace_in_file", "rename_file_or_dir", "delete_file_or_dir", "request_user_input"];
+        IEnumerable<AgentEvent> Busy(string run, int second)
+        {
+            yield return Text(run, AgentContentKind.User, second);
+            foreach (var (tool, index) in tools.Select(static (tool, index) => (tool, index)))
+            {
+                yield return new AgentActivityEvent(new("provider"), "session", Start.AddSeconds(second + 1), new(run), AgentActivityKind.ToolCall, AgentActivityPhase.Started, $"{run}-{index}", null, tool, null);
+                yield return new AgentActivityEvent(new("provider"), "session", Start.AddSeconds(second + 2), new(run), AgentActivityKind.ToolCall, AgentActivityPhase.Completed, $"{run}-{index}", null, tool, null);
+            }
+
+            yield return Text(run, AgentContentKind.Assistant, second + 3);
+            yield return new AgentSessionUpdateEvent(new("provider"), "session", Start.AddSeconds(second + 4), new(run), AgentSessionUpdateKind.Idle, null);
+        }
+
+        var turns = SessionPluginEventsService.MaximumEvents + 8;
+        var journal = Enumerable.Range(0, turns).SelectMany(index => Busy($"run{index:00}", index * 100)).ToArray();
+        var service = Service(Pages(journal, 100));
+
+        var response = await service.ReadAsync(Request(Start), CancellationToken.None);
+
+        Assert.AreEqual("ok", response.Status);
+        Assert.AreEqual(SessionPluginEventsService.MaximumEvents, response.Events.Length, "the most cards of a response, with both forms of their details");
+        StringAssert.Contains(response.Events[^1].EventId, $"run{turns - 1:00}", "the newest turns are the ones that are kept");
+        foreach (var card in response.Events)
+        {
+            Assert.IsNull(card.Html, "the row of the card is its summary");
+            var details = card.Details.Single();
+            StringAssert.Contains(details.Markdown, "| Prompt |", "Copy keeps the Markdown");
+            Assert.IsNotNull(details.Html);
+            StringAssert.Contains(details.Html, "class=\"alta-markdown\"");
+            StringAssert.Contains(details.Html, "| Prompt |");
+            StringAssert.EndsWith(details.Html, "<button type=\"button\" data-alta-command=\"statistics-session\">Session statistics</button></div></div>");
+            Assert.IsTrue(details.Html.Length < SessionPluginEventsService.MaximumHtmlUnits, "the fragment is whole: a cut would lose its button");
+        }
+
+        // The two forms of these cards do not fit the room a response had for Markdown alone.
+        var size = response.Events.Sum(static card => card.EventId.Length + card.Markdown.Length + card.Details.Sum(static detail => detail.Header.Length + detail.Markdown.Length + (detail.Html?.Length ?? 0)));
+        Assert.IsTrue(size > 96 * 1024, $"the cards of the test are long enough to tell: {size}");
+        Assert.IsTrue(size < SessionPluginEventsService.MaximumResponseUnits);
+    }
+
+    [TestMethod]
     public async Task ReadTurns_LeavesOutARunWhoseBeginningIsBeyondThePageLimit()
     {
         // One record per page: the old run is longer than the page limit, the new one fits.

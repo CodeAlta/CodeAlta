@@ -10,7 +10,8 @@ import { DiffPreview } from "./changes/DiffPreview";
 import { isDialogBackdrop } from "./dialogBackdrop";
 
 // Immutable supplied presentation only: opening this dialog grants no RPC or mutation authority. The links of
-// its texts are followed by the opener of the window, as those of a message are.
+// its texts are followed by the opener of the window, as those of a message are. A command that the fragment of a
+// plugin card runs closes the dialog: what a command shows (a tab, a dialog of its own) would be behind it.
 export function TimelineDetails({ item, current, onClose }: { item: TimelineItem; current: () => boolean; onClose: () => void }) {
   const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -34,12 +35,12 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     <AppWindowSurface storageKey="codealta.desktop.window.timeline-details.v1" title={item.title} preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
       onClose={onClose} closeLabel={t("Close")} closeRef={close}>
     <div className="dialog-panes">
-    {item.html && <section className="detail-pane"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null }} /></section>}
+    {item.html && <section className="detail-pane"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null }} onCommand={onClose} /></section>}
     {item.summary && !item.html && <section className="detail-pane"><CodePreview text={item.summary} /></section>}
     {item.markdown && item.category !== "file" && <section className="detail-pane"><MarkdownContent source={item.markdown} timelineCodeBlocks /></section>}
     {item.detailMarkdown && item.category !== "file" && item.detailMarkdown !== item.markdown && <section className="detail-pane"><MarkdownContent source={item.detailMarkdown} timelineCodeBlocks /></section>}
     {item.detailSections?.map((detail, index) => <section className="detail-pane plugin-detail" key={index}><h3>{detail.header}</h3>
-      {detail.html ? <PluginHtml html={detail.html} pluginKey={item.pluginKey} /> : <MarkdownContent source={detail.markdown ?? ""} timelineCodeBlocks />}</section>)}
+      {detail.html ? <PluginHtml html={detail.html} pluginKey={item.pluginKey} onCommand={onClose} /> : <MarkdownContent source={detail.markdown ?? ""} timelineCodeBlocks />}</section>)}
     {item.toolFields?.map(field => field.path === "diff"
       // The diff an edit left behind comes first, as a diff.
       ? <section className="detail-pane detail-pane-diff" key={field.path}><h3>{t("Changes")}{item.toolChanges

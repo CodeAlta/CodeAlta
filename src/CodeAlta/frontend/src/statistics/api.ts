@@ -89,6 +89,11 @@ export type StatisticsContext = Readonly<{
   /** Starts the canvas filtered on this project (the menu of a project). */
   projectId?: string | null;
   projectName?: string | null;
+  /**
+   * Limits the canvas to this session and its sub-agents (the menu of a session, the card of a turn). It is the subject of the canvas, not a
+   * filter of its bar: every question carries it, no chip removes it and "Reset" keeps it.
+   */
+  sessionId?: string | null;
   /** The providers of the window with the names it shows them under: a number is filed under the key, and read under the name. */
   providers?: readonly Readonly<{ key: string; name: string }>[];
   /**

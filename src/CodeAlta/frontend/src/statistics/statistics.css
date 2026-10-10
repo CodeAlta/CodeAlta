@@ -17,6 +17,10 @@
 .stats-chip-text { min-width: 0; overflow: hidden; padding: 4px 4px 4px 10px; text-overflow: ellipsis; white-space: nowrap; }
 .stats-chip-remove { display: grid; place-items: center; width: 22px; height: 22px; margin-right: 2px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
 .stats-chip-remove:hover { background: var(--panel-3); color: var(--text); }
+.stats-chip-scope .stats-chip-text { padding-right: 10px; }
+button.stats-chip-text { border: 0; border-radius: 999px; background: transparent; color: inherit; font: inherit; line-height: inherit; cursor: pointer; }
+button.stats-chip-text:hover { background: var(--panel-3); }
+button.stats-chip-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .stats-chip-remove:focus-visible, .stats-cell-link:focus-visible, .stats-ranked-row:focus-visible, .stats-record:focus-visible, .stats-link:focus-visible, .stats-table th button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .stats-popover { min-width: 220px; max-width: 320px; padding: 4px; }
 .stats-confirm { display: grid; gap: 6px; max-width: 280px; padding: 12px 14px 10px; }

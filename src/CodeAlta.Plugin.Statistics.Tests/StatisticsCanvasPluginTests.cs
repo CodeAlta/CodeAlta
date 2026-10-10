@@ -45,13 +45,13 @@ public sealed class StatisticsCanvasPluginTests
         Assert.IsFalse(string.IsNullOrWhiteSpace(canvas.Description));
 
         var buttons = harness.Plugin.GetUiContributions().OfType<PluginButtonContribution>().ToList();
-        Assert.AreEqual(2, buttons.Count);
+        Assert.AreEqual(3, buttons.Count);
         var title = buttons.Single(button => button.Place == PluginButtonPlace.TitleBar);
         Assert.AreEqual(("statistics", "chart-column", "Statistics", "statistics", null), (title.Id, title.Icon, title.Label, title.Canvas, title.Command));
         var menu = buttons.Single(button => button.Place == PluginButtonPlace.ProjectMenu);
         Assert.AreEqual(("statistics-project", null, "statistics-project", "Statistics of this project"), (menu.Id, menu.Canvas, menu.Command, menu.Label));
-        Assert.IsTrue(buttons.All(button => button.Validate() is null), "the host keeps both buttons");
-        Assert.IsFalse(buttons.Any(button => button.Place == PluginButtonPlace.SessionMenu), "no session filter exists in the queries: the session menu has no line");
+        Assert.IsTrue(buttons.All(button => button.Validate() is null), "the host keeps every button");
+        Assert.AreEqual("statistics-session", buttons.Single(button => button.Place == PluginButtonPlace.SessionMenu).Command, "the menu of a session has its line (StatisticsSessionScopeTests)");
 
         var commands = harness.Plugin.GetCommands().ToList();
         var open = commands.Single(command => command.Name == "statistics");
@@ -61,7 +61,7 @@ public sealed class StatisticsCanvasPluginTests
         Assert.IsFalse(project.ShowInCommandPalette || project.ShowInHelp || project.ShowInCommandBar, "the line of the menu runs it; the palette does not list it");
         Assert.IsTrue(project.Availability.RequiresProject);
         Assert.IsTrue(commands.All(command => command.KeyBinding is null || command.Name == "statistics"), "one shortcut only");
-        Assert.IsTrue(commands.Select(command => command.Name).Contains(menu.Command!), "the button names a command the plugin has");
+        Assert.IsTrue(buttons.Where(button => button.Command is not null).All(button => commands.Any(command => command.Name == button.Command)), "each button names a command the plugin has");
     }
 
     [TestMethod]
