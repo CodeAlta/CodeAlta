@@ -373,6 +373,45 @@ test("the sessions at once, the average fill of the context and the depth of the
   });
 });
 
+for (const samples of [0, 2]) test(`context fill distinguishes ${samples} samples from the measured zero percent value`, { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const block = `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === 'Context fill')`;
+    await render(page, { contextSamples: samples });
+    await page.until(settled, "the overview");
+    await openPage(page, "Models");
+    assert.equal(await page.evaluate(`${block}.dataset.state`), samples > 0 ? "ready" : "empty");
+    assert.equal(await page.evaluate(`${block}.querySelector('.stats-empty') !== null`), samples === 0);
+    if (samples > 0) {
+      await page.evaluate(`${block}.querySelector('.chart-table-toggle').click()`);
+      await page.until(`${block}.querySelector('table.chart-table')`, "the measured zero fill table");
+      const values = await page.evaluate<string[]>(`[...${block}.querySelectorAll('table.chart-table tbody td')].map(cell => cell.textContent.trim())`);
+      assert.ok(values.length > 0);
+      assert.ok(values.every(value => value === "0"), values.join(" | "));
+    }
+  });
+});
+
+for (const title of ["Activity", "Agents"]) for (const notes of [false, true]) test(`derived metrics show their own qualification captions only when noted (${title}, ${notes})`, { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
+    await render(page, { derivedNotes: notes });
+    await page.until(settled, "the overview");
+    await openPage(page, title);
+    if (title === "Activity") {
+      assert.equal(await page.evaluate(`${block("Sessions at once")}.querySelector('.stats-block-header p')?.textContent ?? null`), notes ? "Runs with unknown timing are left out." : null);
+      assert.equal(await page.evaluate(`${block("Active time")}.querySelector('.stats-block-header p')?.textContent ?? null`), null, "The note belongs only to its metric.");
+    } else {
+      assert.equal(await page.evaluate(`${block("Depth of the sub-agents")}.querySelector('.stats-block-header p')?.textContent ?? null`), notes ? "Some parents are unknown. Depths are at least the number of levels shown." : null);
+      const labels = await page.evaluate<string[]>(`[...${block("Depth of the sub-agents")}.querySelectorAll('.stats-ranked-name')].map(item => item.textContent.trim())`);
+      assert.ok(labels.length >= 2);
+      assert.equal(labels[0], notes ? "At least 1 level down" : "Sub-agents of your sessions");
+      assert.equal(labels[1], notes ? "At least 2 levels down" : "Sub-agents of sub-agents");
+      assert.ok(!notes || !labels.includes("Sub-agents of your sessions"), "Unknown ancestry must not be described as a known direct child of your session.");
+      assert.equal(await page.evaluate(`${block("Sessions started")}.querySelector('.stats-block-header p')?.textContent ?? null`), null, "The note does not qualify an unrelated metric.");
+    }
+  });
+});
+
 test("the first time asks how much history to read, then shows the progress, the pause and the end", { skip: !edge, timeout: 300_000 }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });

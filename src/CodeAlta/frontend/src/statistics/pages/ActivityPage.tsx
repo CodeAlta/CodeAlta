@@ -55,7 +55,8 @@ export function ActivityPage() {
         describe={(row, hour, value) => `${week.data!.weekdays[row] ?? ""} ${String(hour).padStart(2, "0")}:00: ${value ? fmt.duration(value) : t("no activity")}`}
  /></div>}
     </Block>
-    <Block title={t("Sessions at once")} span={12} minHeight={220} query={atOnce} empty={atOnce.data !== undefined && atOnce.data.series.every(line => line.total === 0)}>
+    <Block title={t("Sessions at once")} caption={atOnce.data?.query.notes.includes("runs-of-unknown-time-left-out") ? t("Runs with unknown timing are left out.") : undefined}
+      span={12} minHeight={220} query={atOnce} empty={atOnce.data !== undefined && atOnce.data.series.every(line => line.total === 0)}>
       {atOnce.data && <SeriesChart result={atOnce.data} kind="line" stacked={false} height={200} ariaLabel={t("Most sessions running at the same time")} name={() => t("Sessions at once")} colorOf={() => colors.at(4)} />}
     </Block>
     <Block title={t("How long a run takes")} span={12} minHeight={260} query={duration} empty={duration.data !== undefined && duration.data.count === 0}>

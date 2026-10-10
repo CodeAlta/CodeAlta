@@ -27,8 +27,8 @@ public sealed partial class StatisticsQueries
         new("output-tokens", FactTables.Usage, "SUM(f.output_tokens)", "tokens"),
         new("reasoning-tokens", FactTables.Usage, "SUM(f.reasoning_tokens)", "tokens"),
 
-        // The requests that reported a context window: what the average of `context-fill` is an average of.
-        new("context-samples", FactTables.Usage, "SUM(f.context_samples)", "count"),
+        // Exclude unsampled rows in both periods before ranking/limiting, just as `context-fill` excludes unsampled groups.
+        new("context-samples", FactTables.Usage, "SUM(f.context_samples)", "count", Where: "f.context_samples > 0"),
         new("tool-calls", FactTables.Tools, "SUM(f.calls)", "count"),
         new("tool-failures", FactTables.Tools, "SUM(f.failures)", "count"),
         new("tool-calls-canceled", FactTables.Tools, "SUM(f.canceled)", "count"),

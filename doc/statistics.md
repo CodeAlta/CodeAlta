@@ -178,6 +178,8 @@ Three numbers are not facts of their own: they are computed, when they are asked
 
 A session filter limits the three of them as it limits the facts: the sessions at once are the session and its sub-agents with a run going, the fill is of their requests, and the depth counts the sub-agents of the tree of the session. The **depth of each is still from the top of the whole tree**, not from the session of the filter: a sub-agent of a sub-agent is at 2 on the page of its parent as on the page of every session, and the parents above the session are followed though they are not counted.
 
+`context-fill` and `context-samples` exclude groups without a sample in either period before applying the limit. Both rank by current samples, then by ordinal key, including previous-only groups; their named lines and weighted `other` therefore stay paired. The Models block uses the sample counts to decide whether it is empty: measured 0% is still data. Activity shows `runs-of-unknown-time-left-out` as a caption on Sessions at once. Agents shows `some-parents-unknown` on the depth block and labels its rows as lower bounds, not verified relationships to your sessions.
+
 `StatisticsJson.Serialize<T>` writes any result as one line of JSON with camelCase names, enums as text and nulls left out; the names are stable. The results are bounded: at most 5,000 buckets, 21 lines of a series, 500 rows of a table, 50 runs of a session.
 
 ### The arithmetic is tested against a naive recomputation

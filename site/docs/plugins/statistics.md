@@ -91,6 +91,8 @@ The page shows the numbers of your sessions as dashboards, one tab for each ques
 | Sessions | The sessions of the period, in a table that sorts on any number and opens the session |
 | Health | Errors, interrupted runs, compactions, how full the context gets |
 
+Context fill keeps a measured 0% visible; a gap means no request reported a context window. Sessions at once says when runs with unknown timing were left out. When some parents are unknown, sub-agent depths are labelled as **at least** the levels shown. Depths are always counted from the top of the whole tree, even on a session's page.
+
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-statistics-activity.webp" alt="The Activity page of the Statistics tab: sessions started and active for each week, runs by outcome, active time, and a grid of the hours of each day of the week" loading="lazy">
   <figcaption class="small text-secondary mt-2">Activity: sessions, runs by outcome, active time, and when in the week the work happens.</figcaption>

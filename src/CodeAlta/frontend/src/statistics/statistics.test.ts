@@ -668,6 +668,9 @@ test("the sessions at once, the fill of the context and the depth of the sub-age
   assert.equal(depthLabel(t as never, 1), "Sub-agents of your sessions");
   assert.equal(depthLabel(t as never, 2), "Sub-agents of sub-agents");
   assert.equal(depthLabel(t as never, 4), "4 levels down");
+  assert.equal(depthLabel(t as never, 1, true), "At least 1 level down");
+  assert.equal(depthLabel(t as never, 2, true), "At least 2 levels down");
+  assert.equal(depthLabel(t as never, 4, true), "At least 4 levels down");
 });
 
 test("every sentence of the canvas is translated in all the languages, with the same placeholders", async () => {

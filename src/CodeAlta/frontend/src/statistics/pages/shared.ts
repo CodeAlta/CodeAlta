@@ -18,8 +18,9 @@ export function combineSeries(results: readonly Readonly<{ result: SeriesResult;
   return { ...base, metric, unit: base.unit, group: undefined, series };
 }
 
-/** The words for a depth of the tree of sub-agents: 1 is a sub-agent of a session of yours, 2 a sub-agent of a sub-agent. */
-export function depthLabel(t: Translate, depth: number): string {
+/** A whole-tree depth; when ancestry is incomplete, name only its known lower bound, not an unverified relationship. */
+export function depthLabel(t: Translate, depth: number, parentsUnknown = false): string {
+  if (parentsUnknown) return depth <= 1 ? t("At least 1 level down") : t("At least {count} levels down", { count: depth });
   return depth <= 1 ? t("Sub-agents of your sessions") : depth === 2 ? t("Sub-agents of sub-agents") : t("{count} levels down", { count: depth });
 }
 

@@ -80,7 +80,7 @@ export function ModelsPage() {
     <Block title={t("Reasoning effort")} span={6} minHeight={260} query={models} empty={models.data !== undefined && models.data.efforts.length === 0}>
       {models.data && <DataTable label={t("Models by reasoning effort")} columns={effortColumns} rows={models.data.efforts} rowKey={row => `${row.provider}/${row.model}/${row.effort}`} initialSort={{ column: "tokens", descending: true }} limit={8} />}
     </Block>
-    <Block title={t("Context fill")} span={12} minHeight={260} query={firstQuery(fill, fillSamples)} empty={contextFill !== null && contextFill.series.every(line => line.total === 0)}>
+    <Block title={t("Context fill")} span={12} minHeight={260} query={firstQuery(fill, fillSamples)} empty={fillSamples.data !== undefined && fillSamples.data.series.every(line => line.total === 0)}>
       {contextFill && <SeriesChart result={contextFill} kind="line" stacked={false} height={240} ariaLabel={t("Average fill of the context window, by model")} />}
     </Block>
     <Block title={t("The models")} span={12} minHeight={200} query={models} empty={models.data !== undefined && models.data.rows.length === 0}>

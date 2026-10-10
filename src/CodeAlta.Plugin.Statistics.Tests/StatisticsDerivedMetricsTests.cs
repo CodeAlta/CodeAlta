@@ -200,6 +200,73 @@ public sealed class StatisticsDerivedMetricsTests
     }
 
     [TestMethod]
+    [DataRow(1)]
+    [DataRow(3)]
+    public async Task ContextSamples_AlignWithFill_BeforeLimitingPreviousOnlyGroups(int reportingModels)
+    {
+        await using var harness = await QueryHarness.CreateAsync(sessions: 0);
+        var batch = Session("a");
+        var current = QuarterHour.Of(Day.AddHours(9));
+        var previous = QuarterHour.Of(Day.AddDays(-1).AddHours(9));
+        // The alphabetically first model has requests but no window in either period. It must not take the only named slot.
+        foreach (var quarter in new[] { current, previous })
+        {
+            batch.UsageFor(new UsageKey(quarter, "codex", "a-blind", "", "default", UsagePurpose.Turn)).Requests = 10;
+        }
+
+        var models = new[] { ("z-report", 2, 500_000L), ("z-second", 1, 100_000L), ("z-third", 3, 2_700_000L) };
+        foreach (var (model, count, sum) in models.Take(reportingModels))
+        {
+            var usage = batch.UsageFor(new UsageKey(previous, "codex", model, "", "default", UsagePurpose.Turn));
+            usage.Requests = usage.ContextSamples = count;
+            usage.ContextFillPpmSum = sum;
+        }
+
+        await harness.AddAsync(batch);
+        var request = new StatisticsRequest { Period = "2026-06-10..2026-06-10", Frequency = StatisticsFrequency.Day, Comparison = StatisticsComparison.PreviousPeriod, Limit = 1 };
+
+        var fill = await harness.Queries.SeriesAsync(request, "context-fill", "model");
+        var samples = await harness.Queries.SeriesAsync(request, "context-samples", "model");
+
+        CollectionAssert.AreEqual(reportingModels == 1 ? new[] { "z-report" } : new[] { "z-report", "other" }, fill.Series.Select(static line => line.Key).ToArray());
+        CollectionAssert.AreEqual(fill.Series.Select(static line => line.Key).ToArray(), samples.Series.Select(static line => line.Key).ToArray(), "The companion uses the same sample exclusion, ranking and limit in both periods.");
+        for (var index = 0; index < fill.Series.Count; index++)
+        {
+            var average = fill.Series[index];
+            var count = samples.Series[index];
+            Assert.IsNotNull(average.Previous);
+            Assert.IsNotNull(count.Previous);
+            Assert.AreEqual(0d, average.Values.Single());
+            Assert.AreEqual(0d, count.Values.Single());
+            Assert.AreEqual(index == 0 ? 2d : 4d, count.Previous.Single());
+            Assert.AreEqual(count.Previous.Single(), count.PreviousTotal);
+            Assert.AreEqual(index == 0 ? 0.25 : 0.7, average.Previous.Single(), 1e-9, "Other keeps the weighted average (one sample at 10%, three at 90%), not an average of averages.");
+            Assert.AreEqual(average.Previous.Single(), average.PreviousTotal);
+        }
+    }
+
+    [TestMethod]
+    [DataRow(StatisticsComparison.None)]
+    [DataRow(StatisticsComparison.PreviousPeriod)]
+    public async Task ContextSamples_AlignWithFill_WhenNoGroupReportsAWindow(StatisticsComparison comparison)
+    {
+        await using var harness = await QueryHarness.CreateAsync(sessions: 0);
+        var batch = Session("a");
+        batch.UsageFor(new UsageKey(QuarterHour.Of(Day.AddHours(9)), "codex", "a-blind", "", "default", UsagePurpose.Turn)).Requests = 10;
+        batch.UsageFor(new UsageKey(QuarterHour.Of(Day.AddDays(-1).AddHours(9)), "codex", "z-blind", "", "default", UsagePurpose.Turn)).Requests = 10;
+        await harness.AddAsync(batch);
+        var request = new StatisticsRequest { Period = "2026-06-10..2026-06-10", Frequency = StatisticsFrequency.Day, Comparison = comparison, Limit = 1 };
+
+        var fill = await harness.Queries.SeriesAsync(request, "context-fill", "model");
+        var samples = await harness.Queries.SeriesAsync(request, "context-samples", "model");
+
+        CollectionAssert.AreEqual(fill.Series.Select(static line => line.Key).ToArray(), samples.Series.Select(static line => line.Key).ToArray(), "An unsampled group is not a line or part of Other; both metrics keep the same empty fallback.");
+        CollectionAssert.AreEqual(Values(fill), Values(samples));
+        Assert.AreEqual(0d, samples.Series.Single().Total);
+        Assert.AreEqual(fill.Series.Single().PreviousTotal, samples.Series.Single().PreviousTotal);
+    }
+
+    [TestMethod]
     public async Task TheAverageFillOfTheContext_EqualsTheSumsOfTheFacts_AndAddsTheRestAsOneLine()
     {
         await using var harness = await QueryHarness.CreateAsync("Europe/Paris");

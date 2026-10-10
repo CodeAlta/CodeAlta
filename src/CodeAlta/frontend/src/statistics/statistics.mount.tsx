@@ -7,6 +7,7 @@ import { ShellLanguageContext } from "../shellLanguage";
 import type { StatisticsApi, StatisticsContext } from "./api";
 import { createFixtureApi, type FixtureApi, type FixtureScenario } from "./fixtureApi";
 import { StatisticsCanvas } from "./StatisticsCanvas";
+import type { DetailsResult, SeriesResult } from "./types";
 
 type Call = { method: string; request: unknown; args: unknown[]; signal: AbortSignal | null };
 const calls: Call[] = [];
@@ -18,17 +19,27 @@ const nothing = () => { };
 const questions = ["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "weekHour", "records", "health", "details", "runs", "costEstimate"] as const;
 const controls = ["status", "chooseHistory", "pause", "resume", "stopHere", "forgetDeleted", "resetStatistics"] as const;
 
-function recording(api: FixtureApi): StatisticsApi {
+function recording(api: FixtureApi, options: Options): StatisticsApi {
   const wrapped: Record<string, unknown> = { subscribe: api.subscribe };
   for (const name of [...questions, ...controls]) {
     const original = (api as unknown as Record<string, unknown>)[name];
     if (typeof original !== "function") continue;
-    wrapped[name] = (...args: unknown[]) => {
+    wrapped[name] = async (...args: unknown[]) => {
       const signal = args.find((value): value is AbortSignal => typeof AbortSignal !== "undefined" && value instanceof AbortSignal) ?? null;
       const rest = args.filter(value => value !== signal);
       const request = rest.find(value => typeof value === "object" && value !== null && "period" in (value as object)) ?? null;
       calls.push({ method: name, request, args: rest.filter(value => value !== request), signal });
-      return (original as (...parameters: unknown[]) => unknown).apply(api, args);
+      const result = await (original as (...parameters: unknown[]) => unknown).apply(api, args);
+      if (name === "series" && options.contextSamples !== undefined && (args[1] === "context-fill" || args[1] === "context-samples")) {
+        const series = result as SeriesResult;
+        const value = args[1] === "context-samples" ? options.contextSamples : 0;
+        return { ...series, series: series.series.map(line => ({ ...line, total: value * series.buckets.length, values: series.buckets.map(() => value) })) };
+      }
+      if (options.derivedNotes && ((name === "series" && args[1] === "sessions-at-once") || (name === "details" && args[1] === "sub-agent-depth"))) {
+        const derived = result as SeriesResult | DetailsResult;
+        return { ...derived, query: { ...derived.query, notes: [...derived.query.notes, name === "series" ? "runs-of-unknown-time-left-out" : "some-parents-unknown"] } };
+      }
+      return result;
     };
   }
   return wrapped as unknown as StatisticsApi;
@@ -43,6 +54,10 @@ type Options = {
   providers?: boolean;
   /** How many canvases are drawn side by side over the same fixture: two tabs of the statistics in one window. */
   copies?: number;
+  /** Supplies zero fill with this many samples per bucket, distinguishing measured zero from no observation. */
+  contextSamples?: number;
+  /** Supplies the metric-local incomplete ancestry and run-time notes. */
+  derivedNotes?: boolean;
 };
 
 let root: Root | null = null;
@@ -79,7 +94,7 @@ const fixture = {
   render(options: Options = {}) {
     state = { visible: true, ...options };
     api = createFixtureApi({ today: "2026-10-09", scenario: options.scenario, latencyMs: options.latencyMs, estimates: options.estimates, sessionCount: options.sessionCount });
-    wrapped = recording(api);
+    wrapped = recording(api, options);
     draw();
   },
   /** Mounts it again over the same fixture: a reload of the page. */
