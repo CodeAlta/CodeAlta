@@ -429,6 +429,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .remote-control h6 { margin: 0; font-size: 13px; }
 .remote-control p { margin: 0; }
 .remote-control-link code { display: block; overflow-wrap: anywhere; user-select: all; }
+.remote-control-qr { justify-self: center; width: 128px; height: 128px; border-radius: 4px; }
 .remote-control-error { color: var(--red); overflow-wrap: anywhere; }
 .remote-control-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 /* Requests that wait for the user: framed in the color of attention, its button a text button, not an icon. */

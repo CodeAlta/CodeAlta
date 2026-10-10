@@ -70,6 +70,10 @@ test("the Remote Control button is in the color of its state in both themes, and
     // window, which a permission request that appears meanwhile takes only from nowhere or from the composer.
     await evaluate(`document.querySelector('[data-remote-control="connected"]').click()`);
     assert.equal(await until(`!!document.querySelector("[data-remote-control-open]")`), true, "The popover opens");
+    // Measured without the transform of the popover, which opens from a smaller scale.
+    assert.deepEqual(await evaluate(`(() => { const qr = document.querySelector("[data-remote-control-qr]"); const style = qr && getComputedStyle(qr);
+      return qr && { width: style.width, height: style.height, light: qr.querySelector("rect").getAttribute("fill"), label: qr.getAttribute("aria-label") }; })()`),
+      { width: "128px", height: "128px", light: "#fff", label: "QR code of the link, to open the session on a phone" }, "A connected session shows its link as a QR code, dark on white");
     await evaluate(`document.querySelector("[data-remote-control-open]").focus();document.querySelector("[data-remote-control-open]").click()`);
     assert.equal(await until(`!document.querySelector("[data-remote-control-open]")`), true, "Opening the link closes the popover");
     assert.deepEqual(await evaluate("remoteControl.opened"), ["https://claude.ai/code/session_test"]);
@@ -79,6 +83,7 @@ test("the Remote Control button is in the color of its state in both themes, and
     // The Actions menu asks to show it once: closed, it is not shown again when its button is mounted again.
     await evaluate("remoteControl.ask()");
     assert.equal(await until(`!!document.querySelector("[data-remote-control-on]")`), true, "The request of the menu opens the popover");
+    assert.equal(await evaluate(`!document.querySelector("[data-remote-control-qr]")`), true, "A session that is off has no code to show");
     await evaluate(`document.querySelector("[data-asked] [data-remote-control]").click()`);
     assert.equal(await until(`!document.querySelector("[data-remote-control-on]")`), true, "The popover closes");
     await evaluate("remoteControl.remount()");

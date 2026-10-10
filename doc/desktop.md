@@ -593,7 +593,9 @@ and a link that is not one of `https://claude.ai/` is dropped): yellow while con
 when it failed. Its popover has the link, **Open in browser** (`markdownLinks.open`; it closes the popover, whose
 button would otherwise keep the focus a permission request takes), **Copy link**, **Turn
 on**, **Turn off** and **Try again**, and says why a request was refused (`busy`, `unavailable`). The panel
-shows what the host answered until the runtime state says it too.
+shows what the host answered until the runtime state says it too. While connected, the popover shows the link
+as a QR code (`RemoteLinkQr`: `uqr` encodes it, error correction M with a quiet zone of four modules, drawn as
+one SVG path, 128 px, dark on white in both themes, which phone cameras read best).
 
 - **Remote Control…** in the Actions menu of a Claude Code session (Explorer and session list; the provider
   type comes from the provider brands) selects the session and opens the popover: `main.tsx` keeps the

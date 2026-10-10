@@ -184,7 +184,9 @@ A Claude Code session can be followed and driven from claude.ai or the Claude ap
 instance. Turn it on with the **Remote Control** button in the bar of the prompt (the radio tower), or with
 **Remote Control…** in the **Actions** menu of the session. The button's color says where it stands:
 connecting, on (green) or failed (red). Its popover has the link of the session on claude.ai, **Open in
-browser** and **Copy link**, and **Turn off**. In the Claude app the session is listed under its title.
+browser** and **Copy link**, and **Turn off**. While it is on, the popover also shows the link as a QR code:
+scan it with the camera of your phone to open the session there. In the Claude app the session is listed under
+its title.
 
 While it is on:
 

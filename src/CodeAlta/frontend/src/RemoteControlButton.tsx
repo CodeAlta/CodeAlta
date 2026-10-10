@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import type { RemoteControlOpenRequest, RemoteControlView } from "./remoteControl";
+import { RemoteLinkQr } from "./RemoteLinkQr";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
@@ -41,6 +42,7 @@ export function RemoteControlButton({ state, disabled = false, onSet, onOpenLink
       : state.status === "failed" ? <p role="alert" className="remote-control-error">{state.error ?? t("Claude Code could not connect this session.")}</p>
       : null}
     {state.url && <p className="remote-control-link"><code data-remote-control-url>{state.url}</code></p>}
+    {state.url && state.status === "connected" && <RemoteLinkQr url={state.url} label={t("QR code of the link, to open the session on a phone")} />}
     {refused && <p role="alert" className="remote-control-error">{refused}</p>}
     <div className="remote-control-actions">
       {state.url && state.status !== "off" && <>
