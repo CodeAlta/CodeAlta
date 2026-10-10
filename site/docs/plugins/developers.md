@@ -292,7 +292,7 @@ yield return new PluginCanvasContribution
 };
 ```
 
-`PluginScript.File("ui/board.js")` is a file of the plugin folder. `PluginScript.Inline(code)` (or `PluginHtml.Script(code)`) gives the module as text, so that a plugin of one file stays one file; a plugin that ships with CodeAlta uses that form. The module is one of two things:
+`PluginScript.File("ui/board.js")` is a file of the plugin folder. `PluginScript.Inline(code)` (or `PluginHtml.Script(code)`) gives the module as text, so that a plugin of one file stays one file. The module is one of two things:
 
 ```js
 // ui/board.js: no build step
@@ -325,7 +325,9 @@ or `export async function mount(root, alta)`, which fills the element that holds
 | `alta.rpc` | Calls, streams and events of your own C# handlers (below). Only the script of a canvas has it |
 | `alta.versions` | The versions of the libraries and of this interface |
 
-When the plugin is built again, or a file of the module changes, the tab mounts the new module and lets the old one go. A tab that is hidden keeps what it drew until it is shown. A script that fails shows its error in its tab, with a button to copy it, and the rest of the window goes on. HTML written as a string still has no script: `<script>` and `onclick` in it are removed, and `alta.html` and the sanitizer keep text that comes from outside from ever becoming script. ### Talking to your plugin
+When the plugin is built again, or a file of the module changes, the tab mounts the new module and lets the old one go. A tab that is hidden keeps what it drew until it is shown. A script that fails shows its error in its tab, with a button to copy it, and the rest of the window goes on. HTML written as a string still has no script: `<script>` and `onclick` in it are removed, and `alta.html` and the sanitizer keep text that comes from outside from ever becoming script.
+
+### Talking to your plugin
 
 The script of a canvas reaches the C# of its plugin with `alta.rpc`. You register handlers in the `Open` handler of the canvas, and the script calls them by name:
 

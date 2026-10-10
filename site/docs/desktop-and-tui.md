@@ -63,6 +63,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Terminals, which agents can use too</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Tool call details</th><td>{{ alta_yes }} <small>Live terminal, highlighted files and diffs</small></td><td>{{ alta_yes }} <small>Live text output</small></td></tr>
     <tr><th scope="row">Images pasted in a prompt or read by an agent</th><td>{{ alta_yes }} <small>Thumbnails and previews</small></td><td>{{ alta_part }} <small>In terminals that show images</small></td></tr>
+    <tr><th scope="row">Statistics: the numbers of all your sessions as dashboards, with the <a href="{{site.basepath}}/docs/plugins/statistics/">Statistics plugin</a></th><td>{{ alta_yes }} <small>A page in a tab</small></td><td>{{ alta_part }} <small>The card of each turn</small></td></tr>
     <tr><th scope="row">Notes of a session</th><td>{{ alta_yes }} <small>Movable window</small></td><td>{{ alta_yes }} <small>Sidebar panel</small></td></tr>
   </tbody>
   <tbody>
@@ -71,6 +72,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Create, edit and reload a plugin while the app runs</th><td>{{ alta_yes }}</td><td>{{ alta_no }} <small>Built at start</small></td></tr>
     <tr><th scope="row">Ask an agent to write a plugin and try it</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Canvases: tabs that plugins provide, listed in one page and opened by you or by an agent</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Buttons that plugins add to the window: the title bar, the navigation rail and the menus of projects and sessions</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Plugin dialogs and content</th><td>{{ alta_yes }} <small>App components, HTML, Markdown, diagrams</small></td><td>{{ alta_yes }} <small>Terminal controls</small></td></tr>
   </tbody>
   <tbody>

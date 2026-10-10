@@ -47,7 +47,7 @@ for source plugins:
 | [Git](git.md) | The issues and the pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, the `#` lookup in a prompt, and the `gh`, `glab` and `az` agent tools when these CLIs are installed. |
 | [Jira](jira.md) | The issues of a Jira project, for the projects that name one in their configuration. |
 | [MCP](mcp.md) | Model Context Protocol server configuration, `alta mcp` commands, session-activated MCP agent tools, and MCP server management. |
-| [Statistics](statistics.md) | Transient per-turn/session statistics timeline cards and a `statistics estimate` live-tool command. |
+| [Statistics](statistics.md) | A statistics card for each turn, the `alta statistics` commands, and in CodeAlta Desktop the Statistics page with the numbers of all your sessions. |
 | [UI tools](../ui-tools.md) | In CodeAlta Desktop: the tools an agent sees and drives the window with, when its session asks for them. |
 
 ## Manage plugins

@@ -120,12 +120,11 @@ Override only what the plugin needs.
 |---|---|---|---|
 | `GetCommands()` | Commands: the palette, `/name` in the prompt, shortcuts | yes | yes |
 | `GetUiContributions()` | Status items and content around the prompt; buttons in the window (`PluginUi.Button`) | yes | yes (no buttons) |
-| `GetCanvases()` | Tabs that the plugin provides, filled by HTML or by a script | yes | no |
+| `GetCanvases()` | Tabs the plugin provides, which users and agents open, filled by HTML or by a script (see "Canvases") | yes | no |
 | `GetPromptPickers()` | A picker opened by a character typed in the prompt | yes | yes |
 | `GetSessionEventProjections()` | Cards in the timeline of a session | yes | yes |
 | `GetAgentTools()` | Tools the model can call | yes | yes |
 | `GetAltaCommands()` | Commands of the `alta` tool of the sessions | yes | yes |
-| `GetCanvases()` | Tabs the plugin provides, which users and agents open (see "Canvases") | yes | no |
 | `GetSystemPromptContributions()` | Text added to the system or developer prompt | yes | yes |
 | `GetInstructionProcessors()` | Changes to the final instructions of a session | yes | yes |
 | `GetResources()` | Skills shipped with the plugin: `Resources.SkillRoot("skills")` | yes | yes |

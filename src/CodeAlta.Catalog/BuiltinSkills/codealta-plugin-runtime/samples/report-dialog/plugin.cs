@@ -2,8 +2,9 @@ using CodeAlta.Plugins.Abstractions;
 using CodeAlta.Plugins.Tui;
 using XenoAtom.Terminal.UI.Controls;
 
-// A dialog that shows more than fields and buttons: a table, a diagram and source code. A plugin has no script in
-// the window. It writes Markdown, and the window renders it with its own renderer, the one of the timeline.
+// A dialog that shows more than fields and buttons: a table, a diagram and source code. It writes Markdown, and both
+// apps render it with their own renderer, the one of the timeline. (CodeAlta Desktop can also run a script that the
+// plugin brings: see samples/canvas-board.)
 [Plugin("report-dialog", DisplayName = "Report dialog", Description = "Shows a report with a table, a diagram and code.")]
 public sealed class ReportDialogPlugin : PluginBase
 {
