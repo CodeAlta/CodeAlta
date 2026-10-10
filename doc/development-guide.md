@@ -191,6 +191,23 @@ To see what a change costs, start the developer instance with
 (`Profiler.start` and `Profiler.stop` of the DevTools protocol) with several long sessions open; a build with
 `minify: false` in `vite.config.ts` gives readable names.
 
+## Charts
+
+The desktop page draws charts with Apache ECharts (`echarts`, pinned; its only other packages are `zrender` and a nested `tslib`), behind the components of `src/CodeAlta/frontend/src/charts/` (`index.ts` lists the exports). Add no other chart library, wrapper or state manager.
+
+| Need | Use |
+| --- | --- |
+| Lines, areas, bars, scatter, treemap, pie, box plot, histogram, a zoom or brush on the period | `Chart` with an ECharts option; `histogram` + `histogramOption` and `boxStats` + `boxPlotOption` build the option of a histogram (linear or log) and of a box per item |
+| A year of days; weekday by hour | `CalendarHeatmap`, `WeekdayHourHeatmap`: plain SVG, one focusable square per day (ECharts' own calendar draws one picture with no focus per day, so it cannot do this) |
+| A line in a tile or in the cell of a table | `Sparkline` (one SVG path, no ECharts), `StatTile` (number, change with an arrow and a sign, line) |
+
+How to add a chart: write the option (plain data where you can: it may then come from JSON, and `sanitizeChartOption` refuses what is not data: functions, links, a toolbox, markup or code in a `formatter`), give `Chart` an `ariaLabel`, a `group` when charts of a page share a cursor, `onSelect` for a click, `onPeriod` for a zoom, and `visible={false}` while its tab is hidden (hidden tabs stay mounted: a hidden chart draws nothing and catches up when shown). The component supplies the theme, the legend (buttons, reachable by keyboard), the text description, "Show as table" (read from the option, or `table`) and no animation under `prefers-reduced-motion`.
+
+- Colors are variables, never literals: series `--chart-1` to `--chart-10` (Blueprint's extended colors, step 3 on the light theme, step 4 on the dark one), `--chart-seq-1` to `--chart-seq-5` for heat maps, `--chart-diverge-low/mid/high`, and `--chart-text`, `--chart-muted`, `--chart-axis`, `--chart-grid`, `--chart-tooltip-bg` (`charts/charts.css`). A color scheme restyles charts by redefining them or the palette variables they use. Blueprint's core colors keep their meaning of state (failed is red) and are not series colors. `Chart` rebuilds its theme when the root's `bp6-dark` class, `data-theme`, `data-palette` or style change, keeping the zoom and the hidden series.
+- SVG is the default renderer (sharp at any page zoom); use `renderer="canvas"` for a very long series: it is drawn again when the pixel ratio changes.
+- The page's content security policy forbids `eval` and `new Function`. `chartEngine.ts` imports from `echarts/core` only the chart types, components and renderers the pages use; import nothing from ECharts' geo or map parts. Keep new imports in that file, so the ECharts chunk (about 280 KB compressed) stays lazy: `Chart` loads it with `import("./chartEngine")` when the first chart is shown, and the rest of the charts folder is about 11 KB compressed.
+- Tests: pure parts in `charts.test.ts`; `charts.browser.test.ts` mounts a gallery (`charts.mount.tsx`) under StrictMode and the production policy in headless Edge, in both themes, and saves screenshots under `tmp/charts/`.
+
 ## Frontend Shell Shape
 
 The TUI frontend should stay organized around explicit state, commands, events, and projections rather than broad callbacks into `CodeAltaApp`:

@@ -200,6 +200,7 @@ import "./explorer/explorer.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
 import "./workItems/workItems.css";
+import "./charts/charts.css";
 import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";

@@ -1,0 +1,99 @@
+/* The colors of charts. A chart reads these variables from the page (charts/tokens.ts), so a color scheme
+   restyles every chart by redefining them, or the palette variables they refer to. The series take the
+   extended colors Blueprint reserves for data, the third step on the light theme and the fourth, which keeps
+   its contrast on dark surfaces, on the dark one. Blueprint's core colors (blue, green, orange, red) are
+   left for states: failed is red in a chart as elsewhere. */
+:root {
+  --chart-1: var(--bp-palette-cerulean-4);
+  --chart-2: var(--bp-palette-forest-4);
+  --chart-3: var(--bp-palette-gold-4);
+  --chart-4: var(--bp-palette-vermilion-4);
+  --chart-5: var(--bp-palette-violet-4);
+  --chart-6: var(--bp-palette-turquoise-4);
+  --chart-7: var(--bp-palette-rose-4);
+  --chart-8: var(--bp-palette-lime-4);
+  --chart-9: var(--bp-palette-sepia-4);
+  --chart-10: var(--bp-palette-indigo-4);
+}
+
+:root[data-theme="light"] {
+  --chart-1: var(--bp-palette-cerulean-3);
+  --chart-2: var(--bp-palette-forest-3);
+  --chart-3: var(--bp-palette-gold-3);
+  --chart-4: var(--bp-palette-vermilion-3);
+  --chart-5: var(--bp-palette-violet-3);
+  --chart-6: var(--bp-palette-turquoise-3);
+  --chart-7: var(--bp-palette-rose-3);
+  --chart-8: var(--bp-palette-lime-3);
+  --chart-9: var(--bp-palette-sepia-3);
+  --chart-10: var(--bp-palette-indigo-3);
+}
+
+:root {
+  --chart-surface: var(--panel, var(--bp-palette-dark-gray-2));
+  --chart-text: var(--text);
+  --chart-muted: var(--muted);
+  --chart-axis: var(--line-strong, var(--bp-surface-border-color-strong));
+  --chart-grid: var(--line, var(--bp-surface-border-color-default));
+  --chart-tooltip-bg: var(--panel-2, var(--chart-surface));
+  --chart-tooltip-border: var(--line-strong, var(--chart-axis));
+  /* The hue of heat maps and its five steps, from a tint of the surface to the full color. */
+  --chart-heat: var(--chart-2);
+  --chart-seq-1: color-mix(in srgb, var(--chart-heat) 22%, var(--chart-surface));
+  --chart-seq-2: color-mix(in srgb, var(--chart-heat) 42%, var(--chart-surface));
+  --chart-seq-3: color-mix(in srgb, var(--chart-heat) 62%, var(--chart-surface));
+  --chart-seq-4: color-mix(in srgb, var(--chart-heat) 82%, var(--chart-surface));
+  --chart-seq-5: var(--chart-heat);
+  --chart-heat-empty: color-mix(in srgb, var(--chart-text) 8%, transparent);
+  /* A scale with a middle: two hues that are not states, and the surface between them. */
+  --chart-diverge-low: var(--chart-1);
+  --chart-diverge-mid: var(--chart-surface);
+  --chart-diverge-high: var(--chart-3);
+}
+
+.chart-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+.chart { position: relative; margin: 0; min-width: 0; color: var(--chart-text); }
+.chart > .chart-title-row { display: flex; justify-content: flex-end; align-items: center; min-height: 0; }
+.chart > .chart-title-row > .chart-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.chart .chart-surface { width: 100%; height: var(--chart-height, 240px); }
+.chart .chart-surface[hidden] { display: none; }
+.chart .chart-failure { margin: 0; color: var(--red); font-size: 12px; }
+.chart-table-scroll { max-height: var(--chart-height, 240px); overflow: auto; }
+.chart-table-scroll .chart-table { width: 100%; }
+.chart-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.chart-table td { font-variant-numeric: tabular-nums; text-align: right; }
+
+.chart-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0 0 2px; padding: 0; list-style: none; }
+.chart-legend-item { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; border-radius: 3px; background: transparent; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.chart-legend-item > i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.chart-legend-item[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+.chart-legend-item:hover { background: color-mix(in srgb, var(--chart-text) 8%, transparent); }
+.chart-legend-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.heat { display: block; max-width: 100%; height: auto; }
+.heat .heat-label { fill: var(--chart-muted); font-size: 10px; }
+.heat .heat-cell { fill: var(--chart-heat-empty); outline: none; cursor: default; }
+.heat .heat-cell[role="button"] { cursor: pointer; }
+.heat .heat-cell[data-level="1"] { fill: var(--chart-seq-1); }
+.heat .heat-cell[data-level="2"] { fill: var(--chart-seq-2); }
+.heat .heat-cell[data-level="3"] { fill: var(--chart-seq-3); }
+.heat .heat-cell[data-level="4"] { fill: var(--chart-seq-4); }
+.heat .heat-cell[data-level="5"] { fill: var(--chart-seq-5); }
+.heat .heat-cell:hover { stroke: var(--chart-text); stroke-width: 1; }
+.heat .heat-cell:focus-visible { stroke: var(--accent); stroke-width: 2; }
+
+.sparkline { display: inline-block; vertical-align: middle; overflow: visible; }
+.sparkline .sparkline-line { fill: none; stroke: var(--sparkline-color, currentColor); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.sparkline .sparkline-area { fill: var(--sparkline-color, currentColor); opacity: .14; stroke: none; }
+.sparkline .sparkline-line, .sparkline .sparkline-area { vector-effect: non-scaling-stroke; }
+.sparkline .sparkline-last { fill: var(--sparkline-color, currentColor); }
+.stat-tile-trend .sparkline-last { display: none; }
+
+.stat-tile { position: relative; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "label label" "value change" "trend trend"; gap: 2px 8px; min-width: 120px; padding: 10px 12px; border: 1px solid var(--chart-grid); border-radius: 6px; background: var(--chart-surface); }
+.stat-tile-label { grid-area: label; color: var(--chart-muted); font-size: 12px; }
+.stat-tile-value { grid-area: value; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.stat-tile-change { grid-area: change; align-self: end; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--chart-muted); }
+.stat-tile-change[data-tone="good"] { color: var(--green); }
+.stat-tile-change[data-tone="bad"] { color: var(--red); }
+.stat-tile-trend { grid-area: trend; width: 100%; height: 24px; margin-top: 4px; color: var(--chart-muted); }

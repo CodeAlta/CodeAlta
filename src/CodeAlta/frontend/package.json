@@ -28,6 +28,7 @@
     "@xterm/addon-webgl": "0.20.0-beta.300",
     "@xterm/xterm": "6.1.0-beta.304",
     "dompurify": "3.4.14",
+    "echarts": "6.1.0",
     "flexlayout-react": "0.11.0",
     "highlight.js": "11.12.0",
     "lucide-react": "0.511.0",
