@@ -421,6 +421,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
+| `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent |
 | `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |

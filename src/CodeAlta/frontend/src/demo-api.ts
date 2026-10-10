@@ -180,6 +180,9 @@ export const applicationLogs = Object.freeze({
 });
 export const composerStatus = Object.freeze({ read: unavailable });
 export const pluginUi = Object.freeze({ contributions: unavailable, regions: unavailable, invokeCommand: unavailable, searchPicker: unavailable, watch: unavailable, respond: unavailable, dialogAction: unavailable });
+// The canvases are tabs of plugins, which a browser without the host does not run.
+export const canvases = Object.freeze({ list: async () => ({ status: "unavailable", canvases: [] }), open: unavailable, visible: unavailable, close: unavailable, closeSpace: unavailable,
+  action: unavailable, describe: unavailable, watch: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
 
 // The demo has no host configuration file: the editor reports itself unavailable.

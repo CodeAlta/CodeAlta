@@ -180,5 +180,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         public IPluginTaskService Tasks => inner.Tasks;
 
         public IPluginAltaService Alta { get; } = alta;
+
+        public IPluginCanvasService Canvases => inner.Canvases;
     }
 }

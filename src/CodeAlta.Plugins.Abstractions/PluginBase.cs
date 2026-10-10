@@ -189,6 +189,12 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginResourceContribution> GetResources() => [];
 
     /// <summary>
+    /// Gets the canvases of the plugin: tabs that it provides, which the plugin fills and keeps up to date.
+    /// </summary>
+    /// <returns>Canvas contributions.</returns>
+    public virtual IEnumerable<PluginCanvasContribution> GetCanvases() => [];
+
+    /// <summary>
     /// Observes or transforms prompt submission.
     /// </summary>
     /// <param name="context">The prompt submission context.</param>

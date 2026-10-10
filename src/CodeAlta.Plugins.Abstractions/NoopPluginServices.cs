@@ -26,6 +26,7 @@ public sealed class NoopPluginServices : IPluginServices
         Agents = new NoopPluginAgentService();
         Tasks = new NoopPluginTaskService();
         Alta = new NoopPluginAltaService();
+        Canvases = NoopPluginCanvasService.Instance;
     }
 
     /// <inheritdoc />
@@ -57,6 +58,9 @@ public sealed class NoopPluginServices : IPluginServices
 
     /// <inheritdoc />
     public IPluginAltaService Alta { get; }
+
+    /// <inheritdoc />
+    public IPluginCanvasService Canvases { get; }
 
     /// <summary>
     /// Creates no-op services with a default logger.

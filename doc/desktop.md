@@ -729,7 +729,7 @@ space than Default is shown joins that space; a folder that is already a project
 the shown one (`joinShownSpace`) instead of being opened elsewhere.
 
 **Tabs.** Each space has its own tabs (sessions, code editors, Changes, terminals, Work items, Issues,
-Automations) and its own layout. Showing a space swaps the Explorer and the tabs; the tabs of a space
+Automations, canvases of plugins) and its own layout. Showing a space swaps the Explorer and the tabs; the tabs of a space
 come back when it is shown again, also after a restart. The panes of a space that is not shown are not
 in the page; its sessions keep running in the host, and a prompt being typed is kept. When code editors
 hold unsaved edits, leaving the space asks first (Save, Discard, Cancel). A space that is gone (removed
@@ -1429,6 +1429,20 @@ of an unchanged journal does not open it and a grown journal is read only past t
 scanned. A notes scan does not hold the journal gate, so it does not delay timeline pages or event
 appends for the same session. Reload can perform a
 fresh durable read without restoring run/queue/interaction authority.
+
+## Canvases
+
+A plugin can provide tabs, called canvases (see "Canvases" in [Plugins](plugins.md)). A canvas tab is a tab of the space it was opened in, like an editor or a terminal: it is kept with the other tabs of that space (`codealta.desktop.fileTabs.v1.<space id>`), opens in the pane that is active, can be dragged, split, closed and reopened, and comes back when the window restarts with the title, the icon and the status the plugin gave it. Nothing in the window lists the canvases yet: a plugin opens its own, or an agent asks for one.
+
+What a canvas tab shows is an HTML fragment that its plugin writes, drawn with the components of the window as the content of a plugin dialog is. The page asks the host for the instance each time the tab is shown, so what the plugin pushed while the tab was away is there. The page keeps one `canvases.watch` channel for all the canvases of the window: the requests of plugins for a tab, the pushes to the tabs, the title and status of each tab, and the news that plugins changed.
+
+- **Hidden.** A tab behind another one stays mounted and keeps the latest fragment it was sent without drawing it until it is shown; the plugin is told whether its tab is shown. The tabs of a space that is not shown are not in the page; the plugin keeps their instances, and each tab draws the latest fragment when its space is shown again.
+- **Asked by a plugin.** A plugin that asks for a canvas opens or brings to the front its tab in the space the window shows. For another space the tab is added to the tabs of that space and the window stays where it is.
+- **Closed.** Closing a tab closes its instance, and the plugin lets go of what it kept. A plugin can close its own instance, which closes the tab. Deleting a space closes the instances of its tabs.
+- **When the plugin is not running.** The tab shows a quiet placeholder with its title and one line that says why: the plugin is not running, is turned off, did not start (with its first error), no longer has the canvas, or could not show it. It offers **Rebuild plugin** and **Open plugin source** when the plugin is a source plugin whose folder the window can name, and **Close**. When the plugin runs again the tab shows its content again by itself.
+- **A tab of a project or a session** is dropped at the next start when its project or its session is no longer in the space; a tab of the application stays.
+
+The title of the tab is the one the plugin gives; the status it gives is shown beside it. The icon is one of the general icons of the window, or the icon of a plugin.
 
 ## Brand icons
 

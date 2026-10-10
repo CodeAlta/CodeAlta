@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
   skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
@@ -104,7 +104,7 @@ test("persisted tabs round-trip; malformed, duplicate, oversized or foreign valu
 test("a stored tab that is not understood is left out, and the tabs beside it are restored", () => {
   const json = (value: unknown) => () => JSON.stringify(value);
   // A tab of a kind that a newer build stored, among the tabs this one knows.
-  const canvas = { projectId: "p", projectPath: "/p", view: "canvas" };
+  const canvas = { projectId: "p", projectPath: "/p", view: "board" };
   assert.deepEqual(restoreFileTabs(json({ version: 1, open: [editor(), canvas, changes(), automationsTab, workItemsTab], active: changes() })),
     { open: [editor(), changes(), automationsTab, workItemsTab], active: changes(), closed: [] });
   // It was the active one: no tab of a project is active, and the session selection shows.
@@ -120,6 +120,93 @@ test("a stored tab that is not understood is left out, and the tabs beside it ar
     assert.deepEqual(restoreFileTabs(json({ version: 1, open: [tab], active: null })), emptyFileTabs(), JSON.stringify(tab));
     assert.deepEqual(restoreFileTabs(json({ version: 1, open: [changes(), tab, editor("q")], active: editor("q") })),
       { open: [changes(), editor("q")], active: editor("q"), closed: [] }, JSON.stringify(tab));
+  }
+});
+
+const board = (key?: string) => canvasTab({ pluginKey: "builtin:board", canvasId: "board", key }, { title: "Board", icon: "list-checks", plugin: "plugin:global:board" });
+const projectCanvas = (projectId = "p", canvasId = "notes") => canvasTab({ pluginKey: "k", canvasId, project: { id: projectId, path: `/${projectId}` } });
+const sessionCanvas = (sessionId = "s1") => canvasTab({ pluginKey: "k", canvasId: "run", project: { id: "p", path: "/p" }, sessionId });
+
+test("a canvas tab is identified by its plugin, its canvas, its project or session and its key, not by its title", () => {
+  assert.deepEqual(board(), { projectId: "", projectPath: "", view: "canvas", pluginKey: "builtin:board", canvasId: "board", name: "Board", icon: "list-checks", plugin: "plugin:global:board" });
+  assert.ok(isCanvasTab(board()) && !isCanvasTab(editor()) && !isEditorTab(board()) && !isChangesTab(board()) && !isTerminalTab(board()));
+  assert.equal(fileTabKey(board()), '["","canvas","builtin:board","board","",""]');
+  assert.equal(fileTabKey(sessionCanvas()), '["p","canvas","k","run","s1",""]');
+  // The same identity is one tab, whatever the look the plugin gave it.
+  assert.ok(sameFileTab(board(), canvasTab({ pluginKey: "builtin:board", canvasId: "board" }, { title: "Renamed" })));
+  const identities = [board(), board("a"), board("b"), projectCanvas(), projectCanvas("q"), projectCanvas("p", "other"), sessionCanvas(), sessionCanvas("s2"),
+    canvasTab({ pluginKey: "other", canvasId: "board" }), editor(), changes()];
+  assert.equal(new Set(identities.map(fileNodeId)).size, identities.length);
+  const state = openFileTab(openFileTab(emptyFileTabs(), board()), board("a"));
+  assert.equal(state.open.length, 2);
+  assert.equal(openFileTab(state, canvasTab({ pluginKey: "builtin:board", canvasId: "board" }, { title: "Other" })).open[0], state.open[0], "Asked again, the one that is open is shown, as it is.");
+});
+
+test("the look a plugin gives a canvas tab is kept in the tab, in its place, and the identity does not change", () => {
+  let state = openFileTab(openFileTab(openFileTab(emptyFileTabs(), editor()), board()), board("a"));
+  state = activateFileTab(state, board());
+  const renamed = refreshCanvasTab(state, board(), { title: "3 of 8 done", icon: "check" });
+  assert.deepEqual(renamed.open.map(fileTabKey), state.open.map(fileTabKey));
+  assert.equal(renamed.open[1].name, "3 of 8 done");
+  assert.equal(renamed.open[1].icon, "check");
+  assert.equal(renamed.open[1].plugin, "plugin:global:board", "what the look does not say stays");
+  assert.ok(sameFileTab(renamed.active, board()), "the tab in front stays in front");
+  assert.equal(renamed.active, renamed.open[1], "the active tab is the one that was refreshed");
+  assert.equal(renamed.open[0], state.open[0]);
+  assert.equal(renamed.open[2], state.open[2]);
+  assert.equal(refreshCanvasTab(renamed, board(), { title: "3 of 8 done" }), renamed, "nothing changed");
+  assert.equal(refreshCanvasTab(renamed, board("zzz"), { title: "x" }), renamed, "a tab that is not open");
+  // A null look removes what was there: a blank title brings back the one of the canvas.
+  assert.equal(refreshCanvasTab(renamed, board(), { title: null }).open[1].name, undefined);
+  // A tab that was closed and can be reopened has the look too.
+  const closed = closeFileTab(renamed, board());
+  assert.equal(refreshCanvasTab(closed, board(), { title: "Later" }).closed.at(-1)!.name, "Later");
+});
+
+test("a canvas outlives the projects when it is about the application, and goes with its project or its session otherwise", () => {
+  const sessions = { ...catalog, sessions: [{ id: "s1" } as WorkspaceSnapshot["sessions"][number]] };
+  const state = { open: [board(), projectCanvas(), projectCanvas("gone"), projectCanvas("old"), sessionCanvas(), sessionCanvas("s2")], active: sessionCanvas("s2"),
+    closed: [projectCanvas("gone", "later")] };
+  assert.deepEqual(reconcileFileTabs(state, sessions), { open: [board(), projectCanvas(), sessionCanvas()], active: null, closed: [] });
+  assert.deepEqual(reconcileFileTabs({ open: [board()], active: board(), closed: [] }, { ...catalog, projects: [] }), { open: [board()], active: board(), closed: [] });
+  assert.equal(reconcileTerminalTabs(openFileTab(emptyFileTabs(), board()), new Set()).open.length, 1, "no terminal is needed");
+  // A session canvas of a chat has no project.
+  const chat = canvasTab({ pluginKey: "k", canvasId: "run", sessionId: "s1" });
+  assert.deepEqual(reconcileFileTabs(openFileTab(emptyFileTabs(), chat), sessions).open, [chat]);
+});
+
+test("canvas tabs are kept for the next start with their look, and a canvas tab that is not well formed is left out", () => {
+  const tabs = [board(), board("a"), projectCanvas(), sessionCanvas()];
+  const state = tabs.reduce((opened, tab) => openFileTab(opened, tab), emptyFileTabs());
+  let stored = "";
+  assert.equal(persistFileTabs(value => { stored = value; }, state), true);
+  assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
+  assert.deepEqual(restoreFileTabs(() => stored)?.open.map(tab => tab.name), ["Board", "Board", undefined, undefined]);
+  const json = (value: unknown) => () => JSON.stringify(value);
+  const valid = { projectId: "", projectPath: "", view: "canvas", pluginKey: "k", canvasId: "c" };
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [valid], active: valid }))?.open, [canvasTab({ pluginKey: "k", canvasId: "c" })]);
+  for (const bad of [{ ...valid, pluginKey: undefined }, { ...valid, pluginKey: "" }, { ...valid, pluginKey: "x".repeat(513) }, { ...valid, canvasId: undefined }, { ...valid, canvasId: "bad id" },
+    { ...valid, canvasId: "x".repeat(65) }, { ...valid, projectId: "", projectPath: "/p" }, { ...valid, projectId: "p", projectPath: undefined }, { ...valid, projectId: 4 },
+    { ...valid, sessionId: "" }, { ...valid, key: 5 }, { ...valid, key: "x".repeat(129) }, { ...valid, path: "a.ts" }]) {
+    assert.deepEqual(restoreFileTabs(json({ version: 1, open: [editor(), bad, changes()], active: changes() })), { open: [editor(), changes()], active: changes(), closed: [] }, JSON.stringify(bad));
+  }
+  // A look that is not as this build stores it is dropped; the tab stays.
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [{ ...valid, name: "", icon: 4, plugin: "x".repeat(600) }], active: null }))?.open, [canvasTab({ pluginKey: "k", canvasId: "c" })]);
+  // The tab of a canvas is kept in the state of a space that has others of its kind.
+  assert.equal(restoreFileTabs(json({ version: 1, open: [valid, valid], active: null })), null, "the same tab twice is no state this build writes");
+});
+
+test("a canvas tab is labeled with its title and its project in every language", () => {
+  for (const locale of locales) {
+    const render = (tab: FileTab) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
+      { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab, project: "<Project>", dirty: false })));
+    const html = render(canvasTab({ pluginKey: "k", canvasId: "c", project: { id: "p", path: "/p" } }, { title: "<Board>" }));
+    assert.ok(html.includes("&lt;Board&gt;") && html.includes("&lt;Project&gt;"), html);
+    const application = render(board());
+    assert.ok(application.includes("Board") && !application.includes("&lt;Project&gt;"), application);
+    assert.ok(!application.includes("session-tab-dirty"));
+    assert.ok(render(canvasTab({ pluginKey: "k", canvasId: "c" })).includes(translate(locale, "Canvas")), "a tab with no title is a canvas");
   }
 });
 

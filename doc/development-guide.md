@@ -143,6 +143,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `changes/`: the Changes tab, the git status of the composer and the diffs shown in the timeline.
 - `monaco/`: the Monaco setup shared by every editor of the page, the languages, and the text and diff editors.
 - `terminal/`: the terminals (the link to the host, the xterm.js view, the tab, the list of the Explorer, the options, the font).
+- `canvases/`: the tabs that plugins provide (the link to the host, the tab and its placeholder, the control of a plugin that does not run).
 - `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
 
 Rules for these sources:

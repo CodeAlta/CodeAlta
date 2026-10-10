@@ -37,6 +37,12 @@ public interface IPluginServices
 
     /// <summary>Gets in-process <c>alta</c> command services.</summary>
     IPluginAltaService Alta { get; }
+
+    /// <summary>
+    /// Gets canvas services: opening, closing and listing the tabs that the plugin provides. A host that was written before
+    /// canvases existed has no window for them, and this member says so.
+    /// </summary>
+    IPluginCanvasService Canvases => NoopPluginCanvasService.Instance;
 }
 
 /// <summary>

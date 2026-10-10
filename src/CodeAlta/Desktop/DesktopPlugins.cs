@@ -142,7 +142,7 @@ internal static class DesktopPlugins
 /// pane where a plugin command was started; outside both there is none, and a plugin uses the project its
 /// operation context carries.
 /// </remarks>
-internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui) : IPluginServices
+internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -166,6 +166,9 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
     public IPluginTaskService Tasks => _inner.Tasks;
 
     public IPluginAltaService Alta { get; } = alta;
+
+    // The tabs plugins provide; a host started without them has no window to show any.
+    public IPluginCanvasService Canvases { get; } = (IPluginCanvasService?)canvases ?? NoopPluginCanvasService.Instance;
 
     private sealed class RunWorkspace(DesktopPluginUi ui) : IPluginWorkspaceService
     {

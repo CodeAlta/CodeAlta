@@ -231,6 +231,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ProviderUsageService? providerUsage = null;
         McpServersService? mcpServers = null;
         PluginUiService? pluginCommands = null;
+        DesktopCanvases? canvases = null;
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
         DesktopWindowState? windowState = null;
@@ -327,6 +328,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
             var startupStatus = new DesktopStartupStatus();
             var pluginUi = new DesktopPluginUi();
+            // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
+            canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             // A configuration file that cannot be loaded is repaired in the window before anything reads it: the
             // host would fail on it. A missing file is created with the defaults.
             var configRecovery = new ConfigRecoveryService(options.CatalogRoot!, new TextFileCodec());
@@ -360,7 +363,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions), PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
             }, CancellationToken.None));
@@ -379,6 +382,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 providerUsage?.Dispose();
                 if (mcpServers is not null) await mcpServers.CloseAsync(); // So is a running MCP authorization.
                 if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
+                canvases?.Dispose(); // The tabs of plugins end with the application.
             });
             }
             if (configRecovery.IsReady) StartHost();
@@ -530,6 +534,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 try { await host.SpaceCatalog.SeedAsync(); }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The window then has the default space alone. */ }
                 editorView = new DesktopEditorView();
+                canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
                 terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"));
                 shell.BusyTerminals = () => terminals.Busy;
                 // The definitions are shared with every instance; what ran is this instance's. The developer
@@ -664,6 +669,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch);
                     builder.AddPluginUiService(pluginCommands);
+                    builder.AddCanvasesService(canvases is null ? new CanvasesService() : new CanvasesService(canvases, epoch));
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
@@ -826,6 +832,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddPluginsService(new PluginsService());
             builder.AddSessionPluginEventsService(new SessionPluginEventsService());
             builder.AddPluginUiService(new PluginUiService());
+            builder.AddCanvasesService(new CanvasesService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddSettingsFilesService(new SettingsFilesService());
             builder.AddProjectGitService(new ProjectGitService());

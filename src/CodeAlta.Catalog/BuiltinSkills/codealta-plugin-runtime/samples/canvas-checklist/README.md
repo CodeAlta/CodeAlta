@@ -1,0 +1,3 @@
+# Canvas checklist sample
+
+A checklist in three canvases, tabs that the plugin provides: one of the application, one for each project and one for each session. The plugin keeps the lists (with `Services.State`) and each tab is a view of one: its fragment is written by a renderer, ticked from the page (`data-alta-action`), from a command, or by an agent with `alta checklist tick`, and every open tab of the list shows the change at once (`InvalidateAsync`). `alta checklist open` asks the window for a tab with `Services.Canvases.OpenAsync`. The canvas declares actions for agents (`add`, `tick`) and a `Describe` that answers in Markdown.

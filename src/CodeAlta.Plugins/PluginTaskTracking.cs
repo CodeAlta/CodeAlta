@@ -246,6 +246,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
         _database = database;
         Tasks = tasks;
         Alta = new PluginRuntimeAltaService(pluginRuntimeKey, scope, scopeProjectId, inner.Alta);
+        // The host that shows canvases tells each plugin's service apart: a plugin only sees its own.
+        Canvases = inner.Canvases is IPluginCanvasRuntimeService canvases ? canvases.ForPlugin(pluginRuntimeKey) : inner.Canvases;
     }
 
     public Logger Logger { get; }
@@ -269,6 +271,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
     public IPluginTaskService Tasks { get; }
 
     public IPluginAltaService Alta { get; }
+
+    public IPluginCanvasService Canvases { get; }
 
     private sealed class PluginRuntimeAltaService(
         string pluginRuntimeKey,

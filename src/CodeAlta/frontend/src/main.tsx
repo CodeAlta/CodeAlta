@@ -19,7 +19,7 @@ import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus, canvases as canvasesApi, plugins as pluginsApi,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -46,7 +46,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, canvasTab, isCanvasTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -205,6 +205,10 @@ import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
+import "./canvases/canvases.css";
+import { CanvasPanel } from "./canvases/CanvasPanel";
+import { createCanvasHub, type CanvasOpenRequest } from "./canvases/canvasHub";
+import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
@@ -224,6 +228,8 @@ function App() {
   // whole, and the window is given what the shown space has of it, so that everything it lists and opens
   // (the Explorer, the tabs, the search, the work items) is the space's.
   const [spacesHub] = useState(() => createSpacesHub(spacesApi));
+  // The tabs that plugins provide: what they declare, what they ask of the window, and what they push to their tabs.
+  const [canvasHub] = useState(() => createCanvasHub(canvasesApi));
   const spacesState = useSyncExternalStore(spacesHub.subscribe, spacesHub.getSnapshot);
   const [spaceId, writeSpaceId] = useState(() => restoreShownSpace(() => localStorage.getItem(shownSpaceKey)));
   const shownSpace = useRef(spaceId);
@@ -713,7 +719,7 @@ function App() {
         }
       }
     } catch { /* Storage that cannot be read keeps what it has. */ }
-    for (const id of [...spaceTabs.current.keys()]) if (!spacesState.spaces.some(space => space.id === id)) { spaceTabs.current.delete(id); spaceLayouts.current.delete(id); }
+    for (const id of [...spaceTabs.current.keys()]) if (!spacesState.spaces.some(space => space.id === id)) { spaceTabs.current.delete(id); spaceLayouts.current.delete(id); void canvasHub.closeSpace(id); }
   }, [spacesState.loaded, spacesState.available, spacesState.spaces, spaceId, tabsReady]);
   useEffect(() => {
     if (!snapshot || initialSelectionMade.current) return;
@@ -1008,11 +1014,69 @@ function App() {
     })();
     return () => abort.abort();
   }, [status?.hostEpoch]);
+  // The canvases that plugins provide. The status each gave its tab is shown beside its title; the instance each tab shows is
+  // kept so that closing the tab closes it (a tab that is only taken out of the page, with its space, stays open).
+  const [canvasStatuses, setCanvasStatuses] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const canvasInstances = useRef(new Map<string, string>());
+  const canvasInstanceKey = (tab: FileTab, space: string) => `${space}\n${fileTabKey(tab)}`;
+  const changeCanvasLook = useCallback((tab: FileTab, look: Readonly<{ title?: string; status?: string | null; icon?: string; plugin?: string }>) => {
+    if (look.title !== undefined || look.icon !== undefined || look.plugin !== undefined) setFileTabs(state => refreshCanvasTab(state, tab, { title: look.title, icon: look.icon, plugin: look.plugin }));
+    if (look.status !== undefined) setCanvasStatuses(current => {
+      const key = fileTabKey(tab), status = look.status || undefined;
+      if (current.get(key) === status) return current;
+      const next = new Map(current);
+      if (status) next.set(key, status); else next.delete(key);
+      return next;
+    });
+  }, []);
+  // What a tab that shows a plugin that is not running can do: its folder is known from the tab.
+  const canvasControls = useRef(new Map<string, CanvasPluginControl | null>());
+  const canvasControl = (tab: FileTab) => {
+    const key = `${pluginEpoch}\n${tab.plugin ?? ""}`;
+    if (!canvasControls.current.has(key)) canvasControls.current.set(key, createCanvasPluginControl(pluginsApi, pluginEpoch, tab.plugin));
+    return canvasControls.current.get(key) ?? null;
+  };
+  // A plugin asks for a tab: it opens in the space the window shows, or joins the tabs of the space it names without moving the window.
+  function openCanvasRequest(request: CanvasOpenRequest) {
+    const full = catalog.current ?? currentSnapshot.current;
+    if (!full) return;
+    const session = request.sessionId ? full.sessions.find(candidate => candidate.id === request.sessionId) : undefined;
+    const projectId = request.projectId ?? (session?.scopeKind === "project" ? session.projectId : null);
+    const project = projectId ? full.projects.find(candidate => candidate.id === projectId && !candidate.archived) : undefined;
+    if (projectId && !project) return;
+    const spaces = spacesHub.getSnapshot().spaces;
+    // The space the plugin names when the window has it and it shows the project; else the space that is shown, when it does.
+    const named = request.spaceId && spaces.some(space => space.id === request.spaceId) ? request.spaceId : shownSpace.current;
+    const space = spaceShows(spaces, named, projectId) ? named : shownSpace.current;
+    if (!spaceShows(spaces, space, projectId)) return;
+    const tab = canvasTab({ pluginKey: request.pluginKey, canvasId: request.canvasId, project: project ? { id: project.id, path: project.path } : null, sessionId: request.sessionId, key: request.key },
+      { title: request.title, icon: request.icon, plugin: request.plugin });
+    const keep = (value: FileTab) => fileEditors.dirty(fileTabKey(value));
+    const bring = (state: FileTabs) => { const next = openFileTab(state, tab, keep); return request.focus ? next : { ...next, active: state.active }; };
+    if (space === shownSpace.current) { setFileTabs(bring); return; }
+    // Another space: its tabs, in memory when the window left it in this run and in storage otherwise.
+    const kept = spaceTabs.current.get(space);
+    const next = bring(kept?.files ?? restoreFileTabs(() => localStorage.getItem(spaceStorageKey(fileTabsKey, space))) ?? emptyFileTabs());
+    if (kept) spaceTabs.current.set(space, { ...kept, files: next });
+    persistFileTabs(value => localStorage.setItem(spaceStorageKey(fileTabsKey, space), value), next);
+  }
+  const openCanvasLatest = useRef(openCanvasRequest); openCanvasLatest.current = openCanvasRequest;
+  useEffect(() => {
+    if (!tabsReady) return;
+    canvasHub.onOpenRequest(request => openCanvasLatest.current(request));
+    return () => canvasHub.onOpenRequest(null);
+  }, [canvasHub, tabsReady]);
   function closeFile(tab: FileTab, discard = false) {
     if (!discard && fileEditors.dirty(fileTabKey(tab))) { activateFile(tab); setFileClosing({ tab, busy: false }); return; }
     setFileClosing(null);
     // What was asked of a closed editor is not asked again when it is reopened.
     if (isEditorTab(tab)) setEditorRequests(current => { const next = new Map(current); next.delete(tab.projectId); return next; });
+    if (isCanvasTab(tab)) {
+      // The tab is closed, not only taken out of the page: the instance closes and the plugin lets go of what it held for it.
+      const instance = canvasInstances.current.get(canvasInstanceKey(tab, shownSpace.current));
+      if (instance) { canvasInstances.current.delete(canvasInstanceKey(tab, shownSpace.current)); void canvasHub.close(instance); }
+      setCanvasStatuses(current => { if (!current.has(fileTabKey(tab))) return current; const next = new Map(current); next.delete(fileTabKey(tab)); return next; });
+    }
     closedTabKinds.current = [...closedTabKinds.current, "file" as const].slice(-64);
     tabFocusPending.current = true;
     setFileTabs(state => closeFileTab(state, tab));
@@ -1689,6 +1753,8 @@ function App() {
 
   // What plugins contribute for the selected project: their commands and shortcuts, and their prompt pickers.
   const pluginEpoch = owned ? status?.hostEpoch ?? null : null;
+  // What plugins ask of the window for their tabs, and push to them, is read from the host that runs them.
+  useEffect(() => pluginEpoch ? canvasHub.connect(pluginEpoch) : undefined, [canvasHub, pluginEpoch]);
   const pluginProjectId = projectId ?? null;
   const [pluginRevision, setPluginRevision] = useState(0);
   useEffect(() => {
@@ -2869,9 +2935,15 @@ function App() {
               const file = fileTabs.active;
               if (tabs.active && tabKey(tabs.active) === tabKey(tab)) { applyTabState(next); if (file) activateFile(file); } else setTabs(next);
             }} reopen={() => tabCommand("reopenTab")}
-            files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
+            files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} fileStatus={tab => canvasStatuses.get(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
             terminal={id => terminalList.find(terminal => terminal.id === id)}
-            renderFile={(tab, visible) => isIssuesTab(tab)
+            renderFile={(tab, visible) => isCanvasTab(tab)
+              ? <CanvasPanel key={fileTabKey(tab)} tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}
+                active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} onLook={look => changeCanvasLook(tab, look)}
+                onInstance={instance => { const key = canvasInstanceKey(tab, spaceId); if (instance) canvasInstances.current.set(key, instance); }}
+                onClose={() => closeFile(tab)} control={canvasControl(tab)}
+                onOpenSource={folder => openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true })} />
+              : isIssuesTab(tab)
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
                 visible={visible && view === "workspace" && !settingsOpen} preferredStart={workState.settings.start} onActivate={() => activateFile(tab)}

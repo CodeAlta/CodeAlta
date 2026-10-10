@@ -9,8 +9,9 @@ import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { SessionWaitingBadge } from "./WaitingBadge";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isCanvasTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
+import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
@@ -47,10 +48,12 @@ export function SessionTabLabel({ label, path, dirty: shown, drafts, sessionId =
  * The header text of a project's tab: what it shows (its code editor or its changes) and the name of the project,
  * with the folder as tooltip. The editor carries the unsaved mark while one of its files holds edits.
  */
-export function FileTabLabel({ tab, project, dirty, terminal }: {
+export function FileTabLabel({ tab, project, dirty, terminal, status }: {
   tab: FileTab; project: string; dirty: boolean;
   /** What the host says of the terminal of a terminal tab. */
   terminal?: TerminalItem;
+  /** The status text that the plugin of a canvas tab gave: shown beside its title. */
+  status?: string;
 }) {
   const { t } = useShellLanguage();
   if (isTerminalTab(tab)) {
@@ -63,6 +66,13 @@ export function FileTabLabel({ tab, project, dirty, terminal }: {
   if (isAutomationsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Automations")}>{t("Automations")}</span></span>;
   if (isWorkItemsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Work items")}>{t("Work items")}</span></span>;
   if (isIssuesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Issues")}>{t("Issues")}</span></span>;
+  if (isCanvasTab(tab)) {
+    // The title the plugin gave, with the project when the canvas is about one; the status beside it.
+    const title = tab.name ?? t("Canvas"), about = tab.projectId ? project : "";
+    return <span className="session-tab-title"><span className="session-tab-label" title={[`${title}${about ? ` · ${about}` : ""}`, status, tab.projectPath].filter(Boolean).join("\n")}>
+      {title} {about && <span className="session-tab-project">{about}</span>}</span>
+      {status && <span className="canvas-tab-status">{status}</span>}</span>;
+  }
   const name = t(isChangesTab(tab) ? "Changes" : isPluginTab(tab) ? "Plugin" : isSkillTab(tab) ? "Skill" : "Editor");
   return <span className="session-tab-title"><span className="session-tab-label" title={`${name} · ${project}\n${tab.projectPath}`}>
     {name} <span className="session-tab-project">{project}</span></span>
@@ -74,7 +84,7 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty, terminal, onSessionTabClick, layout }: {
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
    * The model of the dock, when its owner keeps one: a dock that is taken away and shown again (the tabs of a
@@ -94,6 +104,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   /** Activates a file tab, or with null returns to the session selection. */
   selectFile?: (tab: FileTab | null) => void;
   closeFile?: (tab: FileTab) => void; fileDirty?: (tab: FileTab) => boolean;
+  /** The status text that the plugin of a canvas tab gave it, shown beside its title. */
+  fileStatus?: (tab: FileTab) => string | undefined;
   /** What the host says of a terminal, for the tab that shows it. */
   terminal?: (id: string) => TerminalItem | undefined;
   /** A session tab or the New session tab was clicked (not its close button): the shell moves the focus to its prompt. */
@@ -131,12 +143,14 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   }, []);
   const label = (tab: SessionTab | null) => tab ? `${plainTitle(snapshot && resolveSessionTab(snapshot, tab)?.title || t("Unavailable session"))} - ${
     tab.projectId === null ? t("Chat") : snapshot?.projects.find(project => project.id === tab.projectId)?.name ?? t("Unavailable project")}` : newSessionLabel ?? t("New session");
-  const projectName = (file: FileTab) => file.name ?? snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project");
+  // The name of a canvas tab is its title: the project is the one of the catalog.
+  const projectName = (file: FileTab) => (isCanvasTab(file) ? undefined : file.name) ?? snapshot?.projects.find(project => project.id === file.projectId)?.name ?? t("Unavailable project");
   const shownTerminal = (file: FileTab) => isTerminalTab(file) && file.terminalId ? terminal?.(file.terminalId) : undefined;
   const fileLabel = (file: FileTab) => {
     if (isAutomationsTab(file)) return t("Automations");
     if (isWorkItemsTab(file)) return t("Work items");
     if (isIssuesTab(file)) return t("Issues");
+    if (isCanvasTab(file)) return `${file.name ?? t("Canvas")}${file.projectId ? ` · ${projectName(file)}` : ""}`;
     if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : isPluginTab(file) ? "Plugin" : isSkillTab(file) ? "Skill" : "Editor")} · ${projectName(file)}`;
     const shown = shownTerminal(file);
     return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
@@ -254,8 +268,9 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
             : isSkillTab(file) ? { icon: "skill" as const, tone: "teal" } : { icon: "code" as const, tone: "azure" };
           // A terminal whose shell runs a command shows it where its icon is.
           values.leading = shown?.running && shown.busy ? <span className="file-tab-icon" data-file-tone={look.tone}><ActivitySpinner size={13} /></span>
+            : isCanvasTab(file) ? <span className="file-tab-icon" data-file-tone="purple"><CanvasIcon name={file.icon} size={14} /></span>
             : <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
-          values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} terminal={shown} /></span>;
+          values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} terminal={shown} status={fileStatus?.(file)} /></span>;
           return;
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());

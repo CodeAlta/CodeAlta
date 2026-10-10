@@ -311,6 +311,7 @@ public sealed class PluginRuntimeActivator
         Add(PluginPoint.Ui, instance.GetUiContributions());
         Add(PluginPoint.SessionEventProjection, instance.GetSessionEventProjections());
         Add(PluginPoint.Resource, instance.GetResources());
+        Add(PluginPoint.Canvas, instance.GetCanvases());
         return registrations;
 
         void Add(PluginPoint point, IEnumerable<object> contributions)

@@ -35,7 +35,7 @@ test("empty owned startup opens usable provider settings and a guide without Res
     const styles = ["../node_modules/normalize.css/normalize.css", "../node_modules/@blueprintjs/core/lib/css/blueprint.css",
       "../node_modules/flexlayout-react/style/light.css", "../node_modules/@xterm/xterm/css/xterm.css", "./style.css",
       "./editor/editor.css", "./explorer/explorer.css", "./terminal/terminal.css", "./automations/automations.css",
-      "./workItems/workItems.css", "./issues/issues.css", "./worktrees/worktrees.css", "./mcpHost/mcpHost.css", "./spaces/spaces.css"];
+      "./workItems/workItems.css", "./issues/issues.css", "./worktrees/worktrees.css", "./mcpHost/mcpHost.css", "./spaces/spaces.css", "./canvases/canvases.css"];
     await writeFile(join(root, "style.css"), styles.map(path => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');

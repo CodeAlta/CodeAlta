@@ -374,6 +374,7 @@ public sealed class PluginContributionRegistry
             PluginResourceContribution resource => resource.Precedence,
             PluginAltaCommandContribution alta => alta.Order,
             PluginCompactionContribution compaction => compaction.Order,
+            PluginCanvasContribution canvas => canvas.Order,
             _ => 0,
         };
 
@@ -392,6 +393,7 @@ public sealed class PluginContributionRegistry
             PluginUiContribution ui => ui.Name,
             PluginResourceContribution resource => resource.Path,
             PluginCompactionContribution _ => null,
+            PluginCanvasContribution canvas => canvas.Id,
             _ => null,
         };
 

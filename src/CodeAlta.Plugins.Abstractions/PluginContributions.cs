@@ -44,6 +44,8 @@ public enum PluginPoint
     Ui,
     /// <summary>Resource contribution.</summary>
     Resource,
+    /// <summary>Canvas: a tab that the plugin provides.</summary>
+    Canvas,
 }
 
 /// <summary>

@@ -88,6 +88,75 @@ public sealed class PluginRuntimeLifecycleTests
     }
 
     [TestMethod]
+    public async Task ActivatorCollectsCanvasContributions_AndNamesThemByTheirIdentifier()
+    {
+        var registry = new PluginContributionRegistry();
+        var activator = new PluginRuntimeActivator(registry);
+        var discovered = new DiscoveredPluginType
+        {
+            Type = typeof(CanvasPlugin),
+            Descriptor = PluginDescriptorFactory.FromType(typeof(CanvasPlugin)),
+        };
+
+        var result = await activator.ActivateAsync(discovered, null, null, new PluginActivationOptions { HostInfo = CreateHostInfo() });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        var canvases = registry.GetSnapshot().Where(static item => item.Handle.Point == PluginPoint.Canvas).ToArray();
+        // The order of the contributions decides: the lower comes first.
+        CollectionAssert.AreEqual(new[] { "first", "second" }, canvases.Select(static item => item.Handle.NaturalName).ToArray());
+        Assert.IsTrue(canvases.All(static item => item.Contribution is PluginCanvasContribution));
+        await result.ActivePlugin!.DeactivateAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual(0, registry.GetSnapshot().Count(static item => item.Handle.Point == PluginPoint.Canvas), "the canvases go with the plugin");
+    }
+
+    [TestMethod]
+    public async Task PluginCanvasService_IsTheOneTheHostGivesForTheCallingPlugin()
+    {
+        var registry = new PluginContributionRegistry();
+        var activator = new PluginRuntimeActivator(registry);
+        var host = new CapturingCanvasService();
+        var discovered = new DiscoveredPluginType
+        {
+            Type = typeof(CanvasPlugin),
+            Descriptor = PluginDescriptorFactory.FromType(typeof(CanvasPlugin)),
+        };
+
+        var result = await activator.ActivateAsync(discovered, null, null, new PluginActivationOptions
+        {
+            HostInfo = CreateHostInfo(),
+            Services = new TestPluginServices(new CapturingPluginAltaService(), host),
+        });
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        var services = result.ActivePlugin!.RuntimeContext.Services;
+        Assert.AreEqual(discovered.Descriptor.RuntimeKey, host.RequestedFor);
+        Assert.IsTrue(services.Canvases.HasInteractiveUi);
+        var opened = await services.Canvases.OpenAsync("first");
+        Assert.AreEqual(PluginCanvasOpenStatus.Requested, opened.Status);
+        Assert.AreEqual(discovered.Descriptor.RuntimeKey, host.Asked.Single().PluginRuntimeKey, "the service a plugin gets is its own");
+        await result.ActivePlugin.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
+    public async Task PluginCanvasService_WithoutAWindowSaysNothingCanBeShown()
+    {
+        var activator = new PluginRuntimeActivator(new PluginContributionRegistry());
+        var discovered = new DiscoveredPluginType
+        {
+            Type = typeof(EmptyPlugin),
+            Descriptor = PluginDescriptorFactory.FromType(typeof(EmptyPlugin)),
+        };
+
+        var result = await activator.ActivateAsync(discovered, null, null, new PluginActivationOptions { HostInfo = CreateHostInfo(), Services = new TestPluginServices(new CapturingPluginAltaService()) });
+
+        var canvases = result.ActivePlugin!.RuntimeContext.Services.Canvases;
+        Assert.IsFalse(canvases.HasInteractiveUi);
+        Assert.AreEqual(PluginCanvasOpenStatus.Unavailable, (await canvases.OpenAsync("any")).Status);
+        Assert.AreEqual(0, canvases.GetOpen().Count);
+        await result.ActivePlugin.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
     public async Task PluginAltaService_UsesRuntimeOwnedPluginKeyAndProjectScope()
     {
         var registry = new PluginContributionRegistry();
@@ -250,7 +319,48 @@ public sealed class PluginRuntimeLifecycleTests
         }
     }
 
-    private sealed class TestPluginServices(IPluginAltaService alta) : IPluginServices
+    private sealed class CapturingCanvasService : IPluginCanvasRuntimeService
+    {
+        public string? RequestedFor { get; private set; }
+
+        public List<(string PluginRuntimeKey, string CanvasId)> Asked { get; } = [];
+
+        public bool HasInteractiveUi => true;
+
+        public IPluginCanvasService ForPlugin(string pluginRuntimeKey)
+        {
+            RequestedFor = pluginRuntimeKey;
+            return new ForOnePlugin(this, pluginRuntimeKey);
+        }
+
+        public ValueTask<PluginCanvasOpenResult> OpenAsync(string canvasId, PluginCanvasOpenOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("The service of no plugin must not be used by a plugin.");
+
+        public ValueTask<bool> CloseAsync(string instanceId, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+
+        public ValueTask InvalidateAsync(string canvasId, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+        public IReadOnlyList<PluginCanvasInstanceInfo> GetOpen() => [];
+
+        private sealed class ForOnePlugin(CapturingCanvasService owner, string key) : IPluginCanvasService
+        {
+            public bool HasInteractiveUi => true;
+
+            public ValueTask<PluginCanvasOpenResult> OpenAsync(string canvasId, PluginCanvasOpenOptions? options = null, CancellationToken cancellationToken = default)
+            {
+                owner.Asked.Add((key, canvasId));
+                return ValueTask.FromResult(new PluginCanvasOpenResult(PluginCanvasOpenStatus.Requested, "instance", null, true));
+            }
+
+            public ValueTask<bool> CloseAsync(string instanceId, CancellationToken cancellationToken = default) => ValueTask.FromResult(false);
+
+            public ValueTask InvalidateAsync(string canvasId, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+
+            public IReadOnlyList<PluginCanvasInstanceInfo> GetOpen() => [];
+        }
+    }
+
+    private sealed class TestPluginServices(IPluginAltaService alta, IPluginCanvasService? canvases = null) : IPluginServices
     {
         private readonly NoopPluginServices _inner = NoopPluginServices.Create();
 
@@ -273,6 +383,8 @@ public sealed class PluginRuntimeLifecycleTests
         public IPluginTaskService Tasks => _inner.Tasks;
 
         public IPluginAltaService Alta { get; } = alta;
+
+        public IPluginCanvasService Canvases { get; } = canvases ?? NoopPluginCanvasService.Instance;
     }
 
     public sealed class FailingContributionPlugin : PluginBase
@@ -292,6 +404,23 @@ public sealed class PluginRuntimeLifecycleTests
 
     public sealed class EmptyPlugin : PluginBase
     {
+    }
+
+    public sealed class CanvasPlugin : PluginBase
+    {
+        public override IEnumerable<PluginCanvasContribution> GetCanvases()
+        {
+            yield return new PluginCanvasContribution
+            {
+                Id = "second", Title = "Second", Order = 2,
+                Open = static (_, _) => ValueTask.FromResult(PluginCanvasView.Html("<p>two</p>")),
+            };
+            yield return new PluginCanvasContribution
+            {
+                Id = "first", Title = "First", Order = 1, Scope = PluginCanvasScope.Project,
+                Open = static (_, _) => ValueTask.FromResult(PluginCanvasView.Html("<p>one</p>")),
+            };
+        }
     }
 
     public sealed class SessionEventProjectionPlugin : PluginBase

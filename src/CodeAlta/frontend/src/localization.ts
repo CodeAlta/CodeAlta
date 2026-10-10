@@ -2240,6 +2240,15 @@ export const messages = dictionary({
   "{count} sessions running": ["{count} sesiones en ejecución", "{count} sessions en cours", "{count} Sitzungen laufen", "{count} 件のセッションが実行中", "{count} 个会话正在运行"],
   "{count} session working in the background": ["{count} sesión trabajando en segundo plano", "{count} session au travail en arrière-plan", "{count} Sitzung arbeitet im Hintergrund", "{count} 件のセッションがバックグラウンドで作業中", "{count} 个会话正在后台工作"],
   "{count} sessions working in the background": ["{count} sesiones trabajando en segundo plano", "{count} sessions au travail en arrière-plan", "{count} Sitzungen arbeiten im Hintergrund", "{count} 件のセッションがバックグラウンドで作業中", "{count} 个会话正在后台工作"],
+  "Canvas": ["Lienzo", "Canevas", "Canvas", "キャンバス", "画布"],
+  "Rebuild plugin": ["Recompilar el complemento", "Recompiler l’extension", "Plugin neu erstellen", "プラグインを再ビルド", "重新生成插件"],
+  "Open plugin source": ["Abrir el código del complemento", "Ouvrir la source de l’extension", "Plugin-Quelltext öffnen", "プラグインのソースを開く", "打开插件源代码"],
+  "Building the plugin…": ["Compilando el complemento…", "Compilation de l’extension…", "Plugin wird erstellt …", "プラグインをビルドしています…", "正在生成插件…"],
+  "The plugin is not running.": ["El complemento no se está ejecutando.", "L’extension n’est pas en cours d’exécution.", "Das Plugin läuft nicht.", "プラグインは実行されていません。", "插件未在运行。"],
+  "The plugin did not start.": ["El complemento no se inició.", "L’extension n’a pas démarré.", "Das Plugin wurde nicht gestartet.", "プラグインを起動できませんでした。", "插件未能启动。"],
+  "The plugin no longer has this canvas.": ["El complemento ya no tiene este lienzo.", "L’extension n’a plus ce canevas.", "Das Plugin hat dieses Canvas nicht mehr.", "プラグインにこのキャンバスはもうありません。", "插件已不再提供此画布。"],
+  "The plugin could not show this canvas.": ["El complemento no pudo mostrar este lienzo.", "L’extension n’a pas pu afficher ce canevas.", "Das Plugin konnte dieses Canvas nicht anzeigen.", "プラグインはこのキャンバスを表示できませんでした。", "插件无法显示此画布。"],
+  "The plugin could not complete the action.": ["El complemento no pudo completar la acción.", "L’extension n’a pas pu terminer l’action.", "Das Plugin konnte die Aktion nicht ausführen.", "プラグインは操作を完了できませんでした。", "插件无法完成此操作。"],
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

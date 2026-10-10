@@ -1,0 +1,18 @@
+/* The tab of a canvas: the fragment of a plugin, or the placeholder that says why there is none. */
+.canvas-panel { height: 100%; min-width: 0; min-height: 0; overflow: auto; background: var(--bg); outline: none; }
+.canvas-panel > .canvas-html { box-sizing: border-box; max-width: 1180px; margin-inline: auto; padding: 18px 24px 28px; font-size: 13px; }
+.canvas-panel .canvas-html :is(h1, h2) { margin: 14px 0 8px; font-size: 18px; font-weight: 650; }
+.canvas-panel .canvas-html h3 { margin: 12px 0 6px; font-size: 14px; }
+
+/* A placeholder that appears only when loading takes long enough to be noticed: no flash on a fast plugin. */
+.canvas-loading { display: grid; place-items: center; height: 100%; opacity: 0; animation: canvas-appear 0s 350ms forwards; color: var(--muted); }
+@keyframes canvas-appear { to { opacity: 1; } }
+
+.canvas-placeholder.bp6-non-ideal-state { height: 100%; }
+.canvas-placeholder .bp6-non-ideal-state-visual { color: var(--muted); }
+.canvas-placeholder .canvas-placeholder-reason { display: block; color: var(--muted); }
+.canvas-placeholder .canvas-placeholder-detail { display: block; max-width: 520px; margin: 10px auto 0; padding: 6px 8px; overflow-wrap: anywhere; text-align: left; white-space: pre-wrap; font-size: 12px; color: var(--red); background: var(--panel-2); border-radius: 4px; }
+.canvas-placeholder-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+
+/* The status the plugin gives beside the title of its tab. */
+.canvas-tab-status { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }

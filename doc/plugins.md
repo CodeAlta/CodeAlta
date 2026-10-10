@@ -261,6 +261,7 @@ The terminal implementation is `CodeAlta.Tui.Plugins.TerminalPluginStartupFeedba
 - normalized agent-event observers;
 - compaction hooks;
 - UI contributions such as status rows, visuals, and renderers;
+- canvases: tabs that the plugin provides in CodeAlta Desktop (see "Canvases");
 - transient session/timeline projections (current APIs still use some legacy `Session` names);
 - resource roots (the hosts read the skill roots; the other kinds have no consumer yet);
 - plugin-lifetime background tasks through `IPluginTaskService`.
@@ -276,6 +277,41 @@ UI-only contributions remain frontend responsibilities. Headless hosts can ignor
 When a plugin constructs a `XenoAtom.Terminal.UI.Controls.Dialog` directly, use `CodeAlta.Plugins.Tui.PluginDialogLayout.ApplyResponsiveSize(...)` with a deferred bounds delegate (for example, `() => PluginDialogLayout.ResolveDialogBounds(anchor)`) so the dialog keeps the same centered, responsive sizing behavior as built-in dialogs, including cases where the dialog is sized after it is attached to the app.
 
 `PluginDialogRequest` retains neutral text, selection, button and metadata fields. For native custom content, migrate `PluginUi.CustomDialog(title, visual)` to `PluginTui.CustomDialog(title, visual)` and `PluginDialogRequest.Content` to `PluginTerminalDialogRequest.Content`. These APIs describe requests; the application presents them (`DesktopPluginUi` and `TerminalPluginUi`, above). A host without a window has the no-op service: `HasInteractiveUi` is false, `ShowDialogAsync` validates and presents nothing, and `ShowDialogForResultAsync` returns null, so completion is not proof of presentation.
+
+## Canvases
+
+A canvas is a tab that a plugin provides. The plugin declares it and holds its state; the tab is a view of that state. Nothing is shown until someone opens the canvas (a person, a command, an agent, or the plugin itself); an open tab comes back when CodeAlta Desktop restarts, and closing it loses nothing, because the state is the plugin's. Canvases are for CodeAlta Desktop: the terminal application lists none, and `Services.Canvases.HasInteractiveUi` is false there.
+
+```csharp
+public override IEnumerable<PluginCanvasContribution> GetCanvases()
+{
+    yield return new PluginCanvasContribution
+    {
+        Id = "release",
+        Title = "Release checklist",
+        Description = "Tracks the steps of a release.",
+        Icon = "star",
+        Scope = PluginCanvasScope.Project,
+        Open = (canvas, ct) => ValueTask.FromResult(PluginCanvasView.Rendered((c, _) => ValueTask.FromResult(Render(c)), OnActionAsync) with { Status = Summary(canvas) }),
+    };
+}
+```
+
+**Declaration.** `PluginBase.GetCanvases()` is read once per activation, like the other contributions. A `PluginCanvasContribution` has an `Id` (1 to 64 letters, digits, `-`, `_` or `.`, unique in the plugin), a `Title`, a `Description` for people and agents, an `Icon` (the name of one of the general icons of the window, such as `star`, `briefcase` or `bot`; another name shows the icon of a plugin), a `Scope`, an optional `InputSchema` (a JSON Schema as text), the `Open` handler, an optional `Describe` handler that answers in Markdown what the canvas shows now, an optional `Closed` handler, and `Actions` that an agent can run (`PluginCanvasActionContribution`: a name, a description, a JSON Schema for the input and a handler that returns JSON).
+
+**Scope and identity.** The scope says what the canvas is about: `Application`, `Project` or `Session`. An instance is identified by its canvas, its space, its project (project scope) or its session (session scope) and an optional key, so the same canvas opened twice with the same identity is one tab. The space is where the tab is, since every space has its own tabs; the same canvas opened in two spaces gives two instances over the same state of the plugin. Use the key for the rare case of several instances in one context (one tab for each issue, each file).
+
+**The instance.** `Open` receives a `PluginCanvasContext` and returns a `PluginCanvasView`. The context has `InstanceId`, `CanvasId`, `SpaceId`, `ProjectId`, `SessionId`, `Key`, `Input` (what the instance was opened with; it is not kept, so a tab restored at a restart has none), `IsVisible` and `VisibilityChanged` (false while the tab is behind another one or its space is not shown), `IsOpen`, and `Closed`, a token that is cancelled when the instance closes or the plugin stops. A plugin keeps the context to push to the tab: `UpdateAsync(html)` sends a new fragment, `SetTitleAsync` and `SetStatusAsync` change the title of the tab and the text beside it, and `InvalidateAsync()` has the host write the fragment again with the renderer. Pushes after the instance closed do nothing, and a push made while `Open` runs is not kept: give the first title and status in the view (`Title`, `Status`). Of several pushes to one tab the last is shown, and a tab that is hidden draws the latest one when it is shown.
+
+**The view.** `PluginCanvasView.Html(fragment, onAction)` shows a fixed fragment; `PluginCanvasView.Rendered(renderer, onAction)` writes it with a handler, called when the instance opens and each time it is invalidated (`PluginCanvasContext.InvalidateAsync`, or `Services.Canvases.InvalidateAsync(canvasId)` for every open instance of a canvas). The fragment follows the rules of the HTML of plugin dialogs (see "Portable results with an HTML form" above and `PluginHtml`): it is sanitized and drawn with the components of the window, `data-alta-command` runs a command of the same plugin for the project and session of the tab, and `data-alta-action` calls the action handler with the name, the value and the current values of the named fields. The handler returns a `PluginCanvasActionResult` (keep the tab as it is, replace its content, or close it). An action that fails shows a notice and leaves the tab as it was; the text of a plugin failure never reaches the page. A fragment is cut at 256 KiB.
+
+**Asking for a tab.** `Services.Canvases` is the service of the calling plugin: `OpenAsync(canvasId, options)` asks the window to open the tab, or to bring it to the front when it is open, and tells whether the request was taken (`PluginCanvasOpenResult`: the status, the instance, the space and whether that space is the one shown). Without options the project and the session are those of the operation that asks (the pane a command runs in); `PluginCanvasOpenOptions` names a space, a project, a session, a key, an input, and whether to take the focus. A request for a space that is not shown adds the tab to the tabs of that space and does not move the window; the tab is there when the space is shown. `CloseAsync(instanceId)` closes an instance and its tab, and `GetOpen()` lists the open instances of the plugin.
+
+**Lifetime.** An instance exists from the first time a tab shows it, and stays while the tab is in the window or its space is not shown (the tab is taken out of the page then, and the plugin sees `IsVisible` false). Closing the tab closes the instance: `Closed` is cancelled, then the `Closed` handler runs. The window keeps at most 64 instances and closes the oldest hidden one beyond that. When a plugin is built again, each open instance is opened again by the new version and the tab shows the result; a build that fails leaves the version that runs and its tabs alone. A plugin that stops, or a new version without the canvas, leaves its tabs waiting: each says so and offers to build the plugin again, to open its source and to close, and comes back by itself when the plugin runs again. A canvas of a project plugin is listed everywhere the plugin is loaded.
+
+**For agents.** The actions of a canvas and its `Describe` handler work whether or not a tab is open, since the state is the plugin's. The window keeps no state that the plugin does not have, so a restored tab asks the plugin for it again.
+
+The `canvas-checklist` sample of the `codealta-plugin-runtime` skill is a complete canvas plugin: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent.
 
 ## Prompt and instruction processing
 
