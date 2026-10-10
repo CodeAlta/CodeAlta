@@ -78,9 +78,12 @@ test("empty owned startup opens usable provider settings and a guide without Res
     const wait = (condition: string) => evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve({settings:document.querySelector('.settings-dialog')?.open,focus:document.activeElement?.outerHTML.slice(0,200),prompt:document.querySelector('#catalog-prompt .view-lines')?.textContent,errors:window.startupErrors});else setTimeout(tick,25)};tick()})`);
     const frames = () => evaluate("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true)))))");
     const stable = async (stage: string) => {
-      // Blueprint's opening/closing transition deliberately moves the guide card for 300ms.
-      // Do not confuse that finite animation with unsettled dock geometry.
-      await new Promise(resolve => setTimeout(resolve, 400));
+      // Under load the browser can start Blueprint's transition after a Node-side delay has elapsed.
+      // Observe its completion, excluding the spotlight's intentional infinite pulse, before sampling.
+      await frames();
+      assert.equal(await wait(`!document.querySelector('.guided-tour .bp6-popover-enter,.guided-tour .bp6-popover-appear,.guided-tour .bp6-popover-exit') &&
+        [...document.querySelectorAll('.guided-tour')].every(element=>element.getAnimations({subtree:true})
+          .every(animation=>animation.playState==='finished'||animation.effect?.getComputedTiming().iterations===Infinity))`), true, `${stage}: guide transitions must finish`);
       await frames();
       const samples = await evaluate(`new Promise(resolve=>{const samples=[];const sample=()=>{
         const boxes=[...document.querySelectorAll('.flexlayout__tabset_tabbar_outer,.flexlayout__tab,.session-workspace,.composer-region,.settings-dialog .app-window,.guided-tour-card')]
