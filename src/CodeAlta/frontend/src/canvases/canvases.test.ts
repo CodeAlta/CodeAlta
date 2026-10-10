@@ -298,6 +298,61 @@ test("an instance that a plugin closes takes its tab away, whether the tab liste
   disconnect();
 });
 
+test("a plugin that closes an instance and asks for its tab again while the tab waits for the host leaves the tab open", async () => {
+  const played = host();
+  let answer: (() => void) | null = null;
+  const open = played.api.open;
+  const api: CanvasApi = { ...played.api, open: async (request, options) => { await new Promise<void>(resolve => { answer = resolve; }); return open(request, options); } };
+  const hub = createCanvasHub(api, timers());
+  const disconnect = hub.connect("epoch");
+  const seen: string[] = [];
+  hub.onOpenRequest(request => seen.push(`open:${request.canvasId}`), closed => seen.push(`closed:${closed.instanceId}`));
+  const closed = (instanceId: string) => event("closed", { instanceId, pluginKey: "k", canvasId: "board", spaceId: "shown" });
+  const request = (instanceId: string | null) => event("open", { instanceId, pluginKey: "k", canvasId: "board", spaceId: "shown", focus: true });
+  const ask = () => hub.open({ pluginKey: "k", canvasId: "board", spaceId: "shown", projectId: null, sessionId: null, key: null, visible: true });
+  const told = (since: number) => { const received: CanvasInstanceEvent[] = []; hub.attach("i1", since, value => received.push(value))(); return received; };
+
+  // The tab asked for its instance (the page was loaded again) and the host has not answered. The plugin closes the instance, then asks
+  // for its tab: the window takes the tab away and puts it back at once, so the tab is still there when the answer comes.
+  let opening = ask();
+  await wait(10);
+  played.push(closed("i1"));
+  played.push(request("i1"));
+  await wait(40);
+  assert.deepEqual(seen, ["closed:i1", "open:board"], "the window hears both, in order");
+  answer!();
+  assert.deepEqual(told((await opening).revision), [], "the close that came before the request is not said to the tab the plugin asked for");
+
+  // The other order closes the tab: asked for, then closed.
+  opening = ask();
+  await wait(10);
+  played.push(request("i1"));
+  played.push(closed("i1"));
+  await wait(40);
+  answer!();
+  assert.deepEqual(told((await opening).revision), [{ kind: "closed" }]);
+
+  // A request for another instance, or one that does not say which, leaves the close of this one.
+  opening = ask();
+  await wait(10);
+  played.push(closed("i1"));
+  played.push(request("other"));
+  played.push(request(null));
+  await wait(40);
+  answer!();
+  assert.deepEqual(told((await opening).revision), [{ kind: "closed" }]);
+
+  // What the plugin sent that is no close stays for the tab: a request for the tab says nothing of what the instance shows.
+  opening = ask();
+  await wait(10);
+  played.push(event("update", { instanceId: "i1", revision: 9, html: "<p>pushed</p>" }));
+  played.push(request("i1"));
+  await wait(40);
+  answer!();
+  assert.deepEqual(told((await opening).revision).map(value => value.kind), ["update"]);
+  disconnect();
+});
+
 test("what plugins asked and closed before the window was ready is given to it in the order it came", async () => {
   const played = host();
   const hub = createCanvasHub(played.api, timers());

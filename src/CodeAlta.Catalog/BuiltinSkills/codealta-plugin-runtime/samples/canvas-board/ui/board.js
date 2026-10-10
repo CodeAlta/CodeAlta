@@ -52,10 +52,11 @@ export default function Board() {
         series: [{ name: "Cards", type: "bar", data: board.columns.map(column => column.cards.length) }],
     };
 
+    // The link shows the name of the file, which fits a narrow column; its tooltip is the whole path.
     const card = (item, column) => html`
         <${Card} key=${item.id} compact style=${{ display: "flex", alignItems: "center", gap: 6 }}>
             <${Icon} name="box" />
-            <span style=${{ flex: 1 }}>${item.title}${item.file && html` <${FileLink} path=${item.file} line=${item.line}>${item.file}<//>`}</span>
+            <span style=${{ flex: 1 }}>${item.title}${item.file && html` <${FileLink} path=${item.file} line=${item.line}>${item.file.split("/").pop()}<//>`}</span>
             ${column < columnNames.length - 1 && html`<${Button} size="small" variant="minimal" icon="arrow-right" title=${`Move to ${columnNames[column + 1]}`}
                 onClick=${() => call("board.move", { id: item.id, column: columnNames[column + 1] })} />`}
         <//>`;

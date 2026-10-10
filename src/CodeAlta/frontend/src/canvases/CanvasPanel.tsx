@@ -145,8 +145,13 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
       change({ kind: "opened", instanceId: reply.instanceId, revision: reply.revision, html: reply.html ?? "", title: reply.title, statusText: reply.statusText, actions: reply.actions,
         script: reply.script ?? null, scriptProblem: reply.scriptProblem ?? null, input: reply.input ?? null });
       latest.current.onLook({ ...reply.title ? { title: reply.title } : {}, status: reply.statusText, ...reply.icon ? { icon: reply.icon } : {}, ...reply.package ? { plugin: reply.package } : {} });
-      // The plugin closed the instance: its tab goes with it.
-      detach = hub.attach(reply.instanceId, reply.revision, event => { if (event.kind === "closed") latest.current.onClose(); else change({ kind: "event", event }); });
+      // The plugin closed the instance: its tab goes with it. A tab that is still there afterwards was asked for again by the plugin in the
+      // same breath, so the window kept it: it asks for the instance the plugin has now. A tab that went away asks for nothing.
+      detach = hub.attach(reply.instanceId, reply.revision, event => {
+        if (event.kind !== "closed") { change({ kind: "event", event }); return; }
+        latest.current.onClose();
+        setRetry(value => value + 1);
+      });
     })();
     return () => {
       cancelled = true;

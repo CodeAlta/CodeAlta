@@ -314,7 +314,14 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
           changed();
           for await (const event of events) {
             if (abort.signal.aborted) return;
-            if (event.kind === "open") { const request = readOpenRequest(event); if (request) open(request); }
+            if (event.kind === "open") {
+              const request = readOpenRequest(event);
+              if (!request) continue;
+              // The plugin asks for the tab of an instance it closed before: the close that was kept for a tab that comes late is not said to
+              // the tab it now asks for, which the window keeps or opens again.
+              if (text(event.instanceId, 256) && retained.get(event.instanceId)?.last?.kind === "closed") retained.delete(event.instanceId);
+              open(request);
+            }
             else if (event.kind === "plugins") { void list(); changed(); }
             else if (event.kind === "rpc" || event.kind === "rpcClosed") deliverRpc(event);
             else {

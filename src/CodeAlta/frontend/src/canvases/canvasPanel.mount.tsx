@@ -19,6 +19,8 @@ const state = {
   abandoned: [] as string[],
   /** The host closed the instance to make room for others: it does not know it until the tab asks for it again. */
   evicted: false,
+  /** The owner of the tab takes the tab away when it is closed, as the window does for a close that nothing follows. */
+  closeUnmounts: false,
   /** The host takes its time to open an instance: each open waits to be released. */
   holdOpens: false, held: [] as (() => void)[],
 };
@@ -98,7 +100,7 @@ const fixture = {
     flushSync(() => root.render(createElement(StrictMode, null, createElement(CanvasPanel, {
       tab, spaceId: options.space === undefined ? "work" : options.space, hub, visible: options.visible ?? true, active: true,
       onActivate: () => { state.activated++; }, onLook: look => { state.looks.push(look); }, onInstance: instance => { state.instances.push(instance); },
-      onClose: () => { state.closed++; }, onOpenSource: folder => { state.sources.push(folder.id); }, control: options.control ? control : null, loadScript,
+      onClose: () => { state.closed++; if (state.closeUnmounts) root.render(null); }, onOpenSource: folder => { state.sources.push(folder.id); }, control: options.control ? control : null, loadScript,
       ...options.owner ? { onAbandoned: (instance: string, space: string | null) => { state.abandoned.push(`${instance}:${space}`); } } : {},
     }))));
   },

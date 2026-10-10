@@ -104,10 +104,21 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
     assert.equal(await wait(`${content}==='back'`), true);
     assert.equal(await evaluate("!document.querySelector('.canvas-placeholder')"), true);
 
-    // The plugin closes the instance: the tab is closed with it.
+    // The plugin closes the instance: the tab is closed with it. Here the owner keeps the tab, as the window does when the plugin asked for
+    // the tab again in the same breath: the tab that is still there asks for the instance the plugin now has, and shows it.
     const closed = await evaluate<number>("canvasFixture.state.closed");
-    await evaluate("canvasFixture.push({ kind: 'closed' })");
+    const reopened = await evaluate<number>("canvasFixture.state.opened");
+    await evaluate("window.keptHtml = canvasFixture.scenario.html; Object.assign(canvasFixture.scenario, { html: '<p>opened anew</p>', revision: 1 }); canvasFixture.push({ kind: 'closed' })");
     assert.equal(await wait(`canvasFixture.state.closed===${closed + 1}`), true);
+    assert.equal(await wait(`${content}==='opened anew'`), true, "a tab that outlives the close of its instance asks for it again");
+    assert.equal(await evaluate("canvasFixture.state.opened"), reopened + 1);
+    assert.equal(await evaluate("canvasFixture.state.closed"), closed + 1, "the owner was told once");
+    // A close that nothing follows takes the tab away, and the tab that is gone asks for nothing.
+    await evaluate("canvasFixture.state.closeUnmounts = true; canvasFixture.push({ kind: 'closed' })");
+    assert.equal(await wait(`canvasFixture.state.closed===${closed + 2} && !document.querySelector('.canvas-panel')`), true);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(await evaluate("canvasFixture.state.opened"), reopened + 1, "a tab that was closed does not open its instance again");
+    await evaluate("canvasFixture.state.closeUnmounts = false; Object.assign(canvasFixture.scenario, { html: window.keptHtml, revision: 1 })");
 
     // A plugin that is not running at the start: the tab says why, and offers to build it, to open its source and to close.
     await evaluate("canvasFixture.clear(); canvasFixture.scenario.status = 'plugin_stopped'");
