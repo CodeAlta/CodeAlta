@@ -2031,10 +2031,14 @@ details, and a popover that names what goes (**Remove {name}?**) before anything
 What ships with the application (a built-in prompt, skill or plugin), what a plugin brings and what
 another tool owns (a skill or an agent of GitHub Copilot, a server of `.mcp.json`) has no such button.
 
-`skills.delete` names a skill by its name and source, as `detail` does. It answers `read_only` for any
-other source, and only moves a folder that is directly inside the folder its source reads and holds a
-`SKILL.md`: a name is compared with the names of the skills and never made into a path. A code editor
-tab that was open on the folder finds it gone, as for a plugin.
+`skills.delete` names a skill by the opaque per-file `id` from `skills.list` and its source, as `detail`
+does. The id hashes the source and full skill-file path, independently of YAML metadata. Both operations
+resolve it against a fresh listing for the selected project and host epoch; a supplied id never falls
+back to a name or becomes a client-supplied path. Legacy name/source requests are accepted only when
+exactly one skill matches. Removal answers `read_only` for any other source, and only moves a folder
+that is directly inside the folder its source reads and holds a `SKILL.md`. A code editor tab that was
+open on the folder finds it gone, as for a plugin. The Global/Project write-scope choice changes
+enablement and creation, not which selected skill is removed.
 
 `plugins.delete` names a package by scope and id, as `reload` does. In order: the plugins of the package
 are stopped in the running host (`PluginRuntimeManager.StopPackageAsync`, which does not look at the
@@ -2109,6 +2113,12 @@ which creates `<name>/SKILL.md` under the global or project skills folder. Selec
 details beside the list: source and state, the path of its `SKILL.md`, the skill that overrides it,
 license, compatibility and allowed tools when declared, related files, validation diagnostics, and the
 instructions of the `SKILL.md` rendered as Markdown (the first 64 Ki characters of a file up to 256 KiB).
+An invalid `SKILL.md`, including malformed YAML that leaves its name empty, remains selectable for
+diagnostics and removal. Rows, selection and detail requests use the per-file id, so unnamed skills and
+duplicate names do not collide. Cached details are also fenced by project, epoch and listing. Enablement
+remains name-based: unusable names have disabled switches and are excluded from bulk toggles. The
+editor's separate name-based folder handle is omitted when the name cannot form a handle or matches
+more than one listed file; the containing skills folder can still be opened from the top of the page.
 A skill is a folder that can hold several files: the button of the details opens that folder in the code
 editor, on its `SKILL.md` and with its files (see "The folder of a plugin or of a skill"). It is **Edit** for
 a skill of the user or of a project, and **View files** for a built-in skill and for a skill that a plugin

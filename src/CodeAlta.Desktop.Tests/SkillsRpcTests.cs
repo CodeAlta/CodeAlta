@@ -39,6 +39,7 @@ public sealed class SkillsRpcTests
         Assert.AreEqual("Alpha workflow", alpha.Description);
         Assert.AreEqual("UserAlta", alpha.Source);
         Assert.AreEqual("User", alpha.Scope);
+        Assert.AreEqual(64, alpha.Id.Length);
         Assert.IsTrue(alpha is { Enabled: true, EnabledGlobal: true, EnabledProject: true, Valid: true, Shadowed: false });
 
         var scoped = await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default);
@@ -52,6 +53,7 @@ public sealed class SkillsRpcTests
         Assert.AreEqual(("skill:global:UserAlta:alpha", Path.Combine(fixture.GlobalRoot, "skills", "alpha")), (alpha.Folder, alpha.Path));
         Assert.AreEqual(($"skill:project:{fixture.Project.Id}:ProjectAlta:beta", Path.Combine(fixture.ProjectPath, ".alta", "skills", "beta")), (beta.Folder, beta.Path));
         Assert.AreEqual("skill:global:UserAlta:alpha", scoped.Skills.Single(skill => skill.Name == "alpha").Folder, "A skill of the user is found without the project.");
+        Assert.AreEqual(alpha.Id, scoped.Skills.Single(skill => skill.Name == "alpha").Id, "The same file keeps its identity across listings.");
     }
 
     [TestMethod]
@@ -102,6 +104,18 @@ public sealed class SkillsRpcTests
         Assert.AreEqual("invalid", (await fixture.Service.SetAllEnabledAsync(new(Epoch, project, "Both", ["alpha"], false), default)).Status);
         Assert.AreEqual("invalid", (await fixture.Service.SetEnabledAsync(new(Epoch, null, "Project", "alpha", false), default)).Status, "The project scope requires a project.");
         Assert.AreEqual("invalid", (await fixture.Service.SetEnabledAsync(new(Epoch, null, "Global", null, false), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task EnablementStillRequiresUsableNames_AndRejectsAnEntireInvalidBatch()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        foreach (var name in new[] { "", " ", "-skill", "skill-", "two--dashes", "bad_name", "../skill", new string('a', 65) })
+        {
+            Assert.AreEqual("invalid", (await fixture.Service.SetEnabledAsync(new(Epoch, null, "Global", name, false), default)).Status, name);
+            Assert.AreEqual("invalid", (await fixture.Service.SetAllEnabledAsync(new(Epoch, null, "Global", ["alpha", name], false), default)).Status, name);
+        }
+        Assert.IsFalse(File.Exists(fixture.GlobalConfig), "The per-file id contract does not relax the separate name-based configuration contract.");
     }
 
     [TestMethod]
@@ -425,6 +439,190 @@ public sealed class SkillsRpcTests
         Assert.IsFalse(Directory.Exists(beta));
         // The code editor that was open on the folder of the skill finds it gone.
         Assert.AreEqual(("project_unavailable", (string?)null), await fixture.Service.Folders!.ResolveAsync(new SkillFolder(null, SkillSourceKind.UserAlta, "alpha"), default));
+    }
+
+    [TestMethod]
+    public async Task Delete_MalformedSkill_RemovesOnlyTheSelectedFolder()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var root = Path.Combine(fixture.ProjectPath, ".alta", "skills");
+        var first = Directory.CreateDirectory(Path.Combine(root, "broken-first")).FullName;
+        var second = Directory.CreateDirectory(Path.Combine(root, "broken-second")).FullName;
+        foreach (var folder in new[] { first, second })
+        {
+            // An unquoted colon makes the frontmatter invalid, including its otherwise present name.
+            File.WriteAllText(Path.Combine(folder, "SKILL.md"), $"---\nname: {Path.GetFileName(folder)}\ndescription: Instructions: use these tools\n---\n\n# {Path.GetFileName(folder)}\n\nKeep this body.\n");
+        }
+
+        var listed = await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default);
+        var chosen = listed.Skills.Single(skill => skill.Title == "broken-second");
+        Assert.AreEqual(string.Empty, chosen.Name);
+        Assert.IsFalse(chosen.Valid);
+        Assert.AreNotEqual(chosen.Id, listed.Skills.Single(skill => skill.Title == "broken-first").Id);
+        var request = new SkillsDetailRequest(Epoch, fixture.Project.Id, chosen.Name, chosen.Source, chosen.Id);
+        var detail = await fixture.Service.DetailAsync(request, default);
+        Assert.AreEqual(("ok", Path.Combine(second, "SKILL.md")), (detail.Status, detail.SkillFilePath));
+        StringAssert.Contains(detail.Content, "# broken-second");
+        Assert.IsTrue(detail.Diagnostics.Any(item => item.Code == "frontmatter-invalid"));
+        Assert.IsFalse(detail.ModelVisible, "A new identity does not make malformed metadata valid.");
+        Assert.IsNull(detail.Folder, "The editor's name-based handle is a separate contract.");
+        var removed = await fixture.Service.DeleteAsync(request, default);
+        Assert.AreEqual(("ok", 1), (removed.Status, removed.Changed));
+        CollectionAssert.AreEqual(new[] { second }, fixture.Trash.Moved);
+        Assert.IsTrue(Directory.Exists(first));
+        Assert.IsFalse(Directory.Exists(second));
+        Assert.IsTrue(Directory.Exists(Path.Combine(root, "beta")));
+        Assert.AreEqual("not_found", (await fixture.Service.DetailAsync(request, default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Service.DeleteAsync(request, default)).Status);
+    }
+
+    [TestMethod]
+    public async Task DuplicateNamesInOneSource_OnlyTheIdSelectsTheSecondSkill()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var root = Path.Combine(fixture.ProjectPath, ".alta", "skills");
+        var second = Directory.CreateDirectory(Path.Combine(root, "second")).FullName;
+        File.WriteAllText(Path.Combine(second, "SKILL.md"), "---\nname: beta\ndescription: Another beta\n---\n\n# Second beta\n\nSecond body.\n");
+        var listed = await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default);
+        var duplicates = listed.Skills.Where(skill => skill.Name == "beta").ToArray();
+        Assert.HasCount(2, duplicates);
+        Assert.HasCount(2, duplicates.Select(skill => skill.Id).Distinct().ToArray());
+        Assert.IsTrue(duplicates.All(skill => skill.Folder is null), "An ambiguous name cannot grant an editor handle to the wrong folder.");
+
+        var legacy = new SkillsDetailRequest(Epoch, fixture.Project.Id, "beta", "ProjectAlta");
+        Assert.AreEqual("invalid", (await fixture.Service.DetailAsync(legacy, default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.DeleteAsync(legacy, default)).Status);
+        Assert.IsEmpty(fixture.Trash.Moved);
+
+        var chosen = duplicates.Single(skill => skill.Title == "Second beta");
+        var request = legacy with { Id = chosen.Id };
+        var detail = await fixture.Service.DetailAsync(request, default);
+        Assert.AreEqual(("ok", Path.Combine(second, "SKILL.md")), (detail.Status, detail.SkillFilePath));
+        StringAssert.Contains(detail.Content, "Second body.");
+        Assert.IsNull(detail.Folder);
+        Assert.AreEqual("ok", (await fixture.Service.DeleteAsync(request, default)).Status);
+        CollectionAssert.AreEqual(new[] { second }, fixture.Trash.Moved);
+        Assert.IsTrue(Directory.Exists(Path.Combine(root, "beta")));
+        Assert.IsFalse(Directory.Exists(second));
+        Assert.AreEqual("not_found", (await fixture.Service.DeleteAsync(request, default)).Status, "A stale id must not fall back to the remaining name.");
+    }
+
+    [TestMethod]
+    public async Task IdsSurviveMetadataChanges_ButNotAFileMove()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var alpha = (await fixture.Service.ListAsync(new(Epoch, null), default)).Skills.Single();
+        var folder = Path.Combine(fixture.GlobalRoot, "skills", "alpha");
+        File.WriteAllText(Path.Combine(folder, "SKILL.md"), "---\nname: renamed\ndescription: Changed metadata\n---\n\n# Renamed\n");
+        var changed = (await fixture.Service.ListAsync(new(Epoch, null), default)).Skills.Single();
+        Assert.AreEqual(alpha.Id, changed.Id);
+        var request = new SkillsDetailRequest(Epoch, null, alpha.Name, alpha.Source, alpha.Id);
+        var detail = await fixture.Service.DetailAsync(request, default);
+        Assert.AreEqual(("ok", "renamed"), (detail.Status, detail.Name), "An id selects the file even when its old metadata no longer matches.");
+
+        Directory.Move(folder, folder + "-moved");
+        Assert.AreNotEqual(alpha.Id, (await fixture.Service.ListAsync(new(Epoch, null), default)).Skills.Single().Id);
+        Assert.AreEqual("not_found", (await fixture.Service.DetailAsync(request, default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Service.DeleteAsync(request, default)).Status);
+        Assert.IsEmpty(fixture.Trash.Moved);
+    }
+
+    [TestMethod]
+    public async Task IdRequests_RefuseForgedStaleSourceAndProjectIdentitiesWithoutNameFallback()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var listed = (await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default)).Skills;
+        var beta = listed.Single(skill => skill.Name == "beta");
+        var alpha = listed.Single(skill => skill.Name == "alpha");
+        var request = new SkillsDetailRequest(Epoch, fixture.Project.Id, beta.Name, beta.Source, beta.Id);
+        var other = await fixture.Projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, "other-project")).FullName);
+        var otherFolder = Directory.CreateDirectory(Path.Combine(other.ProjectPath, ".alta", "skills", "beta")).FullName;
+        File.WriteAllText(Path.Combine(otherFolder, "SKILL.md"), "---\nname: beta\ndescription: Other project\n---\n\n# Other beta\n");
+        foreach (var (attempt, expected) in new (SkillsDetailRequest, string)[]
+        {
+            (request with { Id = "" }, "invalid"),
+            (request with { Id = new string('G', 64) }, "invalid"),
+            (request with { Id = new string('A', 65) }, "invalid"),
+            (request with { Id = Path.Combine(otherFolder, "SKILL.md") }, "invalid"),
+            (request with { Id = new string('0', 64) }, "not_found"),
+            (request with { Id = alpha.Id }, "not_found"),
+            (request with { Source = "UserAlta" }, "not_found"),
+            (request with { Source = "0" }, "invalid"),
+            (request with { ProjectId = null }, "not_found"),
+            (request with { ProjectId = other.Id }, "not_found"),
+            (request with { ProjectId = "missing" }, "unknown_project"),
+            (request with { ExpectedEpoch = "another" }, "stale_epoch"),
+        })
+        {
+            Assert.AreEqual(expected, (await fixture.Service.DetailAsync(attempt, default)).Status, attempt.ToString());
+            Assert.AreEqual(expected, (await fixture.Service.DeleteAsync(attempt, default)).Status, attempt.ToString());
+        }
+
+        fixture.Project.Archived = true;
+        await fixture.Projects.SaveAsync(fixture.Project);
+        Assert.AreEqual("archived_project", (await fixture.Service.DetailAsync(request, default)).Status);
+        Assert.AreEqual("archived_project", (await fixture.Service.DeleteAsync(request, default)).Status);
+        Assert.IsEmpty(fixture.Trash.Moved);
+        Assert.IsTrue(Directory.Exists(Path.Combine(fixture.ProjectPath, ".alta", "skills", "beta")) && Directory.Exists(otherFolder));
+    }
+
+    [TestMethod]
+    public async Task IdRemoval_PreservesReadOnlySourcesAndTrashFailures()
+    {
+        using var fixture = await Fixture.CreateAsync(builtin: true);
+        var listed = (await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default)).Skills;
+        var builtin = listed.Single(skill => skill.Source == "Builtin");
+        var readOnly = new SkillsDetailRequest(Epoch, fixture.Project.Id, null, builtin.Source, builtin.Id);
+        Assert.AreEqual("ok", (await fixture.Service.DetailAsync(readOnly, default)).Status);
+        Assert.AreEqual("read_only", (await fixture.Service.DeleteAsync(readOnly, default)).Status);
+
+        var alpha = listed.Single(skill => skill.Name == "alpha");
+        var request = new SkillsDetailRequest(Epoch, fixture.Project.Id, null, alpha.Source, alpha.Id);
+        fixture.Trash.Available = false;
+        Assert.AreEqual("trash_unavailable", (await fixture.Service.DeleteAsync(request, default)).Status);
+        fixture.Trash.Available = true;
+        fixture.Trash.Fails = true;
+        Assert.AreEqual("trash_failed", (await fixture.Service.DeleteAsync(request, default)).Status);
+        Assert.IsEmpty(fixture.Trash.Moved);
+        Assert.IsTrue(Directory.Exists(Path.Combine(fixture.GlobalRoot, "skills", "alpha")));
+        Assert.IsTrue(Directory.Exists(Path.Combine(fixture.BuiltinRoot, "gamma")));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("group/nested")]
+    public async Task IdRemoval_StillRequiresASkillFolderDirectlyInItsSourceRoot(string relative)
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var root = Path.Combine(fixture.ProjectPath, ".alta", "skills");
+        var folder = Directory.CreateDirectory(Path.Combine(root, relative)).FullName;
+        File.WriteAllText(Path.Combine(folder, "SKILL.md"), "---\nname: not-direct\ndescription: A skill outside the removable layout\n---\n\n# Not direct\n");
+        var skill = (await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default)).Skills.Single(skill => skill.Name == "not-direct");
+        var request = new SkillsDetailRequest(Epoch, fixture.Project.Id, null, skill.Source, skill.Id);
+        Assert.AreEqual("ok", (await fixture.Service.DetailAsync(request, default)).Status);
+        Assert.AreEqual("read_only", (await fixture.Service.DeleteAsync(request, default)).Status);
+        Assert.IsEmpty(fixture.Trash.Moved);
+        Assert.IsTrue(File.Exists(Path.Combine(folder, "SKILL.md")));
+    }
+
+    [TestMethod]
+    public async Task IdRequests_RefuseASkillFileReplacedByALink()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var alpha = (await fixture.Service.ListAsync(new(Epoch, null), default)).Skills.Single();
+        var file = Path.Combine(fixture.GlobalRoot, "skills", "alpha", "SKILL.md");
+        var target = Path.Combine(fixture.ProjectPath, "outside.md");
+        File.Move(file, target);
+        try { File.CreateSymbolicLink(file, target); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Inconclusive($"Symbolic links are unavailable: {exception.Message}");
+        }
+        var request = new SkillsDetailRequest(Epoch, null, null, alpha.Source, alpha.Id);
+        Assert.AreNotEqual("ok", (await fixture.Service.DetailAsync(request, default)).Status);
+        Assert.AreNotEqual("ok", (await fixture.Service.DeleteAsync(request, default)).Status);
+        Assert.IsEmpty(fixture.Trash.Moved);
+        Assert.IsTrue(File.Exists(target));
     }
 
     private sealed class Fixture : IDisposable

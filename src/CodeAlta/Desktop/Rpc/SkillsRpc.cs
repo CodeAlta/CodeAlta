@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using NeoAstra.Rpc;
@@ -85,11 +87,11 @@ internal sealed class SkillsService
             var listing = await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
             var descriptors = listing.Skills;
             var skills = descriptors.Take(MaximumSkills).Select(skill => new SkillsEntry(
-                Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength),
+                IdOf(skill), Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength),
                 skill.SourceKind.ToString(), skill.Scope.ToString(), !skill.IsDisabledGlobally, !skill.IsDisabledForProject,
                 skill.IsEnabled, skill.IsValid, skill.IsShadowed, skill.IsTrusted,
                 // The row opens the folder of its skill in the code editor: the id the editor names it by, and its path.
-                SkillFolders.IdOf(skill, request.ProjectId, project.Root), Bound(skill.SkillRootPath, MaximumPathLength))).ToArray();
+                EditorFolderOf(skill, descriptors, request.ProjectId, project.Root), Bound(skill.SkillRootPath, MaximumPathLength))).ToArray();
             return new("ok", request.ProjectId, skills, descriptors.Count - skills.Length)
             {
                 Problems = [.. listing.Problems.Select(static problem => new PluginsProblem("config", Bound(problem.Path, MaximumPathLength), Clean(problem.Message), problem.IsProject ? "Project" : "Global"))],
@@ -113,16 +115,14 @@ internal sealed class SkillsService
         SkillsDetailResponse Failed(string status) => new(status, request.Name, request.Source, null, null, null, null, false, null, null, null, null, false, [], [], 0);
         if (_projects is null || _management is null) return Failed("unavailable");
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return Failed("stale_epoch");
-        if (request.Name is not { Length: > 0 and <= MaximumNameLength } || request.Source is not { Length: > 0 and <= 64 }) return Failed("invalid");
+        if (!ValidIdentity(request, out var source)) return Failed("invalid");
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
             var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
-            // A shadowed skill shares its name with the one that hides it; the source tells them apart.
-            var skill = descriptors.FirstOrDefault(candidate => string.Equals(candidate.Name, request.Name, StringComparison.Ordinal)
-                && string.Equals(candidate.SourceKind.ToString(), request.Source, StringComparison.Ordinal));
-            if (skill is null) return Failed("not_found");
+            var (status, skill) = FindSkill(descriptors, request, source);
+            if (skill is null) return Failed(status);
             // The document lookup refuses a skill file reached through a link.
             var document = await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, cancellationToken).ConfigureAwait(false);
             string? content = null;
@@ -142,7 +142,7 @@ internal sealed class SkillsService
                 content, truncated || content is null && file.Exists,
                 [.. related.Take(MaximumRelatedFiles).Select(static item => new SkillsRelatedFile(Bound(item.Category, 64), Bound(item.RelativePath, 512)))],
                 [.. skill.Diagnostics.Take(MaximumDiagnostics).Select(static item => new SkillsDiagnostic(item.Severity.ToString(), Bound(item.Code, 64), Bound(item.Message, MaximumMessageLength)))],
-                Math.Max(0, related.Count - MaximumRelatedFiles), SkillFolders.IdOf(skill, request.ProjectId, project.Root));
+                Math.Max(0, related.Count - MaximumRelatedFiles), EditorFolderOf(skill, descriptors, request.ProjectId, project.Root));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -221,10 +221,7 @@ internal sealed class SkillsService
         ArgumentNullException.ThrowIfNull(request);
         if (_projects is null || _management is null) return new("unavailable", 0, null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", 0, null);
-        if (request.Name is not { Length: > 0 and <= MaximumNameLength } || request.Source is not { Length: > 0 and <= 64 }) return new("invalid", 0, null);
-        // The name of a source as the listing gives it: a number is not one.
-        if (!request.Source.All(char.IsAsciiLetter) || !Enum.TryParse<SkillSourceKind>(request.Source, ignoreCase: false, out var source) || !Enum.IsDefined(source))
-            return new("invalid", 0, null);
+        if (!ValidIdentity(request, out var source)) return new("invalid", 0, null);
         if (source is not (SkillSourceKind.UserAlta or SkillSourceKind.ProjectAlta or SkillSourceKind.UserCommon or SkillSourceKind.ProjectCommon)) return new("read_only", 0, null);
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return new(project.Status, 0, null);
@@ -235,8 +232,8 @@ internal sealed class SkillsService
         {
             // Removing a skill does not depend on what a configuration file says of it.
             var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
-            var skill = descriptors.FirstOrDefault(candidate => candidate.SourceKind == source && string.Equals(candidate.Name, request.Name, StringComparison.Ordinal));
-            if (skill is null) return new("not_found", 0, null);
+            var (status, skill) = FindSkill(descriptors, request, source);
+            if (skill is null) return new(status, 0, null);
             folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(skill.SkillRootPath));
             // The folder of one skill, directly in the folder of its source: never that folder itself, nor one above it.
             var root = _management.GetRoots(project.Root).FirstOrDefault(candidate => candidate.Source == source)?.RootPath;
@@ -301,6 +298,46 @@ internal sealed class SkillsService
 
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
+    // Identity belongs to the listed file, never to its YAML name (which may be empty or shared). An id is only
+    // compared with a fresh, project-scoped listing; it is never decoded into a client-supplied filesystem path.
+    private static string IdOf(SkillDescriptor skill)
+    {
+        var path = Path.GetFullPath(skill.SkillFilePath);
+        if (OperatingSystem.IsWindows()) path = path.ToUpperInvariant();
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{skill.SourceKind}\n{path}")));
+    }
+
+    private static bool ValidIdentity(SkillsDetailRequest request, out SkillSourceKind source)
+    {
+        source = default;
+        // The name of a source as the listing gives it: a number is not one.
+        return request.Source is { Length: > 0 and <= 64 } && request.Source.All(char.IsAsciiLetter)
+            && Enum.TryParse(request.Source, ignoreCase: false, out source) && Enum.IsDefined(source)
+            && (request.Id is not null ? request.Id.Length == 64 && request.Id.All(char.IsAsciiHexDigit)
+                : request.Name is { Length: > 0 and <= MaximumNameLength });
+    }
+
+    private static (string Status, SkillDescriptor? Skill) FindSkill(IReadOnlyList<SkillDescriptor> descriptors, SkillsDetailRequest request, SkillSourceKind source)
+    {
+        SkillDescriptor? found = null;
+        foreach (var skill in descriptors)
+        {
+            if (skill.SourceKind != source || !(request.Id is not null
+                ? string.Equals(IdOf(skill), request.Id, StringComparison.Ordinal)
+                : string.Equals(skill.Name, request.Name, StringComparison.Ordinal))) continue;
+            // Old clients can still name an unambiguous skill. They must never select the first of duplicates,
+            // and an unknown id must never fall back to a name, even when that name is present in the listing.
+            if (found is not null) return ("invalid", null);
+            found = skill;
+        }
+        return found is null ? ("not_found", null) : ("ok", found);
+    }
+
+    private static string? EditorFolderOf(SkillDescriptor skill, IReadOnlyList<SkillDescriptor> descriptors, string? projectId, string? projectRoot)
+        // Editor folder handles are still name-based: do not offer a handle that could open another row's files.
+        => descriptors.Count(candidate => candidate.SourceKind == skill.SourceKind && string.Equals(candidate.Name, skill.Name, StringComparison.Ordinal)) == 1
+            ? SkillFolders.IdOf(skill, projectId, projectRoot) : null;
+
     // What a parser or the system said, on one line.
     private static string Clean(string message)
         => Bound(new string([.. message.Where(static character => !char.IsControl(character))]).Trim(), MaximumMessageLength);
@@ -344,12 +381,14 @@ internal sealed record SkillsListResponse(string Status, string? ProjectId, IRea
 /// One discovered skill. The source is <c>ProjectAlta</c>, <c>ProjectCommon</c>, <c>UserAlta</c>, <c>UserCommon</c>,
 /// <c>Plugin</c> or <c>Builtin</c>; the scope is <c>Project</c>, <c>User</c>, <c>Plugin</c> or <c>Builtin</c>.
 /// </summary>
-/// <param name="Folder">The id that names the folder of the skill to the code editor; null for a skill whose name cannot be part of an id.</param>
+/// <param name="Folder">The id that names the folder of the skill to the code editor; null for an ambiguous name or one that cannot be part of an id.</param>
 /// <param name="Path">The path of the folder of the skill.</param>
-internal sealed record SkillsEntry(string Name, string Title, string Description, string Source, string Scope, bool EnabledGlobal,
+/// <param name="Id">An opaque, metadata-independent identity of this source and skill file, used for details and removal.</param>
+internal sealed record SkillsEntry(string Id, string Name, string Title, string Description, string Source, string Scope, bool EnabledGlobal,
     bool EnabledProject, bool Enabled, bool Valid, bool Shadowed, bool Trusted, string? Folder = null, string? Path = null);
-/// <summary>Names one listed skill by its name and source.</summary>
-internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? ProjectId, string? Name, string? Source);
+/// <summary>Names one listed skill by its id and source. Without an id, a legacy name must match exactly one skill.</summary>
+/// <param name="Id">The id returned by the listing; when supplied, the name is ignored and is never a fallback.</param>
+internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? ProjectId, string? Name, string? Source, string? Id = null);
 
 /// <summary>
 /// The detail of one skill. <c>Content</c> is the <c>SKILL.md</c> text, cut at 64 Ki characters

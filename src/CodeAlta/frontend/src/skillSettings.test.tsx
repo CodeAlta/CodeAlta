@@ -4,11 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SkillsDetailResponse, SkillsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { SkillDetail, SkillRows, skillRemovable } from "./SkillSettings";
+import { SkillDetail, SkillRows, skillRemovable, skillToggleable } from "./SkillSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
-const entry = (name: string, source: string): SkillsEntry => ({ name, title: name, description: "What it is for.", source,
+const entry = (name: string, source: string): SkillsEntry => ({ id: `${source}-${name}`, name, title: name, description: "What it is for.", source,
   scope: source.startsWith("Project") ? "Project" : source.startsWith("User") ? "User" : source, enabledGlobal: true, enabledProject: true, enabled: true, valid: true, shadowed: false, trusted: true,
   folder: `skill:global:${source}:${name}`, path: `/skills/${name}` });
 const detail = (skill: SkillsEntry, change: Partial<SkillsDetailResponse> = {}): SkillsDetailResponse => ({ status: "ok", name: skill.name, source: skill.source,
@@ -105,4 +105,25 @@ test("a skill has no button while its details are read, when its folder has no i
   assert.ok(!render(skill, detail(skill, { folder: null })).includes(button), "The host did not name the folder.");
   assert.ok(!render(skill, detail(skill, { skillRootPath: null })).includes(button));
   assert.ok(!render(skill, detail(skill), { edit: false }).includes(button), "A page without an owned host opens no editor.");
+});
+
+test("invalid or missing names cannot write name-based enablement, but keep their selection and removal", () => {
+  for (const name of ["", " ", "Not A Slug", "../skill", "-skill", "skill-", "two--dashes", "a".repeat(65), "name:tool", "bad_name"])
+    assert.equal(skillToggleable(name), false, name);
+  for (const name of ["valid-name", "UPPERCASE", "écrire", "计划", "١-٢", " spaced ", "a".repeat(64)])
+    assert.equal(skillToggleable(name), true, name);
+  const skills = [
+    { ...entry("", "ProjectAlta"), id: "first-file", title: "Broken first", valid: false, folder: null },
+    { ...entry("", "ProjectAlta"), id: "second-file", title: "Broken second", valid: false, folder: null },
+  ];
+  const rows = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillRows, { skills, empty: "No skills were found.", selected: skills[1], disabled: false, onSelect: never, onToggle: never, onDelete: never })))
+    .split('<div class="bp6-card').slice(1);
+  assert.equal(rows.length, 2);
+  assert.ok(!rows[0].includes("aria-current") && rows[1].includes('aria-current="true"'));
+  for (const [index, title] of ["Broken first", "Broken second"].entries()) {
+    assert.match(rows[index], /<input[^>]*disabled=""/);
+    assert.ok(rows[index].includes(`aria-label="Enable ${title}"`));
+    assert.ok(rows[index].includes(`aria-label="Remove ${title}"`));
+  }
 });

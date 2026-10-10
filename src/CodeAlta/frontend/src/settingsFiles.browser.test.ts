@@ -151,6 +151,67 @@ test("a settings page says where its files are, and opens, copies and shows them
     await act(`${button(problem, "Edit in the code editor")}.click()`);
     assert.deepEqual(await evaluate(`${calls("files.open")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", kind: "config", scope: "Global", id: null, part: null });
     assert.equal(await evaluate(`${fixture}.state.opened`), 1, "the window leaves Settings for the code editor");
+
+    // Malformed metadata must not collapse rows, suppress their details or send an empty name to removal.
+    await command("Page.navigate", { url: pathToFileURL(page).href + "?skills=invalid" });
+    const skillRows = "[...document.querySelectorAll('.skill-settings .settings-editor-rows .bp6-card')]";
+    const skillDetail = "document.querySelector('.skill-detail')";
+    await until(`${skillRows}.length === 4`, "unnamed skills and duplicate names each have their own row");
+    assert.deepEqual(await evaluate(`${skillRows}.map(row => row.querySelector('input').disabled)`), [true, true, false, false], "only usable names have enablement switches");
+    assert.equal(await evaluate("document.querySelector('.settings-scope [aria-checked=true]')?.textContent"), "Global");
+    await act(`${card("Broken second")}.querySelector('strong').click()`);
+    await until(`${skillDetail}?.querySelector('.skill-detail-diagnostics')?.textContent.includes('Broken second: invalid YAML.')`, "the second unnamed skill has its own diagnostic");
+    assert.equal(await evaluate(`${card("Broken second")}.getAttribute('aria-current')`), "true");
+    assert.equal(await evaluate(`${card("Broken first")}.getAttribute('aria-current')`), null);
+    assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta" });
+    await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('Instructions for broken-second')`, "the right body is shown");
+    assert.ok((await evaluate(`${skillDetail}.textContent`) as string).includes("C:\\skills\\broken-second\\SKILL.md"));
+
+    // Bulk toggles still name skills, but omit empty names and deduplicate usable names.
+    const bulk = (text: string) => `[...document.querySelectorAll('.settings-editor-toolbar button')].find(value => value.textContent === ${JSON.stringify(text)})`;
+    await act(`${bulk("Disable all")}.click()`);
+    await until(`${calls("skills.setAllEnabled")}.length === 1`);
+    assert.deepEqual(await evaluate(calls("skills.setAllEnabled")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", names: ["duplicate"], enabled: false }]);
+    assert.deepEqual(await evaluate(calls("skills.setEnabled")), []);
+    const filter = (text: string) => `(() => { const input = document.querySelector('input[type=search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(text)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`;
+    await act(filter("Broken"));
+    assert.deepEqual(await evaluate(`[${bulk("Enable all")}.disabled, ${bulk("Disable all")}.disabled]`), [true, true], "a list with only unnamed skills has no bulk toggle action");
+    await act(filter(""));
+    await until(`${skillDetail}?.querySelector('.skill-detail-diagnostics')?.textContent.includes('Broken second: invalid YAML.')`);
+
+    // Cached detail is fenced by project and epoch as well as row id, even when the fake host takes time to answer.
+    for (const [change, context] of [[`${fixture}.setProjectId('other')`, "epoch/other"], [`${fixture}.setEpoch('next')`, "next/other"]]) {
+      await act(`${fixture}.state.holdDetails = true; ${change}`);
+      await until(`${fixture}.state.pendingDetails.length > 0`);
+      assert.equal(await evaluate(`${skillDetail}.querySelector('.skill-detail-instructions')`), null, "the old scope's detail is hidden while the new one loads");
+      await act(`${fixture}.state.holdDetails = false; ${fixture}.state.pendingDetails.splice(0).forEach(value => value.resolve())`);
+      await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes(${JSON.stringify(context)})`);
+    }
+    await act(`${fixture}.setEpoch('epoch'); ${fixture}.setProjectId('p')`);
+    await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('epoch/p')`);
+
+    // Remove from the details while Global is selected: identity and project, not the write scope, select the file.
+    await act(`${skillDetail}.querySelector('button.bp6-intent-danger').click()`);
+    await until(`${confirm} !== null`);
+    assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), "Remove Broken second?");
+    await act(`${confirm}.querySelector('button').click()`);
+    await until(`${card("Broken second")} === undefined`);
+    assert.deepEqual(await evaluate(calls("skills.delete")), [{ expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta" }]);
+    assert.equal(await evaluate(`${card("Broken first")} !== undefined`), true, "the first unnamed skill stays");
+    await until(`${confirm} === null`, "the first confirmation has closed");
+
+    // The same is true for two files with the same nonempty name and source.
+    await act(`${card("Duplicate second")}.querySelector('strong').click()`);
+    await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('Instructions for duplicate-second')`);
+    assert.equal(await evaluate(`${card("Duplicate second")}.getAttribute('aria-current')`), "true");
+    assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta" });
+    await act(`${trash("Duplicate second")}.click()`);
+    await until(`${confirm} !== null`);
+    assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), "Remove Duplicate second?");
+    await act(`${confirm}.querySelector('button').click()`);
+    await until(`${card("Duplicate second")} === undefined`);
+    assert.deepEqual(await evaluate(`${calls("skills.delete")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta" });
+    assert.deepEqual(await evaluate(`${skillRows}.map(row => row.querySelector('strong').textContent)`), ["Broken first", "Duplicate first"]);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

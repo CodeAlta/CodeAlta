@@ -745,6 +745,8 @@ A skill is a folder that can hold several files. In the desktop app, the `</>` b
 
 The red **Remove** button of a skill, in its row or in its details, moves the folder of the skill to the trash of your system after you confirm. It is there for your own skills and for those of the project; a built-in skill, a skill of a plugin or of GitHub Copilot has none.
 
+In the desktop app, an **Invalid** skill can still be selected to read its diagnostics and removed. This includes a `SKILL.md` whose YAML cannot be parsed, and skills that share a name. **Remove** acts on the selected skill, even when **Global** is selected for enablement changes. A skill without a usable name has a disabled switch and is left out of **Enable all** and **Disable all**. To repair its file, open the containing skills folder from the top of the page.
+
 To work on all your own skills at once, open `~/.alta/skills` from the top of the page: the code editor shows that folder, where each skill is a folder with its `SKILL.md`. The `.alta/skills` folder of the selected project opens the same way.
 
 When a `config.toml` does not parse, the page still lists the skills and names that file in red above the list, with the button that opens it in the code editor. Until the file is fixed, the skills it disables are shown as enabled, and a change of a switch cannot be saved to it.
