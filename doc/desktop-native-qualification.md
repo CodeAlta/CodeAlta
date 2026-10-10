@@ -237,7 +237,7 @@ The preserved dependency/license review is point-in-time evidence, not a release
   not the rendered boot DOM. Actual DOM/RPC/CM/Radix/Mermaid/dialog assertions remain in the isolated
   M0 fixture. Managed tests separately cover the production boot projection and generated JSON.
 
-### Final M1b recovery verification — 2026-09-05
+### Final M1b recovery verification - 2026-09-05
 
 All commands below completed on the recovered filesystem, without replaying the failed prior
 session. Local evidence is retained under

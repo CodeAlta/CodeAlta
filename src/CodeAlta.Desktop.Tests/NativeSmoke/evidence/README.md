@@ -1,4 +1,4 @@
-# Final M0 run pointers — 2026-09-05
+# Final M0 run pointers - 2026-09-05
 
 These are task-owned **local** evidence directories, not release artifacts or portable CI links.
 No user profile/configuration/provider/plugin was opened. The prototype changes are left uncommitted

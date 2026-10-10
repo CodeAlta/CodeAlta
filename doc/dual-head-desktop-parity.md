@@ -1,10 +1,10 @@
-# Dual-head desktop parity — in development
+# Dual-head desktop parity - in development
 
 > **Status: scoped owned Desktop command review, exact-target steering, idle compaction and observed-run cancellation verified, 2026-09-12.** Earlier bounded M2/M3 and persisted-workspace/owned-text-submission/display evidence remains recorded below. This is an implementation acceptance ledger, not documentation of a shipped desktop. Desktop feature parity and full platform qualification remain **pending**. The terminal project/package is `CodeAlta.Tui`, command `altatui`; `CodeAlta` / `alta` remains an explicitly in-development surface with opt-in experimental host operations. A successful managed build or existing unit test does not qualify desktop support.
 
 Source of acceptance criteria: the approved [dual-head desktop plan](../.alta/plans/2026-09-05-dual-head-desktop.md), especially its feature-parity matrix, design §§6.2–6.6, and M0/M7 gates. This document records bounded milestone evidence separately from outstanding desktop acceptance. The coordinator owns the plan checklist and subsequent implementation.
 
-## M4 checkpoint: Send/Abort document-lifetime correction — 2026-09-12
+## M4 checkpoint: Send/Abort document-lifetime correction - 2026-09-12
 
 The same sole writer corrected five files; parent audited all source/fixture bodies and integrated.
 Send/Abort now use an App-owned helper with immutable intents, original transport waiters, synchronous
@@ -42,7 +42,7 @@ full-suite or website execution. Website theme acquisition remains outside the n
 Deferred runtime interleavings and durable reauthorization are unchanged. M4–M6 remain open;
 this closes a document-lifetime prerequisite, not the admission/observation or interaction milestones.
 
-## M4 checkpoint: volatile Desktop queue/cancel — 2026-09-12
+## M4 checkpoint: volatile Desktop queue/cancel - 2026-09-12
 
 The same sole writer implemented the adapter-only 11-file vertical and a three-file correction;
 parent independently audited complete source/fixtures, generated contracts, verified and integrated.
@@ -89,7 +89,7 @@ or website qualification. Website build remains omitted because configured theme
 the no-network boundary. The two deferred runtime interleavings below remain dynamically uncovered;
 durable/restart recovery needs a separately approved trust/reauthorization contract.
 
-## M4 checkpoint: volatile owned deferred execution — 2026-09-12
+## M4 checkpoint: volatile owned deferred execution - 2026-09-12
 
 The same sole writer implemented only the shared-runtime queue prerequisite. Parent independently
 audited complete source/fixture bodies, returned corrections to that writer, ran verification and
@@ -140,7 +140,7 @@ That prerequisite step did not qualify Desktop queue RPC/UI, durable/restart rec
 default-profile, network/install/restore, full-suite or website qualification. Website build remains
 omitted because configured theme acquisition crosses the no-network boundary.
 
-## M4 checkpoint: exact observed-run cancellation — 2026-09-12
+## M4 checkpoint: exact observed-run cancellation - 2026-09-12
 
 The same sole writer implemented the optional hub route, existing-only owned runtime capture,
 independent AbortRun slot/shared bounded receipts and unary Desktop `sessions.abortRun`. Parent
@@ -188,7 +188,7 @@ or website qualification. Website theme acquisition remains outside the no-netwo
 Noncooperative/self-awaiting callbacks remain unsupported; timeout is not termination proof.
 Queue ownership and remaining M4–M6 requirements are not completed by this command vertical.
 
-## M4 checkpoint: provider run lifetime and owned run binding — 2026-09-12
+## M4 checkpoint: provider run lifetime and owned run binding - 2026-09-12
 
 The optional provider-only `IAgentTargetedAbortProvider` and per-send `AgentRunLifecycle` now
 establish original-source cancellation and authoritative owned permission/run binding in the
@@ -233,7 +233,7 @@ docs are updated. Noncooperative hooks/callbacks can still prevent shutdown; cal
 await their own send/control/disposal, and a timeout never authorizes abandoning retained work.
 M4–M6 remain open.
 
-## M4 checkpoint: owned exact-attachment idle compaction — 2026-09-12
+## M4 checkpoint: owned exact-attachment idle compaction - 2026-09-12
 
 The same sole writer implemented one further command vertical; parent independently audited all
 changed production/fixture bodies, executed verification and owns documentation/integration.
@@ -285,7 +285,7 @@ install/restore, full-suite or website qualification. Website theme acquisition 
 the verification boundary. Conditional active-run abort, queue execution/recovery ownership,
 broader M4 interactions/recovery and all remaining M5/M6 work are **still open**.
 
-## M4 checkpoint: owned exact-target text steering — 2026-09-12
+## M4 checkpoint: owned exact-target text steering - 2026-09-12
 
 The same sole implementation writer added `OwnedTextSteerRequest`, bounded owned admission,
 existing-entry-only runtime dispatch, generated `sessions.steer`, and App-owned steering
@@ -331,7 +331,7 @@ remote content, so its build remains outside this verification boundary. Genuine
 active-run abort, owned compaction, queue drain/recovery ownership and broader interactions/UI
 remain subsequent work, not features supplied by this slice.
 
-## M4 checkpoint: opted-in Desktop command review — 2026-09-12
+## M4 checkpoint: opted-in Desktop command review - 2026-09-12
 
 The explicit `--review-owned-command-permissions` flag now connects the existing owned-send
 permission lifetime to Desktop. Complete owned-host/root consent remains mandatory and the
@@ -408,7 +408,7 @@ theme acquisition conflicts with this continuation's no-install/no-network bound
 desktop parity remain incomplete**, including notifications, file-change review, asks, broader
 observation/effect recovery and real native usability.
 
-## M4 checkpoint: backend owned permission execution/attachment lifetime — 2026-09-11
+## M4 checkpoint: backend owned permission execution/attachment lifetime - 2026-09-11
 
 `CodeAltaHostOptions.ReviewOwnedCommandPermissions` is explicit and defaults **OFF**. At this backend
 checkpoint no RPC or Desktop consumer enabled it; the 2026-09-12 continuation above adds that opt-in.
@@ -464,7 +464,7 @@ auth/network, install or restore execution ran for this slice. This is backend-o
 the actual Desktop permission consumer and wider shared-effect/interaction migration still require
 separate scope and review. **M4/full desktop parity remain incomplete.**
 
-## M4 checkpoint: explicit per-send permission callback prerequisite — 2026-09-11
+## M4 checkpoint: explicit per-send permission callback prerequisite - 2026-09-11
 
 `AgentSendOptions.OnPermissionRequest` is now an optional callback override for each send's
 in-process `AgentSession` built-in tool definitions. Null keeps the existing session callback.
@@ -488,7 +488,7 @@ acquisition disabled. No broad suite, native/app/default-root/real-provider/netw
 execution ran. The subsequent backend checkpoint above qualifies a bounded per-execution/attachment
 permission lifetime using this association; **M4/full parity remain incomplete**.
 
-## M4 checkpoint: manual selected-session current-runtime observation — 2026-09-11
+## M4 checkpoint: manual selected-session current-runtime observation - 2026-09-11
 
 `SessionRuntimeService.GetCurrentStateAsync` uses existing admitted-work ownership, actor lookup
 and a synchronous actor query to copy immutable entry/transition facts. It creates no actor or
@@ -536,7 +536,7 @@ before runtime permissions, and coordinator reuse does not compare callbacks. Th
 checkpoint above qualifies opt-in cancellation/retirement/reuse binding with isolated fake-provider
 tests. No Desktop approval route is enabled; unbound requests remain denied.
 
-## M4 checkpoint: exclusive original-event reader — 2026-09-11
+## M4 checkpoint: exclusive original-event reader - 2026-09-11
 
 `SessionRuntimeEventPublisher` now admits one original-event reader per instance at first
 enumeration. A competing reader throws before touching the channel; rejected/unstarted iterators
@@ -563,7 +563,7 @@ watermarks, and its baseline must not be combined with an unrevisioned raw strea
 handshake. Next is a bounded actor-owned active-state/snapshot recommendation using the existing
 runtime query/entry/queue owners, rather than expanding evictable Display into authoritative state.
 
-## M4 checkpoint: scoped source-test cleanup — 2026-09-11
+## M4 checkpoint: scoped source-test cleanup - 2026-09-11
 
 All eleven reconstruction-only methods listed in the historical checkpoints below are now
 removed, together with their private hashes, compressed data, restoration routines and obsolete
@@ -593,7 +593,7 @@ Next is a bounded TUI observation/effect review of the actual pump/coordinator/r
 routes. Rich history and original .NET plugin/effect inputs must not be replaced by truncated
 display DTOs or reconstructed events; a scoped migration recommendation precedes implementation.
 
-## M4 checkpoint: scoped Desktop selected-session display — 2026-09-11
+## M4 checkpoint: scoped Desktop selected-session display - 2026-09-11
 
 Parent reviewed and independently verified the sole child's owned-only `SessionDisplayService`,
 generated channel/JSON metadata, selected-session store and `LiveSessionPanel`. Default/catalog-only
@@ -632,7 +632,7 @@ workspace and owned-mode guards now inspect current source directly. No behavior
 **All eleven were subsequently removed in the scoped cleanup above.** The original requirement
 was to resolve them before M4 completion, without adding inverse reconstruction machinery.
 
-## M4 checkpoint: reported plain ToolCall display — 2026-09-12
+## M4 checkpoint: reported plain ToolCall display - 2026-09-12
 
 The existing selected-session Display channel now includes at most two recently updated reported
 plain ToolCalls, keyed by exact provider/nullable-run/activity identity within the existing session
@@ -667,7 +667,7 @@ website execution was added. Historical async projection/RPC suites were not rer
 Permission policy, TUI/effects, native/file/ask authority, deferred queue interleavings and durable
 recovery remain outside this vertical. **M4–M6 remain open.**
 
-## M4 checkpoint: committed live display foundation — 2026-09-11
+## M4 checkpoint: committed live display foundation - 2026-09-11
 
 `SessionRuntimeService.Display` now commits immutable, bounded live status/text values before
 the existing lossy event-delivery attempt. Atomic observation admission captures the initial
@@ -708,7 +708,7 @@ data was not projected (the later bounded ToolCall report extension is recorded 
 snapshots. The later scoped Desktop channel/UI integration is recorded above; TUI observation/effect
 migration, canonical history reconciliation and full interaction/run-state parity remain open.
 
-## M3 follow-up: explicit source-plugin authoring profiles — 2026-09-08
+## M3 follow-up: explicit source-plugin authoring profiles - 2026-09-08
 
 The same sole child implemented Neutral/Terminal source-plugin profiles against `85c25ff2`,
 without executing generation, discovery, loading or tests. Reusable APIs default to Neutral;
@@ -787,7 +787,7 @@ and inherited direct ALC entry points are not sandboxed. Builtin backend/rendere
 desktop plugin hosting and remaining M3–M7 work stay open. Website qualification remains
 blocked by the remote-theme/offline constraint. No push, publish or merge is authorized.
 
-## M3 follow-up: remaining neutral contract and package separation — 2026-09-08
+## M3 follow-up: remaining neutral contract and package separation - 2026-09-08
 
 The same sole child implemented the dialog/layout/prompt-host closure, fixtures first and
 source-only. `PluginDialogRequest` and `IPluginPromptEditorHost` are neutral;
@@ -835,7 +835,7 @@ remain unchanged. Migration docs and builtin skill are updated. Website, native/
 default-profile, installed packages and full-suite execution remain excluded. Source-plugin
 profiles, builtin backend separation, desktop presentation and the remaining M3–M7 work are open.
 
-## M3 follow-up: optional terminal session-event presentation — 2026-09-08
+## M3 follow-up: optional terminal session-event presentation - 2026-09-08
 
 The same sole child delivered ten scoped code/test files against `bbe583e8`, fixtures first
 and without execution. Native event/detail/dynamic factory contracts and visual context now
@@ -881,7 +881,7 @@ Actual rich statistics/native rendering, installed source-plugin loading, full s
 website build remain unqualified. Dialog/prompt-host contracts, remaining assembly references,
 builtin backend separation and full M3–M7 parity remain open.
 
-## Latest M4 checkpoint: bounded persisted-event history — 2026-09-08
+## Latest M4 checkpoint: bounded persisted-event history - 2026-09-08
 
 Session selection now calls generated `workspace.history` using the same retained session
 store as catalog browsing. The shared reader frames at most 256 KiB plus five probe bytes,
@@ -957,7 +957,7 @@ Durations below are measured command wall time, including command startup and re
 | --- | --- | --- | --- | --- |
 | `src` | `dotnet build -c Release` | **Pass**, 0 | 17.538 s | Full existing solution built; **0 warnings, 0 errors**. MSBuild reported 17.29 s. No pre-existing compilation failure observed. |
 | `src` | `dotnet test CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj -c Release --logger "trx;LogFileName=plugin-abstractions.trx" --results-directory <EvidenceRoot>/results` | **Pass**, 0 | 2.140 s | **13 passed, 0 failed, 0 skipped** in this project only; runner test duration 70 ms. Contract regression baseline, not full-solution or desktop coverage. |
-| `src` | `dotnet test -c Release` | **Skipped — safety**, not launched | Not measured | Unfiltered runtime/profile isolation was not established; see exclusions below. No full-suite success or failure is claimed. |
+| `src` | `dotnet test -c Release` | **Skipped - safety**, not launched | Not measured | Unfiltered runtime/profile isolation was not established; see exclusions below. No full-suite success or failure is claimed. |
 | `site` | `lunet build` | **Pass**, 0 | 3.152 s | Production site build: **111 files**, **1,011,576 bytes** written; Lunet reported 2,095.4111 ms. No pre-existing website failure observed. |
 
 Local evidence was retained outside the repository in the original temporary directory under `codealta-m0-baseline-a2726f6b424147a98bf5336411b567c1`: `dotnet-info.log`, `build.log`, `tests.log`, `site.log`, `summary.json` and `results/plugin-abstractions.trx`. These are local, temporary execution artifacts, not committed evidence or a portable CI artifact. Standard ignored build/site outputs were generated; no application, dependency or website source was edited.
@@ -1462,7 +1462,7 @@ Separately verified App47,026 bytes/811 CRLF lines, SHA256 `510AD5B44C683610FFED
 
 #### Exact catalog literals accepted; source-only fixture authorization
 
-The sole child delivered complete E1–E6 old/new code/XML literals against `0f613fb0` without edits or C# execution (run `01a07a20-ab62-7c53-9ed5-2e9c00b22985`, content `msg_0cd04bac6eadda77016a9e3e422a6c87d298f2c45a3f6d1643`). Parent confirmed idle/queue0 and clean tracked/staged state, then independently audited the actual start, disposal adapter, snapshot, helper and XML—not merely their summary. Accepted unchanged: E1 imports; E2 retained-task/Lazy/stopping/database field anchor; E3 complete constructor signature/opening/first statement; E4 complete start XML/member; E5 complete disposal XML/adapter/private core; E6 **complete unchanged options XML/type** plus blank line and complete separate helper through EOF. Each displayed literal includes one final CRLF; all separators are CRLF, strict UTF-8/no BOM. Inverses replace each entire NEW with its corresponding entire OLD, E6→E5→E4→E3→E2→E1, not inferred brace/XML deletion.
+The sole child delivered complete E1–E6 old/new code/XML literals against `0f613fb0` without edits or C# execution (run `01a07a20-ab62-7c53-9ed5-2e9c00b22985`, content `msg_0cd04bac6eadda77016a9e3e422a6c87d298f2c45a3f6d1643`). Parent confirmed idle/queue0 and clean tracked/staged state, then independently audited the actual start, disposal adapter, snapshot, helper and XML - not merely their summary. Accepted unchanged: E1 imports; E2 retained-task/Lazy/stopping/database field anchor; E3 complete constructor signature/opening/first statement; E4 complete start XML/member; E5 complete disposal XML/adapter/private core; E6 **complete unchanged options XML/type** plus blank line and complete separate helper through EOF. Each displayed literal includes one final CRLF; all separators are CRLF, strict UTF-8/no BOM. Inverses replace each entire NEW with its corresponding entire OLD, E6→E5→E4→E3→E2→E1, not inferred brace/XML deletion.
 
 Parent independently re-entered these exact literals as text, required one ordinal occurrence for all six forward and six reverse maps, and compared the reverse result ordinally and byte-by-byte. It reconstructs the entire10,673-byte/298-line CRLF baseline SHA256 `4FF490A7A3D403D6E9D72D063D9A87B0A34348D24F1D98DB635F52E77C374A15`. A separate raw named HEAD blob read established normalized LF and explicitly reconstructed CRLF before individual-byte checkout comparison. Candidate **16,820 bytes/417 CRLF lines**, SHA256 **`5293CB31630ED2ECABE9CAB719BDBECA3CDC9FFD2B9228382CD154F06F77ECAB`**, also passes strict UTF-8/no BOM/consistent CRLF/final newline. No candidate or script file was written; no C# compiled/executed. Text checks exit0, no inspection failure or parent correction.
 
@@ -1532,7 +1532,7 @@ Same sole child may inspect the session/interface/options, service acquisition a
 
 Parent raw baselines: session11,953 bytes/343 CRLF lines SHA256 `4A2C24DC1C6E11D259E6E033FEB2F9519D4AC35FD27F948CF2DD00C5533193AA`; interface1,037 bytes/30 LF lines SHA256 `A7311FB8B0DB4D50E380A15E10F429118BAA5DD845D0981D554AB379E55C5388`, strict UTF-8/no BOM/final newline. The first two-file check incorrectly assumed uniform CRLF and exited1 on the interface after validating session; corrected explicit LF validation passed, no source change or unresolved inspection blocker. Named reads are nonzero I/O, not execution. Catalog integration's passing31 cases/build/site remain historical evidence for that completed slice; no new runtime/native qualification, push/publish/merge or completed M2–M7 claim.
 
-#### Restart checkpoint — paused at research handoff, 2026-09-07
+#### Restart checkpoint - paused at research handoff, 2026-09-07
 
 User requested stopping at the next round to restart CodeAlta. The sole child completed its read-only investigation against `16e6371f` and is confirmed idle with zero queued prompts and no children. Parent deleted coordinator reminder `reminder-01a0775f965b7cc7b3549db62839e536`; do not resume from stale reminder delivery. No new assignment, implementation, fixture, build, test or discovery is authorized. Resume only after user instruction. Full child report is in session `01a0777e-c548-7684-998f-347ac55cd394`, run `01a07a54-35d8-76a1-9bc1-51ddc539ced1`, content `msg_05277c6174483888016a9e4cba448487d2ad46dadbcc98aef8`.
 
@@ -1836,20 +1836,20 @@ All **14** approved areas are retained. The two evidence columns are deliberatel
 
 | ID / area and current reference | Required desktop acceptance | Automated evidence | Manual/native evidence |
 | --- | --- | --- | --- |
-| P01 — Startup/config recovery: `Program`, `DeferredCodeAltaApp`, `ConfigRecoveryDialog` | Fast boot shell; offline sessions before providers; malformed TOML recovery; cache/provider/plugin errors visible; safe mode works. | **Pending** | **Pending** |
-| P02 — Navigator/projects: `CodeAltaShellController`, `NavigatorActionCoordinator`, project dialogs | Current-folder project; add/open/import; rename/edit/archive/hide/delete as currently supported; sorting/recent limits; global and nested child sessions; refresh/search and complete session browsing. | **Pending** | **Pending** |
-| P03 — Tabs and restore: shell/session tab coordinators, `SessionViewCatalog` | Draft/session/editor/plugin tabs, selected tab and preferences restored; close/reopen and keyboard movement; unsent drafts survive switching heads. Running sessions remain discoverable when tabs close. | **Pending** | **Pending** |
-| P04 — Session commands: creation/command/queue/provider-switch coordinators | Create global/project/child sessions; send/queue/always-queue/steer/abort/compact; clear queue, inspect and perform existing queue edit/reorder actions; rename/delete; provider/model/reasoning/agent-prompt selection with actual runtime capabilities. | **Pending** | **Pending** |
-| P05 — Composer: prompt/reference/image views and GitHub plugin | Multiline/full prompt; undo/redo, paste, IME; file `@` and GitHub `#` references; plugin attachments; clipboard/drop images; capability validation and persistent drafts. `?`/`/` shortcuts remain prompt UI, not a new slash-tail parser. | **Pending** | **Pending** |
-| P06 — Timeline: runtime/timeline renderers, usage and session-info views | User/assistant/reasoning/notices/tools; streaming progress/errors/cancellations; code/diffs/images; expand/collapse and copy; history navigation/search; system-prompt details; context/tokens/cost/timing and provider/session metadata. No recomputing usage in JavaScript. | **Pending** | **Pending** |
-| P07 — Interactions: permission/user-input coordinators, `AskModeCoordinator`, `AskQuestionFormView`, `AskFileReviewView` | Existing permission decisions and auto-approval policy; queued question/choice/freeform asks; attached-file review/edit/save; cancellation and exactly-once replies across document reload. | Asks and attached-file review (line comments, edit/save, tabbed questions) are in the desktop; permission/user-input parity and replies across document reload remain **Pending** | **Pending** |
-| P08 — Coordination: `CodeAltaFrontendComposition`, LiveTool contributors, notes/reminders | All in-process `alta` actions, parent/child status/results, notes copy/clear, reminders create/list/delete and repeat/queue behavior, agent/profile switching. Independent of active tab selection. | **Pending** | **Pending** |
-| P09 — Providers: provider coordinator/dialog/model catalog | Add/edit/delete/enable; advanced TOML; test/refresh/cancel; browser/device login/logout; accounts/models; readiness and diagnostics; model metadata and selection for draft/current session. | **Pending** | **Pending** |
-| P10 — Prompts/skills: management dialogs/services and catalogs | Agent and system prompt create/edit/delete/inspect; scope/provenance/built-in read-only rules; skills discover/inspect/create/edit/enable/disable/activate and diagnostics. | **Pending** | **Pending** |
-| P11 — Plugins/MCP/GitHub/statistics | Discovery, enable/disable/rebuild/reload/status/diagnostics/contributions; current MCP server/tool management, JSON/policy editing and OAuth; GitHub picker/attachments; statistics cards/details/live-tool commands. | **Pending** | **Pending** |
-| P12 — File editing: `FileEditorWorkspaceCoordinator`, `FileEditorTab`, `TextFileCodec` | Scoped open/edit/save; encoding/BOM/newlines; syntax/search/undo/redo; conflict detection and dirty-close prompts. No unrestricted renderer filesystem access. | **Pending** | **Pending** |
-| P13 — Preferences/help/diagnostics: built-in commands, navigator settings, logs/about | Scheme/language/permissions; navigator layout/density; help/palette; logs; version/update visibility; clipboard and screenshot/export equivalent. Terminal loop/terminal-cell debug commands stay TUI-only (see exception below). | **Pending** | **Pending** |
-| P14 — Accessibility/native behavior | Keyboard-complete navigation, focus restore/trap, semantic labels/non-color statuses, contrast/reduced motion, text scale/high DPI, native window/menu/dialog behavior on every claimed engine. | **Pending** | **Pending** |
+| P01 - Startup/config recovery: `Program`, `DeferredCodeAltaApp`, `ConfigRecoveryDialog` | Fast boot shell; offline sessions before providers; malformed TOML recovery; cache/provider/plugin errors visible; safe mode works. | **Pending** | **Pending** |
+| P02 - Navigator/projects: `CodeAltaShellController`, `NavigatorActionCoordinator`, project dialogs | Current-folder project; add/open/import; rename/edit/archive/hide/delete as currently supported; sorting/recent limits; global and nested child sessions; refresh/search and complete session browsing. | **Pending** | **Pending** |
+| P03 - Tabs and restore: shell/session tab coordinators, `SessionViewCatalog` | Draft/session/editor/plugin tabs, selected tab and preferences restored; close/reopen and keyboard movement; unsent drafts survive switching heads. Running sessions remain discoverable when tabs close. | **Pending** | **Pending** |
+| P04 - Session commands: creation/command/queue/provider-switch coordinators | Create global/project/child sessions; send/queue/always-queue/steer/abort/compact; clear queue, inspect and perform existing queue edit/reorder actions; rename/delete; provider/model/reasoning/agent-prompt selection with actual runtime capabilities. | **Pending** | **Pending** |
+| P05 - Composer: prompt/reference/image views and GitHub plugin | Multiline/full prompt; undo/redo, paste, IME; file `@` and GitHub `#` references; plugin attachments; clipboard/drop images; capability validation and persistent drafts. `?`/`/` shortcuts remain prompt UI, not a new slash-tail parser. | **Pending** | **Pending** |
+| P06 - Timeline: runtime/timeline renderers, usage and session-info views | User/assistant/reasoning/notices/tools; streaming progress/errors/cancellations; code/diffs/images; expand/collapse and copy; history navigation/search; system-prompt details; context/tokens/cost/timing and provider/session metadata. No recomputing usage in JavaScript. | **Pending** | **Pending** |
+| P07 - Interactions: permission/user-input coordinators, `AskModeCoordinator`, `AskQuestionFormView`, `AskFileReviewView` | Existing permission decisions and auto-approval policy; queued question/choice/freeform asks; attached-file review/edit/save; cancellation and exactly-once replies across document reload. | Asks and attached-file review (line comments, edit/save, tabbed questions) are in the desktop; permission/user-input parity and replies across document reload remain **Pending** | **Pending** |
+| P08 - Coordination: `CodeAltaFrontendComposition`, LiveTool contributors, notes/reminders | All in-process `alta` actions, parent/child status/results, notes copy/clear, reminders create/list/delete and repeat/queue behavior, agent/profile switching. Independent of active tab selection. | **Pending** | **Pending** |
+| P09 - Providers: provider coordinator/dialog/model catalog | Add/edit/delete/enable; advanced TOML; test/refresh/cancel; browser/device login/logout; accounts/models; readiness and diagnostics; model metadata and selection for draft/current session. | **Pending** | **Pending** |
+| P10 - Prompts/skills: management dialogs/services and catalogs | Agent and system prompt create/edit/delete/inspect; scope/provenance/built-in read-only rules; skills discover/inspect/create/edit/enable/disable/activate and diagnostics. | **Pending** | **Pending** |
+| P11 - Plugins/MCP/GitHub/statistics | Discovery, enable/disable/rebuild/reload/status/diagnostics/contributions; current MCP server/tool management, JSON/policy editing and OAuth; GitHub picker/attachments; statistics cards/details/live-tool commands. | **Pending** | **Pending** |
+| P12 - File editing: `FileEditorWorkspaceCoordinator`, `FileEditorTab`, `TextFileCodec` | Scoped open/edit/save; encoding/BOM/newlines; syntax/search/undo/redo; conflict detection and dirty-close prompts. No unrestricted renderer filesystem access. | **Pending** | **Pending** |
+| P13 - Preferences/help/diagnostics: built-in commands, navigator settings, logs/about | Scheme/language/permissions; navigator layout/density; help/palette; logs; version/update visibility; clipboard and screenshot/export equivalent. Terminal loop/terminal-cell debug commands stay TUI-only (see exception below). | **Pending** | **Pending** |
+| P14 - Accessibility/native behavior | Keyboard-complete navigation, focus restore/trap, semantic labels/non-color statuses, contrast/reduced motion, text scale/high DPI, native window/menu/dialog behavior on every claimed engine. | **Pending** | **Pending** |
 
 ### Explicit terminal-only exception
 
@@ -1861,14 +1861,14 @@ These rows retain the richer approved editor/visual/workspace requirements; they
 
 | ID / surface | Required acceptance | Implementation / evidence |
 | --- | --- | --- |
-| V01 — Editor/composer engine (P05/P12) | One CodeMirror 6 engine with composer, file/config and read-only comparison presets; preserve editor state/undo/selection through tab changes and resizing; IME/completion must prevent accidental sends. Line numbers, folding, matching/indentation, multiselection, find/replace with regex, go-to-line, wrapping/tab size, line/column and encoding/newline status; dirty/conflict/revision-checked .NET save and backend diagnostics with correct UTF-16 positions. | **Pending** |
-| V02 — Languages and large files (P06/P12) | Markdown/fences, C#, JSON, TOML, YAML, JS/TS/JSX/TSX, HTML/CSS, XML/MSBuild, Bash/PowerShell, Python and diff grammars with plain-text fallback; bounded transport/long-line work and explicit large-file mode; never save a truncated document over its original. No semantic IDE/LSP claim. | **Pending** |
-| V03 — Markdown/code (P06/P08/P10/P12) | Shared GFM renderer for all surfaces; tables/tasks/footnotes/callouts, heading anchors and exact-source code copy/wrap/open controls; no raw HTML, automatic remote images or executable task boxes. Lazy Shiki JavaScript-engine token rendering, bounded language imports, stable block revisions and readable incomplete-fence fallback. | **Pending** |
-| V04 — Markdown editing and comparisons (P07/P12) | Source / Preview / Split, heading outline, source-position links, bounded anchored scroll sync, source-preserving toolbar edits; inline/side-by-side read-only CM merge, context folding/gutters/intraline emphasis/change navigation. Partial patches remain patches, not fabricated full files; editable saves use the ordinary backend conflict checks. | **Pending** |
-| V05 — Mermaid (P06/P08/P12) | Direct main-document strict-mode rendering for flowchart, sequence, class, state and ER; `.mmd`/`.mermaid` and fenced Markdown share the component. Diagram / Source, accessible title/description/source, fit/zoom/reset/pan/expand, copy/save source and bounded PNG export. Test theme/fonts/Unicode, invalid/incomplete/oversized input, stale results and cleanup. Initial 32 KiB/200-edge limits are targets to measure, not qualified results; source fallback alone is not completion. | **Pending** |
-| V06 — Tabs/splits/native drops (P03/P04/P05/P14) | Persistent reorderable tab strip with overflow/pin/reopen/badges/dirty guards, pointer and keyboard dnd-kit moves/cancellation/announcements, no editor remount or duplicate subscriptions. Accessible resizable panes with constraints/reset/collapse and committed-size persistence. Native file/image/folder drops use explicit grants, not browser path inference; queue reorder remains a backend command. | **Pending** |
-| V07 — Settings/tables/themes/localization (P09/P10/P11/P13) | One settings sidebar/search/scope workflow; compact searchable/sortable accessible model/provider/plugin tables with truthful backend paging; shared named neutral color schemes and localization, local licensed fonts/icons, configurable typography/density, live-preview/revert, reduced motion and scaling. Exact library versions/lockfile and license review still pending. | **Pending** |
-| V08 — Portable plugin panels (P11) | Head-neutral backend contributions, optional TUI renderers, rich desktop adapters and meaningful TUI fallback; builtin MCP/GitHub/statistics retain shared backend ownership. One typed project/workspace panel example; backend-only, dual-head, TUI-only, unavailable/failing/reloading plugin tests in installed packages. | **Pending** |
+| V01 - Editor/composer engine (P05/P12) | One CodeMirror 6 engine with composer, file/config and read-only comparison presets; preserve editor state/undo/selection through tab changes and resizing; IME/completion must prevent accidental sends. Line numbers, folding, matching/indentation, multiselection, find/replace with regex, go-to-line, wrapping/tab size, line/column and encoding/newline status; dirty/conflict/revision-checked .NET save and backend diagnostics with correct UTF-16 positions. | **Pending** |
+| V02 - Languages and large files (P06/P12) | Markdown/fences, C#, JSON, TOML, YAML, JS/TS/JSX/TSX, HTML/CSS, XML/MSBuild, Bash/PowerShell, Python and diff grammars with plain-text fallback; bounded transport/long-line work and explicit large-file mode; never save a truncated document over its original. No semantic IDE/LSP claim. | **Pending** |
+| V03 - Markdown/code (P06/P08/P10/P12) | Shared GFM renderer for all surfaces; tables/tasks/footnotes/callouts, heading anchors and exact-source code copy/wrap/open controls; no raw HTML, automatic remote images or executable task boxes. Lazy Shiki JavaScript-engine token rendering, bounded language imports, stable block revisions and readable incomplete-fence fallback. | **Pending** |
+| V04 - Markdown editing and comparisons (P07/P12) | Source / Preview / Split, heading outline, source-position links, bounded anchored scroll sync, source-preserving toolbar edits; inline/side-by-side read-only CM merge, context folding/gutters/intraline emphasis/change navigation. Partial patches remain patches, not fabricated full files; editable saves use the ordinary backend conflict checks. | **Pending** |
+| V05 - Mermaid (P06/P08/P12) | Direct main-document strict-mode rendering for flowchart, sequence, class, state and ER; `.mmd`/`.mermaid` and fenced Markdown share the component. Diagram / Source, accessible title/description/source, fit/zoom/reset/pan/expand, copy/save source and bounded PNG export. Test theme/fonts/Unicode, invalid/incomplete/oversized input, stale results and cleanup. Initial 32 KiB/200-edge limits are targets to measure, not qualified results; source fallback alone is not completion. | **Pending** |
+| V06 - Tabs/splits/native drops (P03/P04/P05/P14) | Persistent reorderable tab strip with overflow/pin/reopen/badges/dirty guards, pointer and keyboard dnd-kit moves/cancellation/announcements, no editor remount or duplicate subscriptions. Accessible resizable panes with constraints/reset/collapse and committed-size persistence. Native file/image/folder drops use explicit grants, not browser path inference; queue reorder remains a backend command. | **Pending** |
+| V07 - Settings/tables/themes/localization (P09/P10/P11/P13) | One settings sidebar/search/scope workflow; compact searchable/sortable accessible model/provider/plugin tables with truthful backend paging; shared named neutral color schemes and localization, local licensed fonts/icons, configurable typography/density, live-preview/revert, reduced motion and scaling. Exact library versions/lockfile and license review still pending. | **Pending** |
+| V08 - Portable plugin panels (P11) | Head-neutral backend contributions, optional TUI renderers, rich desktop adapters and meaningful TUI fallback; builtin MCP/GitHub/statistics retain shared backend ownership. One typed project/workspace panel example; backend-only, dual-head, TUI-only, unavailable/failing/reloading plugin tests in installed packages. | **Pending** |
 
 Remote hosting/network authentication, multi-user access, installers/automatic updates, arbitrary plugin JavaScript canvases, executable HTML/JS previews, editable graph canvases, WYSIWYG, embedded terminals, general docking/tear-offs and a full IDE remain outside this approved scope. They are not silently substituted for, or prerequisites of, the pending rows above.
 
@@ -1876,14 +1876,14 @@ Remote hosting/network authentication, multi-user access, installers/automatic u
 
 | Gate | Required evidence | Current status |
 | --- | --- | --- |
-| G01 — M0 NuGet consumer | Minimal consumer using published NeoAstra **0.1.0**, centrally pinned package and reviewed locked frontend dependencies; staged client and relative assets. | **Pass — isolated prototype**, not production |
-| G02 — M0 serverless/native proof | Fake-data packaged Release launch, typed RPC round trip, channel cancellation, close/dialog behavior, dynamic asset loading and ordinary CM/Radix/direct Mermaid integration without Node/dev server/providers/plugins. | **Pass — Windows x64 prototype**, parent rerun |
-| G03 — M0 isolated tool distribution | Local-feed pack/install outside checkout into task-owned tool path; native/assets/contracts/content inventory and command exit/output checks; Windows console/window subsystem behavior. No absolute local NeoAstra dependency or global tool replacement. | **Pass — Exe/WinExe prototype packages**; interactive console/Explorer UX and production plugin CLI pending |
-| G04 — Shared ownership and compatibility | Both heads and both cross-head lock orders/races/stale/denied-access cases; admission before mutable startup; fake-provider sessions with closed tabs, reload, queue/stop and confirmed quit; legacy/current journal/config/UI-state/text/image draft handoff without unknown-field loss. | **Pending** |
-| G05 — Recovery and permissions | One runtime reader; revisioned snapshot/subscribe, bounded nonblocking fan-out, loss/gap recovery with bounded history reads; exactly-once ask/permission resolution across reconnect/abort/quit and stale/wrong-session rejection. Preserve permission configuration including current AutoApprove default. | **Pending** |
-| G06 — Content and package correctness | Controlled application navigation/links/attachments/native grants, default Markdown/Mermaid content handling, no secrets/source maps/remote assets/dev overrides in Release; explicit OAuth listeners cleaned up. No custom isolation framework. | **Pending** |
-| G07 — Performance and accessibility | Hardware/fixture-recorded cold/warm startup, provider-independent catalog/history, ten active fake sessions and 100,000-event journal, bounded memory/payloads/DOM, input/scroll latency; keyboard/screen-reader/IME/contrast/reduced-motion/100–200% scale. Provisional <50 ms p95 input/frame targets are unmeasured. | **Pending — no performance budget qualified** |
-| G08 — Full regression and release | Full safely isolated .NET suite, frontend typecheck/lint/tests/build, mock-transport UI tests distinguished from native tests; both final tool packages/content/plugin compatibility, all parity rows and public/internal installation/migration docs; no publishing or reduced support matrix without authorization. | **Pending — partial baseline only** |
+| G01 - M0 NuGet consumer | Minimal consumer using published NeoAstra **0.1.0**, centrally pinned package and reviewed locked frontend dependencies; staged client and relative assets. | **Pass - isolated prototype**, not production |
+| G02 - M0 serverless/native proof | Fake-data packaged Release launch, typed RPC round trip, channel cancellation, close/dialog behavior, dynamic asset loading and ordinary CM/Radix/direct Mermaid integration without Node/dev server/providers/plugins. | **Pass - Windows x64 prototype**, parent rerun |
+| G03 - M0 isolated tool distribution | Local-feed pack/install outside checkout into task-owned tool path; native/assets/contracts/content inventory and command exit/output checks; Windows console/window subsystem behavior. No absolute local NeoAstra dependency or global tool replacement. | **Pass - Exe/WinExe prototype packages**; interactive console/Explorer UX and production plugin CLI pending |
+| G04 - Shared ownership and compatibility | Both heads and both cross-head lock orders/races/stale/denied-access cases; admission before mutable startup; fake-provider sessions with closed tabs, reload, queue/stop and confirmed quit; legacy/current journal/config/UI-state/text/image draft handoff without unknown-field loss. | **Pending** |
+| G05 - Recovery and permissions | One runtime reader; revisioned snapshot/subscribe, bounded nonblocking fan-out, loss/gap recovery with bounded history reads; exactly-once ask/permission resolution across reconnect/abort/quit and stale/wrong-session rejection. Preserve permission configuration including current AutoApprove default. | **Pending** |
+| G06 - Content and package correctness | Controlled application navigation/links/attachments/native grants, default Markdown/Mermaid content handling, no secrets/source maps/remote assets/dev overrides in Release; explicit OAuth listeners cleaned up. No custom isolation framework. | **Pending** |
+| G07 - Performance and accessibility | Hardware/fixture-recorded cold/warm startup, provider-independent catalog/history, ten active fake sessions and 100,000-event journal, bounded memory/payloads/DOM, input/scroll latency; keyboard/screen-reader/IME/contrast/reduced-motion/100–200% scale. Provisional <50 ms p95 input/frame targets are unmeasured. | **Pending - no performance budget qualified** |
+| G08 - Full regression and release | Full safely isolated .NET suite, frontend typecheck/lint/tests/build, mock-transport UI tests distinguished from native tests; both final tool packages/content/plugin compatibility, all parity rows and public/internal installation/migration docs; no publishing or reduced support matrix without authorization. | **Pending - partial baseline only** |
 
 ### Native platform qualification
 
@@ -1907,7 +1907,7 @@ The TUI retains its existing eight-RID intent, including `linux-musl-x64` and `l
 2. **M0 feasibility and M1 dual-head foundation are accepted**, along with the bounded M2 storage/options/permission/immediate-user-input/durable-notes/pending-ask-queue/response-settlement/reminder-firing/observer/configured-provider-composition/inspection checkpoints above. Continue M2's remaining interaction lifetime, provider auth/configuration/refresh workflows and shared startup ownership, adapting actual TUI routes before desktop equivalents. No upstream NeoAstra change or custom launcher was required.
 3. Desktop feature, cross-head persistence/ownership, full native platform, performance and release gates remain pending. Prototype integration success and the terminal rename are not desktop parity.
 
-## M2 shared startup admission checkpoint — 2026-09-08
+## M2 shared startup admission checkpoint - 2026-09-08
 
 The user resumed execution and requested faster M2–M7 progress. Unaccepted file-search lifetime policy is deferred rather than blocking this independent startup step. The sole child implemented the shared guard extraction and mandatory synchronous `CodeAltaStartupAdmission.Run`; parent independently reviewed the complete helper, moved guard, Program/CLI changes, inert tests and source/preservation helpers. No desktop enablement or lock-algorithm change is included.
 
@@ -2291,7 +2291,7 @@ broader native qualification occurred. The same child continues read-only on the
 M4 Desktop operation/lifecycle vertical while the parent integrates this bounded slice; M3–M7
 are not complete.
 
-### Explicit Desktop text submission and owned cached reads — 2026-09-08
+### Explicit Desktop text submission and owned cached reads - 2026-09-08
 
 Implemented separately consented existing-session text submission, submission-specific abort,
 bounded receipt recovery and direct cached workspace/history reads. Browser/catalog-only modes
@@ -2361,7 +2361,7 @@ lease retention is source-reviewed, not termination proof; five seconds remains 
 Website remote-theme acquisition, M2 races/file-search and broader M3–M7 parity remain open.
 The same sole child continues read-only on the next M4 projection prerequisite; no M8 is defined.
 
-## Runtime forwarding ownership prerequisite — 2026-09-08
+## Runtime forwarding ownership prerequisite - 2026-09-08
 
 After `67bb503e`, the same source-only writer implemented three-original/six-new-file
 forwarding ownership. The parent audited actual Runtime/helper/fixture/inverse code
@@ -2408,7 +2408,7 @@ lossy competing-reader runtime stream remain explicit. This is not revisioned
 projection, M4/live parity, native qualification or completed M3–M7. Website theme
 acquisition and prior M2/file-search deferrals remain open; M8 remains undefined.
 
-### Restricted owned Desktop ask round trip — 2026-09-12
+### Restricted owned Desktop ask round trip - 2026-09-12
 
 Implemented the caller-session-only `alta ask --stdin` producer, private shared ask owner,
 finite list/answer/cancel/observe RPCs and App-owned pending-ask presentation. It is enabled only
@@ -2448,7 +2448,7 @@ UI, real providers/tools/auth and website are not newly qualified; website theme
 outside the no-network/install boundary. Old-binary compatibility, deferred queue interleavings,
 durable trust recovery and remaining M4–M6 work are explicitly open.
 
-### Owned Desktop current-notes read — 2026-09-13
+### Owned Desktop current-notes read - 2026-09-13
 
 Implemented a 19-path source/test vertical: notes-specific contained store reader sharing the original
 parser/lock, runtime known-session resolution, existing eight-read workspace admission/drain, owned-only
@@ -2711,7 +2711,7 @@ while startup succeeds, without establishing a drain for pre-handle background w
 lifetime/task-service/load-context resources; OCE bypasses the existing filtered cleanup catch.
 Joining manager startup is not qualification of that older failure path.
 
-### M4 bounded plugin ownership prerequisite: verified — 2026-09-13
+### M4 bounded plugin ownership prerequisite: verified - 2026-09-13
 
 The approved 23-file implementation now gives each activation 64 occupied agent-event attempts
 and zero queued waiters. Capacity/Closing are explicit delivery rejection, not callback success.
@@ -2751,7 +2751,7 @@ This completes a bounded prerequisite only. Runtime plugin observation has not m
 replay is unchanged, and there is no history/live watermark. Pre-handle activation acquisitions,
 noncooperative background work and complete host termination remain unqualified. M4–M6 stay open.
 
-### M4 captured-envelope observer prerequisite: verified — 2026-09-13
+### M4 captured-envelope observer prerequisite: verified - 2026-09-13
 
 The same sole writer added only `RuntimePluginAgentEventObserver.cs` in Orchestration and its
 main-test-project fixture. No existing source, project or historical inverse changed. The helper
@@ -2786,7 +2786,7 @@ global-root precedence/first matching project identity without prompt discovery.
 reports faulted, not canceled tasks; its fatal path defaults to `Environment.FailFast` and has not been
 executed here. Existing headless API, history observation and readers remain unchanged. M4–M6 stay open.
 
-### M4 live plugin-effect cutover: functional-first integration — 2026-09-22
+### M4 live plugin-effect cutover: functional-first integration - 2026-09-22
 
 Live provider, explicit append, notes and synthetic-failure plugin observation now runs from the
 shared runtime rather than the TUI event reader. Host composition supplies one captured-envelope
@@ -2804,7 +2804,7 @@ passes. Exact source-text reconstruction for this cutover is deliberately ignore
 functional-first direction; those brittle shape checks are not release evidence and can be deleted or
 redesigned later. Native UI, configured providers and broad profile-dependent tests remain separate.
 
-### Functional-first M5/M6 workspace checkpoint — 2026-09-22
+### Functional-first M5/M6 workspace checkpoint - 2026-09-22
 
 The production React entry now presents a responsive project/session workspace rather than a long
 developer disclaimer page: project and session navigation, search, automatic first selection,
@@ -2833,7 +2833,7 @@ passes 288 behavioral tests with four older source-shape checks skipped. A solut
 passes with no warnings. The unfiltered solution test command exceeded the five-minute local limit,
 so this checkpoint does not claim a complete repository test pass.
 
-### Normal local startup and SDK output — 2026-09-22
+### Normal local startup and SDK output - 2026-09-22
 
 The desktop no longer requires an operator-created `--data-root` for ordinary startup. This historical
 checkpoint initially made no-argument startup catalog-only; the later interactive-default checkpoint
@@ -2845,7 +2845,7 @@ New builds use standard SDK locations such as `bin/Debug/net10.0` and `obj/Debug
 NeoAstra contracts remain under `obj/neoastra`. Existing stale `bin/desktop` or `obj/desktop` build
 artifacts are not runtime inputs and may be removed by the developer.
 
-### Persisted Markdown and resizable navigation — 2026-09-22
+### Persisted Markdown and resizable navigation - 2026-09-22
 
 Persisted timeline rows now retain up to 32 KiB of text per event while staying inside the existing
 bounded response budget. The desktop renders that text as GFM (including headings, lists, tables and
@@ -2869,7 +2869,7 @@ The obsolete frontend entrypoint source-text test was removed rather than update
 implementation-shape contract. No mounted interaction, real-provider submission, broad solution test,
 website build or M7 qualification is claimed.
 
-### Unified transcript and prompt presentation — 2026-09-22
+### Unified transcript and prompt presentation - 2026-09-22
 
 Selecting a session now keeps the persisted Markdown transcript visible in both catalog-only and owned
 host modes. Owned mode adds the retained live window as a compact activity section whose finalized and
@@ -2890,7 +2890,7 @@ presentation change. No source-shape test was added. Mounted keyboard/pointer ac
 profile opt-in transition to owned mode, durable drafts, selectors/attachments, stream/history merging
 and M7 qualification remain open.
 
-### M6 settings navigation slice — 2026-09-22
+### M6 settings navigation slice - 2026-09-22
 
 The existing configuration cards now sit behind one responsive settings navigator with text search and
 All, General, Agent and Extensions scopes. Filtering is local presentation only: it neither starts
@@ -2902,7 +2902,7 @@ results through the same filtering helper used by React. All **141 frontend beha
 production TypeScript/Vite build pass. Permissions, account/auth and model management, prompt/skill/
 plugin mutation, dirty-state persistence and backend-validated saves remain open M6 work.
 
-### M6 settings sidebar-only navigation — 2026-09-26 (awaiting independent acceptance)
+### M6 settings sidebar-only navigation - 2026-09-26 (awaiting independent acceptance)
 
 The desktop Settings modal retains its bottom-left-only shell entry, browser-native modal focus/inert
 behavior and approximately 80% viewport size. One vertical, grouped sidebar now selects actual
@@ -2916,7 +2916,7 @@ and page switching retain the existing mounted workspace, draft and exact-target
 This replaces the earlier M6 settings-navigation presentation, not its historical test evidence;
 native WebView2 interaction and full configuration-management parity remain unqualified.
 
-### M6 session-row action entry — 2026-09-26 (awaiting independent acceptance)
+### M6 session-row action entry - 2026-09-26 (awaiting independent acceptance)
 
 Each visible session row has one right-aligned, keyboard-focusable ellipsis icon instead of
 separate Actions, Rename and Delete entry buttons. Its existing menu exposes Open, Rename and
@@ -2928,7 +2928,7 @@ the connected trigger; Tab and outside dismissal do not restore focus over a new
 This is presentation/entry consolidation, not a new session mutation or native WebView2
 accessibility qualification.
 
-### M6 project/session rail header density — 2026-09-26 (awaiting independent acceptance)
+### M6 project/session rail header density - 2026-09-26 (awaiting independent acceptance)
 
 The project rail keeps its Projects heading, Open Project, filter, sort/clear and bottom-left
 Settings controls. The filter and sort retain explicit accessible names without visible label
@@ -2939,7 +2939,7 @@ truncation evidence, load errors or pending/uncertain operation recovery. No sel
 write, shortcut or dialog owner changes; mounted-browser layout evidence is not native WebView2
 or screen-reader acceptance.
 
-### Accumulated persisted timeline paging — 2026-09-22
+### Accumulated persisted timeline paging - 2026-09-22
 
 **2026-09-24 latest-first history:** The shared cached-store history
 reader and desktop `workspace.historyTail` route now support a reverse, bounded 256 KiB/100-record
@@ -2978,7 +2978,7 @@ otherwise behavioral fixture classes are now explicitly skipped rather than rewr
 source shape. The focused result is **135 passed, 25 intentionally skipped, 0 failed**; backend RPC,
 projection, validation and lifetime behavior remains covered by the passing functional cases.
 
-### Desktop workspace usability repair — 2026-09-22
+### Desktop workspace usability repair - 2026-09-22
 
 Project and session lists, the unified transcript, configuration page, notes body and project/help
 dialogs now use bounded, always-visible scroll regions. The transcript initially follows its newest
@@ -3016,7 +3016,7 @@ native window but fails WebView2 controller creation (`NeoAstraException`), so m
 screen-reader and native-WebView interaction remain unverified. Model/provider/prompt mutation, full MCP
 management, CodeMirror/attachments, native menus and broader M5/M6 parity remain open; M7 is not started.
 
-### Interactive default and compact semantic timeline — 2026-09-22
+### Interactive default and compact semantic timeline - 2026-09-22
 
 No-argument Desktop startup now follows the normal TUI ownership default: it composes an owned host for
 the current directory and standard `~/.alta` profile, acquires the shared runtime lock, and lets the

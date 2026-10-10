@@ -3795,10 +3795,10 @@ interleaving, a history watermark or automatic journal refresh. The window shows
 lifecycle, queue count, configuration labels
 and up to eight text items, plus two most recently updated **reported plain ToolCall activities**.
 Tool names may be shortened; arguments/results are not shown. Reported phases can regress, and
-missing/evicted activity is unknown—not idle or complete. Started may precede permission resolution
+missing/evicted activity is unknown - not idle or complete. Started may precede permission resolution
 and proves neither approval nor process launch; other phases are not run-completion or exactly-once
 effect acknowledgments. This is not a complete transcript, tool-results/usage view or interaction UI.
-No retained state means not yet observed or evicted—not idle or completed. Text and labels may
+No retained state means not yet observed or evicted - not idle or completed. Text and labels may
 be shortened, and replacement/eviction indicators make omissions explicit. **Reconnect live
 display** explicitly starts a new observation; it never resends a prompt. A stale host epoch
 explicitly requires reloading the UI, not reconnecting with the old identity. Selection changes,
@@ -3874,7 +3874,7 @@ selection changes for manual receipt reconciliation. Replaying a busy receipt do
 a new explicit action uses a fresh key. Closing the panel cancels only the wait; shutdown retains
 and joins accepted compaction and cancellation work.
 
-**Queue text — this host only** uses an explicitly refreshed runtime/attachment observation, including
+**Queue text - this host only** uses an explicitly refreshed runtime/attachment observation, including
 busy/draining attachments. `sessions.queue` reserves exact text for that attachment only; the receipt
 separately reports reservation, host-only insertion and execution/cleanup. `queue_accepted` is not
 durable or executed, and `queue_dispatched` is not proof of run completion. The composer does not
