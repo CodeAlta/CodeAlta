@@ -20,6 +20,10 @@ not select a project, import a folder, refresh the catalog or send a request.
   the revision read just before it. Archiving changes catalog metadata, not project
   files or running work. Unarchive does not start work.
 
+- **Open <title>** lines end the menu, after a separator, when plugins declare canvases about a project:
+  the first four, then **More…**, which opens the Canvases page. Each opens that canvas for the row's project in
+  the shown space, whether or not the row is the selected project, and changes no project, catalog or setting.
+
 For a nonselected row, mutation items are disabled: opening its menu never silently
 switches scope to authorize a write. Existing rename/F2 and archive controls remain.
 Pending or unconfirmed original operations continue to block fresh menu mutations;

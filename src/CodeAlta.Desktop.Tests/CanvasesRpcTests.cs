@@ -656,6 +656,133 @@ public sealed class NotesPlugin : PluginBase
 }
 """;
 
+    [TestMethod]
+    public async Task AltaView_ListsTheDeclaredCanvases_AndTheOpenInstancesWithTheirPlugin()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var view = new DesktopAltaCanvases(fixture.Broker);
+
+        var declared = view.List();
+
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "plain" }, declared.Select(static canvas => canvas.Id).ToArray());
+        var board = declared[0];
+        Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "application", "{\"type\":\"object\"}", true),
+            (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.InputSchema, board.Describes));
+        CollectionAssert.AreEqual(new[] { "add", "throw" }, board.Actions.Select(static action => action.Name).ToArray());
+        Assert.AreEqual("Adds an item.", board.Actions[0].Description);
+        Assert.AreEqual(("project", "session"), (declared[1].Scope, declared[2].Scope));
+        Assert.IsNull(declared[4].Description);
+        Assert.IsFalse(declared[4].Describes);
+
+        var opened = await fixture.OpenAsync("board", space: "work", key: "k1");
+        var open = view.ListOpen().Single();
+        Assert.AreEqual((opened.InstanceId, Plugin, "board", "work", "k1", "Board k1", true), (open.InstanceId, open.PluginKey, open.CanvasId, open.SpaceId, open.Key, open.Title, open.Visible));
+    }
+
+    [TestMethod]
+    public async Task AltaView_Open_NeedsAPageThatWatches()
+    {
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        var view = new DesktopAltaCanvases(fixture.Broker);
+
+        Assert.IsFalse(view.HasWindow);
+        Assert.AreEqual("unavailable", (await view.OpenAsync(new(Plugin, "board", null, null, null, null), null, true, default)).Status);
+
+        fixture.StartWatching();
+        Assert.IsTrue(view.HasWindow);
+    }
+
+    [TestMethod]
+    public async Task AltaView_Open_InTheShownSpace_AsksThePageToOpenTheTab()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Shown = "work";
+        var view = new DesktopAltaCanvases(fixture.Broker);
+
+        var opened = await view.OpenAsync(new(Plugin, "notes", "work", "p1", "s1", null), null, false, default);
+
+        Assert.AreEqual(("requested", "work", true), (opened.Status, opened.SpaceId, opened.Shown));
+        var request = await fixture.NextAsync("open");
+        Assert.AreEqual((Plugin, "notes", "work", "p1", null, opened.InstanceId, false), (request.PluginKey, request.CanvasId, request.SpaceId, request.ProjectId, request.SessionId, request.InstanceId, request.Focus));
+        Assert.AreEqual(0, fixture.Plugin.Opened + view.ListOpen().Count, "The page opens the instance when its tab mounts.");
+    }
+
+    [TestMethod]
+    public async Task AltaView_Open_InAnotherSpace_AddsTheTabThereAndOpensTheInstanceHidden()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Shown = "work";
+        var view = new DesktopAltaCanvases(fixture.Broker);
+        var input = JsonSerializer.SerializeToElement(new { issue = 3 });
+
+        var opened = await view.OpenAsync(new(Plugin, "board", "play", null, null, "k1"), input, true, default);
+
+        Assert.AreEqual(("requested", "play", false), (opened.Status, opened.SpaceId, opened.Shown));
+        var request = await fixture.NextAsync("open");
+        Assert.AreEqual(("play", true), (request.SpaceId, request.Focus));
+        // The plugin opened it, hidden, with the input: the canvas is listed and can be described and closed.
+        Assert.AreEqual(1, fixture.Plugin.Opened);
+        var instance = view.ListOpen().Single();
+        Assert.AreEqual((opened.InstanceId, "play", false), (instance.InstanceId, instance.SpaceId, instance.Visible));
+        Assert.AreEqual(3, fixture.Plugin.Contexts[opened.InstanceId!].Input!.Value.GetProperty("issue").GetInt32());
+
+        // The tab of that space asks for its instance when the user shows the space: it is the same one, and shown now.
+        var shown = await fixture.OpenAsync("board", space: "play", key: "k1");
+        Assert.AreEqual(opened.InstanceId, shown.InstanceId);
+        Assert.AreEqual(1, fixture.Plugin.Opened);
+        Assert.IsTrue(view.ListOpen().Single().Visible);
+    }
+
+    [TestMethod]
+    public async Task AltaView_Open_TakesNothingFromThePaneAndRefusesWhatIsMissing()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Shown = "work";
+        var view = new DesktopAltaCanvases(fixture.Broker);
+
+        Assert.AreEqual("invalid_request", (await view.OpenAsync(new(Plugin, "notes", "work", null, null, null), null, true, default)).Status, "A project canvas needs the project the command resolved.");
+        Assert.AreEqual("invalid_request", (await view.OpenAsync(new(Plugin, "run", "work", "p1", null, null), null, true, default)).Status);
+        Assert.AreEqual("unknown_canvas", (await view.OpenAsync(new(Plugin, "missing", "work", null, null, null), null, true, default)).Status);
+        Assert.AreEqual("plugin_stopped", (await view.OpenAsync(new("builtin:gone", "board", "work", null, null, null), null, true, default)).Status);
+        Assert.IsFalse(fixture.HasEvent("open"));
+    }
+
+    [TestMethod]
+    public async Task AltaView_Close_ClosesTheInstanceAndTellsThePage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Shown = "work";
+        var view = new DesktopAltaCanvases(fixture.Broker);
+        var target = new AltaCanvasTarget(Plugin, "board", "play", null, null, null);
+        var opened = await view.OpenAsync(target, null, true, default);
+        await fixture.NextAsync("open");
+
+        Assert.IsFalse(await view.CloseAsync(target with { SpaceId = "work" }, default), "Another space's tab is another instance.");
+        Assert.IsTrue(await view.CloseAsync(target, default));
+
+        Assert.AreEqual(opened.InstanceId, (await fixture.NextAsync("closed")).InstanceId);
+        Assert.AreEqual(0, view.ListOpen().Count);
+        Assert.IsTrue(fixture.Plugin.Closed.Contains(opened.InstanceId!));
+        Assert.IsFalse(await view.CloseAsync(target, default));
+    }
+
+    [TestMethod]
+    public async Task AltaView_DescribesAndInvokes_WithoutAWindow()
+    {
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        var view = new DesktopAltaCanvases(fixture.Broker);
+        var target = new AltaCanvasTarget(Plugin, "board", null, null, null, null);
+
+        Assert.AreEqual(new AltaCanvasDescription("ok", "# Board (closed)"), await view.DescribeAsync(target, default));
+        var result = await view.InvokeAsync(target, "add", JsonSerializer.SerializeToElement(new { item = "milk" }), default);
+        Assert.AreEqual("ok", result.Status);
+        Assert.AreEqual("milk", result.Result!.Value.GetProperty("added").GetString());
+        Assert.AreEqual("unknown_action", (await view.InvokeAsync(target, "nothing", null, default)).Status);
+        Assert.AreEqual("failed", (await view.InvokeAsync(target, "throw", null, default)).Status);
+        Assert.AreEqual("unknown_canvas", (await view.DescribeAsync(target with { CanvasId = "missing" }, default)).Status);
+        Assert.AreEqual("plugin_stopped", (await view.InvokeAsync(target with { PluginKey = "builtin:gone" }, "add", null, default)).Status);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _root;

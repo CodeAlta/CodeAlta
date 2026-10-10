@@ -327,6 +327,19 @@ new PluginDerivedSessionEvent
 
 Keep the `EventId` stable for the same turn so the card is updated, not duplicated. A detail section can also carry `Html`. For a native TUI card, use `PluginTerminalDerivedSessionEvent` with a `VisualFactory`.
 
+## Canvases
+
+In CodeAlta Desktop a plugin can provide **canvases**: tabs that it fills and keeps up to date, such as a checklist, a board or a report. The plugin declares them in `GetCanvases()` and holds their state, so closing a tab loses nothing. The `canvas-checklist` sample is a complete one.
+
+You do not write anything to make a canvas easy to find:
+
+- The **Canvases** page, opened with the button of the title bar after Issues, has a card for each canvas, with what is open in the space you look at. **Open** opens it for the project or the session in front, or for the one you pick on its card. **New canvas** starts a request for an agent to write one.
+- The search (`Ctrl+P`) has a command "Open canvas: <title>" for each canvas.
+- The menu of a project row lists the canvases about a project, and the menu of a session row those about a session.
+- Settings > Plugins lists the canvases of each plugin.
+
+Agents use `alta canvas`: `list` and `show` read what canvases exist and what each shows, `invoke` runs an action, and `open`, `focus` and `close` act on a tab. A tab belongs to a space. When an agent opens a canvas for a space that you are not looking at, the tab is added to that space and the window stays where it is.
+
 ## Agent tools and `alta` commands
 
 `GetAgentTools()` adds tools the model can call: wrap an `AgentToolDefinition` with `AgentTool.Create`. `OnToolCallAsync` and `OnToolResultAsync` see and change the calls of the tools that plugins add.
@@ -421,7 +434,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
-| `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent |
+| `canvas-checklist` | A tab that the plugin provides, found from the Canvases page, the search and `alta canvas`: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent |
 | `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |

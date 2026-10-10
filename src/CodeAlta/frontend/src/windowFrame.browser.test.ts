@@ -21,7 +21,7 @@ const frame = `(() => {
     tabs: Math.round(parseFloat(getComputedStyle(document.querySelector(".flexlayout__tabset_tabbar_outer[data-titlebar-start]")).paddingLeft)) };
 })()`;
 // The height of the title bar, the width the mark takes when it is alone, and the width the Explorer starts with.
-const bar = 38, mark = 218, explorer = 272;
+const bar = 38, mark = 248, explorer = 272;
 
 test("the Explorer has its column in a wide window and opens over the tabs in a narrow one, under a title bar that stays in place", { skip: !edge, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-window-frame-"));

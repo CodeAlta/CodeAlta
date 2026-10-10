@@ -563,7 +563,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     new AltaCommandReviewPolicy(AcceptsCommands: !options.ReviewOwnedCommandPermissions)
                     {
                         AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
-                    });
+                    },
+                    // The tabs plugins provide: only a host that started its plugins has them.
+                    canvases is null ? null : new DesktopAltaCanvases(canvases));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);

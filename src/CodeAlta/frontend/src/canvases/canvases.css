@@ -16,3 +16,21 @@
 
 /* The status the plugin gives beside the title of its tab. */
 .canvas-tab-status { margin-left: 8px; color: var(--muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
+
+/* The Canvases tab: the frame of the Work items tab, and one card for each canvas the plugins declare. */
+.canvases-emblem { background: linear-gradient(135deg, #7961db, #2d72d2); color: #fff; }
+.canvases-page { overflow: auto; padding-bottom: 24px; }
+.canvases-empty.bp6-non-ideal-state { flex: 1; height: auto; min-height: 240px; }
+.canvases-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 18px; padding: 0; list-style: none; }
+.canvases-list > li { display: flex; min-width: 0; }
+.canvas-card.bp6-card { display: flex; flex: 1; flex-direction: column; gap: 8px; min-width: 0; padding: 14px 16px; }
+.canvas-card[data-open] { border-color: color-mix(in srgb, var(--green) 55%, var(--line-strong)); }
+.canvas-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.canvas-card-icon { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--accent); background: var(--panel-2); }
+.canvas-card-title { flex: 1; min-width: 0; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-card-description { margin: 0; color: var(--text); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.canvas-card-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; color: var(--muted); font-size: 12px; }
+.canvas-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
+.canvas-card-actions > .bp6-html-select { flex: 1 1 140px; min-width: 0; max-width: 100%; }
+.canvas-card-actions > .bp6-html-select select { width: 100%; text-overflow: ellipsis; }
+.canvas-card-actions > .bp6-button { margin-left: auto; }

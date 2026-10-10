@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { WorkspaceProject } from "#neoastra";
+import type { CanvasItem, WorkspaceProject } from "#neoastra";
+import { canvasRef } from "../canvases/canvasPages";
 import { AppIcon } from "../AppIcon";
 import { ProjectDetailsDialog } from "../ProjectDetailsEntry";
 import { projectRowAccess, projectRowCurrent, type ProjectRowContext } from "./projectRowActionAccess";
@@ -24,6 +25,11 @@ export type ProjectRowAuthority = {
   /** Whether archiving and unarchiving ask first, which the menu says; they do when this is absent. */
   archiveAsks?: boolean;
   sessions?: ScopeSessionActions;
+  /**
+   * The canvases of plugins that are about a project: the first few are lines of the menu, and `more` says the page has others.
+   * Absent where no canvas can be opened.
+   */
+  canvases?: Readonly<{ list: () => Readonly<{ items: readonly CanvasItem[]; more: boolean }>; open: (item: CanvasItem, project: WorkspaceProject) => void; all: () => void }>;
 };
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
   row: HTMLLIElement; details: boolean; opening: boolean };
@@ -97,6 +103,14 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     dismiss();
     owner.sessions[kind](value.project.id);
   }
+  // A canvas of a plugin about this project, or the page that lists them all (item null).
+  function canvasAction(item: CanvasItem | null, original: Review) {
+    const value = review.current;
+    const owner = latest.current;
+    if (!value || value !== original || value.details || !owner?.canvases || !current(value) || modalDialogOpen() || !projectRowAccess(value.project, owner.current()).open) return;
+    dismiss();
+    if (item) owner.canvases.open(item, value.project); else owner.canvases.all();
+  }
   function action(kind: "open" | "details" | "rename" | "archive", original: Review) {
     const value = review.current;
     const owner = latest.current;
@@ -119,6 +133,8 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     favorite?.set(value);
   }
   const access = visible && authority ? projectRowAccess(visible.project, authority.current()) : null;
+  // Beside the actions of the project, what the plugins offer for it: a few lines, then the page of the canvases.
+  const canvases = visible && authority?.canvases && !visible.project.archived ? authority.canvases.list() : null;
   return <li ref={row} className="project-action-row" onContextMenu={event => {
     if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="menu"], dialog')) return;
     event.preventDefault(); open();
@@ -148,6 +164,9 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
         { key: "archive", label: t(authority?.archiveAsks === false ? project.archived ? "Unarchive project" : "Archive project" : project.archived ? "Unarchive project…" : "Archive project…"),
           icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },
+        ...(canvases && canvases.items.length > 0 ? [{ key: "canvases", divider: true as const },
+          ...canvases.items.map(item => ({ key: `canvas:${canvasRef(item)}`, label: t("Open {title}", { title: item.title }), icon: "canvases" as const, onSelect: () => canvasAction(item, visible) })),
+          ...(canvases.more ? [{ key: "canvases-more", label: t("More…"), icon: "canvases" as const, onSelect: () => canvasAction(null, visible) }] : [])] : []),
       ]} />}
     {visible?.details && visible.context.snapshot && <ProjectDetailsDialog project={visible.project} snapshot={visible.context.snapshot}
       isCurrent={() => current(visible)} onClose={() => dismiss(true)} />}

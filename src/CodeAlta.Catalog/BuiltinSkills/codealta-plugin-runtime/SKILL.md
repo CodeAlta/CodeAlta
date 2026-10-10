@@ -124,6 +124,7 @@ Override only what the plugin needs.
 | `GetSessionEventProjections()` | Cards in the timeline of a session | yes | yes |
 | `GetAgentTools()` | Tools the model can call | yes | yes |
 | `GetAltaCommands()` | Commands of the `alta` tool of the sessions | yes | yes |
+| `GetCanvases()` | Tabs the plugin provides, which users and agents open (see "Canvases") | yes | no |
 | `GetSystemPromptContributions()` | Text added to the system or developer prompt | yes | yes |
 | `GetInstructionProcessors()` | Changes to the final instructions of a session | yes | yes |
 | `GetResources()` | Skills shipped with the plugin: `Resources.SkillRoot("skills")` | yes | yes |
@@ -308,6 +309,33 @@ What `context.Events` holds:
 - To see the events a session really has, read its journal, one JSON event per line: `~/.alta/sessions/<year>/<month>/<day>/<session-id>.jsonl` (`~/.alta/dev/sessions/` when CodeAlta runs with `--dev`). `alta session current` gives the id of your session.
 
 A card appears after the next turn of a session, or when the session is opened again.
+
+## Canvases
+
+A canvas is a tab of CodeAlta Desktop that the plugin provides: a checklist, a board, a report. The plugin declares it with `GetCanvases()` and holds its state; the tab is a view of that state, opened by the user or by an agent, and it comes back at the next start. Nothing is shown until someone opens it. See `samples/canvas-checklist`, a complete one: a checklist of the application, of a project and of a session.
+
+```csharp
+public override IEnumerable<PluginCanvasContribution> GetCanvases()
+{
+    yield return new PluginCanvasContribution
+    {
+        Id = "release", Title = "Release checklist", Description = "The steps of a release and who owns them.",
+        Icon = "list-checks", Scope = PluginCanvasScope.Project,   // Application, Project or Session: what one tab is about
+        Open = (canvas, ct) => ValueTask.FromResult(PluginCanvasView.Rendered((c, _) => ValueTask.FromResult(Render(c)), OnActionAsync)),
+        Describe = (canvas, ct) => ValueTask.FromResult<string?>(Markdown(canvas)),   // what it shows now, for agents
+        Actions = [ new PluginCanvasActionContribution { Name = "tick", Description = "Ticks a step.", InputSchema = "{...JSON Schema...}", Handler = TickAsync } ],
+    };
+}
+```
+
+- The id is 1 to 64 letters, digits, `-`, `_` or `.`. The description is written for agents: it is what they read to decide whether to use the canvas.
+- The user finds the canvas without anything more from the plugin: the Canvases page, the search (`Open canvas: <title>`), the menu of a project row (scope Project) or of a session row (scope Session), and Settings > Plugins list what the plugin declares.
+- An agent uses the `alta canvas` commands. Read them from `alta canvas --help` when you need the options:
+  - `alta canvas list` lists the canvases that plugins declare (`ref` is `plugin-key/canvas-id`), `alta canvas list --open` the tabs that are open.
+  - `alta canvas show <id> [--project <project>]` prints the actions with their schemas and, when the canvas has a `Describe` handler, what it shows now. Prefer it to a picture.
+  - `alta canvas invoke <id> <action> --stdin` runs an action with JSON input and prints its JSON result. It works whether the tab is open or not, since the state is the plugin's.
+  - `alta canvas open <id> --project <project>` shows the tab to the user; `focus` and `close` act on a tab that is open. The window shows one space at a time: a request for another space adds the tab there and the answer says `shown: false`. Tell the user, and run `alta space switch` only when they ask to see it.
+- To create one: `alta plugin create`, write `GetCanvases()` in `plugin.cs`, `alta plugin build`, `alta plugin reload`, then `alta canvas open <id>` (and `alta canvas invoke` for an action) to try it in the same turn.
 
 ## Agent tools
 

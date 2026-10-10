@@ -96,6 +96,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `plugin` | List and inspect the plugins and look their API up. In CodeAlta Desktop, also create, build and reload source plugins. |
 | `diff` | Show the changed files of a project to the user. Only in CodeAlta Desktop. |
 | `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
+| `canvas` | List the canvases that plugins provide, show one, open, focus and close its tab, and run its actions. Only in CodeAlta Desktop. |
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
 | `automation` | List, create, run, enable, disable and delete automations, and find the one that started a session. Only in CodeAlta Desktop. |
 | `task` | List, show, propose, start, complete, set aside, dismiss and remove the follow-up tasks of a project. |
@@ -541,6 +542,49 @@ one, is `project.notFound` as before.
 
 `alta terminal show` and `alta terminal create --show` are not concerned: the tab of a terminal opens in
 the space that is shown, whatever the project of the terminal.
+
+## Canvas commands
+
+`alta canvas` works with the canvases that plugins provide: tabs of the CodeAlta Desktop window that a plugin fills and keeps up to date (see "Canvases" in `doc/plugins.md`). Reading a canvas and running its actions need no window. Opening, focusing and closing a tab do.
+
+```text
+alta canvas list [--plugin <key-or-name>] [--open] [--space <space> | --all]
+alta canvas show <id> [--project <project>] [--session <id>] [--key <key>]
+alta canvas open <id> [--project <project>] [--session <id>] [--space <space>] [--key <key>] [--stdin]
+alta canvas focus <id> [--project <project>] [--session <id>] [--space <space>] [--key <key>]
+alta canvas close <id> [--project <project>] [--session <id>] [--space <space>] [--key <key>]
+alta canvas invoke <id> <action> [--project <project>] [--session <id>] [--key <key>] [--stdin]
+```
+
+- **Ids.** `<id>` is `plugin-key/canvas-id` (what `ref` says in `list`), or the id of the canvas alone when one plugin only declares it; several plugins that declare the same id answer `usage.ambiguousCanvas` and name the refs. An unknown canvas is `canvas.notFound`.
+- **What a canvas is about.** A canvas of the application needs nothing. A canvas of a project takes `--project` (id, slug or path), then the project of the calling session, then the catalog project of the cwd (`usage.missingProject` when none). A canvas of a session takes `--session` (id), then the calling session (`usage.missingSession`); its project is the one of that session. The window and the plugins use the id of a project, not its slug: the command resolves it. `--key` tells apart several instances of a canvas in the same context.
+- **`list`** prints one `alta.canvas.item` per declared canvas (`ref`, `pluginKey`, `plugin`, `canvasId`, `title`, `description`, `icon`, `scope`, `input`, `actions`, `describes`) and an `alta.canvas.summary`. The declared canvases are the same in every space. `--open` prints the tabs that are open instead, as `alta.canvas.instance` records and an `alta.canvas.instanceSummary`: those of the space the window shows, of the space `--space` names, or of every space with `--all`.
+- **`show`** prints an `alta.canvas.detail`: the declaration, its `inputSchema`, each action with its `description` and `inputSchema` (JSON, as the plugin wrote it), the instances that are open, and, when the canvas can describe itself and its context is known, `markdown`: what it shows now. Read it instead of looking at a picture.
+- **`open`** asks the window for the tab, or brings it to the front, and prints an `alta.canvas.opened` with `instanceId`, `spaceId`, `space` and `shown`. `--stdin` reads the JSON input of the canvas, which the instance that the tab creates gets (an instance that is open keeps what it was opened with). `focus` does the same for a tab that is open and answers `canvas.notOpen` otherwise (`alta.canvas.focused`). `close` closes the tab and its instance; the plugin keeps its state (`alta.canvas.closed`, or `canvas.notOpen`).
+- **`invoke`** runs an action that the canvas declares and prints an `alta.canvas.result` with the `result` the plugin returned. The tab need not be open. The input is JSON on stdin and should match the schema that `show` prints for the action; an action the canvas does not declare is `canvas.actionNotFound` and the message lists the ones it does. A plugin that fails answers `canvas.failed` (exit code 1) and writes the reason in the application log.
+
+`--beside` (to open a tab to the right of the calling session) is not part of the command: a tab goes where the window puts the tabs of its kind.
+
+### Which space
+
+The window shows one space at a time, and each space has its own tabs. A canvas tab is a tab of one space:
+
+- `--space <space>` names it (id, start of id or name). A space that does not have the project is refused with `project.notInSpace` (exit code 7) and nothing is asked of the window; the default space has every project.
+- Without it, the space the window shows when it has the project or the session (or the canvas is about the application, or the session is a chat, which every space shows); otherwise the first space of the project, the one `project.notInShownSpace` names for the editor.
+- A space that is not the one shown gets the tab **without the window moving**: the user finds the canvas when they show that space. The record says so with `spaceId` and `shown: false`. An agent that was asked to show it runs `alta space switch <space>` first, which is what that command is for. The plugin opens the instance at once, hidden, so that `show`, `list --open`, `invoke` and `close` know it.
+- A host without spaces leaves the space to the window.
+
+Nothing here changes a setting of the user, and a window that is not open is `view.unavailable` (exit code 5) for `open`, `focus` and `close`.
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `usage.ambiguousCanvas`, `usage.missingCanvas`, `usage.missingProject`, `usage.missingSession`, `usage.invalidInput`, `usage.scopeConflict`, `usage.invalidCanvasRequest` | 2 | The reference, the context or the input is wrong. |
+| `canvas.notFound`, `canvas.notOpen`, `canvas.actionNotFound`, `project.notFound`, `session.notFound`, `space.notFound` | 3 | What was named is not there. |
+| `view.unavailable`, `service.unavailable` | 5 | No window is open, or the service is missing. |
+| `canvas.pluginStopped`, `project.notInSpace`, `space.unavailable` | 7 | The plugin is not running, the space does not have the project, or the host keeps no spaces. |
+| `canvas.failed` | 1 | The action of the plugin failed. |
+
+Like `editor`, the group exists only where a host registers its view (`IAltaCanvasView`), which the desktop host does when it runs plugins: in the terminal UI and the standalone tool it is not among the commands, their help or `alta tool list`.
 
 ## Appearance commands
 

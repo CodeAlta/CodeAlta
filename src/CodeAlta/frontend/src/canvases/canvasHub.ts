@@ -115,6 +115,8 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     getCatalog: () => catalog,
     /** Changes with each new listing: for `useSyncExternalStore`. */
     getVersion: () => version,
+    /** Reads the canvases the plugins declare again: what the Canvases page asks for when it is shown. */
+    refresh: () => list(),
     subscribeCatalog(listener: () => void) { catalogListeners.add(listener); return () => { catalogListeners.delete(listener); }; },
     /** Calls the listener when plugins started, were replaced or stopped, and when the host is reached again: a tab that waits for its plugin asks again. */
     subscribeChanges(listener: () => void) { changeListeners.add(listener); return () => { changeListeners.delete(listener); }; },

@@ -19,7 +19,7 @@ import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus, canvases as canvasesApi, plugins as pluginsApi,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus, type CanvasItem, canvases as canvasesApi, plugins as pluginsApi,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -46,7 +46,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, canvasTab, isCanvasTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, canvasTab, canvasesTab, isCanvasTab, isCanvasesTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -118,7 +118,7 @@ import { ConfirmPopover } from "./ConfirmPopover";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import { sessionHierarchy } from "./sessionHierarchy";
-import { SessionTabMenu } from "./SessionTabMenu";
+import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
 import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection } from "./explorer/projectRail";
@@ -208,6 +208,8 @@ import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import { CanvasPanel } from "./canvases/CanvasPanel";
 import { createCanvasHub, type CanvasOpenRequest } from "./canvases/canvasHub";
+import { CanvasesPanel } from "./canvases/CanvasesPanel";
+import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasTabOf, defaultCanvasTarget, newCanvasPrompt, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
 import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
@@ -1044,22 +1046,59 @@ function App() {
     const projectId = request.projectId ?? (session?.scopeKind === "project" ? session.projectId : null);
     const project = projectId ? full.projects.find(candidate => candidate.id === projectId && !candidate.archived) : undefined;
     if (projectId && !project) return;
-    const spaces = spacesHub.getSnapshot().spaces;
     // The space the plugin names when the window has it and it shows the project; else the space that is shown, when it does.
-    const named = request.spaceId && spaces.some(space => space.id === request.spaceId) ? request.spaceId : shownSpace.current;
-    const space = spaceShows(spaces, named, projectId) ? named : shownSpace.current;
-    if (!spaceShows(spaces, space, projectId)) return;
+    const space = canvasRequestSpace(spacesHub.getSnapshot().spaces, request.spaceId, shownSpace.current, projectId);
+    if (!space) return;
     const tab = canvasTab({ pluginKey: request.pluginKey, canvasId: request.canvasId, project: project ? { id: project.id, path: project.path } : null, sessionId: request.sessionId, key: request.key },
       { title: request.title, icon: request.icon, plugin: request.plugin });
     const keep = (value: FileTab) => fileEditors.dirty(fileTabKey(value));
-    const bring = (state: FileTabs) => { const next = openFileTab(state, tab, keep); return request.focus ? next : { ...next, active: state.active }; };
-    if (space === shownSpace.current) { setFileTabs(bring); return; }
-    // Another space: its tabs, in memory when the window left it in this run and in storage otherwise.
+    if (space === shownSpace.current) { setFileTabs(state => bringCanvasTab(state, tab, request.focus, keep)); return; }
+    // Another space: its tabs, in memory when the window left it in this run and in storage otherwise. The window stays where it is.
     const kept = spaceTabs.current.get(space);
-    const next = bring(kept?.files ?? restoreFileTabs(() => localStorage.getItem(spaceStorageKey(fileTabsKey, space))) ?? emptyFileTabs());
+    const next = addCanvasTabToSpace({ kept: kept?.files, read: () => localStorage.getItem(spaceStorageKey(fileTabsKey, space)),
+      write: value => localStorage.setItem(spaceStorageKey(fileTabsKey, space), value) }, tab, request.focus, keep);
     if (kept) spaceTabs.current.set(space, { ...kept, files: next });
-    persistFileTabs(value => localStorage.setItem(spaceStorageKey(fileTabsKey, space), value), next);
   }
+  // The canvases the plugins declare now, read again whenever the plugins change.
+  const canvasCatalog = useSyncExternalStore(canvasHub.subscribeCatalog, canvasHub.getCatalog);
+  // Opens the tab of a canvas in the space that is shown: one tab for each canvas, project, session and key.
+  function openCanvas(item: CanvasItem, target: CanvasTarget) {
+    if (!owned) return;
+    openFile(canvasTabOf(item, target));
+  }
+  // What the menu of a session row offers of the plugins: their canvases about a session, a few lines and then the page of the canvases.
+  function sessionCanvasEntries(session: WorkspaceSession): SessionMenuEntry[] {
+    const menu = owned ? canvasMenuItems(canvasCatalog, "Session") : null;
+    if (!menu || menu.items.length === 0) return [];
+    const project = selectedProject && !selectedProject.archived && session.scopeKind === "project" && session.projectId === selectedProject.id ? { id: selectedProject.id, path: selectedProject.path } : null;
+    return [{ key: "canvases", divider: true },
+      ...menu.items.map(item => ({ key: `canvas:${item.pluginKey}/${item.id}`, label: t("Open {title}", { title: item.title }), icon: "canvases" as const,
+        onSelect: () => { dismissSessionMenu(false); openCanvas(item, { project, sessionId: session.id }); } })),
+      ...(menu.more ? [{ key: "canvases-more", label: t("More…"), icon: "canvases" as const, onSelect: () => { dismissSessionMenu(false); openFile(canvasesTab); } }] : [])];
+  }
+  // Opens a canvas for what is selected: the search, the palette and the menus of rows do not ask which project.
+  function openCanvasHere(item: CanvasItem) {
+    const target = defaultCanvasTarget(item, canvasSelection);
+    if (target) openCanvas(item, target);
+  }
+  // Asks an agent for a canvas: the new-session prompt of the project in front holds the request, which the user completes and sends.
+  function newCanvas() {
+    const project = canvasSelection.project;
+    if (!owned || !project) return;
+    const scope = `local-draft:${JSON.stringify(project.id)}`, key = `codealta.desktop.localPrompt.${JSON.stringify(project.id)}`;
+    // What is already written there belongs to the user: it is shown, not replaced.
+    if (!localDrafts.get(scope, () => restoreDraft(() => localStorage.getItem(key), scope)).text.trim()) {
+      localDrafts.edit(scope, newCanvasPrompt);
+      persistDraft((_key, value) => localStorage.setItem(key, value), () => localStorage.removeItem(key), scope, newCanvasPrompt);
+    }
+    selectProject(project.id);
+    focusPromptSoon();
+  }
+  // The sessions a canvas of a session can be opened for: the ones of the space that is shown, the ones used last first.
+  const canvasSessions = useMemo(() => [...(snapshot?.sessions ?? [])].sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt)).slice(0, 200)
+    .map(session => { const project = session.scopeKind === "project" ? snapshot?.projects.find(value => value.id === session.projectId && !value.archived) : undefined;
+      return { id: session.id, title: plainTitle(session.title), project: project ? { id: project.id, path: project.path } : null, projectName: project?.name ?? null }; }), [snapshot]);
+  const canvasProjects = useMemo(() => (snapshot?.projects ?? []).filter(value => !value.archived).map(value => ({ id: value.id, path: value.path, name: value.name })), [snapshot]);
   const openCanvasLatest = useRef(openCanvasRequest); openCanvasLatest.current = openCanvasRequest;
   useEffect(() => {
     if (!tabsReady) return;
@@ -1482,6 +1521,12 @@ function App() {
   const selectedSession = snapshot && tabs.active?.sessionId === sessionId && !resolveSessionTab(snapshot, tabs.active)
     ? undefined : snapshot?.sessions.find(value => value.id === sessionId);
   const selectedProject = snapshot?.projects.find(value => value.id === projectId);
+  // What a canvas that is opened without a choice is about: the project in front, and the session in front with its project.
+  const canvasSelection: CanvasSelection = {
+    project: selectedProject && !selectedProject.archived ? { id: selectedProject.id, path: selectedProject.path } : null,
+    session: selectedSession ? { id: selectedSession.id, project: selectedSession.scopeKind === "project" && selectedSession.projectId
+      ? (catalog.current ?? snapshot)?.projects.filter(value => value.id === selectedSession.projectId && !value.archived).map(value => ({ id: value.id, path: value.path }))[0] ?? null : null } : null,
+  };
   function currentProjectDetailsContext(): ProjectDetailsContext {
     return { snapshot: currentSnapshot.current, projectId: selectedScope.current, sessionId: selectedSessionId.current,
       hostEpoch: currentHostEpoch.current ?? null, hostAvailable: currentHostAvailable.current,
@@ -1748,6 +1793,7 @@ function App() {
       case "project": setProjectTree(current => expandScope(current, choice.id)); selectProject(choice.id); focusPromptSoon(); break;
       case "session": selectProject(choice.projectId, choice.id); focusPromptSoon(); break;
       case "file": openEditor(choice.project, { path: choice.path, line: null, column: null, explorer: null }); break;
+      case "canvas": { const item = canvasCatalog.find(value => value.pluginKey === choice.pluginKey && value.id === choice.id); if (item) openCanvasHere(item); break; }
     }
   });
 
@@ -1806,7 +1852,7 @@ function App() {
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
-      case "automations": case "workItems": case "issues": return owned;
+      case "automations": case "workItems": case "issues": case "canvases": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
@@ -1848,6 +1894,7 @@ function App() {
       case "automations": openAutomations(); break;
       case "workItems": openWorkItems(); break;
       case "issues": openFile(issuesTab); break;
+      case "canvases": openFile(canvasesTab); break;
       case "newSpace": setSpaceDialog(true); break;
       case "goToSpace": setSpaceMenuRequest(value => value + 1); break;
       case "previousSpace": case "nextSpace":
@@ -2704,6 +2751,8 @@ function App() {
               {work.some(item => item.stage === "todo") && <span className="activity-work-dot" aria-hidden="true" />}</Button>
             <Button variant="minimal" size="small" icon={<AppIcon name="issueOpen" size={16} />} className="activity-issues" disabled={!owned}
               active={!!fileTabs.active && isIssuesTab(fileTabs.active)} aria-label={t("Issues")} title={`${t("Issues")} (Ctrl+G, Ctrl+B)`} onClick={() => openFile(issuesTab)} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="canvases" size={16} />} className="activity-canvases" disabled={!owned}
+              active={!!fileTabs.active && isCanvasesTab(fileTabs.active)} aria-label={t("Canvases")} title={t("Canvases")} onClick={() => openFile(canvasesTab)} />
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
           </nav>
         </WindowBrand>
@@ -2779,6 +2828,8 @@ function App() {
               locked: projectRenamePending.current || !!uncertainProjectRename.current || projectRenameLocked
                 || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive,
+              canvases: owned ? { list: () => canvasMenuItems(canvasCatalog, "Project"), open: (item, project) => openCanvas(item, { project: { id: project.id, path: project.path }, sessionId: null }),
+                all: () => openFile(canvasesTab) } : undefined,
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
                 search: id => scopeSessionAction(id, "search"), browse: id => scopeSessionAction(id, "browse") } }}
             editor={owned ? { open: id => fileTabs.open.some(tab => isEditorTab(tab) && tab.projectId === id),
@@ -2866,6 +2917,7 @@ function App() {
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
+                  ...sessionCanvasEntries(session),
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
@@ -2943,6 +2995,9 @@ function App() {
                 onInstance={instance => { const key = canvasInstanceKey(tab, spaceId); if (instance) canvasInstances.current.set(key, instance); }}
                 onClose={() => closeFile(tab)} control={canvasControl(tab)}
                 onOpenSource={folder => openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true })} />
+              : isCanvasesTab(tab)
+              ? <CanvasesPanel key={fileTabKey(tab)} hub={canvasHub} tabs={fileTabs.open} projects={canvasProjects} sessions={canvasSessions} selection={canvasSelection}
+                visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)} onOpen={openCanvas} onNew={owned && canvasSelection.project ? newCanvas : null} />
               : isIssuesTab(tab)
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
@@ -3025,7 +3080,7 @@ function App() {
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
-      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision}
+      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
@@ -3141,6 +3196,8 @@ function App() {
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
       available={commandAvailable} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
+      canvases={owned ? canvasCatalog : []} canvasAvailable={item => !!defaultCanvasTarget(item, canvasSelection)}
+      onCanvas={item => chooseSearch({ kind: "canvas", pluginKey: item.pluginKey, id: item.id })}
       onProject={project => chooseSearch({ kind: "project", id: project.id })}
       onSession={session => chooseSearch({ kind: "session", projectId: session.projectId, id: session.id })}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}

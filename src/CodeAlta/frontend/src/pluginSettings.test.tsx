@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { PluginsEntry } from "#neoastra";
+import type { CanvasItem, PluginsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { PluginProblems, PluginRows, pluginFailure, pluginRows } from "./PluginSettings";
+import { PluginProblems, PluginRows, pluginCanvases, pluginFailure, pluginRows } from "./PluginSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
@@ -155,4 +155,29 @@ test("a change that did not succeed says why in the words of plugins", () => {
     assert.ok(notice, status);
     for (const locale of locales) assert.ok(translate(locale, notice.key).length > 0, `${status} in ${locale}`);
   }
+});
+
+const canvas = (id: string, plugin: Partial<CanvasItem>): CanvasItem => ({ pluginKey: "k", plugin: "P", package: null, id, title: id[0].toUpperCase() + id.slice(1), description: null, icon: null,
+  scope: "Application", input: false, actions: 0, describes: false, ...plugin });
+
+test("a row lists the canvases its plugin declares, with their scope, before anything is opened", () => {
+  const declared = [canvas("board", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Project" }), canvas("run", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Session" }),
+    canvas("stats", { pluginKey: "builtin:statistics", plugin: "Statistics" }), canvas("other", { pluginKey: "global:other", package: "plugin:global:other" })];
+  const rows = pluginRows([entry("notes", { name: "Notes" }), entry("other", { name: "Other", state: "Disabled", enabled: false, runtime: null })], english);
+  const names = (id: string, builtIn = false) => pluginCanvases(rows.find(row => row.id === id && row.builtIn === builtIn)!, declared).map(value => value.id);
+  assert.deepEqual(names("notes"), ["board", "run"], "A source plugin is named by its folder.");
+  assert.deepEqual(names("statistics", true), ["stats"], "A plugin that ships with CodeAlta is named by its key.");
+  assert.deepEqual(names("git", true), []);
+  assert.deepEqual(pluginCanvases(rows.find(row => row.id === "notes")!, []), [], "A plugin that does not run declares none.");
+  for (const locale of locales) {
+    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(PluginRows, { rows, canvases: declared, disabled: false, onToggle: never, onReload: never, platform: "windows", onReveal: never })));
+    const notes = cards(html).find(value => value.includes("<strong>Notes</strong>")) ?? assert.fail("no row for Notes");
+    assert.equal((notes.match(/class="plugin-canvas"/gu) ?? []).length, 2, locale);
+    for (const [title, scope] of [["Board", "Project"], ["Run", "Session"]]) {
+      assert.ok(notes.includes(translate(locale, "Canvas: {title} ({scope})", { title, scope: translate(locale, scope as "Project" | "Session") })), `${locale} ${title}`);
+    }
+  }
+  const html = render([entry("notes")]);
+  assert.ok(!html.includes("plugin-canvas"), "Nothing is listed where nothing is declared.");
 });

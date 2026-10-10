@@ -1,0 +1,111 @@
+// How a canvas is found and opened: the pieces of the Canvases page, of the search, of the menus and of the requests of
+// plugins and agents that need no component. The tab itself is `fileTabs.ts`; what a tab shows is `CanvasPanel`.
+import type { CanvasItem } from "#neoastra";
+import { canvasTab, emptyFileTabs, openFileTab, persistFileTabs, restoreFileTabs, type FileTab, type FileTabs } from "../fileTabs";
+import { spaceShows, type Space } from "../spaces/spaces";
+
+/** What one instance of a canvas is about. */
+export type CanvasScope = "Application" | "Project" | "Session";
+
+/** The scope a canvas declares; a name the host does not say is the application. */
+export const canvasScope = (item: Pick<CanvasItem, "scope">): CanvasScope => item.scope === "Project" ? "Project" : item.scope === "Session" ? "Session" : "Application";
+
+/** What `alta canvas` calls a canvas: the plugin and the canvas. */
+export const canvasRef = (item: Pick<CanvasItem, "pluginKey" | "id">) => `${item.pluginKey}/${item.id}`;
+
+/** The project a canvas is about, as a tab names it. */
+export type CanvasProject = Readonly<{ id: string; path: string }>;
+
+/** What a canvas is opened for: the project of a project canvas, and the session of a session canvas with the project of that session. */
+export type CanvasTarget = Readonly<{ project: CanvasProject | null; sessionId: string | null }>;
+
+/** What the window has selected, which a canvas that is opened without a choice is about. */
+export type CanvasSelection = Readonly<{
+  /** The project in front, when it can be worked in; null for a chat or an archived project. */
+  project: CanvasProject | null;
+  /** The session in front, with its project; null when none is. */
+  session: Readonly<{ id: string; project: CanvasProject | null }> | null;
+}>;
+
+/**
+ * What a canvas is opened for when nothing was chosen: the application has nothing to name, a project canvas takes the project in
+ * front, a session canvas the session in front. Null when the scope needs what the window does not have selected.
+ */
+export function defaultCanvasTarget(item: Pick<CanvasItem, "scope">, selection: CanvasSelection): CanvasTarget | null {
+  switch (canvasScope(item)) {
+    case "Application": return { project: null, sessionId: null };
+    case "Project": return selection.project ? { project: selection.project, sessionId: null } : null;
+    default: return selection.session ? { project: selection.session.project, sessionId: selection.session.id } : null;
+  }
+}
+
+/** The tab that shows an instance of a canvas. The title, the icon and the plugin are what the declaration says until the plugin says better. */
+export function canvasTabOf(item: CanvasItem, target: CanvasTarget): FileTab {
+  const scope = canvasScope(item);
+  return canvasTab({ pluginKey: item.pluginKey, canvasId: item.id, project: scope === "Application" ? null : target.project,
+    sessionId: scope === "Session" ? target.sessionId : null }, { title: item.title, icon: item.icon, plugin: item.package });
+}
+
+/** Whether a tab shows an instance of a canvas. */
+export const showsCanvas = (tab: FileTab, item: Pick<CanvasItem, "pluginKey" | "id">) => tab.view === "canvas" && tab.pluginKey === item.pluginKey && tab.canvasId === item.id;
+
+/** The tabs of a space that show a canvas. */
+export const openCanvases = (tabs: readonly FileTab[], item: Pick<CanvasItem, "pluginKey" | "id">) => tabs.filter(tab => showsCanvas(tab, item));
+
+/** The most canvases a menu lists before "More…". */
+export const canvasMenuLimit = 4;
+
+/** The canvases of a scope that a row menu lists: the first few, and whether more are left for the page. */
+export function canvasMenuItems(items: readonly CanvasItem[], scope: CanvasScope, limit = canvasMenuLimit): Readonly<{ items: readonly CanvasItem[]; more: boolean }> {
+  const found = items.filter(item => canvasScope(item) === scope);
+  return { items: found.slice(0, limit), more: found.length > limit };
+}
+
+/** What the palette and the search list for a canvas: the same row, by its words. */
+export type CanvasCommand = Readonly<{ key: string; item: CanvasItem; name: string; label: string; description: string; group: string }>;
+
+/** A slash name that the author of a canvas never wrote: `open_<id>`. */
+export const canvasCommandName = (item: Pick<CanvasItem, "id">) => `open_${item.id.replace(/[^A-Za-z0-9_]+/gu, "_")}`;
+
+/** The commands of the canvases the plugins declare now: one for each, in the order of the declarations. */
+export function canvasCommands(items: readonly CanvasItem[], label: (title: string) => string, fallback: (plugin: string) => string): readonly CanvasCommand[] {
+  return items.map(item => ({ key: `canvas:${canvasRef(item)}`, item, name: canvasCommandName(item), label: label(item.title),
+    description: item.description ?? fallback(item.plugin), group: item.plugin }));
+}
+
+/** Whether every word of a query is found in a command: its slash name, its title, its description or its plugin. */
+export function matchesCanvasCommand(command: CanvasCommand, words: readonly string[]): boolean {
+  const text = `${command.name} ${command.label} ${command.item.title} ${command.description} ${command.group} canvas`.toLowerCase();
+  return words.every(word => text.includes(word));
+}
+
+/** What the "New canvas" action asks of the agent of the session it starts. It is a prompt to an agent: it stays in English. */
+export const newCanvasPrompt = "Activate the codealta-plugin-runtime skill, then create a CodeAlta canvas for this project: a tab that a plugin provides. The canvas should show ";
+
+/**
+ * Where a canvas tab goes when a plugin or an agent asks for it: the space it names when the window has that space and the space shows the
+ * project of the canvas; the space that is shown otherwise, when it shows the project; none when neither does.
+ */
+export function canvasRequestSpace(spaces: readonly Space[], requested: string | null, shown: string, projectId: string | null): string | null {
+  const named = requested && spaces.some(space => space.id === requested) ? requested : shown;
+  const space = spaceShows(spaces, named, projectId) ? named : shown;
+  return spaceShows(spaces, space, projectId) ? space : null;
+}
+
+/** Opens a canvas tab in tabs, or finds it there; it comes to the front only when asked. */
+export function bringCanvasTab(state: FileTabs, tab: FileTab, focus: boolean, keep: (tab: FileTab) => boolean = () => false): FileTabs {
+  const next = openFileTab(state, tab, keep);
+  return focus ? next : { ...next, active: state.active };
+}
+
+/**
+ * Adds a canvas tab to a space that the window does not show, and does not move the window: the tabs the window kept of that space in this
+ * run, else the ones it stored, get the tab, and what comes out is stored again for the next time the space is shown. A tab is in front
+ * of its space only when asked, as it is in the space that is shown.
+ */
+export function addCanvasTabToSpace(source: Readonly<{ kept: FileTabs | undefined; read: () => string | null; write: (value: string) => void }>,
+  tab: FileTab, focus: boolean, keep: (tab: FileTab) => boolean = () => false): FileTabs {
+  const next = bringCanvasTab(source.kept ?? restoreFileTabs(source.read) ?? emptyFileTabs(), tab, focus, keep);
+  persistFileTabs(source.write, next);
+  return next;
+}

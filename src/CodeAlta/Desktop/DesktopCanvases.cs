@@ -41,6 +41,13 @@ internal sealed record CanvasDeclaration(ActivePluginInstance Plugin, PluginCanv
 /// <param name="Revision">Grows with every change of the content: a page ignores an event older than what it has.</param>
 internal sealed record CanvasInstanceState(string InstanceId, string Title, string? StatusText, string Html, bool Actions, int Revision);
 
+/// <summary>An instance that is open, with the identity that names it.</summary>
+/// <param name="InstanceId">The identifier of the instance.</param>
+/// <param name="Identity">The plugin, the canvas, the space, the context and the key of the instance.</param>
+/// <param name="Title">The title of its tab now.</param>
+/// <param name="Visible">A tab shows it now.</param>
+internal sealed record CanvasOpenInstance(string InstanceId, CanvasIdentity Identity, string Title, bool Visible);
+
 /// <summary>How opening an instance ended: its state, or a refusal code.</summary>
 /// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>invalid_request</c>, <c>unknown_canvas</c>, <c>plugin_stopped</c>, <c>failed</c> or <c>limit</c>.</param>
 /// <param name="State">The state of the instance when it was opened.</param>
@@ -399,6 +406,22 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         }
     }
 
+    /// <summary>Whether a page watches now: a request for a tab reaches a window.</summary>
+    internal bool HasPage
+    {
+        get { lock (_gate) return _outbox is not null && !_disposed; }
+    }
+
+    /// <summary>Lists the open instances with the identity of each, in the order they were opened.</summary>
+    internal IReadOnlyList<CanvasOpenInstance> OpenInstances()
+    {
+        lock (_gate)
+        {
+            return [.. _instances.Values.Where(static instance => !instance.Closed).OrderBy(static instance => instance.Order)
+                .Select(static instance => new CanvasOpenInstance(instance.Id, instance.Identity, instance.Title, instance.Visible))];
+        }
+    }
+
     /// <summary>Lists the open instances, in the order they were opened.</summary>
     /// <param name="pluginKey">Only the instances of this plugin; null for every plugin.</param>
     internal IReadOnlyList<PluginCanvasInstanceInfo> List(string? pluginKey)
@@ -509,7 +532,16 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         return new(RequestOpen(pluginKey, canvasId, options));
     }
 
-    private PluginCanvasOpenResult RequestOpen(string pluginKey, string canvasId, PluginCanvasOpenOptions? options)
+    /// <summary>
+    /// Asks the page for the tab of a canvas. A plugin's request takes what it leaves out from the pane or the operation it runs in;
+    /// a request from outside a plugin (<c>alta canvas open</c>) names its context itself and takes nothing from them.
+    /// </summary>
+    /// <param name="pluginKey">The runtime key of the plugin.</param>
+    /// <param name="canvasId">The canvas.</param>
+    /// <param name="options">Where the tab is, what it is about, and its input.</param>
+    /// <param name="fromPane">Whether the project and the session left out are those of the pane or of the operation that asks.</param>
+    /// <returns>How it ended.</returns>
+    internal PluginCanvasOpenResult RequestOpen(string pluginKey, string canvasId, PluginCanvasOpenOptions? options, bool fromPane = true)
     {
         string? shown;
         lock (_gate)
@@ -521,8 +553,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         if (!ValidCanvasId(canvasId)) return new(PluginCanvasOpenStatus.Invalid, null, null, false);
         var declaration = Find(pluginKey, canvasId);
         if (declaration is null) return new(PluginCanvasOpenStatus.UnknownCanvas, null, null, false);
-        var pane = _ui?.Scope;
-        var operation = PluginOrchestrationBridge.CurrentToolOperation;
+        var pane = fromPane ? _ui?.Scope : null;
+        var operation = fromPane ? PluginOrchestrationBridge.CurrentToolOperation : null;
         var space = options?.SpaceId ?? shown;
         var identity = new CanvasIdentity(pluginKey, canvasId, space, options?.ProjectId ?? operation?.ProjectId ?? pane?.ProjectId,
             options?.SessionId ?? operation?.SessionId ?? pane?.SessionId, options?.Key);

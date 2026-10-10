@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { CanvasItem, SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { canvasCommands, matchesCanvasCommand } from "../canvases/canvasPages";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
@@ -25,6 +26,7 @@ export type SearchStart = Readonly<{ category?: SearchCategory; text?: string; p
 
 /** What was chosen in the search, for the window to open once the search has closed. */
 export type SearchChoice = Readonly<{ kind: "command"; id: CommandId } | { kind: "plugin"; id: string } | { kind: "project"; id: string }
+  | { kind: "canvas"; pluginKey: string; id: string }
   | { kind: "session"; projectId: string | null; id: string } | { kind: "file"; project: Pick<WorkspaceProject, "id" | "path">; path: string }>;
 
 /** A text with the parts that the query found marked. */
@@ -48,7 +50,7 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * and the commands. Enter opens what is selected. Tab changes the category; a text that starts with "/" looks for a
  * command. It is a movable, resizable window like the others; its place and size are remembered.
  */
-export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, onProject, onSession, onFile, onClose }: {
+export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose }: {
   snapshot: WorkspaceSnapshot | null;
   /** What the list of the projects and sessions leaves out, when the host shortened it. */
   note?: string | null;
@@ -62,6 +64,11 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   /** The commands of plugins, listed after the application's own. */
   pluginCommands?: readonly PluginCommandView[];
   onPluginCommand?: (id: string) => void;
+  /** The canvases that plugins declare: each is a command that opens it, listed with the plugins' commands. */
+  canvases?: readonly CanvasItem[];
+  /** Whether a canvas can be opened for what the window has selected: a canvas about a project needs one. */
+  canvasAvailable?: (item: CanvasItem) => boolean;
+  onCanvas?: (item: CanvasItem) => void;
   onProject: (project: WorkspaceProject) => void;
   onSession: (session: WorkspaceSession) => void;
   onFile: (project: FileProject, path: string) => void;
@@ -82,7 +89,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   const words = query.words;
   const scoped = scope !== undefined;
   const shownCategory: SearchCategory = scoped ? "sessions" : query.commands ? "commands" : category;
-  const latest = useRef({ files, available, onCommand, onPluginCommand }); latest.current = { files, available, onCommand, onPluginCommand };
+  const latest = useRef({ files, available, onCommand, onPluginCommand, canvasAvailable, onCanvas }); latest.current = { files, available, onCommand, onPluginCommand, canvasAvailable, onCanvas };
 
   // The files of the project in front are searched by the host, a moment after the last key.
   const fileQuery = words.join(" ");
@@ -120,20 +127,25 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
     const plugins = searchPluginCommands(text, pluginCommands).map((command, index): CommandResult => ({ kind: "command", key: `plugin:${command.id}`, score: 3000 + index,
       name: command.name, label: command.label, description: command.description, group: command.group ?? command.plugin, keys: command.keys ? [command.keys] : [],
       enabled: true, run: () => latest.current.onPluginCommand?.(command.id) }));
+    // A canvas is a command that nobody wrote: it opens the tab, for the project or the session the window has selected.
+    const canvasRows = canvasCommands(canvases, title => t("Open canvas: {title}", { title }), plugin => t("A canvas of {plugin}.", { plugin }))
+      .filter(command => matchesCanvasCommand(command, words))
+      .map((command, index): CommandResult => ({ kind: "command", key: command.key, score: 3500 + index, name: command.name, label: command.label, description: command.description,
+        group: command.group, keys: [], enabled: latest.current.canvasAvailable?.(command.item) ?? true, run: () => latest.current.onCanvas?.(command.item) }));
     return {
       sessions: query.commands || !snapshot ? none : searchSessions(snapshot, words, scope),
       projects: query.commands || scoped || !snapshot ? none : searchProjects(snapshot, words, favorites),
       files: query.commands || scoped ? none : foundFiles.items as readonly SearchResult[],
-      commands: scoped ? none : [...own, ...plugins] as readonly SearchResult[],
+      commands: scoped ? none : [...own, ...plugins, ...canvasRows] as readonly SearchResult[],
     };
-  }, [snapshot, text, scope, favorites, pluginCommands, foundFiles, locale]);
+  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale]);
 
   const groups = useMemo(() => shownGroups(shownCategory, found), [shownCategory, found]);
   const rows = useMemo(() => flatResults(groups), [groups]);
   const index = Math.max(0, Math.min(active, rows.length - 1));
   useLayoutEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [index, groups]);
 
-  const enabled = (result: SearchResult) => result.kind !== "command" || !result.key.startsWith("command:") || latest.current.available(result.key.slice("command:".length) as CommandId);
+  const enabled = (result: SearchResult) => result.kind !== "command" || result.enabled && (!result.key.startsWith("command:") || latest.current.available(result.key.slice("command:".length) as CommandId));
   function open(result: SearchResult | undefined) {
     if (!result || !enabled(result)) return;
     if (result.kind === "project") onProject(result.project);

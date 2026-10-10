@@ -7,7 +7,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * The tab of a terminal names the terminal; its project is empty for a terminal of no project, and its path
  * is the folder the terminal started in. The automations of the application have one tab, of no project
  * (`view: "automations"`), and so have the work items, the tasks and the plans of every project
- * (`view: "workItems"`), and the issues and pull requests (`view: "issues"`). The code editor also opens on the folder of a source plugin or of a skill, and on the folder of a
+ * (`view: "workItems"`), the issues and pull requests (`view: "issues"`), and the canvases that plugins declare (`view: "canvases"`). The code editor also opens on the folder of a source plugin or of a skill, and on the folder of a
  * file that a link named and no project has: its tab names that folder where a tab names a project, and carries the name of the plugin, of the skill or of the folder.
  *
  * A canvas is a tab that a plugin provides (`view: "canvas"`). Its identity is the plugin, the canvas, the project or the
@@ -15,7 +15,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * shows before the plugin has started: the title (`name`) and the `icon`, kept up to date by the plugin, and `plugin`, the id
  * of the folder of the plugin package, which says where to rebuild it and open its source when it is not running.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues" | "canvas";
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues" | "canvases" | "canvas";
   terminalId?: string; name?: string; pluginKey?: string; canvasId?: string; sessionId?: string; key?: string; icon?: string; plugin?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
@@ -35,6 +35,9 @@ export const workItemsTab: FileTab = Object.freeze({ projectId: "", projectPath:
 /** The tab of the issues and the pull requests: there is one, whatever the project. */
 export const isIssuesTab = (tab: FileTab) => tab.view === "issues";
 export const issuesTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "issues" });
+/** The tab of the canvases that plugins declare, the page that lists and opens them: there is one, whatever the project. */
+export const isCanvasesTab = (tab: FileTab) => tab.view === "canvases";
+export const canvasesTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "canvases" });
 export const isCanvasTab = (tab: FileTab) => tab.view === "canvas";
 /** Which canvas a tab shows, and about what: the plugin and the canvas it declares, the project and the session when it has them, and its key. */
 export type CanvasTabIdentity = Readonly<{ pluginKey: string; canvasId: string; project?: Readonly<{ id: string; path: string }> | null; sessionId?: string | null; key?: string | null }>;
@@ -156,7 +159,7 @@ export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot):
   // The folder of a plugin or of a skill is not a project of the workspace: its editor says so itself when the folder is gone.
   // A canvas of the application lasts; one of a project or of a session lasts as long as they are in the space.
   const canvas = (tab: FileTab) => (tab.projectId === "" || resolveFileTab(snapshot, tab)) && (tab.sessionId === undefined || snapshot.sessions.some(session => session.id === tab.sessionId));
-  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
+  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
   const open = state.open.filter(lasting);
   const closed = state.closed.filter(lasting);
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
@@ -208,6 +211,7 @@ function storedTab(value: unknown): { tab: FileTab; file: string | null } | null
   if (stored.view === "automations") return stored.projectId === "" && stored.projectPath === "" ? { tab: automationsTab, file: null } : null;
   if (stored.view === "workItems") return stored.projectId === "" && stored.projectPath === "" ? { tab: workItemsTab, file: null } : null;
   if (stored.view === "issues") return stored.projectId === "" && stored.projectPath === "" ? { tab: issuesTab, file: null } : null;
+  if (stored.view === "canvases") return stored.projectId === "" && stored.projectPath === "" ? { tab: canvasesTab, file: null } : null;
   if (stored.view === "canvas") { const tab = storedCanvasTab(stored); return tab ? { tab, file: null } : null; }
   if (!text(stored.projectId, 256) || !text(stored.projectPath, 4096)) return null;
   const project = { id: stored.projectId, path: stored.projectPath };

@@ -148,6 +148,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateEditorCommand(context.Invocation);
         }
 
+        // And for the canvases of plugins.
+        if (context.Invocation.Services.Get<IAltaCanvasView>() is not null)
+        {
+            yield return CreateCanvasCommand(context.Invocation);
+        }
+
         // And for the terminals.
         if (context.Invocation.Services.Get<IAltaTerminals>() is not null)
         {
@@ -199,7 +205,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var issues = context.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null;
         var appearance = context.Services.Get<IAltaAppearance>() is not null;
         var spaces = context.Services.Get<SpaceCatalog>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && !spaces && workshop is null) return Policies;
+        var canvases = context.Services.Get<IAltaCanvasView>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && !spaces && !canvases && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
@@ -210,6 +217,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (workshop?.OpenEditor is not null) policies.Add(PluginOpenPolicy);
         if (changes) policies.Add(DiffShowPolicy);
         if (editor) policies.Add(EditorOpenPolicy);
+        if (canvases) policies.AddRange(CanvasPolicies);
         if (terminals) policies.AddRange(TerminalPolicies);
         if (automations) policies.AddRange(AutomationPolicies);
         return policies;

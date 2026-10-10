@@ -70,6 +70,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Run plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
     <tr><th scope="row">Create, edit and reload a plugin while the app runs</th><td>{{ alta_yes }}</td><td>{{ alta_no }} <small>Built at start</small></td></tr>
     <tr><th scope="row">Ask an agent to write a plugin and try it</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
+    <tr><th scope="row">Canvases: tabs that plugins provide, listed in one page and opened by you or by an agent</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Plugin dialogs and content</th><td>{{ alta_yes }} <small>App components, HTML, Markdown, diagrams</small></td><td>{{ alta_yes }} <small>Terminal controls</small></td></tr>
   </tbody>
   <tbody>
