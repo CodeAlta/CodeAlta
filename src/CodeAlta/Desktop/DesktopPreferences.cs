@@ -195,5 +195,23 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
     }
 }
 
+/// <summary>
+/// Writes the preferences of the application one write at a time, each with the preferences as they are when it is
+/// made: two changes made at the same time (a setting of the user, a session that turns Remote Control on) never
+/// leave the file with the older one.
+/// </summary>
+/// <param name="dataRoot">Where the preferences are kept.</param>
+/// <param name="latest">The preferences as they are now.</param>
+internal sealed class DesktopPreferencesWriter(string dataRoot, Func<DesktopPreferences> latest)
+{
+    private readonly Lock _gate = new();
+
+    /// <summary>Writes the preferences as they are now; false when the file could not be written.</summary>
+    internal bool Write()
+    {
+        lock (_gate) return latest().Save(dataRoot);
+    }
+}
+
 [System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
 internal sealed partial class DesktopPreferencesJson : System.Text.Json.Serialization.JsonSerializerContext;
