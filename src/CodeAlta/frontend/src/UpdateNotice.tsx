@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout } from "@blueprintjs/core";
+import { Button, Callout, OverlayToaster, type ToastProps } from "@blueprintjs/core";
 import type { AppUpdateResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { translate, type Locale, type MessageKey } from "./localization";
@@ -18,14 +18,30 @@ export function availableUpdate(update: Pick<AppUpdateResponse, "status" | "late
  * How often the page asks the host whether there is a newer version. The host decides whether its last look
  * at nuget.org is old enough to be made again, so the page may ask often: also when the window comes back.
  */
-export const updateCheckInterval = 30 * 60_000;
+export const updateCheckInterval = 10 * 60_000;
 
 /**
  * The newer version to announce after a check: one that was not announced yet. The application stays open
  * for days and checks again as time passes; each newer version is announced once.
  */
-export function updateToAnnounce(announced: string | null, update: AvailableUpdate | null): AvailableUpdate | null {
-  return update && update.version !== announced ? update : null;
+export function updateToAnnounce(announced: ReadonlySet<string>, update: AvailableUpdate | null, visible = true): AvailableUpdate | null {
+  return visible && update && !announced.has(update.version) ? update : null;
+}
+
+/** A nonmodal notice kept until dismissed, not a short toast that can be missed while working. */
+export function updateNotification(update: AvailableUpdate, locale: Locale, onOpenReleaseNotes: () => void, onInstall: () => void): ToastProps {
+  return { intent: "primary", icon: "automatic-updates", timeout: 0,
+    message: <UpdateNotice update={update} locale={locale} onOpenReleaseNotes={onOpenReleaseNotes} onInstall={onInstall} /> };
+}
+
+/** Owns the update notice separately from transient messages, whose bounded queue can evict old toasts. */
+export function UpdateToaster({ notification }: { notification: ToastProps | null }) {
+  const toaster = useRef<OverlayToaster>(null);
+  useEffect(() => {
+    if (notification) toaster.current?.show(notification, "app-update");
+    else toaster.current?.clear();
+  }, [notification]);
+  return <OverlayToaster ref={toaster} position="bottom-right" maxToasts={1} className="app-update-toaster" />;
 }
 
 /** What to say about the update the previous run started; null when none ran. */

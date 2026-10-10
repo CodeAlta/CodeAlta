@@ -467,8 +467,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     windowBackground.Apply(remembered.Background);
                 });
             }
-            // As the terminal application does: one look at nuget.org for a newer version. An instance on
-            // explicit roots is automation and stays off the network.
+            // Look for a newer version at startup and periodically while the desktop runs. An instance
+            // on explicit roots is automation and stays off the network.
             // Only an installed tool can replace itself: a helper waits for this process to end, runs
             // the update and starts CodeAlta again.
             AppUpdateService StartAppUpdate()
@@ -740,6 +740,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         asks?.CloseAdmission();
         reminders?.CloseAdmission();
         providers?.CloseAdmission();
+        // This application's own timer must stop even if later host/native cleanup is unconfirmed.
+        if (appUpdate is not null)
+        {
+            try { await appUpdate.DisposeAsync(); }
+            catch (Exception failure)
+            {
+                bodyFailed = true;
+                LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "The update check did not stop cleanly");
+            }
+        }
         if (_closeFlow is not null)
         {
             try
@@ -801,7 +811,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             return;
         }
         gitIssues?.Dispose(); // Its RPC host is gone: no lookup can still use the HTTP client.
-        appUpdate?.Dispose();
         if (window is not null)
         {
             allowClose = true;

@@ -12,7 +12,7 @@ public sealed class DesktopAppUpdateTests
     {
         var checks = 0;
         var opened = new List<string>();
-        using var service = new AppUpdateService("1.2.0+abc123", (package, current, prerelease, _) =>
+        await using var service = new AppUpdateService("1.2.0+abc123", (package, current, prerelease, _) =>
         {
             checks++;
             Assert.AreEqual("CodeAlta", package);
@@ -45,7 +45,7 @@ public sealed class DesktopAppUpdateTests
         var time = new ManualTime();
         var published = "1.1.1";
         var checks = 0;
-        using var service = new AppUpdateService("1.1.1", (package, current, prerelease, _) =>
+        await using var service = new AppUpdateService("1.1.1", (package, current, prerelease, _) =>
         {
             checks++;
             var latest = NuGetVersion.Parse(published);
@@ -77,12 +77,117 @@ public sealed class DesktopAppUpdateTests
     }
 
     [TestMethod]
+    public void BackgroundChecks_AreTenMinutesApart()
+        => Assert.AreEqual(TimeSpan.FromMinutes(10), AppUpdateService.Period);
+
+    [TestMethod]
+    public async Task HiddenWindow_ChecksWithoutThePage_AndAboutMovesTheNextCheck()
+    {
+        var time = new ManualTime();
+        var checks = 0;
+        var background = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var service = new AppUpdateService("1.2.0", (package, current, prerelease, _) =>
+        {
+            if (Interlocked.Increment(ref checks) == 2) background.SetResult();
+            return Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, NuGetVersion.Parse("1.3.0"), true, true, prerelease));
+        }, _ => false) { Time = time };
+        service.Start();
+        service.Start();
+        await service.CheckAsync(new(), CancellationToken.None);
+        Assert.AreEqual(1, time.ActiveTimers, "starting twice must not create two schedules");
+        time.Advance(AppUpdateService.Period - TimeSpan.FromSeconds(1));
+        Assert.AreEqual(1, checks);
+        time.FireEarly();
+        Assert.AreEqual(AppUpdateService.Period.Ticks, time.NextCheckAt, "an early timer callback must not postpone the check by another ten minutes");
+        time.Advance(TimeSpan.FromSeconds(1));
+        // No request from the page: the timer alone starts the next check.
+        await background.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.CheckAsync(new(), CancellationToken.None);
+        Assert.AreEqual(2, checks);
+        time.Advance(AppUpdateService.MinimumAge);
+        await service.CheckAsync(new(Refresh: true), CancellationToken.None);
+        Assert.AreEqual(3, checks);
+        Assert.AreEqual(time.GetTimestamp() + AppUpdateService.Period.Ticks, time.NextCheckAt);
+        await service.DisposeAsync();
+        Assert.AreEqual(0, time.ActiveTimers);
+        time.Advance(AppUpdateService.Period);
+        Assert.AreEqual(3, checks);
+    }
+
+    [TestMethod]
+    public async Task StartupAboutAndTimer_ShareTheCheck_AndShutdownCancelsAndJoinsIt()
+    {
+        var time = new ManualTime();
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var checks = 0;
+        var service = new AppUpdateService("1.2.0", async (package, current, prerelease, token) =>
+        {
+            Interlocked.Increment(ref checks);
+            using var registration = token.Register(() => canceled.TrySetResult());
+            entered.TrySetResult(token);
+            // Model a request that needs to finish cleanup even after cancellation.
+            await release.Task;
+            return new(package, current, NuGetVersion.Parse("1.3.0"), true, true, prerelease);
+        }, _ => false) { Time = time };
+        Task<AppUpdateResponse>? page = null;
+        Task<AppUpdateResponse>? about = null;
+        try
+        {
+            service.Start();
+            var token = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            page = service.CheckAsync(new(), CancellationToken.None);
+            time.Advance(AppUpdateService.Period);
+            about = service.CheckAsync(new(Refresh: true), CancellationToken.None);
+            time.Advance(AppUpdateService.Period);
+            using var abandoned = new CancellationTokenSource();
+            abandoned.Cancel();
+            await Assert.ThrowsAsync<OperationCanceledException>(() => service.CheckAsync(new(), abandoned.Token));
+            Assert.IsFalse(token.IsCancellationRequested, "a page going away does not cancel the application's check");
+            Assert.AreEqual(1, checks, "startup, About, periodic ticks and page reload share one network check");
+            var disposing = service.DisposeAsync().AsTask();
+            Assert.AreSame(disposing, service.DisposeAsync().AsTask());
+            await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.IsFalse(disposing.IsCompleted, "shutdown waits for the actual request, not only its cancellation");
+            Assert.Throws<ObjectDisposedException>(service.Start);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => service.CheckAsync(new(), CancellationToken.None));
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Task.WhenAll(service.DisposeAsync().AsTask(), page ?? Task.CompletedTask, about ?? Task.CompletedTask).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.AreEqual(0, time.ActiveTimers);
+        time.Advance(AppUpdateService.Period);
+        Assert.AreEqual(1, checks);
+    }
+
+    [TestMethod]
+    public async Task FailedRefresh_KeepsTheKnownUpdate_AndRetriesAfterFiveMinutes()
+    {
+        var time = new ManualTime();
+        var checks = 0;
+        await using var service = new AppUpdateService("1.2.0", (package, current, prerelease, _) =>
+        {
+            if (++checks == 2) throw new HttpRequestException("temporarily offline");
+            return Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, NuGetVersion.Parse(checks == 1 ? "1.3.0" : "1.4.0"), true, true, prerelease));
+        }, _ => true) { Time = time };
+        var known = await service.CheckAsync(new(), CancellationToken.None);
+        time.Advance(AppUpdateService.Period);
+        Assert.AreEqual(known, await service.CheckAsync(new(), CancellationToken.None), "a network failure must not remove the version or its actions");
+        time.Advance(AppUpdateService.MinimumAge);
+        Assert.AreEqual("1.4.0", (await service.CheckAsync(new(), CancellationToken.None)).LatestVersion);
+        Assert.AreEqual(3, checks);
+    }
+
+    [TestMethod]
     public async Task FailedCheck_IsMadeAgainSoon_AndABuildWithoutVersionNever()
     {
         var time = new ManualTime();
         var online = false;
         var checks = 0;
-        using var service = new AppUpdateService("1.2.0", (package, current, prerelease, _) =>
+        await using var service = new AppUpdateService("1.2.0", (package, current, prerelease, _) =>
         {
             checks++;
             return online ? Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, NuGetVersion.Parse("1.3.0"), true, true, prerelease))
@@ -95,29 +200,77 @@ public sealed class DesktopAppUpdateTests
         Assert.AreEqual(("available", 2), ((await service.CheckAsync(new(), CancellationToken.None)).Status, checks));
 
         // A build of the checkout, and an instance on explicit roots, ask nothing however long they run.
-        using var development = new AppUpdateService("development", (_, _, _, _) => throw new InvalidOperationException("not asked"), _ => true) { Time = time };
-        using var absent = new AppUpdateService { Time = time };
+        await using var development = new AppUpdateService("development", (_, _, _, _) => throw new InvalidOperationException("not asked"), _ => true) { Time = time };
+        await using var absent = new AppUpdateService { Time = time };
         foreach (var quiet in new[] { development, absent })
         {
+            quiet.Start();
             Assert.AreEqual("unavailable", (await quiet.CheckAsync(new(), CancellationToken.None)).Status);
             time.Advance(AppUpdateService.Period + AppUpdateService.Period);
             Assert.AreEqual("unavailable", (await quiet.CheckAsync(new(Refresh: true), CancellationToken.None)).Status);
         }
+        Assert.AreEqual(0, time.ActiveTimers, "unpublished builds and explicit roots need no background timer");
     }
 
     // A clock the test moves: the age of a check is elapsed time, not the time of day.
     private sealed class ManualTime : TimeProvider
     {
         private long _ticks;
+        private readonly List<ManualTimer> _timers = [];
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
         public override long GetTimestamp() => Interlocked.Read(ref _ticks);
-        public void Advance(TimeSpan by) => Interlocked.Add(ref _ticks, by.Ticks);
+        public int ActiveTimers => _timers.Count(timer => !timer.Disposed);
+        public long NextCheckAt => _timers.Single(timer => !timer.Disposed).DueAt;
+        public void FireEarly() => _timers.Single(timer => !timer.Disposed).Tick(force: true);
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(this, callback, state);
+            timer.Change(dueTime, period);
+            _timers.Add(timer);
+            return timer;
+        }
+        public void Advance(TimeSpan by)
+        {
+            Interlocked.Add(ref _ticks, by.Ticks);
+            foreach (var timer in _timers) timer.Tick();
+        }
+
+        private sealed class ManualTimer(ManualTime clock, TimerCallback callback, object? state) : ITimer
+        {
+            private readonly Lock _gate = new();
+            private long _dueAt;
+            private long _period;
+            private bool _disposed;
+            public bool Disposed { get { lock (_gate) return _disposed; } }
+            public long DueAt { get { lock (_gate) return _dueAt; } }
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (_gate)
+                {
+                    if (_disposed) return false;
+                    _dueAt = clock.GetTimestamp() + dueTime.Ticks;
+                    _period = period.Ticks;
+                    return true;
+                }
+            }
+            public void Tick(bool force = false)
+            {
+                lock (_gate)
+                {
+                    if (_disposed || (!force && clock.GetTimestamp() < _dueAt)) return;
+                    _dueAt = clock.GetTimestamp() + _period;
+                }
+                callback(state);
+            }
+            public void Dispose() { lock (_gate) _disposed = true; }
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
 
     [TestMethod]
     public async Task Prerelease_LooksForPrereleases_AndUpdatesToOne()
     {
-        using var service = new AppUpdateService("1.3.0-alpha.2", (package, current, prerelease, _) =>
+        await using var service = new AppUpdateService("1.3.0-alpha.2", (package, current, prerelease, _) =>
         {
             Assert.IsTrue(prerelease);
             return Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, NuGetVersion.Parse("1.3.0-alpha.5"), true, true, prerelease));
@@ -134,24 +287,24 @@ public sealed class DesktopAppUpdateTests
         static Func<string, NuGetVersion, bool, CancellationToken, Task<CodeAltaNuGetUpdateCheckResult>> Returns(NuGetVersion? latest, bool found, bool newer)
             => (package, current, prerelease, _) => Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, latest, found, newer, prerelease));
 
-        using var latest = new AppUpdateService("1.3.0", Returns(NuGetVersion.Parse("1.3.0"), found: true, newer: false), _ => { opened++; return true; });
+        await using var latest = new AppUpdateService("1.3.0", Returns(NuGetVersion.Parse("1.3.0"), found: true, newer: false), _ => { opened++; return true; });
         var same = await latest.CheckAsync(new(), CancellationToken.None);
         Assert.AreEqual("latest", same.Status);
         Assert.IsNull(same.Command);
         Assert.AreEqual("unavailable", (await latest.OpenReleaseNotesAsync(new(), CancellationToken.None)).Status);
 
-        using var unpublished = new AppUpdateService("1.3.0", Returns(null, found: false, newer: false), _ => true);
+        await using var unpublished = new AppUpdateService("1.3.0", Returns(null, found: false, newer: false), _ => true);
         Assert.AreEqual("not_found", (await unpublished.CheckAsync(new(), CancellationToken.None)).Status);
 
-        using var offline = new AppUpdateService("1.3.0", (_, _, _, _) => throw new HttpRequestException("no network"), _ => true);
+        await using var offline = new AppUpdateService("1.3.0", (_, _, _, _) => throw new HttpRequestException("no network"), _ => true);
         var failed = await offline.CheckAsync(new(), CancellationToken.None);
         Assert.AreEqual("failed", failed.Status);
         Assert.AreEqual("1.3.0", failed.CurrentVersion);
 
         // A build that is not a published version has nothing to compare, and does not ask nuget.org.
-        using var development = new AppUpdateService("development", (_, _, _, _) => throw new InvalidOperationException("not asked"), _ => true);
+        await using var development = new AppUpdateService("development", (_, _, _, _) => throw new InvalidOperationException("not asked"), _ => true);
         Assert.AreEqual("unavailable", (await development.CheckAsync(new(), CancellationToken.None)).Status);
-        using var absent = new AppUpdateService();
+        await using var absent = new AppUpdateService();
         Assert.AreEqual("unavailable", (await absent.CheckAsync(new(), CancellationToken.None)).Status);
         Assert.AreEqual(0, opened);
     }
@@ -164,7 +317,7 @@ public sealed class DesktopAppUpdateTests
 
         var installs = new List<bool>();
         var canceled = 0;
-        using var service = new AppUpdateService("1.2.0", Latest("1.3.0-beta.1", newer: true), _ => true)
+        await using var service = new AppUpdateService("1.2.0", Latest("1.3.0-beta.1", newer: true), _ => true)
         {
             Install = prerelease => { installs.Add(prerelease); return installs.Count == 1; }, CancelInstall = () => canceled++, Installed = "ok",
         };
@@ -179,10 +332,10 @@ public sealed class DesktopAppUpdateTests
         Assert.AreEqual(1, canceled);
 
         // Nothing newer, or not an installed tool: there is nothing to install.
-        using var current = new AppUpdateService("1.3.0", Latest("1.3.0", newer: false), _ => true) { Install = _ => throw new InvalidOperationException("not asked") };
+        await using var current = new AppUpdateService("1.3.0", Latest("1.3.0", newer: false), _ => true) { Install = _ => throw new InvalidOperationException("not asked") };
         Assert.IsFalse((await current.CheckAsync(new(), CancellationToken.None)).CanInstall);
         Assert.AreEqual("unavailable", (await current.InstallAsync(new(), CancellationToken.None)).Status);
-        using var build = new AppUpdateService("1.2.0", Latest("1.3.0", newer: true), _ => true);
+        await using var build = new AppUpdateService("1.2.0", Latest("1.3.0", newer: true), _ => true);
         Assert.IsFalse((await build.CheckAsync(new(), CancellationToken.None)).CanInstall);
         Assert.AreEqual("unavailable", (await build.InstallAsync(new(), CancellationToken.None)).Status);
         Assert.AreEqual("unavailable", build.CancelInstallation(new()).Status);

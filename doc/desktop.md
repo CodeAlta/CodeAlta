@@ -216,11 +216,16 @@ ends (`DesktopTerminalStart`):
 
 At its start the desktop asks nuget.org whether a newer `CodeAlta` package is published, as the
 terminal application does for its own package (a prerelease build also considers prereleases). It
-stays open, or in the notification area, for days, so it asks again: the page asks the host every
-half hour, and when its window comes back after that long; the host looks at nuget.org again when
-its last look is four hours old, or five minutes old after a look that failed or when the About page
-is opened. Each newer version is announced once. Installing a version and opening its release notes
-use what the last look found. The
+stays open, or in the notification area, for days, so the host checks again every ten minutes,
+even when the window is hidden. The page reads the result every ten minutes and when the window
+comes back; opening About can refresh a check after five minutes. Startup, periodic and About
+checks share one in-flight request. A failed check keeps a known available version and can be
+retried after five minutes. Each newer version is announced once per page lifetime, in a bottom-right
+notice that stays until dismissed rather than disappearing after a few seconds. It has its own
+toaster, so transient messages cannot evict it. A result received while the
+window is hidden is announced when it comes back. Installing a version and opening its release
+notes use what the last look found. Closing the application cancels and joins the check and stops
+its timer. The
 tool package only names one package per platform (`CodeAlta.win-x64`, `CodeAlta.Tui.linux-x64`), and
 nuget.org can list it well before those: a version counts once the package of the running platform
 lists it too, so that the update command cannot fail on a package that is not there yet. A

@@ -1,4 +1,4 @@
-import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -16,7 +16,7 @@ import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
-import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, UpdateNotice } from "./UpdateNotice";
+import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
@@ -1212,7 +1212,9 @@ function App() {
   // application stays open, or in the notification area, for days. A newer version is announced once, with the
   // command that installs it; Settings > About keeps the result.
   const [appUpdateResult, setAppUpdateResult] = useState<AppUpdateResponse | null>(null);
-  const announcedUpdate = useRef<string | null>(null);
+  const [updateNotice, setUpdateNotice] = useState<ToastProps | null>(null);
+  const announcedUpdates = useRef(new Set<string>());
+  const pendingUpdate = useRef<AvailableUpdate | null>(null);
   const updateChecked = useRef(false);
   // Update and restart: the host hands the update to a helper and exits as it does for Exit. An exit the
   // user cancels (unsaved files, running sessions) calls the update off.
@@ -1232,6 +1234,12 @@ function App() {
     void appUpdate.cancelInstallation({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The helper gives up by itself after its wait. */ });
   }
   function openReleaseNotes() { void appUpdate.openReleaseNotes({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The address is in the toast's command line. */ }); }
+  function announceUpdate() {
+    const available = updateToAnnounce(announcedUpdates.current, pendingUpdate.current, document.visibilityState === "visible");
+    if (!available) return;
+    announcedUpdates.current.add(available.version);
+    setUpdateNotice(updateNotification(available, shownLocale.current, openReleaseNotes, installUpdate));
+  }
   // Asks the host, which looks at nuget.org again only when its last look is old enough; `refresh` is the
   // About page, where a look of a few minutes ago is made again.
   function checkForUpdate(refresh: boolean, signal: AbortSignal) {
@@ -1244,11 +1252,8 @@ function App() {
       const installed = first ? installedNotice(value) : null;
       if (installed) showToast({ intent: installed.intent, icon: installed.intent === "success" ? "tick" : "error", timeout: 12_000,
         message: translate(shownLocale.current, installed.key, installed.parameters) });
-      const available = updateToAnnounce(announcedUpdate.current, availableUpdate(value));
-      if (!available) return;
-      announcedUpdate.current = available.version;
-      showToast({ intent: "primary", icon: "automatic-updates", timeout: 20_000,
-        message: <UpdateNotice update={available} locale={shownLocale.current} onOpenReleaseNotes={openReleaseNotes} onInstall={installUpdate} /> });
+      pendingUpdate.current = availableUpdate(value);
+      announceUpdate();
     }, () => {
       // A later question that gets no answer leaves what the page knows.
       if (!signal.aborted && !updateChecked.current) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null });
@@ -1258,9 +1263,9 @@ function App() {
     if (!status?.hostEpoch) return;
     const abort = new AbortController();
     checkForUpdate(false, abort.signal);
-    // Again as time passes, and when the window comes back after a while: a hidden page may run no timer.
-    let asked = Date.now();
-    const again = () => { if (document.visibilityState === "visible" && Date.now() - asked >= updateCheckInterval) { asked = Date.now(); checkForUpdate(false, abort.signal); } };
+    // The host checks even while hidden. On return read its result without waiting for the next page tick,
+    // and show any notice deferred while hidden. Frequent focus events reuse the host's cached check.
+    const again = () => { if (document.visibilityState === "visible") { announceUpdate(); checkForUpdate(false, abort.signal); } };
     const timer = window.setInterval(again, updateCheckInterval);
     document.addEventListener("visibilitychange", again);
     window.addEventListener("focus", again);
@@ -3343,6 +3348,7 @@ function App() {
     {/* A first start also opens the settings of the providers, with their own guide: this one waits for them to close. */}
     {entryGuide && !settingsOpen && <EntryAddedDialog onClose={() => setEntryGuide(false)}
       onShowInFinder={() => { void desktopShell.revealEntry({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The folder is named in the dialog. */ }); }} />}
+    <UpdateToaster notification={updateNotice} />
     {closeQuestion && <CloseWindowDialog platform={shellPreferences?.platform ?? "windows"} trayIcon={shellPreferences?.trayIcon} onKeepRunning={keepRunning} onExit={exitOnClose}
       onCancel={() => setCloseQuestion(false)} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}

@@ -221,7 +221,7 @@ On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (â
 
 ### Updates from the app
 
-When a new version is available, the desktop app shows a notice with **Update and restart**. The TUI shows the `dotnet tool update` command to run.
+The desktop app checks for new versions at startup and every ten minutes, even while it is in the notification area. When a new version is available, it shows a bottom-right notice with **Update and restart** that stays until you dismiss it. You do not need to open About; if the window was hidden, the notice appears when you return. Settings â†’ About keeps the update available after you dismiss the notice. The TUI shows the `dotnet tool update` command to run.
 
 ## Same feature, another name
 

@@ -6,13 +6,11 @@ using NuGet.Versioning;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// Whether a newer CodeAlta package is published, checked at start as the terminal application does: the page
-/// shows the new version, its release notes and the command that updates the tool. The desktop stays open, or
-/// in the notification area, for days: the page asks again as time passes, and a check that is old enough is
-/// then made again.
+/// Whether a newer CodeAlta package is published, checked at start and every ten minutes, even while the
+/// window is hidden. The page shows the new version, its release notes and the command that updates the tool.
 /// </summary>
 [NeoRpcService("appUpdate", Version = 1)]
-internal sealed class AppUpdateService : IDisposable
+internal sealed class AppUpdateService : IAsyncDisposable
 {
     /// <summary>The package the desktop is installed from.</summary>
     internal const string PackageId = "CodeAlta";
@@ -22,11 +20,16 @@ internal sealed class AppUpdateService : IDisposable
     private readonly Func<string, bool> _open;
     private readonly CancellationTokenSource _closing = new();
     private readonly Lock _gate = new();
+    private readonly Lazy<Task> _disposal;
     private Task<AppUpdateResponse>? _result;
+    private AppUpdateResponse? _available;
+    private ITimer? _timer;
     private long _checkedAt;
+    private bool _failed;
+    private bool _closed;
 
-    /// <summary>How old a check is before the page's next question makes it again.</summary>
-    internal static readonly TimeSpan Period = TimeSpan.FromHours(4);
+    /// <summary>How often the running desktop looks for a newer version.</summary>
+    internal static readonly TimeSpan Period = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// How old a check is before it is made again for a question that asks for it (the About page was
@@ -34,7 +37,7 @@ internal sealed class AppUpdateService : IDisposable
     /// </summary>
     internal static readonly TimeSpan MinimumAge = TimeSpan.FromMinutes(5);
 
-    /// <summary>The clock the age of a check is measured with.</summary>
+    /// <summary>The clock for the check's age and the application-owned timer.</summary>
     internal TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>Creates an unavailable service for a window without an installed application behind it.</summary>
@@ -42,6 +45,7 @@ internal sealed class AppUpdateService : IDisposable
     {
         _version = "development";
         _open = static _ => false;
+        _disposal = new(DisposeCoreAsync);
     }
 
     /// <param name="version">The running version, as the assembly records it.</param>
@@ -55,6 +59,7 @@ internal sealed class AppUpdateService : IDisposable
         _version = version;
         _check = check ?? ((package, current, prerelease, token) => CodeAltaNuGetUpdateChecker.CheckNuGetOrgAsync(package, current, prerelease, token));
         _open = open ?? OpenInBrowser;
+        _disposal = new(DisposeCoreAsync);
     }
 
     /// <summary>
@@ -70,16 +75,39 @@ internal sealed class AppUpdateService : IDisposable
     /// <summary>How the update started by the previous run went (<c>ok</c> or <c>failed</c>); null when none ran.</summary>
     internal string? Installed { get; init; }
 
-    /// <summary>Starts the first check of this run; the page asks for its result later.</summary>
-    internal void Start() => _ = Result(refresh: false);
+    /// <summary>Starts this run's checks once; they do not depend on a visible WebView or an open About page.</summary>
+    /// <exception cref="ObjectDisposedException">The application is closing.</exception>
+    internal void Start()
+    {
+        lock (_gate)
+        {
+            _ = Result(refresh: false);
+            if (_check is not null && NuGetVersion.TryParse(_version, out _))
+                _timer ??= Time.CreateTimer(static state => ((AppUpdateService)state!).Tick(), this, Period, Period);
+        }
+    }
+
+    private void Tick()
+    {
+        lock (_gate)
+        {
+            if (_closed) return;
+            _ = Result(refresh: false);
+            // Timers and the elapsed-time clock can differ by a tick. An early callback must wait only
+            // the remaining age, not skip the check until the following ten-minute interval.
+            var remaining = Period - Time.GetElapsedTime(_checkedAt);
+            if (remaining > TimeSpan.Zero) _timer?.Change(remaining, Period);
+        }
+    }
 
     /// <summary>
     /// The result of the check: <c>available</c> with the newer version, its release notes and the update
     /// command, <c>latest</c>, <c>not_found</c> (the package is not published), <c>failed</c> (nuget.org
     /// could not be read) or <c>unavailable</c> (a build that is not a published version). A check older than
     /// <see cref="Period"/> is made again first, and one older than <see cref="MinimumAge"/> when the request
-    /// asks for it or when it failed.
+    /// asks for it or when it failed. A transient failure retains a previously available update.
     /// </summary>
+    /// <exception cref="ObjectDisposedException">The application is closing.</exception>
     [NeoRpcMethod("check")]
     public async Task<AppUpdateResponse> CheckAsync(AppUpdateCheckRequest request, CancellationToken cancellationToken)
     {
@@ -122,26 +150,51 @@ internal sealed class AppUpdateService : IDisposable
         return new(result is { Status: "available", ReleaseNotes: { } address } && _open(address) ? "ok" : "unavailable");
     }
 
-    /// <inheritdoc />
-    public void Dispose()
+    /// <summary>Stops admission, cancels the request, and joins it and the timer before releasing the token source.</summary>
+    public ValueTask DisposeAsync()
     {
-        _closing.Cancel();
-        _closing.Dispose();
+        lock (_gate) _closed = true;
+        return new(_disposal.Value);
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        Task<AppUpdateResponse>? result;
+        ITimer? timer;
+        lock (_gate) (result, timer) = (_result, _timer);
+        try
+        {
+            try { await _closing.CancelAsync().ConfigureAwait(false); }
+            finally
+            {
+                try { if (timer is not null) await timer.DisposeAsync().ConfigureAwait(false); }
+                finally { if (result is not null) await result.ConfigureAwait(false); }
+            }
+        }
+        finally { _closing.Dispose(); }
     }
 
     // What the page was last told: installing a version or opening its notes asks nuget.org nothing more.
     private Task<AppUpdateResponse> Known()
     {
-        lock (_gate) return _result ?? Result(refresh: false);
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            return _result ?? Result(refresh: false);
+        }
     }
 
     private Task<AppUpdateResponse> Result(bool refresh)
     {
         lock (_gate)
         {
+            ObjectDisposedException.ThrowIf(_closed, this);
             if (_result is not null && !Expired(_result, refresh)) return _result;
             _checkedAt = Time.GetTimestamp();
-            return _result = Task.Run(CheckOnceAsync);
+            // About can move the next check forward: never wait another full tick after it becomes due.
+            _timer?.Change(Period, Period);
+            var token = _closing.Token;
+            return _result = Task.Run(() => CheckOnceAsync(token));
         }
     }
 
@@ -152,24 +205,26 @@ internal sealed class AppUpdateService : IDisposable
         if (!last.IsCompletedSuccessfully) return true;
         var status = last.Result.Status;
         if (status == "unavailable") return false;
-        return Time.GetElapsedTime(_checkedAt) >= (refresh || status == "failed" ? MinimumAge : Period);
+        return Time.GetElapsedTime(_checkedAt) >= (refresh || _failed ? MinimumAge : Period);
     }
 
-    private async Task<AppUpdateResponse> CheckOnceAsync()
+    private async Task<AppUpdateResponse> CheckOnceAsync(CancellationToken token)
     {
         // A build output has no published version to compare (its version carries the commit only as metadata).
         if (_check is null || !NuGetVersion.TryParse(_version, out var current)) return new("unavailable", PackageId, _version, null, null, null);
+        _failed = false;
         try
         {
-            var result = await _check(PackageId, current, current.IsPrerelease, _closing.Token).ConfigureAwait(false);
+            var result = await _check(PackageId, current, current.IsPrerelease, token).ConfigureAwait(false);
             if (!result.PackageFound) return new("not_found", PackageId, result.CurrentVersionText, null, null, null);
             if (!result.HasNewerVersion || result.LatestVersion is not { } latest) return new("latest", PackageId, result.CurrentVersionText, result.LatestVersionText, null, null);
-            return new("available", PackageId, result.CurrentVersionText, result.LatestVersionText,
+            return _available = new("available", PackageId, result.CurrentVersionText, result.LatestVersionText,
                 CodeAltaNuGetUpdateChecker.UpdateCommand(PackageId, latest.IsPrerelease), CodeAltaNuGetUpdateChecker.ReleaseNotesUri(result.LatestVersionText));
         }
         catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException or InvalidOperationException or IOException)
         {
-            return new("failed", PackageId, current.ToNormalizedString(), null, null, null);
+            _failed = true;
+            return _available ?? new("failed", PackageId, current.ToNormalizedString(), null, null, null);
         }
     }
 

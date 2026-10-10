@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { locales, translate } from "./localization";
-import { availableUpdate, installedNotice, RecoveryUpdateNotice, updateCheckInterval, updateStatus, updateToAnnounce } from "./UpdateNotice";
+import { availableUpdate, installedNotice, RecoveryUpdateNotice, updateCheckInterval, updateNotification, updateStatus, updateToAnnounce } from "./UpdateNotice";
 
 const available = { status: "available", latestVersion: "1.3.0", command: "dotnet tool update -g CodeAlta", releaseNotes: "https://github.com/CodeAlta/CodeAlta/releases/tag/1.3.0", canInstall: false };
 
@@ -56,14 +56,31 @@ test("the screen of a configuration that cannot be loaded offers the newer versi
 
 test("an application that stays open announces each newer version once", () => {
   const first = availableUpdate(available)!;
+  const announced = new Set<string>();
   // The check of the start, then the same answer every time the page asks again.
-  assert.equal(updateToAnnounce(null, first), first);
-  assert.equal(updateToAnnounce("1.3.0", first), null);
+  assert.equal(updateToAnnounce(announced, first, false), null, "a hidden window defers the notice without consuming it");
+  assert.equal(updateToAnnounce(announced, first), first);
+  announced.add(first.version);
+  assert.equal(updateToAnnounce(announced, first), null);
   // A version published later is new again; nothing newer says nothing.
   const next = availableUpdate({ ...available, latestVersion: "1.4.0" })!;
-  assert.equal(updateToAnnounce("1.3.0", next), next);
-  assert.equal(updateToAnnounce("1.3.0", null), null);
-  assert.equal(updateToAnnounce(null, null), null);
-  // The page asks more often than the host looks at nuget.org (every four hours), and not every minute.
-  assert.ok(updateCheckInterval >= 10 * 60_000 && updateCheckInterval <= 60 * 60_000);
+  assert.equal(updateToAnnounce(announced, next), next);
+  announced.add(next.version);
+  assert.equal(updateToAnnounce(announced, first), null, "an older cached reply does not re-announce an earlier version");
+  assert.equal(updateToAnnounce(announced, null), null);
+  assert.equal(updateToAnnounce(new Set(), null), null);
+  // A newer version should not require opening About or waiting hours.
+  assert.equal(updateCheckInterval, 10 * 60_000);
+});
+
+test("the new-version notice stays until dismissed and preserves the existing update actions", () => {
+  const never = () => assert.fail("showing a notice must not install or open anything");
+  const toast = updateNotification(availableUpdate({ ...available, canInstall: true })!, "en", never, never);
+  assert.equal(toast.timeout, 0);
+  assert.equal(toast.intent, "primary");
+  const html = renderToStaticMarkup(toast.message);
+  assert.ok(html.includes("CodeAlta 1.3.0 is available."));
+  assert.ok(html.includes("Update and restart"));
+  assert.ok(html.includes("View release notes"));
+  assert.ok(!html.includes('role="dialog"'), "the notice must not block the workspace");
 });
