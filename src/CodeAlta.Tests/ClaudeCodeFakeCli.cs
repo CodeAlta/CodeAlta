@@ -53,6 +53,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets what the CLI waits for before it answers <c>initialize</c>; <see langword="null"/> to answer at once.</summary>
     public Task? InitializeAnswer { get; set; }
 
+    /// <summary>Gets or sets what a process waits for before it stops when the host stops it; <see langword="null"/> to stop at once.</summary>
+    public Task? StopHeldUntil { get; set; }
+
     /// <summary>Gets the number of bridges connected so far, which numbers their links.</summary>
     public int BridgesConnected => _bridges;
 
@@ -239,8 +242,17 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         }
     }
 
-    public ValueTask DisposeAsync()
+    /// <summary>Gets a value indicating whether the host began to stop the process.</summary>
+    public bool IsStopping { get; private set; }
+
+    public async ValueTask DisposeAsync()
     {
+        IsStopping = true;
+        if (_cli.StopHeldUntil is { } held)
+        {
+            await held.ConfigureAwait(false);
+        }
+
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
             ExitCode ??= 0;
@@ -250,8 +262,6 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                 request.TrySetCanceled();
             }
         }
-
-        return ValueTask.CompletedTask;
     }
 
     /// <summary>Ends the process as a crash would.</summary>

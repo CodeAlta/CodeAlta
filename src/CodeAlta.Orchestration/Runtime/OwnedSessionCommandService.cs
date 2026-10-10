@@ -84,6 +84,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private readonly HashSet<string> _abortingRuns = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, QueueOperation> _queues = [];
     private readonly HashSet<string> _queueing = new(StringComparer.OrdinalIgnoreCase);
+    // The requests of remote control under way, by session: they may attach it.
+    private readonly Dictionary<string, int> _remoteControlling = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Exception> _cleanupFailures = [];
     private bool _closed;
     private bool _retained;

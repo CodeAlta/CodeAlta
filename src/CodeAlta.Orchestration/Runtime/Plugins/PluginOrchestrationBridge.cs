@@ -253,6 +253,29 @@ public sealed class PluginOrchestrationBridge
         return augmentation.ApplyTo(executionOptions);
     }
 
+    /// <summary>
+    /// Returns the execution options of an existing session that is attached without a run (to turn on its remote
+    /// control), with what plugins contribute to every run of its scope: the options its next run has when no
+    /// before-run hook adds anything, so that run keeps this attachment.
+    /// </summary>
+    /// <remarks>No before-run hook is called: nothing runs yet.</remarks>
+    /// <param name="executionOptions">The execution options of the session, before plugins.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a global session.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The options to attach the session with.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="executionOptions"/> is <see langword="null" />.</exception>
+    public async Task<SessionExecutionOptions> AugmentAttachmentAsync(
+        SessionExecutionOptions executionOptions,
+        string? projectId,
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(executionOptions);
+        var augmentation = await BuildAugmentationAsync(executionOptions, new AgentInput([]), ScopeOf(executionOptions, projectId, sessionId), isRun: false, cancellationToken).ConfigureAwait(false);
+        return augmentation.ApplyTo(executionOptions);
+    }
+
     private static PluginAdapterOperationOptions ScopeOf(SessionExecutionOptions executionOptions, string? projectId, string? sessionId)
         => new()
         {
