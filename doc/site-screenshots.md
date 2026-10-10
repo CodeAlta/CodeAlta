@@ -203,3 +203,9 @@ A picture of the desktop application only is a figure:
 
 Build the site (`lunet build` in `site/`) and look at the pages. The pictures also ship with the application,
 in its user guide (`content/user-guide/img`): a test checks that every picture a page names is there.
+
+## The banner
+
+`site/img/alta-banner.png` (1280x640) is the picture of a link to the website or to the repository. It is drawn by
+`python img/make-banner.py` from the repository root (Pillow, Windows fonts) with a capture of the site,
+`alta-desktop-split-three.webp`: retake that capture first, then run the script again.
