@@ -22,7 +22,7 @@ export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
 export const emptyFileTabs = (): FileTabs => ({ open: [], active: null, closed: [] });
 export const fileTabKey = (tab: FileTab) => JSON.stringify(tab.view === "terminal" ? [tab.projectId, tab.view, tab.terminalId]
-  : tab.view === "canvas" ? [tab.projectId, tab.view, tab.pluginKey, tab.canvasId, tab.sessionId ?? "", tab.key ?? ""] : [tab.projectId, tab.view]);
+  : tab.view === "canvas" ? [tab.sessionId ? "" : tab.projectId, tab.view, tab.pluginKey, tab.canvasId, tab.sessionId ?? "", tab.key ?? ""] : [tab.projectId, tab.view]);
 export const isChangesTab = (tab: FileTab) => tab.view === "changes";
 export const isEditorTab = (tab: FileTab) => tab.view === "editor";
 export const isTerminalTab = (tab: FileTab) => tab.view === "terminal";

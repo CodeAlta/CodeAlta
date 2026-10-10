@@ -131,7 +131,9 @@ test("a canvas tab is identified by its plugin, its canvas, its project or sessi
   assert.deepEqual(board(), { projectId: "", projectPath: "", view: "canvas", pluginKey: "builtin:board", canvasId: "board", name: "Board", icon: "list-checks", plugin: "plugin:global:board" });
   assert.ok(isCanvasTab(board()) && !isCanvasTab(editor()) && !isEditorTab(board()) && !isChangesTab(board()) && !isTerminalTab(board()));
   assert.equal(fileTabKey(board()), '["","canvas","builtin:board","board","",""]');
-  assert.equal(fileTabKey(sessionCanvas()), '["p","canvas","k","run","s1",""]');
+  // A session names its instance by itself: the project it was opened from is not part of it, so one session is one tab.
+  assert.equal(fileTabKey(sessionCanvas()), '["","canvas","k","run","s1",""]');
+  assert.ok(sameFileTab(sessionCanvas(), canvasTab({ pluginKey: "k", canvasId: "run", sessionId: "s1" })));
   // The same identity is one tab, whatever the look the plugin gave it.
   assert.ok(sameFileTab(board(), canvasTab({ pluginKey: "builtin:board", canvasId: "board" }, { title: "Renamed" })));
   const identities = [board(), board("a"), board("b"), projectCanvas(), projectCanvas("q"), projectCanvas("p", "other"), sessionCanvas(), sessionCanvas("s2"),
