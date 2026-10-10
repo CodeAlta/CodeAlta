@@ -14,5 +14,7 @@
   <ItemGroup>
     <!-- Resolves the temporary directory of the test process, which macOS places below a symbolic link. -->
     <Compile Include="../CodeAlta.Tests/LinkFreeTempDirectory.cs" Link="LinkFreeTempDirectory.cs" />
+    <!-- The journals of the synthetic sessions that the statistics read. -->
+    <Compile Include="../CodeAlta.Plugin.Statistics.Tests/JournalBuilder.cs" Link="Statistics/JournalBuilder.cs" />
   </ItemGroup>
 </Project>

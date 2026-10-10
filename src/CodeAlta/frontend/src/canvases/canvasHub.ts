@@ -8,6 +8,9 @@ type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown
 
 /** How long the page waits before it listens again after the host stopped telling. */
 export const reconnectMilliseconds = 2000;
+/** How many times a tab asks for its instance when the host turns the call away because too many are being served, and how long it waits before the second try. */
+export const openAttempts = 6;
+export const openRetryMilliseconds = 150;
 /** The most open requests kept for a window that has not taken them yet, and the most instances whose last events are kept for a tab that comes late. */
 export const retainedLimit = 64;
 
@@ -197,11 +200,20 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     async open(request: Readonly<{ pluginKey: string; canvasId: string; spaceId: string | null; projectId: string | null; sessionId: string | null; key: string | null; visible: boolean }>): Promise<CanvasOpenResponse> {
       const host = epoch;
       if (!host) return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null };
-      try {
-        const reply = await api.open({ expectedEpoch: host, ...request }, { timeoutMilliseconds: 45_000 });
-        pluginIconFiles.register(request.pluginKey, reply.icon, reply.iconData);
-        return reply;
-      } catch { return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null }; }
+      // A window that restores many tabs at once asks more at a time than the host serves: a call the host turned away for that is made again.
+      for (let attempt = 1; ; attempt++) {
+        try {
+          const reply = await api.open({ expectedEpoch: host, ...request }, { timeoutMilliseconds: 45_000 });
+          pluginIconFiles.register(request.pluginKey, reply.icon, reply.iconData);
+          return reply;
+        } catch (error) {
+          if (attempt >= openAttempts || (error as { code?: unknown } | null)?.code !== "too_many_requests") break;
+          await new Promise<void>(resolve => timers.set(resolve, openRetryMilliseconds * attempt));
+          if (epoch !== host) break;
+        }
+      }
+
+      return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null };
     },
     /** Says whether a tab shows an instance; false when the host could not be told. */
     async setVisible(instanceId: string, visible: boolean): Promise<boolean> {

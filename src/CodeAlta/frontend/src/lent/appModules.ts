@@ -12,7 +12,9 @@ export type AppModule = Readonly<{
  * libraries) with the rest of the page: no import map is needed for it, and a module is loaded when a tab first shows it. Add a line to give a
  * built-in plugin a module (see "Application modules" in doc/development-guide.md); `appModules.test.ts` checks the list.
  */
-export const appModules: readonly AppModule[] = [];
+export const appModules: readonly AppModule[] = [
+  { name: "statistics", entry: "src/statistics/canvas.tsx" },
+];
 
 /** The address of a module in the build output, relative to the application's origin. */
 export const appModuleFile = (name: string): string => `lib/app/${name}.js`;

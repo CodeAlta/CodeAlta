@@ -1175,6 +1175,23 @@ instance (`CatalogOptions.StateRoot`, so the developer instance reads its own se
 (`StatisticsPlugin.Statistics`, an `IStatisticsService`: status, events, controls, queries); `doc/statistics.md`
 describes the store, the job and the commands.
 
+### Statistics
+
+The same plugin gives the window a **Statistics** canvas (scope Application): the numbers of all the sessions as
+dashboards, drawn by the module `statistics` of the application's own build (`src/statistics/canvas.tsx`, named
+with `PluginScript.App("statistics")`) and fed by the plugin through `alta.rpc`. It opens from:
+
+- the **Statistics** button at the top right of the title bar, before the space switch (a plugin button, icon
+  `chart-column`): a small ring while the history is read, a dot while the first-time choice waits;
+- **Statistics** in the search of the window, `/statistics`, and `Ctrl+G` then `C`;
+- the **Statistics** line of the menu of a project, which opens the canvas for that project only (its own tab,
+  key `project:<project id>`);
+- `alta canvas open statistics`, and `alta statistics` for the numbers themselves.
+
+Each space has its own Statistics tab, which starts on the space it shows (nothing for the space that holds every
+project). The calls the canvas makes are the plugin's own (`statistics.*`, `doc/statistics.md`). The shortcut and the
+button exist only in this application: CodeAlta TUI has neither.
+
 ### Persisted event history
 
 Selecting a session shows its latest turn: bounded pages of its persisted canonical events, up to 1,000
@@ -3238,6 +3255,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
 | `Ctrl+G` then `Ctrl+I` | Work items (`/work_items`) |
 | `Ctrl+G` then `Ctrl+B` | Issues and pull requests (`/issues`) |
+| `Ctrl+G` then `C` | Statistics (`/statistics`), the dashboards of the numbers of all the sessions |
 | `Ctrl+G` then `Ctrl+V`, `Ctrl+G` then `1`…`9` | Go to Space (`/space`, opens the space switch), show the space at that place of the list (Default is 1) |
 | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` (also from a terminal) | Previous / next space (`/space_prev`, `/space_next`) |
 | No key | New Space (`/new_space`), Spaces (`/spaces`, opens Settings → Spaces) |

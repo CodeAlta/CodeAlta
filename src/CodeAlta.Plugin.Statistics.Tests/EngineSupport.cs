@@ -35,6 +35,21 @@ internal sealed class FakeJournalCatalog : ISessionJournalCatalog
 
     public int Opens { get; private set; }
 
+    /// <summary>Gets how many times the files were listed.</summary>
+    public int Lists { get; private set; }
+
+    /// <summary>Gets the sum of the lengths of the files.</summary>
+    public long TotalBytes
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _files.Values.Sum(static file => (long)file.Bytes.Length);
+            }
+        }
+    }
+
     public void Set(string sessionId, byte[] bytes, DateTimeOffset lastWrite)
     {
         lock (_gate)
@@ -83,6 +98,7 @@ internal sealed class FakeJournalCatalog : ISessionJournalCatalog
         SessionJournalFile[] files;
         lock (_gate)
         {
+            Lists++;
             files = [.. _files.Select(static pair => new SessionJournalFile(pair.Key, "memory://" + pair.Key, pair.Value.Bytes.Length, pair.Value.LastWrite))
                 .OrderByDescending(static file => file.LastWriteUtc).ThenByDescending(static file => file.SessionId, StringComparer.Ordinal)];
         }

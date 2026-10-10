@@ -201,6 +201,8 @@ import "./terminal/terminal.css";
 import "./automations/automations.css";
 import "./workItems/workItems.css";
 import "./charts/charts.css";
+// The Statistics canvas is a module the application loads when a tab shows it, and a module brings no stylesheet with it: the sheet is part of the page.
+import "./statistics/statistics.css";
 import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";

@@ -57,6 +57,7 @@ public sealed partial class StatisticsPlugin
         }
 
         var directory = new AltaProjectDirectory(Services.Alta);
+        _directory = directory;
         var store = new StatisticsStore(Services.Database, new LocalDays(TimeZoneInfo.Local));
         var engine = new StatisticsEngine(store, _journals, new StatisticsEngineOptions
         {
@@ -68,6 +69,7 @@ public sealed partial class StatisticsPlugin
                 .ToDictionary(static project => project.Id, static project => project.Name, StringComparer.OrdinalIgnoreCase),
         });
         _engine = engine;
+        engine.StatusChanged += OnButtonStatusChanged;
         _job = Tasks.Run(
             "statistics-history",
             token => new ValueTask(engine.RunAsync(token)),
@@ -106,6 +108,7 @@ public sealed partial class StatisticsPlugin
             return;
         }
 
+        engine.StatusChanged -= OnButtonStatusChanged;
         job?.RequestCancellation();
         if (job is not null)
         {

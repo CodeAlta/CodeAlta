@@ -57,6 +57,130 @@ public sealed class StatisticsEngineTests
     }
 
     [TestMethod]
+    public async Task TheFirstTimeStatus_CountsTheSessionsTheirBytesAndTheEarliestDay_WithoutReadingAnyJournal()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "old", Today9.AddDays(-30), runs: 3);
+        AddSession(harness, "recent", Today9.AddDays(-2), runs: 2);
+        AddSession(harness, "today", Today9, runs: 1);
+
+        await harness.Engine.DrainAsync();
+
+        var status = harness.Engine.Status;
+        Assert.AreEqual(HistoryState.NeedsChoice, status.State);
+        Assert.AreEqual(3, status.SessionsTotal);
+        Assert.AreEqual(0, status.SessionsDone);
+        Assert.AreEqual(harness.Journals.TotalBytes, status.BytesTotal);
+        Assert.IsTrue(status.BytesTotal > 0);
+        // The earliest day is the one of the oldest journal: its last write, the end of its three runs.
+        Assert.AreEqual(20260909, status.OldestDateReached);
+        Assert.AreEqual(0, harness.Journals.Opens, "No journal is opened to count.");
+    }
+
+    [TestMethod]
+    public async Task TheFirstTimeNumbers_AreCached_AndReadAgainWhenTheyAreOldOrAskedFor()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "a", Today9.AddDays(-5));
+        await harness.Engine.DrainAsync();
+        var lists = harness.Journals.Lists;
+        Assert.AreEqual(1, harness.Engine.Status.SessionsTotal);
+
+        // A session that appears is not seen while the numbers are fresh: the listing is not repeated.
+        AddSession(harness, "b", Today9.AddDays(-9));
+        var cached = await harness.Engine.RefreshOverviewAsync(TimeSpan.FromMinutes(1));
+        Assert.AreEqual(lists, harness.Journals.Lists);
+        Assert.AreEqual(1, cached.SessionsTotal);
+
+        // Past the age that is accepted, or asked for with no age, it is listed again and the status follows.
+        harness.Time.Advance(TimeSpan.FromMinutes(2));
+        var changes = new List<StatisticsStatus>();
+        harness.Engine.StatusChanged += changes.Add;
+        var fresh = await harness.Engine.RefreshOverviewAsync(TimeSpan.FromMinutes(1));
+        Assert.AreEqual(lists + 1, harness.Journals.Lists);
+        Assert.AreEqual(2, fresh.SessionsTotal);
+        Assert.AreEqual(20260930, fresh.OldestDateReached);
+        Assert.AreEqual(1, changes.Count(change => change.SessionsTotal == 2), "The new numbers are published.");
+        AddSession(harness, "c", Today9.AddDays(-1));
+        Assert.AreEqual(3, (await harness.Engine.RefreshOverviewAsync(TimeSpan.Zero)).SessionsTotal);
+    }
+
+    [TestMethod]
+    public async Task TheFirstTimeNumbers_AreLeftOnceTheUserChooses_AndCostNothingAfterwards()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "a", Today9.AddDays(-5));
+        AddSession(harness, "b", Today9.AddDays(-400));
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(2, harness.Engine.Status.SessionsTotal);
+
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.LastDays(30));
+        await harness.Engine.DrainAsync();
+        var done = harness.Engine.Status;
+        Assert.AreEqual(HistoryState.Done, done.State);
+        Assert.AreEqual(1, done.SessionsTotal, "Only the session inside the choice is counted now.");
+        var lists = harness.Journals.Lists;
+        var again = await harness.Engine.RefreshOverviewAsync(TimeSpan.Zero);
+        Assert.AreEqual(lists, harness.Journals.Lists, "Once chosen, nothing is listed for the first-time card.");
+        Assert.AreEqual(HistoryState.Done, again.State);
+    }
+
+    [TestMethod]
+    public async Task TheFirstTimeNumbers_OfAThousandsOfFiles_AreOneListing()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        for (var index = 0; index < 3000; index++)
+        {
+            harness.Journals.Set($"s{index:D4}", [1, 2, 3, 4], Today9.AddMinutes(-index));
+        }
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(3000, harness.Engine.Status.SessionsTotal);
+        Assert.AreEqual(12000L, harness.Engine.Status.BytesTotal);
+        Assert.AreEqual(1, harness.Journals.Lists);
+        Assert.IsTrue(clock.Elapsed < TimeSpan.FromSeconds(10), clock.Elapsed.ToString());
+    }
+
+    [TestMethod]
+    public async Task Reset_EmptiesTheNumbers_AndComesBackToTheChoice()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "a", Today9.AddDays(-3), runs: 3);
+        AddSession(harness, "b", Today9, runs: 1);
+        await harness.Engine.DrainAsync();
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(HistoryState.Done, harness.Engine.Status.State);
+        Assert.IsTrue(await harness.Store.CountAsync("journal") > 0);
+        var changes = new List<StatisticsDataChange>();
+        harness.Engine.DataChanged += changes.Add;
+
+        var status = await harness.Engine.ResetAsync();
+
+        Assert.AreEqual(HistoryState.NeedsChoice, status.State);
+        Assert.IsNull(status.Choice);
+        Assert.AreEqual(2, status.SessionsTotal, "The card has its numbers again.");
+        Assert.AreEqual(0L, await harness.Store.CountAsync("journal"));
+        Assert.AreEqual(0L, await harness.Store.CountAsync("session"));
+        Assert.AreEqual(1, changes.Count, "The pages are told that every day changed.");
+        Assert.IsTrue(changes[0].Revision > 0);
+
+        // The choice can be made again, and the numbers come back as they were.
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(HistoryState.Done, harness.Engine.Status.State);
+        Assert.AreEqual(2L, await harness.Store.CountAsync("session"));
+
+        // And it survives a restart as a first start: nothing chosen.
+        await harness.Engine.ResetAsync();
+        await harness.RestartAsync();
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(HistoryState.NeedsChoice, harness.Engine.Status.State);
+    }
+
+    [TestMethod]
     public async Task ReadingAllTheHistory_GivesTheNumbersOfReadingEachSessionAtOnce()
     {
         await using var harness = await EngineHarness.CreateAsync();

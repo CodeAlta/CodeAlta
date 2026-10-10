@@ -168,6 +168,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         }
 
         runtime.Changed += OnPluginsChanged;
+        // A page that asked before the broker had a runtime was told it is unavailable: it asks again once it hears of the plugins. Nothing else moves.
+        lock (_gate) _outbox?.Add(new CanvasEvent("plugins"));
     }
 
     /// <summary>Counts the pages that began to watch: a test waits for it to grow before it expects the page to hear.</summary>
@@ -534,6 +536,9 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             _outbox = outbox;
             generation = ++_watchGeneration;
             while (_openBacklog.TryDequeue(out var missed)) outbox.Add(missed);
+            // A page that starts watching may have asked for its tabs before the plugins were there (a window that restores its tabs while the host starts):
+            // the tabs that wait ask again.
+            if (_runtime is not null) outbox.Add(new CanvasEvent("plugins"));
         }
 
         replaced?.Complete();

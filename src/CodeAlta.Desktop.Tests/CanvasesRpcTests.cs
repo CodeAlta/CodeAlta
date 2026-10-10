@@ -774,6 +774,8 @@ public sealed class BoardsPlugin : PluginBase
         await context.UpdateAsync("<p>for the new page</p>");
 
         Assert.AreEqual("<p>for the new page</p>", (await second.NextAsync("update")).Html);
+        // A page that starts watching hears first that the plugins are there; the channel of a page ends once it was read.
+        await first.NextAsync("plugins");
         await first.EndedAsync();
         Assert.IsFalse(first.Has("update"));
     }

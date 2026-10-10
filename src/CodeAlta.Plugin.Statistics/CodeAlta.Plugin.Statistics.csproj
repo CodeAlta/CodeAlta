@@ -16,5 +16,6 @@
     <InternalsVisibleTo Include="altatui" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Plugin.Statistics.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
   </ItemGroup>
 </Project>

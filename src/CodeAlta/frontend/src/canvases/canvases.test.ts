@@ -315,3 +315,35 @@ test("the frames of a connection reach the listener of their instance in order, 
   assert.equal(heard.at(-1), "closed:null:watch_ended");
   disconnect();
 });
+
+test("a tab whose call the host turned away because too many were served asks again, and gives up after a few tries", async () => {
+  const played = host();
+  let refusals = 2, asked = 0;
+  const open = played.api.open;
+  const api: CanvasApi = { ...played.api, open: async (request, options) => {
+    asked++;
+    if (refusals-- > 0) throw Object.assign(new Error("The RPC command concurrency limit is exhausted."), { code: "too_many_requests", retryable: true });
+    return open(request, options);
+  } };
+  const hub = createCanvasHub(api, { set: (run) => setTimeout(run, 1), clear: timer => clearTimeout(timer as number) });
+  const disconnect = hub.connect("epoch");
+  const reply = await hub.open({ pluginKey: "k", canvasId: "board", spaceId: null, projectId: null, sessionId: null, key: null, visible: true });
+  assert.equal(reply.status, "ok");
+  assert.equal(asked, 3, "two refusals, then the instance");
+
+  refusals = 100;
+  asked = 0;
+  const gone = await hub.open({ pluginKey: "k", canvasId: "board", spaceId: null, projectId: null, sessionId: null, key: null, visible: true });
+  assert.equal(gone.status, "unavailable");
+  assert.equal(asked, 6, "it does not insist");
+
+  // Another failure is not retried.
+  asked = 0;
+  refusals = 0;
+  const other: CanvasApi = { ...played.api, open: async () => { asked++; throw new Error("boom"); } };
+  const second = createCanvasHub(other, { set: (run) => setTimeout(run, 1), clear: timer => clearTimeout(timer as number) });
+  second.connect("epoch");
+  assert.equal((await second.open({ pluginKey: "k", canvasId: "board", spaceId: null, projectId: null, sessionId: null, key: null, visible: true })).status, "unavailable");
+  assert.equal(asked, 1);
+  disconnect();
+});

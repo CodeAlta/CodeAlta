@@ -159,6 +159,117 @@ Every result starts with `query` (`QueryHeader`): the period as asked, `from` an
 
 The tests compute a series from the facts themselves, with plain `TimeZoneInfo` arithmetic and none of the code under test, and compare: every metric of the families (active time, runs, tokens, tool calls, prompts, cost per unit) at every frequency (day, week, month, year) in six zones; the hours of a day on which the clocks change; a month as the sum of its days read from the roll-ups and from the quarter hours; a series cut by a group equals the series without it; a project and a space filter equal the sum of the sessions of those projects; sessions active are counted in the facts; the rankings, the tables, the records, the calendar and the week by hour. Resume, split and restart invariants are in `StatisticsStoreTests` and `StatisticsEngineTests`: reading in halves equals reading at once, a crash between two commits resumes to the same totals, a rewritten session replaces its facts, a deleted journal keeps them, and the same range is never counted twice.
 
+## The canvas
+
+The Statistics canvas (`src/CodeAlta/frontend/src/statistics/`) draws the questions above. It is one React component, `StatisticsCanvas({ api, context })`, that knows no transport: it asks a `StatisticsApi` and draws what comes back, and the application binds that interface to the plugin. `createFixtureApi` is a second implementation over generated data (six months, several providers, models and projects, a history in each of its states), used by the browser tests and for demos.
+
+| Piece | Role |
+| --- | --- |
+| `api.ts` | `StatisticsApi`: one method for each question (`summary`, `series`, `top`, `tools`, `models`, `projects`, `sessions`, `session`, `distribution`, `calendar`, `weekHour`, `records`, `health`, `details`, `runs`), the controls of the history (`status`, `chooseHistory`, `pause`, `resume`, `stopHere`, `forgetDeleted`, `resetStatistics?`), `costEstimate?` and `subscribe` for the status and the days that changed. Every question takes an `AbortSignal`. `StatisticsContext` says where the canvas is: its instance id, whether it is visible, the space and project it opened for, the spaces, `openSession` |
+| `types.ts` | The JSON of every result, as TypeScript. `src/CodeAlta.Plugin.Statistics.Tests/Golden/results.json` holds one sample of each as the plugin writes it: a C# test keeps the file equal to the serializer, `golden.test.ts` checks the types against it |
+| `frame.ts` | The bar every page shares: the period, the frequency, the comparison, the filters, the page. A reducer changes it; `encodeFrame` and `decodeFrame` write it as a short query string kept per canvas instance, so a reload keeps it; `requestOf` turns it into the request of a page |
+| `runtime.tsx`, `queryStore.ts`, `useQuery.ts` | The state of a canvas (one provider per canvas): the frame, the status of the history, the results read, the controls |
+| `options.ts`, `steps.ts` | The ECharts options of the pages and the arithmetic of the steps of a distribution, as pure functions |
+| `FrameBar.tsx`, `HistoryBar.tsx`, `pages/` | The bar, the history bar and the first-time card, and one component for each page |
+
+### Pages
+
+| Page | Blocks |
+| --- | --- |
+| Overview | Tiles (sessions, runs, active time, prompts you sent, tokens and a tile for each unit of cost), activity over time stacked by provider, project or model in tokens, requests or time with a brush that sets the period, the year as a calendar, the top projects, models and tools, the records |
+| Activity | Sessions started and active, runs by outcome, active time, the week by hour, how long a run takes, runs and active time per session |
+| Models | Tokens by model, what tokens are made of, the share of input read from the cache, the size of a request, reasoning effort, the table of models |
+| Cost | For each unit that has a cost: the cost over time, by model, by project and per run. An estimate from public prices, marked as such, only when the binding offers `costEstimate` |
+| Tools | Calls by kind, the table of tools, where the time goes, the duration of the most called tools, the shell programs, the `alta` commands, MCP servers |
+| Prompts | Prompts by sender or by kind, the size of your prompts, attachments, what comes back for a prompt of yours |
+| Agents | Sessions started by you and by agents, the share of tokens and time in sub-agents, the largest trees of sessions, runs by who started them |
+| Code | Files changed, lines added and removed, by project and by kind of file |
+| Projects | The table of projects, the spaces, the time by space and project |
+| Sessions | The sessions of the period as a table that sorts on any number; a row opens its session |
+| Health | Errors, interrupted runs, the tools that fail, compactions, how full the context gets |
+
+A chart is never alone: each has "Show as table" (the same numbers), a name for a screen reader, a legend of buttons and a tooltip. A click on a bar, a legend entry or a row adds the filter (a provider, a model, a project, a kind of tool); a click on a day of the calendar sets the period to that day; a session row opens the session.
+
+### The bar
+
+| Control | Choices |
+| --- | --- |
+| Period | Today, the last 7, 30 or 90 days, this month, last month, this year, all time, or two dates |
+| Frequency | Auto (as the plugin picks it), hour, day, week, month, year. A frequency that does not fit the period (hours over a year) is not offered |
+| Compare | No comparison, the previous period, the same period last year: tiles show their change with an arrow and a sign, time charts a dashed line |
+| Filters | Space, project, provider, model, reasoning effort, who started the work, kind of tool, as chips. A chip of a filter that a page cannot honor (`query.ignoredFilters`) is dashed |
+| Reset | Back to the frame the canvas opened with: the shown space or project, 30 days |
+
+The canvas opens filtered on the space the window shows (`context.spaceId`) or on a project (`context.projectId`), and removing the chip shows everything.
+
+### The history in the canvas
+
+| State | What the canvas shows |
+| --- | --- |
+| `needsChoice` | A card instead of the pages: all the history (with the number of sessions and the date from the status, when the plugin gives them), the last 90 days, from today |
+| `reading` | A bar under the bar: sessions read of the total, the date reached, the time left, **Pause**. The canvas is in use; the part of a chart before `coverage.completeFrom` is hatched and says "Not read yet". When it ends, one notification |
+| `paused` | The date reached, the sessions left, **Resume** and **Stop here** |
+| `stoppedHere` | "The charts start on…"; "Read more history…" in the menu of the canvas |
+| `done` with skipped sessions | "3 sessions could not be read", with their reasons and **Try again** |
+| `failed` | The reason, and **Try again** |
+
+The menu of the canvas also has "Forget deleted sessions" and, when the binding offers `resetStatistics`, "Reset statistics…". "Read more history…" lists the choices that go further back than the one made.
+
+### Lifecycle
+
+- Only the page that is shown is mounted, and only it asks. A question is held under its key (the method, the request, its arguments) in a store of the canvas that keeps 96 results; coming back to a page shows them at once.
+- A question starts a moment after its key settles and is canceled when the key changes or the block goes away, so the effects that run twice under React StrictMode ask once.
+- While `context.visible` is false nothing is asked and the charts draw nothing. The status and the changes that arrive meanwhile are kept and applied when the canvas is shown again.
+- `DataChanged` events are gathered for a second; then the results whose period (or compared period) holds a changed day are marked stale, and the page that is shown asks for those again, the others not.
+- A chart is drawn with the SVG renderer (canvas above 1,500 buckets). The hatch of what is not read yet is CSS over the plot box the option fixes, so it is not a legend entry or a row of the table.
+- Numbers and dates are written with the locale of the window (`Intl`): `1.2M`, `1 h 05`, `$1,511`; the sentences are in `statistics/messages.ts`, in six languages.
+
+### Tests
+
+`statistics.test.ts` (the pure parts: periods and frequencies, the frame and its query string, the request, the formatters, the options, the steps, the store, the history states, the filters, the fixture), `golden.test.ts` (the JSON shapes), and `statistics.browser.test.ts`, which mounts the canvas in headless Edge under the production policy and React StrictMode over a recording fixture API: every page in both themes, the requests the frame produces, the first time, the pause, a hidden tab, a burst of changes, an error and its retry, an empty period, 220 page switches, the keyboard, the languages, narrow and zoomed. The pictures are in `tmp/statistics/`.
+
+## The plugin side of the canvas
+
+In CodeAlta Desktop the plugin declares the canvas, its button and its commands (`StatisticsPlugin.Canvas.cs`); `src/CodeAlta.Plugin.Statistics/Canvas/` holds the calls and the events. None is declared when the plugin reads nothing (CodeAlta TUI, no database, no journals).
+
+| What | How |
+| --- | --- |
+| Canvas | `statistics`, scope Application, icon `chart-column`, `Script = PluginScript.App("statistics")`, a one-line skeleton as fragment. The calls are registered in `Open`, before the view is returned. The key `project:<project id>` opens it for one project (its own tab, titled `Statistics: <name>`) and survives a restart, as an input does not |
+| Button | `PluginUi.Button(TitleBar, "statistics", "chart-column", "Statistics")` with `Canvas = "statistics"`. Its state is a ring (`PluginButtonBadge.Busy`) while `State` is `reading`, a dot while it is `needsChoice`, nothing otherwise, with a tooltip for each. `InvalidateButtons()` is called when that kind changes, not at each step of the reading. A second button, `ProjectMenu`, runs the command `statistics-project` for the project of the row |
+| Commands | `statistics` (palette name `/statistics`, binding `Ctrl+G` then `C`), and `statistics-project`, which is not in the palette: it is what the line of a project menu runs. There is no line in the menu of a session: the questions have no session filter |
+| Module | `src/statistics/canvas.tsx` is the entry listed in `lent/appModules.ts`. It reads `statistics.context`, makes a `StatisticsApi` over `alta.rpc` (`rpcApi.ts`), maps `alta.context` to a `StatisticsContext` (`canvasContext.ts`: the space of the tab, nothing for the space that holds every project, the project of the key or the input) and mounts `StatisticsCanvas`. `statistics.css` is part of the page's own stylesheet: a module brings none |
+
+### The calls
+
+Each call is a record the script sends (`StatisticsCall`: `request`, `metric`, `group`, `kind`, `by`, `sort`, `measure`, `subject`, `list`, `id`, `withChildren`, `days`) and answers with the JSON `StatisticsJson` writes, exactly as `alta statistics` does: the result of a question is `StatisticsJson.Serialize` parsed once, so the golden file of the tests is the contract of the wire too. A name is lowercase, as the transport requires.
+
+| Calls | Input | Answer |
+| --- | --- | --- |
+| `statistics.summary`, `.tools`, `.models`, `.projects`, `.calendar`, `.week-hour`, `.records`, `.health` | `{ request }` | the result of the question of that name |
+| `statistics.series` | `{ request, metric, group }` | `SeriesResult` |
+| `statistics.top` | `{ request, kind, by }` | `TopResult` |
+| `statistics.sessions`, `.runs` | `{ request, sort }` | `SessionsResult`, `RunsResult` |
+| `statistics.session` | `{ id, withChildren }` | `SessionDetailResult`; `not_found` when no session matches |
+| `statistics.distribution` | `{ request, measure, subject }` | `DistributionResult` |
+| `statistics.details` | `{ request, list }` | `DetailsResult` |
+| `statistics.status` | | the `StatisticsStatus`; while the first choice waits it carries the numbers of the card (below) |
+| `statistics.choose-history` | `{ kind: "all" \| "fromToday" \| "days", days }` | the status after the choice |
+| `statistics.pause`, `.resume`, `.stop-here`, `.reset` | | the status after the call |
+| `statistics.forget-deleted` | | `{ count }` |
+| `statistics.context` | | `{ spaces: [{ id, name, isDefault, projectIds }], projects: [{ id, name }] }`, read through `alta space list` and `alta project list`; the default space has every project |
+
+A question waits for the tables to exist (`InitializeAsync`), then for one of four places (`MaximumConcurrentQuestions`, shared by all the canvases), so a page that asks twelve things at once does not hold twelve readers of the database. They run while the history is read: reading uses its own connection and the database is in write-ahead mode. A result of more than 3 MiB (`StatisticsCanvasRpc.MaximumResultBytes`, under the 4 MiB the transport carries) is refused with `result_too_large`: choose a shorter period or add a filter; the queries cap their own rows (`StatisticsQueries.MaxLimit`) well below that.
+
+Errors have stable codes and a sentence made to be shown: `invalid_request` (a period, a metric, a sort, a space that does not exist, a request that is not an object, a missing argument), `not_found` (a session), `unavailable` (retryable: the plugin is not running) and `result_too_large`. Any other failure is not translated: the host reports `internal_error` and the text stays in the log of the plugin. Cancellation reaches the query.
+
+### The events
+
+One event, `statistics.events`, carries `{ kind: "status", status }` and `{ kind: "data", change: { revision, fromDay, toDay, sessionIds } }`. `StatisticsEventPump` (one per open canvas) gathers what the engine says in a burst for a quarter of a second and sends the last status and the union of the days that changed. It sends nothing while the tab is hidden: the latest goes when the tab is shown. An event is not kept, so the module reads the status with a call after it listens, and again when the connection to the plugin is made again (`alta.rpc.generation`), together with a change that says every day is stale.
+
+### The first-time card
+
+While the choice waits, the engine lists the journals (no journal is opened) and publishes, in `sessionsTotal`, `bytesTotal` and `oldestDateReached` (the day of the oldest journal), what the card says: "906 sessions since 20 April 2026 can be read". The listing is made once the engine is ready, kept, and read again by `statistics.status` when it is more than half a minute old. It is dropped when the choice is made. `ResetAsync` (the menu of the canvas, `statistics.reset`) cancels the reading, empties every table of the plugin and comes back to this state, with a data change that says every day changed.
+
 ## `alta statistics`
 
 The commands are the same questions, for agents and for the user. Each writes **one JSONL record** (`type`, `version`, `correlationId`, then the result) and works without a window, on any host that has the database. `0` is success, `2` a usage error (a period, a metric or a filter that is not valid), `1` another failure; an error is an `alta.error` record on stderr.

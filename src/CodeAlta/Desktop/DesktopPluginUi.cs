@@ -471,6 +471,8 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
 
         public ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
             => owner.ShowDialogForResultAsync(request, pluginKey, cancellationToken);
+
+        public void InvalidateButtons() => owner.InvalidateButtons();
     }
 
     private sealed class Registration(DesktopPluginUi owner, Action<PluginUiEvent> watcher) : IDisposable

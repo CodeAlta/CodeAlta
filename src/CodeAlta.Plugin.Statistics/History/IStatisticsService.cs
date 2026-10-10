@@ -56,4 +56,9 @@ public interface IStatisticsService
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The number of sessions forgotten.</returns>
     ValueTask<int> ForgetDeletedAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Empties the statistics and comes back to the first-time choice of how much history to read.</summary>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The status after the reset.</returns>
+    ValueTask<StatisticsStatus> ResetAsync(CancellationToken cancellationToken = default);
 }

@@ -18,7 +18,7 @@ test("series colors are Blueprint's data hues in order, numbered from 1, wrappin
   assert.equal(seriesVariable(9), "--chart-10");
   assert.equal(seriesVariable(10), "--chart-1");
   assert.equal(seriesVariable(-1), "--chart-10");
-  assert.deepEqual(fallbackSeries.light, ["#147eb3", "#29a634", "#d1980b", "#d33d17", "#9d3f9d", "#00a396", "#db2c6f", "#8eb125", "#946638", "#7961db"]);
+  assert.deepEqual(fallbackSeries.light, ["#147eb3", "#29a634", "#866103", "#d33d17", "#9d3f9d", "#00a396", "#db2c6f", "#5a701a", "#946638", "#7961db"]);
   assert.equal(seriesColor(fallbackSeries.dark, 11), fallbackSeries.dark[1]);
 });
 

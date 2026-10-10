@@ -66,6 +66,7 @@ public static class StatisticsJson
 [JsonSerializable(typeof(HealthResult))]
 [JsonSerializable(typeof(SessionDetailResult))]
 [JsonSerializable(typeof(StatisticsStatus))]
+[JsonSerializable(typeof(StatisticsDataChange))]
 [JsonSerializable(typeof(DetailsResult))]
 [JsonSerializable(typeof(RunsResult))]
 [JsonSerializable(typeof(StatisticsCoverage))]

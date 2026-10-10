@@ -19,12 +19,13 @@
 :root[data-theme="light"] {
   --chart-1: var(--bp-palette-cerulean-3);
   --chart-2: var(--bp-palette-forest-3);
-  --chart-3: var(--bp-palette-gold-3);
+  /* Gold and lime at step 3 are 2.6:1 and 2.5:1 on white, under the 3:1 a bar or a line needs: they take step 2 on the light theme. */
+  --chart-3: var(--bp-palette-gold-2);
   --chart-4: var(--bp-palette-vermilion-3);
   --chart-5: var(--bp-palette-violet-3);
   --chart-6: var(--bp-palette-turquoise-3);
   --chart-7: var(--bp-palette-rose-3);
-  --chart-8: var(--bp-palette-lime-3);
+  --chart-8: var(--bp-palette-lime-2);
   --chart-9: var(--bp-palette-sepia-3);
   --chart-10: var(--bp-palette-indigo-3);
 }

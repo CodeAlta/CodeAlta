@@ -252,6 +252,28 @@ internal sealed partial class StatisticsStore
         return (sessions, days);
     }
 
+    /// <summary>
+    /// Empties every table of the plugin: the facts, the roll-ups, the sessions, where each journal was read to, and the choice of the user.
+    /// The tables stay, at their version.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <returns>A task representing the write.</returns>
+    public ValueTask ResetAsync(CancellationToken cancellationToken = default)
+        => WriteAsync(
+            sql =>
+            {
+                // The prefix is the name of the plugin followed by an underscore, which LIKE reads as any character: compare the start of the name.
+                var tables = sql.Query(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, length(@p0)) = @p0",
+                    static reader => reader.GetString(0),
+                    Prefix);
+                foreach (var table in tables)
+                {
+                    sql.Execute($"DELETE FROM {table}");
+                }
+            },
+            cancellationToken);
+
     private ApplyResult Apply(SqlSession sql, ApplyRequest request)
     {
         var batch = request.Batch;

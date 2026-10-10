@@ -17,10 +17,11 @@ export const divergingVariables: readonly string[] = Object.freeze(["--chart-div
 
 /**
  * The colors a page that defines no variable falls back to: Blueprint's extended colors, the third step on the
- * light theme and the fourth on the dark one (the lighter step keeps its contrast on dark surfaces).
+ * light theme (the second for gold and lime, which are under 3:1 on white at the third) and the fourth on the dark
+ * one (the lighter step keeps its contrast on dark surfaces).
  */
 export const fallbackSeries = Object.freeze({
-  light: Object.freeze(["#147eb3", "#29a634", "#d1980b", "#d33d17", "#9d3f9d", "#00a396", "#db2c6f", "#8eb125", "#946638", "#7961db"]),
+  light: Object.freeze(["#147eb3", "#29a634", "#866103", "#d33d17", "#9d3f9d", "#00a396", "#db2c6f", "#5a701a", "#946638", "#7961db"]),
   dark: Object.freeze(["#3fa6da", "#43bf4d", "#f0b726", "#eb6847", "#bd6bbd", "#13c9ba", "#f5498b", "#b6d94c", "#af855a", "#9881f3"]),
 }) as Readonly<Record<"light" | "dark", readonly string[]>>;
 

@@ -113,7 +113,7 @@ test("every kind of chart is drawn under the production policy, in both themes, 
     assert.ok(names.includes("Prompts, answers and errors per day"));
     assert.match(await page.evaluate<string>(`document.querySelector('[data-chart="lines"] .chart-surface').getAttribute('aria-label')`), /line chart|chart/i);
     // The series take the palette of the page, in order.
-    const paletteOf = (dark: boolean) => dark ? ["#3fa6da", "#43bf4d", "#f0b726"] : ["#147eb3", "#29a634", "#d1980b"];
+    const paletteOf = (dark: boolean) => dark ? ["#3fa6da", "#43bf4d", "#f0b726"] : ["#147eb3", "#29a634", "#866103"];
     const strokes = () => page.evaluate<string[]>(`[...document.querySelectorAll('[data-chart="lines"] .chart-surface svg path')].map(p => (p.getAttribute('stroke') || '').toLowerCase()).filter(c => /^#[0-9a-f]{6}$/.test(c))`);
     const dark = await strokes();
     for (const color of paletteOf(true)) assert.ok(dark.includes(color), `${color} in ${dark.join()}`);

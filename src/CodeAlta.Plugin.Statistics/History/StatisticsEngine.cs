@@ -76,6 +76,8 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     private readonly ConcurrentDictionary<string, DateTimeOffset> _flow = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private readonly SemaphoreSlim _initialization = new(1, 1);
+    private readonly SemaphoreSlim _stepGate = new(1, 1);
+    private readonly SemaphoreSlim _overviewGate = new(1, 1);
     private readonly Dictionary<string, string> _projectNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SkippedSession> _skipped = [];
 
@@ -108,6 +110,8 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     private DateTimeOffset _lastRescan;
     private DateTimeOffset _lastProjectRefresh;
     private bool _projectNamesStale = true;
+    private JournalOverview? _overview;
+    private DateTimeOffset _overviewAt;
     private StatisticsStatus _status = new();
     private int _disposed;
 
@@ -155,6 +159,9 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
 
     private sealed record TodoItem(SessionJournalFile File, bool Restart, long BytesToRead);
 
+    /// <summary>What the first-time card says before anything is read: the journals that exist, their size, and the day of the oldest.</summary>
+    private sealed record JournalOverview(int Sessions, long Bytes, int? EarliestDay);
+
     /// <summary>Prepares the tables and reads what the user chose before. Called by <see cref="RunAsync"/>; tests call it themselves.</summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>A task representing the preparation.</returns>
@@ -195,6 +202,72 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         finally
         {
             _initialization.Release();
+        }
+
+        // The state is known and published; the first-time card gets its numbers right after, so that a slow disk never delays the state.
+        await RefreshOverviewAsync(TimeSpan.MaxValue, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Counts what the first-time choice is about: the journals of the session store, their size and the day of the oldest, from the
+    /// listing alone (no journal is opened) and cached. It does nothing once the user has chosen.
+    /// </summary>
+    /// <param name="maxAge">How old the numbers may be and still be taken from the cache; <see cref="TimeSpan.Zero"/> to read them again.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The status after the refresh.</returns>
+    public async ValueTask<StatisticsStatus> RefreshOverviewAsync(TimeSpan maxAge, CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _overviewGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_gate)
+            {
+                if (_phase != HistoryPhase.NeedsChoice || (_overview is not null && _time.GetUtcNow() - _overviewAt < maxAge))
+                {
+                    return _status;
+                }
+            }
+
+            var sessions = 0;
+            long bytes = 0;
+            DateTimeOffset? oldest = null;
+            try
+            {
+                await foreach (var file in _journals.ListAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    sessions++;
+                    bytes += file.Length;
+                    if (oldest is null || file.LastWriteUtc < oldest)
+                    {
+                        oldest = file.LastWriteUtc;
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The card then says its generic sentence: the journals are listed again at the next look.
+                _options.Logger?.Warn($"Statistics could not list the sessions: {exception.Message}");
+                return Status;
+            }
+
+            lock (_gate)
+            {
+                if (_phase != HistoryPhase.NeedsChoice)
+                {
+                    return _status;
+                }
+
+                _overview = new JournalOverview(sessions, bytes, oldest is { } first ? _days.DayOf(first) : null);
+                _overviewAt = _time.GetUtcNow();
+            }
+
+            Publish();
+            return Status;
+        }
+        finally
+        {
+            _overviewGate.Release();
         }
     }
 
@@ -311,6 +384,7 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             _phase = HistoryPhase.Reading;
             _reason = extend ? "extended" : "first-read";
             _todo = null;
+            _overview = null;
             ResetProgress();
             CancelHistoryReading();
         }
@@ -404,6 +478,55 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     }
 
     /// <inheritdoc />
+    public async ValueTask<StatisticsStatus> ResetAsync(CancellationToken cancellationToken = default)
+    {
+        await InitializeAsync(cancellationToken).ConfigureAwait(false);
+        lock (_gate)
+        {
+            CancelHistoryReading();
+        }
+
+        // The step that runs ends at a line (its reading was canceled) and nothing starts before the tables are empty.
+        await _stepGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        long revision;
+        try
+        {
+            lock (_gate)
+            {
+                _phase = HistoryPhase.NeedsChoice;
+                _choice = null;
+                _floorDay = null;
+                _floorQuarter = int.MinValue;
+                _paused = false;
+                _stopped = false;
+                _completeFromDay = null;
+                _reason = null;
+                _error = null;
+                _todo = null;
+                _overview = null;
+                _historyCts = null;
+                ResetProgress();
+            }
+
+            _flow.Clear();
+            _failed.Clear();
+            await _store.ResetAsync(cancellationToken).ConfigureAwait(false);
+            revision = Interlocked.Increment(ref _revision);
+        }
+        finally
+        {
+            _stepGate.Release();
+        }
+
+        Publish();
+        await RefreshOverviewAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false);
+
+        // Every day changed: the pages ask again for what they show.
+        DataChanged?.Invoke(new StatisticsDataChange(revision, 10101, 99991231, []));
+        return Status;
+    }
+
+    /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
@@ -416,6 +539,20 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     }
 
     private async Task<bool> StepAsync(CancellationToken cancellationToken)
+    {
+        // One step at a time: a reset waits for the step that runs, and nothing it writes can come after the tables are emptied.
+        await _stepGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await StepCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _stepGate.Release();
+        }
+    }
+
+    private async Task<bool> StepCoreAsync(CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _disposed) != 0)
         {
@@ -927,11 +1064,12 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 Reason = _phase is HistoryPhase.Reading or HistoryPhase.Paused ? _reason : null,
                 Choice = _choice?.ToText(),
                 FloorDay = _floorDay,
-                SessionsTotal = _sessionsTotal,
+                // Before the choice nothing is read: the card is told what could be, from the listing of the journals.
+                SessionsTotal = _phase == HistoryPhase.NeedsChoice ? _overview?.Sessions ?? 0 : _sessionsTotal,
                 SessionsDone = _sessionsDone,
-                BytesTotal = _bytesTotal,
+                BytesTotal = _phase == HistoryPhase.NeedsChoice ? _overview?.Bytes ?? 0 : _bytesTotal,
                 BytesDone = _bytesDone,
-                OldestDateReached = _oldestReached,
+                OldestDateReached = _phase == HistoryPhase.NeedsChoice ? _overview?.EarliestDay : _oldestReached,
                 CompleteFromDay = _completeFromDay,
                 BytesPerSecond = speed,
                 EtaSeconds = eta,
