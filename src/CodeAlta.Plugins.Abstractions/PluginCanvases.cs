@@ -284,6 +284,15 @@ public abstract class PluginCanvasContext
     /// <summary>Raised when <see cref="IsVisible"/> changes. The argument is the new value.</summary>
     public abstract event Action<bool>? VisibilityChanged;
 
+    private IPluginCanvasRpc? _noRpc;
+
+    /// <summary>
+    /// Gets the registry of the calls that the script of the instance makes to the plugin, and the way to send it events. The handlers are
+    /// registered in <see cref="PluginCanvasContribution.Open"/>, before it returns the view that names the script (see <see cref="IPluginCanvasRpc"/>).
+    /// A context that has no tab (a description, the action of an agent) gives a registry that registers nothing.
+    /// </summary>
+    public virtual IPluginCanvasRpc Rpc => _noRpc ??= new NoopPluginCanvasRpc();
+
     /// <summary>Sets the title of the tab.</summary>
     /// <param name="title">The title. A blank title brings back the title of the canvas.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>

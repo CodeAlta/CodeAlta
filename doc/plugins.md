@@ -378,7 +378,7 @@ The price is the versions: what is lent is the real library at the version CodeA
 | `alta.host` | `openFile(path, { line })`, `openDiff()`, `openSession(id)`, `openCanvas(id, options)`, `openLink(url)`, `notify(message, { tone })`, `runCommand(name)`, `setTitle`, `setStatus`, `setBadge` (the last three are for the tab; a badge takes the place of the status while it is set). A request the window cannot serve does nothing |
 | `alta.theme` | `value` and `subscribe`: the colors of the window as values (`text`, `muted`, `grid`, `surface`, `series`, `ramp`…), for what a script paints itself |
 | `alta.html(text)` | Cleans a string of HTML as fragments are cleaned; assign the result to `innerHTML`. Insert a string with this, never with `innerHTML` alone |
-| `alta.rpc` | The calls and streams of the plugin's own handlers; not available yet: every call rejects with `rpc_unavailable` |
+| `alta.rpc` | The calls, the streams and the events of the plugin's own C# handlers (see "Talking to the plugin"). Only the script of a canvas has it; elsewhere every call rejects with `rpc_unavailable` |
 | `alta.versions` | The version of this interface and of the lent libraries |
 
 **The `codealta` module** adds what no library has:
@@ -387,7 +387,7 @@ The price is the versions: what is lent is the real library at the version CodeA
 | --- | --- |
 | `html` | JSX without a build step: ``html`<${Button} intent="primary">Save<//>` `` (the syntax of `htm`; `class` and `for` on a page element are read as `className` and `htmlFor`) |
 | `useAlta`, `useVisible`, `useTheme` | The `alta` object, and the two signals of it as hooks |
-| `useRpc`, `useStream` | The calls and streams of the plugin as hooks; they need `alta.rpc` |
+| `useRpc`, `useStream` | The calls and streams of the plugin as hooks (see "Talking to the plugin") |
 | `Markdown`, `Code`, `Diagram` | The Markdown of the timeline, colored code, Mermaid diagrams in the colors of the window |
 | `Icon`, `BrandIcon` | An icon of the window by its name, the logo of a provider or a service |
 | `FileLink`, `SessionLink` | A link that opens a file in the code editor at a line, or a session |
@@ -397,7 +397,64 @@ The price is the versions: what is lent is the real library at the version CodeA
 
 **What happens around a script.** A tab that is hidden stays mounted and is told (`alta.visible`); a tab keeps the script it drew until it is shown, so a plugin that reloads while its tab is hidden is not started on a skeleton the tab has not drawn. A script that fails to load, is neither form, or throws shows its error in its content with a button that copies it, and the window around it goes on. A script the host cannot serve (a file that is missing or too large) says so in the same place. The safe mode that starts CodeAlta without plugins starts it without their scripts. A script runs in the document of the application, so it can do what the page can; a plugin is trusted code that runs in the process anyway, and the policy of the page and the sanitizer keep the property that matters: text from outside never becomes script.
 
-The `canvas-board` sample of the `codealta-plugin-runtime` skill is a React canvas with Blueprint tabs, a menu, a chart, Markdown, a file link and `alta.host`.
+### Talking to the plugin
+
+The script of a canvas reaches the C# of its own plugin with `alta.rpc`. It is the same NeoAstra RPC client that the window uses for the host (request ids, cancellation, timeouts, typed errors, streams read one item at a time), running on a connection that the window carries for it: a plugin writes handlers and a script calls them by name, and neither has to know how the frames travel.
+
+The plugin registers its handlers in the `Open` handler of the canvas, before it returns the view. Each open instance has its own registry, so a handler keeps what it needs of the instance in the closure it was written with:
+
+```csharp
+Open = (canvas, _) =>
+{
+    canvas.Rpc.Handle<GetBoard, Board>("board.get", (request, ct) => ValueTask.FromResult(_board.Read(request.Project)));
+    canvas.Rpc.Handle<MoveCard>("board.move", async (request, ct) => await _board.MoveAsync(request, ct));      // no result
+    canvas.Rpc.Stream<WatchBoard, BoardChange>("board.watch", (request, ct) => _board.WatchAsync(request, ct)); // IAsyncEnumerable<BoardChange>
+    return ValueTask.FromResult(PluginCanvasView.Html("<div id=\"board\"></div>") with { Script = PluginScript.File("ui/board.js") });
+}
+
+// Later, from anywhere in the plugin:
+await canvas.Rpc.PublishAsync("board.changed", new BoardChanged(revision));                                    // an event
+```
+
+```js
+const board = await alta.rpc.invoke("board.get", { project: alta.context.projectId });        // or useRpc("board.get", input)
+for await (const change of await alta.rpc.stream("board.watch", {}, { signal: alta.closed })) draw(change);   // or useStream("board.watch")
+const stop = await alta.rpc.subscribe("board.changed", change => refresh());                  // stop() ends it
+```
+
+| C# member of `canvas.Rpc` | What the script does |
+| --- | --- |
+| `Handle<TRequest, TResult>(name, handler)` | `await alta.rpc.invoke(name, input, { signal })` gives the result |
+| `Handle<TRequest>(name, handler)` | The same, and the result is `null` |
+| `Stream<TRequest, TItem>(name, handler)` | `await alta.rpc.stream(name, input, { signal })` gives an async iterable. The window takes the next item of the `IAsyncEnumerable` only when the script has taken the ones before, so a slow reader slows the iterator down and never fills a queue. Stopping the loop, or aborting the signal, cancels the token of the iterator |
+| `PublishAsync<T>(name, value)` | `await alta.rpc.subscribe(name, handler)` listens and gives the function that stops it. An event is not kept: a script that is not subscribed yet does not get it, so it reads the state with a call after it subscribed |
+| `JsonOptions` | The `JsonSerializerOptions` that read the requests and write the results, the items and the events: the web defaults (camelCase). A plugin with a source-generated context sets `new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = MyContext.Default }` in `Open` |
+
+Names are 1 to 64 of `a-z`, `0-9`, `.`, `-` and `_`, starting with a letter or a digit (`PluginRpc.IsValidName`); registering one twice, or after `Open` has returned, throws, and a canvas registers at most 256. A request is any JSON value that its type reads; a call without input reads as `{}`, so a record whose members are optional needs no argument. Each handler gets a token that is cancelled when the script cancels the call, when the call times out, when the connection ends, and when the instance closes or the plugin stops or is reloaded.
+
+**Errors.** A call that fails rejects with an `AltaError`, which has a stable `code`, a message and `retryable`. What a handler throws never crosses to the page: it is logged by the plugin's logger and the script gets `internal_error`, unless the handler throws `PluginRpcException(code, message)` (or with `retryable: true`), whose code (1 to 64 of `a-z`, `0-9`, `_`, starting with a letter) and message (one line, at most 400 characters, no stack trace or path) are made to be shown. A stream carries no code of its own: an exception in its iterator ends it with `internal_error`, so expected failures go in an item. The window adds its own codes:
+
+| Code | Meaning | `retryable` |
+| --- | --- | --- |
+| `invalid_request` | The input does not match the type of the handler | no |
+| `command_not_found` | The plugin registered no handler of that name | no |
+| `internal_error` | The handler threw something else than a `PluginRpcException` | no |
+| `too_many_requests` | A limit below was reached | yes |
+| `payload_too_large` | The request or the result is above 1 MiB (4 MiB for a result) | no |
+| `timeout` | The call took more than 30 seconds | yes |
+| `operation_canceled` | The script cancelled the call | no |
+| `connection_closed` | The connection to the plugin ended while the call ran (the plugin was reloaded, the window reconnected); the next call connects again | yes |
+| `rpc_unavailable` | The canvas has no calls (the plugin registered none and its view has no script), or the window cannot reach the plugin | no |
+
+A call is never replayed by the window: a mutation that failed with `timeout` or `connection_closed` may have been applied, and the script decides whether to ask again.
+
+**Limits.** A frame of at most 1 MiB, 8 calls running at once, 8 streams and 8 subscriptions open, 8 items in flight on a stream, about 200 calls a second (a burst of 400), and 30 seconds for a call. A script that keeps being refused for calling too fast loses its connection and connects again with its next call. The window sends the frames of a script together, a few milliseconds apart, so a stream of a thousand items does not cost a thousand calls.
+
+**Lifetime.** Nothing is opened until the script calls. The first call connects; a connection that ends (the plugin was reloaded, the window reloaded, the host closed the instance) fails what is pending with a retryable `connection_closed` and the next call connects again; `alta.rpc.generation` counts those reconnections, and `useRpc` reads again when it changes. A tab that is hidden pauses its streams: the window holds back their acknowledgements, so the plugin's iterator stops after a few items and goes on when the tab is shown. `useRpc` reads when the component is shown (and again when the tab is shown after it was hidden); `useStream` follows the stream while the component is shown and takes it again, after a wait that grows to 8 seconds, when the connection ended. A tab closed, a space deleted, a plugin reloaded or stopped, and a page that reloads all end the connection and cancel what the handlers were doing.
+
+**What remains.** Only the script of a canvas has `alta.rpc`: a dialog, the content around the prompt and a card of the timeline have no instance to hold a registry, so their scripts get `rpc_unavailable`; they act through `alta.host` and the commands of the plugin. A plugin cannot yet generate a typed file for its calls: a script passes and reads JSON.
+
+The `canvas-board` sample of the `codealta-plugin-runtime` skill is a React canvas with Blueprint tabs, a menu, a chart, Markdown, a file link and `alta.host`, whose board lives in the plugin: the script reads it with a call and a stream, changes it with calls, hears an event, and `alta board add --title ...` changes it from a terminal.
 
 ## Buttons
 

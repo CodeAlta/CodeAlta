@@ -33,23 +33,38 @@ export function useTheme(): AltaTheme {
 /** What a call of the plugin gave: `loading` while it runs, then the `data` or the `error`; `reload` calls again. */
 export type RpcResult<T> = Readonly<{ data: T | undefined; error: Error | null; loading: boolean; reload: () => void }>;
 
+/** How long a stream or a call waits before it asks again after the connection to its plugin ended, and the longest wait. */
+const retryDelayMilliseconds = 500;
+const retryDelayLimitMilliseconds = 8000;
+
 /**
- * Calls a handler of the plugin when the component is drawn, and again when the name or the input change or `reload` is called. The
- * call is dropped when the component goes away. Needs `alta.rpc`: until the window carries it, the result is the error `rpc_unavailable`.
+ * Calls a handler of the plugin when the component is drawn and shown, and again when the name or the input change, `reload` is called, the
+ * tab is shown again after it was hidden, or the connection to the plugin was made again (the data may be stale). A hidden component asks for
+ * nothing. The call is dropped when the component goes away. Needs `alta.rpc`: where the window does not carry it, the result is the error
+ * `rpc_unavailable`. A call that failed because the connection ended is asked again once.
  */
 export function useRpc<T = unknown>(name: string, input?: unknown): RpcResult<T> {
   const alta = useAlta();
+  const visible = useVisible();
+  const generation = useSignal(alta.rpc.generation);
   const [version, reload] = useReducer((value: number) => value + 1, 0);
   const [state, setState] = useState<Readonly<{ data: T | undefined; error: Error | null; loading: boolean }>>({ data: undefined, error: null, loading: true });
   const inputKey = JSON.stringify(input ?? null);
   useEffect(() => {
+    if (!visible) return undefined;
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setState(previous => ({ ...previous, loading: true }));
     alta.rpc.invoke(name, JSON.parse(inputKey), { signal: controller.signal }).then(
       data => { if (!controller.signal.aborted) setState({ data: data as T, error: null, loading: false }); },
-      error => { if (!controller.signal.aborted) setState(previous => ({ data: previous.data, error: error instanceof Error ? error : new AltaError("rpc_failed", String(error)), loading: false })); });
-    return () => controller.abort();
-  }, [alta, name, inputKey, version]);
+      error => {
+        if (controller.signal.aborted) return;
+        const failure = error instanceof Error ? error : new AltaError("rpc_failed", String(error));
+        setState(previous => ({ data: previous.data, error: failure, loading: false }));
+        if (failure instanceof AltaError && failure.retryable && failure.code === "connection_closed") timer = setTimeout(reload, retryDelayMilliseconds);
+      });
+    return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer); };
+  }, [alta, name, inputKey, version, visible, generation]);
   return useMemo(() => ({ ...state, reload }), [state]);
 }
 
@@ -58,16 +73,19 @@ export type StreamResult<T> = Readonly<{ latest: T | undefined; items: readonly 
 
 /**
  * Follows a stream of the plugin while the component is drawn and shown: a hidden component lets go of the stream and takes it again when it is
- * shown. Needs `alta.rpc`: until the window carries it, the result is the error `rpc_unavailable`.
+ * shown. A stream that ended because the connection to the plugin ended is taken again after a short wait, longer each time. Needs `alta.rpc`:
+ * where the window does not carry it, the result is the error `rpc_unavailable`.
  */
 export function useStream<T = unknown>(name: string, input?: unknown): StreamResult<T> {
   const alta = useAlta();
   const visible = useVisible();
   const [state, setState] = useState<StreamResult<T>>({ latest: undefined, items: [], error: null, active: false });
+  const [attempt, again] = useReducer((value: number) => value + 1, 0);
   const inputKey = JSON.stringify(input ?? null);
   useEffect(() => {
     if (!visible) { setState(previous => ({ ...previous, active: false })); return undefined; }
     const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setState(previous => ({ ...previous, error: null, active: true }));
     void (async () => {
       try {
@@ -79,11 +97,16 @@ export function useStream<T = unknown>(name: string, input?: unknown): StreamRes
 
         if (!controller.signal.aborted) setState(previous => ({ ...previous, active: false }));
       } catch (error) {
-        if (!controller.signal.aborted) setState(previous => ({ ...previous, error: error instanceof Error ? error : new AltaError("rpc_failed", String(error)), active: false }));
+        if (controller.signal.aborted) return;
+        const failure = error instanceof Error ? error : new AltaError("rpc_failed", String(error));
+        setState(previous => ({ ...previous, error: failure, active: false }));
+        if (failure instanceof AltaError && failure.retryable && failure.code === "connection_closed") {
+          timer = setTimeout(again, Math.min(retryDelayLimitMilliseconds, retryDelayMilliseconds * 2 ** Math.min(attempt, 4)));
+        }
       }
     })();
-    return () => controller.abort();
-  }, [alta, name, inputKey, visible]);
+    return () => { controller.abort(); if (timer !== undefined) clearTimeout(timer); };
+  }, [alta, name, inputKey, visible, attempt]);
   return state;
 }
 

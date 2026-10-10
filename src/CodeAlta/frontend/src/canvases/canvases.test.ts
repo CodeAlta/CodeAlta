@@ -6,7 +6,7 @@ import { createCanvasHub, readInstanceEvent, readOpenRequest, retainedLimit, typ
 import { createCanvasPluginControl, readPluginFolder, type CanvasPluginApi } from "./canvasPlugin";
 
 const event = (kind: string, fields: Partial<CanvasEvent> = {}): CanvasEvent => ({ kind, actions: null, canvasId: null, focus: false, html: null, icon: null, instanceId: null, key: null,
-  package: null, pluginKey: null, projectId: null, revision: null, script: null, scriptProblem: null, sessionId: null, spaceId: null, state: null, statusText: null, title: null, ...fields });
+  package: null, pluginKey: null, projectId: null, revision: null, connection: null, frames: null, reason: null, script: null, scriptProblem: null, sessionId: null, spaceId: null, state: null, statusText: null, title: null, ...fields });
 const wait = (milliseconds = 10) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 /** A host the test plays: the events it sends on its channel, and what the page asked of it. */
@@ -23,6 +23,9 @@ function host() {
     closeSpace: async request => { calls.push(`closeSpace:${request.spaceId}`); return { status: "ok" }; },
     action: async request => { calls.push(`action:${request.action}`); return { status: "ok", html: null, closed: false }; },
     describe: async () => ({ status: "ok", markdown: null }),
+    rpcOpen: async () => ({ status: "unavailable", connection: null, maximumFrameBytes: 0 }),
+    rpcSend: async () => ({ status: "closed" }),
+    rpcClose: async () => ({ status: "ok" }),
     watch: async (_request, options) => {
       channels++;
       return { [Symbol.asyncIterator]: () => ({
@@ -285,4 +288,30 @@ test("what a tab can do about a plugin that does not run comes from the plugins 
   const project = createCanvasPluginControl(api, "epoch", "plugin:project:p1:notes")!;
   await project.rebuild();
   assert.deepEqual(reloads.at(-1), { expectedEpoch: "epoch", projectId: "p1", scope: "Project", id: "notes" });
+});
+
+test("the frames of a connection reach the listener of their instance in order, and every connection ends when the watch does", async () => {
+  const fake = host();
+  const hub = createCanvasHub(fake.api, timers());
+  const heard: string[] = [];
+  hub.rpc.listen("i1", { frames: (connection, frames) => heard.push(`${connection}:${frames.join("|")}`), closed: (connection, reason) => heard.push(`closed:${connection}:${reason}`) });
+  assert.deepEqual(await hub.rpc.open("i1"), { status: "unavailable", connection: null, maximumFrameBytes: 0 }, "nothing to ask before the host is known");
+  assert.equal(await hub.rpc.send("i1", "c1", ["x"]), "unavailable");
+
+  const disconnect = hub.connect("epoch");
+  await wait();
+  fake.push(event("rpc", { instanceId: "i1", connection: "c1", frames: ["a", "b"] }));
+  fake.push(event("rpc", { instanceId: "elsewhere", connection: "c9", frames: ["lost"] }));
+  fake.push(event("rpc", { instanceId: "i1", connection: "c1", frames: ["c"] }));
+  fake.push(event("rpcClosed", { instanceId: "i1", connection: "c1", reason: "replaced" }));
+  fake.push(event("rpc", { instanceId: "i1", connection: "", frames: ["bad"] }));
+  await wait();
+
+  assert.deepEqual(heard, ["closed:null:watch_started", "c1:a|b", "c1:c", "closed:c1:replaced"]);
+  assert.equal((await hub.rpc.open("i1")).status, "unavailable", "the host of the test has none");
+  await hub.rpc.close("i1", "c1");
+  fake.end();
+  await wait();
+  assert.equal(heard.at(-1), "closed:null:watch_ended");
+  disconnect();
 });

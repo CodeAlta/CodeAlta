@@ -1,8 +1,9 @@
 // The page's link to the canvases of plugins: what plugins declare, the instances that tabs show, and what plugins push to them.
 import type { canvases, CanvasActionResponse, CanvasEvent, CanvasItem, CanvasOpenResponse } from "#neoastra";
 import { pluginIconFiles } from "../pluginButtons/pluginIcons";
+import type { CanvasRpcCarrier, CanvasRpcListener } from "./canvasRpc";
 
-export type CanvasApi = Pick<typeof canvases, "list" | "open" | "visible" | "close" | "closeSpace" | "action" | "describe" | "watch">;
+export type CanvasApi = Pick<typeof canvases, "list" | "open" | "visible" | "close" | "closeSpace" | "action" | "describe" | "watch" | "rpcOpen" | "rpcSend" | "rpcClose">;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** How long the page waits before it listens again after the host stopped telling. */
@@ -78,6 +79,8 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
   const catalogListeners = new Set<() => void>();
   const changeListeners = new Set<() => void>();
   const attached = new Map<string, Set<(event: CanvasInstanceEvent) => void>>();
+  // The scripts that call their plugin: one connection at a time for an instance, and it hears only the frames of the instance.
+  const rpcListeners = new Map<string, CanvasRpcListener>();
   // The last events of the instances nobody listens to yet: a tab attaches after its open call returned, and events may have come before.
   const retained = new Map<string, { update: Extract<CanvasInstanceEvent, { kind: "update" }> | null; last: CanvasInstanceEvent | null }>();
 
@@ -118,6 +121,42 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
 
   function changed() { for (const listener of [...changeListeners]) listener(); }
 
+  // What the host said of a connection of a script: frames are given in order, and the end of a connection after them.
+  function deliverRpc(event: CanvasEvent) {
+    if (!text(event.instanceId, 256) || !text(event.connection, 64)) return;
+    const listener = rpcListeners.get(event.instanceId);
+    if (!listener) return;
+    if (event.kind === "rpc") { if (Array.isArray(event.frames)) listener.frames(event.connection, event.frames.filter((frame): frame is string => typeof frame === "string")); }
+    else listener.closed(event.connection, typeof event.reason === "string" && event.reason.length <= 64 ? event.reason : "host_closed");
+  }
+
+  // A host that cannot be heard answers none of the calls it was given: every connection ends, and the scripts make theirs again.
+  function endRpc(reason: string) { for (const listener of [...rpcListeners.values()]) listener.closed(null, reason); }
+
+  const rpc: CanvasRpcCarrier = {
+    async open(instanceId) {
+      const host = epoch;
+      if (!host) return { status: "unavailable", connection: null, maximumFrameBytes: 0 };
+      try { return await api.rpcOpen({ expectedEpoch: host, instanceId }, { timeoutMilliseconds: 15_000 }); }
+      catch { return { status: "unavailable", connection: null, maximumFrameBytes: 0 }; }
+    },
+    async send(instanceId, connection, frames) {
+      const host = epoch;
+      if (!host) return "unavailable";
+      try { return (await api.rpcSend({ expectedEpoch: host, instanceId, connection, frames: [...frames] }, { timeoutMilliseconds: 30_000 })).status; }
+      catch { return "unavailable"; }
+    },
+    async close(instanceId, connection) {
+      const host = epoch;
+      if (!host) return;
+      try { await api.rpcClose({ expectedEpoch: host, instanceId, connection }, { timeoutMilliseconds: 10_000 }); } catch { /* The host frees the session with its instance. */ }
+    },
+    listen(instanceId, listener) {
+      rpcListeners.set(instanceId, listener);
+      return () => { if (rpcListeners.get(instanceId) === listener) rpcListeners.delete(instanceId); };
+    },
+  };
+
   return {
     /** The canvases the plugins declare now. */
     getCatalog: () => catalog,
@@ -133,6 +172,8 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
       onOpen = handler;
       if (handler) for (const request of waiting.splice(0)) handler(request);
     },
+    /** The way the calls of the scripts of canvases reach their plugins. */
+    rpc,
     /** Whether the page is connected to a host. */
     get connected() { return epoch !== null; },
     /**
@@ -196,20 +237,24 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
         try {
           const events = await api.watch({ expectedEpoch: hostEpoch }, { signal: abort.signal });
           // Connected: read what plugins declare, and let the tabs that wait ask again.
+          endRpc("watch_started");
           void list();
           changed();
           for await (const event of events) {
             if (abort.signal.aborted) return;
             if (event.kind === "open") { const request = readOpenRequest(event); if (request) open(request); }
             else if (event.kind === "plugins") { void list(); changed(); }
+            else if (event.kind === "rpc" || event.kind === "rpcClosed") deliverRpc(event);
             else { const read = readInstanceEvent(event); if (read) deliver(read.instanceId, read.event); }
           }
         } catch { /* The channel ended: watch again below, unless the window is going away. */ }
+        endRpc("watch_ended");
         if (!abort.signal.aborted) timer = timers.set(() => void watch(), reconnectMilliseconds);
       }
       void watch();
       return () => {
         abort.abort();
+        endRpc("watch_ended");
         if (timer !== null) timers.clear(timer);
         if (epoch === hostEpoch) epoch = null;
         retained.clear();

@@ -322,9 +322,35 @@ or `export async function mount(root, alta)`, which fills the element that holds
 | `alta.host` | Opens a file in the code editor at a line, the changes of a project, a session, another canvas or a web page; shows a notice; runs a command of the plugin; sets the title, the status and the mark of the tab |
 | `alta.theme` | The colors of the window as values, with an event, for what a script paints itself |
 | `alta.html(text)` | Cleans a string of HTML as fragments are cleaned. Use it to put a string in the page, never `innerHTML` alone |
+| `alta.rpc` | Calls, streams and events of your own C# handlers (below). Only the script of a canvas has it |
 | `alta.versions` | The versions of the libraries and of this interface |
 
-When the plugin is built again, or a file of the module changes, the tab mounts the new module and lets the old one go. A tab that is hidden keeps what it drew until it is shown. A script that fails shows its error in its tab, with a button to copy it, and the rest of the window goes on. HTML written as a string still has no script: `<script>` and `onclick` in it are removed, and `alta.html` and the sanitizer keep text that comes from outside from ever becoming script. The `canvas-board` sample is a React canvas with Blueprint tabs and a menu, a chart and `alta.host`.
+When the plugin is built again, or a file of the module changes, the tab mounts the new module and lets the old one go. A tab that is hidden keeps what it drew until it is shown. A script that fails shows its error in its tab, with a button to copy it, and the rest of the window goes on. HTML written as a string still has no script: `<script>` and `onclick` in it are removed, and `alta.html` and the sanitizer keep text that comes from outside from ever becoming script. ### Talking to your plugin
+
+The script of a canvas reaches the C# of its plugin with `alta.rpc`. You register handlers in the `Open` handler of the canvas, and the script calls them by name:
+
+```csharp
+Open = (canvas, ct) =>
+{
+    canvas.Rpc.Handle<GetBoard, Board>("board.get", (request, ct) => ValueTask.FromResult(_board.Read()));
+    canvas.Rpc.Handle<MoveCard>("board.move", async (request, ct) => await _board.MoveAsync(request, ct));
+    canvas.Rpc.Stream<WatchBoard, BoardChange>("board.watch", (request, ct) => _board.WatchAsync(ct));
+    return ValueTask.FromResult(PluginCanvasView.Html("<p>Loading…</p>") with { Script = PluginScript.File("ui/board.js") });
+}
+// Later: await canvas.Rpc.PublishAsync("board.changed", new BoardChanged(2));
+```
+
+```js
+const board = await alta.rpc.invoke("board.get");                                             // useRpc("board.get") in a component
+for await (const change of await alta.rpc.stream("board.watch")) draw(change);               // useStream("board.watch")
+const stop = await alta.rpc.subscribe("board.changed", change => refresh());
+```
+
+Requests and results are ordinary C# records, read and written as camelCase JSON. A stream is an `IAsyncEnumerable` that the window reads one item at a time, so a slow script slows it down and a hidden tab pauses it. An event is not kept: subscribe, then read the state with a call. To fail on purpose, throw `PluginRpcException("not_found", "No such card.")`: the script gets an `AltaError` with that `code`. Any other exception reaches the script as `internal_error`, with its text in the log of the plugin. Each handler gets a token that is cancelled when the script cancels the call, when it takes more than 30 seconds, when the tab closes, or when the plugin is reloaded.
+
+A frame is at most 1 MiB; a script can have 8 calls running, 8 streams and 8 subscriptions open and make about 200 calls a second. Past a limit the call fails with `too_many_requests` or `payload_too_large`, and a script that keeps being refused loses its connection and connects again with its next call. Dialogs, prompt content and cards of the timeline have no `alta.rpc`: they act through `alta.host` and the commands of the plugin.
+
+The `canvas-board` sample is a React canvas with Blueprint tabs and a menu, a chart and `alta.host`, whose board lives in the plugin: the script reads it with a call and a stream, changes it with calls, and hears an event; `alta board add --title ...` changes it from a terminal.
 
 ## Status items and content around the prompt
 
@@ -512,7 +538,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
 | `canvas-checklist` | A tab that the plugin provides, found from the Canvases page, the search and `alta canvas`: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
-| `canvas-board` | A tab drawn by a script of the package folder: a React component with Blueprint tabs and menus, a chart, Markdown, links and `alta.host` |
+| `canvas-board` | A tab drawn by a script of the package folder: a React component with Blueprint tabs and menus, a chart, Markdown, links and `alta.host`, whose board lives in the plugin and is read with `alta.rpc` (a call, a stream, an event) |
 | `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |

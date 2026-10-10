@@ -80,7 +80,7 @@ internal sealed record CanvasOpening(string Status, CanvasInstanceState? State, 
 /// delivered. Nothing a plugin throws crosses to the page.
 /// </para>
 /// </remarks>
-internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
+internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcCarrier, IDisposable
 {
     /// <summary>The most instances that stay open; at the limit the oldest hidden one is closed to make room.</summary>
     internal const int MaximumInstances = 64;
@@ -90,6 +90,15 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
 
     /// <summary>The most events one page can have waiting: the page reads slowly or not at all.</summary>
     internal const int MaximumPendingEvents = 512;
+
+    /// <summary>The most frames of connections of scripts that wait for the page; a session that has more waits for room.</summary>
+    internal const int MaximumPendingRpcFrames = 128;
+
+    /// <summary>The most characters of frames that wait for the page.</summary>
+    internal const int MaximumPendingRpcChars = 16 * 1024 * 1024;
+
+    /// <summary>The most frames of one connection that one event carries.</summary>
+    internal const int MaximumRpcFramesPerEvent = 64;
 
     internal const int MaximumHtmlUnits = DesktopPluginUi.MaximumHtmlUnits;
     internal const int MaximumTitleUnits = 200;
@@ -423,6 +432,62 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         }
     }
 
+    /// <summary>Opens the connection of the script of an instance to its plugin: a session that the page's frames are given to.</summary>
+    /// <param name="instanceId">The instance.</param>
+    /// <returns><c>ok</c> with the identifier of the connection; <c>unknown</c> when the instance is not open; <c>unavailable</c> when it has no calls or no page watches.</returns>
+    internal (string Status, string? Connection) RpcOpen(string instanceId)
+    {
+        HostContext? context;
+        int generation;
+        lock (_gate)
+        {
+            if (_disposed || _outbox is null) return ("unavailable", null);
+            if (!_instances.TryGetValue(instanceId, out var instance) || instance.Closed || instance.State != "ready") return ("unknown", null);
+            (context, generation) = (instance.Context, _watchGeneration);
+        }
+
+        if (context?.Endpoint is not { } endpoint) return ("unavailable", null);
+        return endpoint.Connect(generation) is { } connection ? ("ok", connection) : ("unknown", null);
+    }
+
+    /// <summary>Gives the frames of a connection to its session.</summary>
+    /// <returns><c>ok</c>, <c>closed</c> when the connection is not the open one of an open instance, or <c>payload_too_large</c>.</returns>
+    internal string RpcSend(string instanceId, string connection, IReadOnlyList<string> frames)
+        => EndpointOf(instanceId)?.Receive(connection, frames) ?? "closed";
+
+    /// <summary>Ends a connection that the page closed.</summary>
+    /// <returns>False when it is not the open one of an open instance.</returns>
+    internal bool RpcClose(string instanceId, string connection) => EndpointOf(instanceId)?.Close(connection) ?? false;
+
+    private CanvasRpcEndpoint? EndpointOf(string instanceId)
+    {
+        lock (_gate) return _instances.TryGetValue(instanceId, out var instance) && !instance.Closed ? instance.Context?.Endpoint : null;
+    }
+
+    // The page watched before a watch began or ended: what its connections were told will never be answered.
+    private void DropRpcSessions(int upToGeneration)
+    {
+        CanvasRpcEndpoint[] endpoints;
+        lock (_gate) endpoints = [.. _instances.Values.Select(static instance => instance.Context?.Endpoint).OfType<CanvasRpcEndpoint>()];
+        foreach (var endpoint in endpoints) endpoint.DropSession(upToGeneration);
+    }
+
+    /// <inheritdoc />
+    ValueTask ICanvasRpcCarrier.SendAsync(string instanceId, string connection, string frame, CancellationToken cancellationToken)
+    {
+        CanvasOutbox? outbox;
+        lock (_gate) outbox = _outbox;
+        return outbox is null ? ValueTask.FromException(new IOException("No page watches the canvases.")) : outbox.AddRpcAsync(instanceId, connection, frame, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    void ICanvasRpcCarrier.Closed(string instanceId, string connection, string reason)
+    {
+        CanvasOutbox? outbox;
+        lock (_gate) outbox = _outbox;
+        outbox?.AddRpcClosed(instanceId, connection, reason);
+    }
+
     /// <summary>Whether a page watches now: a request for a tab reaches a window.</summary>
     internal bool HasPage
     {
@@ -461,24 +526,37 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
     {
         var outbox = new CanvasOutbox();
         CanvasOutbox? replaced;
+        int generation;
         lock (_gate)
         {
             if (_disposed) yield break;
             replaced = _outbox;
             _outbox = outbox;
-            _watchGeneration++;
+            generation = ++_watchGeneration;
             while (_openBacklog.TryDequeue(out var missed)) outbox.Add(missed);
         }
 
         replaced?.Complete();
+        // The connections of the page that was replaced are gone with it: its frames are never answered.
+        DropRpcSessions(generation - 1);
         try
         {
             await foreach (var value in outbox.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
         }
         finally
         {
-            lock (_gate) if (ReferenceEquals(_outbox, outbox)) _outbox = null;
+            var current = false;
+            lock (_gate)
+            {
+                if (ReferenceEquals(_outbox, outbox))
+                {
+                    _outbox = null;
+                    current = true;
+                }
+            }
+
             outbox.Complete();
+            if (current) DropRpcSessions(generation);
         }
     }
 
@@ -633,7 +711,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
             else input = instance.Input;
         }
 
-        var context = new HostContext(this, instance, input, declaration.Plugin.RuntimeContext.LifetimeCancellationToken, declaration.Canvas.Scope);
+        var context = new HostContext(this, instance, input, declaration.Plugin.RuntimeContext.LifetimeCancellationToken, declaration.Canvas.Scope, declaration.Plugin.RuntimeContext.Services?.Logger);
         PluginCanvasView view;
         string html;
         string? script = null, scriptProblem = null;
@@ -648,6 +726,9 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
                 script = Modules.Publish(DesktopPluginModules.OwnerOf(declaration.Plugin), wanted);
                 if (script is null) scriptProblem = "The script of the canvas could not be found.";
             }
+
+            // What the plugin registered for its script to call is final once it has returned the view: the host of the calls is built from it.
+            context.StartRpc(this, hasScript: view.Script is { HasEntry: true });
         }
         catch (Exception exception)
         {
@@ -967,7 +1048,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         // The token outlives its source, which is disposed when the context is retired.
         private readonly CancellationToken _token;
 
-        public HostContext(DesktopCanvases owner, Instance? instance, CanvasIdentity identity, CancellationToken pluginLifetime, PluginCanvasScope scope)
+        // What the plugin registers for its script to call: only an instance that has a tab has one.
+        private readonly PluginRpcRegistry? _rpc;
+
+        public HostContext(DesktopCanvases owner, Instance? instance, CanvasIdentity identity, CancellationToken pluginLifetime, PluginCanvasScope scope, Logger? logger = null)
         {
             _owner = owner;
             _instance = instance;
@@ -976,13 +1060,27 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
             _closed = instance is null ? null : CancellationTokenSource.CreateLinkedTokenSource(pluginLifetime);
             _token = _closed?.Token ?? pluginLifetime;
             Input = null;
+            _rpc = instance is null ? null : new PluginRpcRegistry(identity.PluginKey, identity.CanvasId, logger, _token);
         }
 
-        public HostContext(DesktopCanvases owner, Instance instance, JsonElement? input, CancellationToken pluginLifetime, PluginCanvasScope scope)
-            : this(owner, instance, instance.Identity, pluginLifetime, scope)
+        public HostContext(DesktopCanvases owner, Instance instance, JsonElement? input, CancellationToken pluginLifetime, PluginCanvasScope scope, Logger? logger = null)
+            : this(owner, instance, instance.Identity, pluginLifetime, scope, logger)
         {
             Input = input;
         }
+
+        /// <summary>The host that serves the calls of the script of the tab, once the plugin returned its view; null when there is none.</summary>
+        public CanvasRpcEndpoint? Endpoint { get; private set; }
+
+        /// <summary>Ends the registration of the calls, and builds the host that serves them when the plugin registered any or its view has a script.</summary>
+        public void StartRpc(ICanvasRpcCarrier carrier, bool hasScript)
+        {
+            if (_rpc is null) return;
+            if (_rpc.Count > 0 || hasScript) Endpoint = new CanvasRpcEndpoint(InstanceId, _rpc, carrier);
+            else _rpc.Seal();
+        }
+
+        public override IPluginCanvasRpc Rpc => _rpc ?? base.Rpc;
 
         public CanvasIdentity Identity { get; }
 
@@ -1020,6 +1118,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         public void Retire()
         {
             if (_closed is not { } closed) return;
+            Endpoint?.Retire();
             try
             {
                 closed.Cancel();
@@ -1107,6 +1206,10 @@ internal sealed class CanvasOutbox
     private readonly Lock _lock = new();
     private readonly List<CanvasEvent> _events = [];
     private readonly Channel<bool> _signal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
+    // The frames of the connections of scripts, in order: they are neither merged nor dropped, and a writer waits for room.
+    private readonly Queue<RpcEntry> _rpc = new();
+    private TaskCompletionSource _rpcRoom = NewRoom();
+    private long _rpcChars;
     private bool _complete;
 
     public void Add(CanvasEvent value)
@@ -1147,9 +1250,93 @@ internal sealed class CanvasOutbox
 
     public void Complete()
     {
-        lock (_lock) _complete = true;
+        TaskCompletionSource room;
+        lock (_lock)
+        {
+            _complete = true;
+            room = _rpcRoom;
+        }
+
+        room.TrySetResult();
         _signal.Writer.TryComplete();
     }
+
+    /// <summary>
+    /// Queues a frame of a connection for the page. It waits while the page has too many frames waiting, which holds back the session
+    /// that produced it, and so the stream behind it.
+    /// </summary>
+    /// <exception cref="IOException">The page stopped watching.</exception>
+    public async ValueTask AddRpcAsync(string instanceId, string connection, string frame, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Task room;
+            lock (_lock)
+            {
+                if (_complete) throw new IOException("The page stopped watching the canvases.");
+                if (_rpc.Count < DesktopCanvases.MaximumPendingRpcFrames && (_rpc.Count == 0 || _rpcChars + frame.Length <= DesktopCanvases.MaximumPendingRpcChars))
+                {
+                    _rpc.Enqueue(new RpcEntry(instanceId, connection, frame, null));
+                    _rpcChars += frame.Length;
+                    _signal.Writer.TryWrite(true);
+                    return;
+                }
+
+                room = _rpcRoom.Task;
+            }
+
+            await room.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Queues the end of a connection after the frames queued for it.</summary>
+    public void AddRpcClosed(string instanceId, string connection, string reason)
+    {
+        lock (_lock)
+        {
+            if (_complete) return;
+            _rpc.Enqueue(new RpcEntry(instanceId, connection, null, reason));
+            _signal.Writer.TryWrite(true);
+        }
+    }
+
+    private static TaskCompletionSource NewRoom() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // The next event for the page, with the frames of one connection that wait together in one event.
+    private CanvasEvent? TakeRpcLocked()
+    {
+        if (_rpc.Count == 0) return null;
+        var first = _rpc.Dequeue();
+        CanvasEvent value;
+        if (first.Frame is null)
+        {
+            value = new CanvasEvent("rpcClosed") { InstanceId = first.InstanceId, Connection = first.Connection, Reason = first.Reason };
+        }
+        else
+        {
+            var frames = new List<string> { first.Frame };
+            _rpcChars -= first.Frame.Length;
+            var chars = first.Frame.Length;
+            while (_rpc.TryPeek(out var next) && next.Frame is not null && frames.Count < DesktopCanvases.MaximumRpcFramesPerEvent
+                && string.Equals(next.InstanceId, first.InstanceId, StringComparison.Ordinal) && string.Equals(next.Connection, first.Connection, StringComparison.Ordinal)
+                && chars + next.Frame.Length <= DesktopCanvases.MaximumPendingRpcChars / 8)
+            {
+                _rpc.Dequeue();
+                frames.Add(next.Frame);
+                _rpcChars -= next.Frame.Length;
+                chars += next.Frame.Length;
+            }
+
+            value = new CanvasEvent("rpc") { InstanceId = first.InstanceId, Connection = first.Connection, Frames = [.. frames] };
+        }
+
+        var room = _rpcRoom;
+        _rpcRoom = NewRoom();
+        room.TrySetResult();
+        return value;
+    }
+
+    private sealed record RpcEntry(string InstanceId, string Connection, string? Frame, string? Reason);
 
     public async IAsyncEnumerable<CanvasEvent> ReadAllAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -1159,6 +1346,7 @@ internal sealed class CanvasOutbox
             lock (_lock)
             {
                 if (_events.Count > 0) { next = _events[0]; _events.RemoveAt(0); }
+                else next = TakeRpcLocked();
             }
 
             if (next is not null) { yield return next; continue; }

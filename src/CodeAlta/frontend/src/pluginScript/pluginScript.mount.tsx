@@ -75,6 +75,8 @@ const sessions = { title: (id: string) => `Session ${id}`, open: (id: string) =>
 const carried: AltaRpc = {
   invoke: async (name, input) => { note("rpc", { name, input }); return { rows: 3 }; },
   stream: async () => (async function* () { yield 1; yield 2; yield 3; })(),
+  subscribe: async () => () => { },
+  generation: { value: 0, subscribe: () => () => { } },
 };
 
 type Options = { rpc?: boolean; html?: string; path?: string | null; problem?: string | null; visible?: boolean; whenShown?: boolean; spacer?: number; sibling?: boolean };

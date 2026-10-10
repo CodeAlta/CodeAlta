@@ -101,6 +101,19 @@ public sealed class PluginCanvasContractTests
         Assert.IsNull(options.SpaceId);
     }
 
+    [TestMethod]
+    public void AContextWithoutATab_HasARegistryThatRegistersNothing_OfItsOwn()
+    {
+        var one = new Context();
+        var other = new Context();
+
+        var first = one.Rpc;
+        Assert.AreSame(first, one.Rpc);
+        Assert.AreNotSame(one.Rpc, other.Rpc, "a registry holds its options: each context has its own, and no state is shared");
+        one.Rpc.Handle<JsonElement>("board.get", static (_, _) => ValueTask.CompletedTask);
+        Assert.ThrowsExactly<ArgumentException>(() => one.Rpc.Handle<JsonElement>("Board", static (_, _) => ValueTask.CompletedTask));
+    }
+
     private sealed class Bare : PluginBase
     {
     }

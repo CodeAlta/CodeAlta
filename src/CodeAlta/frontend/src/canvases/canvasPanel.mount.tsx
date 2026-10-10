@@ -35,6 +35,9 @@ const api: CanvasApi = {
   closeSpace: async () => ({ status: "ok" }),
   action: async request => { state.actions.push({ action: request.action ?? "", value: request.value, values: request.values ?? {} }); return actionAnswer; },
   describe: async () => ({ status: "ok", markdown: null }),
+  rpcOpen: async () => ({ status: "unavailable", connection: null, maximumFrameBytes: 0 }),
+  rpcSend: async () => ({ status: "closed" }),
+  rpcClose: async () => ({ status: "ok" }),
   watch: async () => ({ [Symbol.asyncIterator]: () => ({
     next: () => new Promise<IteratorResult<CanvasEvent>>(resolve => { const ready = queued.shift(); if (ready) resolve({ done: false, value: ready }); else waiting.push(resolve); }),
     return: async () => ({ done: true as const, value: undefined }),

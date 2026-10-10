@@ -184,13 +184,13 @@ test("alta.host checks what a script passes and does what the window serves, and
   assert.doesNotThrow(() => { bare.host.openFile("a"); bare.host.openSession("s"); bare.host.notify("m"); bare.host.setBadge(1); bare.host.openCanvas("board"); });
 });
 
-test("alta.html cleans a string through the sanitizer of the window, and alta.rpc says it is not available yet", async () => {
+test("alta.html cleans a string through the sanitizer of the window, and alta.rpc says it is not available outside a canvas", async () => {
   const { alta } = make();
   assert.equal(alta.html("<b>x</b><script>alert(1)</script>"), "<clean><b>x</b></clean>");
   assert.equal(alta.html(undefined as never), "<clean></clean>");
   await assert.rejects(alta.rpc.invoke("board.get"), (error: unknown) => error instanceof AltaError && error.code === "rpc_unavailable");
   await assert.rejects(alta.rpc.stream("board.watch"), (error: unknown) => error instanceof AltaError && error.code === "rpc_unavailable");
-  const given = { invoke: async () => 42, stream: async () => (async function* () { yield 1; })() };
+  const given = { invoke: async () => 42, stream: async () => (async function* () { yield 1; })(), subscribe: async () => () => { }, generation: { value: 0, subscribe: () => () => { } } };
   const { alta: carried } = make({}, { rpc: given });
   assert.equal(await carried.rpc.invoke("x"), 42, "a window that carries the RPC gives it");
 });

@@ -276,11 +276,32 @@ export default function Board() {                    // a React component, drawn
 
 - **Libraries.** The application lends **its own** `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react` and `lucide-react`, the very instances it runs (React 19, Blueprint 6, FlexLayout 0.11), so import them by their names and ship nothing. There is no build step: write plain JavaScript, with `html` of `codealta` instead of JSX (or `React.createElement`). Use `PopoverNext`, not `Popover`. A script depends on these versions (`alta.versions`); the HTML vocabulary and `codealta` are what stays stable.
 - **`codealta`** gives `html`, `useAlta`, `useVisible`, `useTheme`, `Markdown`, `Code`, `Diagram`, `Icon`, `BrandIcon`, `FileLink`, `SessionLink` and the charts (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, `WeekdayHourHeatmap`, `histogram`…).
-- **`alta`** (the argument of `mount`, and `useAlta()`): `alta.context` (project, session, key, the `input` the canvas was opened with), `alta.visible` (pause timers and reads while it is false), `alta.closed` (an `AbortSignal`: end what the script started), `alta.host` (`openFile`, `openDiff`, `openSession`, `openCanvas`, `openLink`, `notify`, `runCommand`, `setTitle`, `setStatus`, `setBadge`), `alta.theme` (the colors as values), `alta.html(text)` (a string cleaned as fragments are: the only way to put a string in `innerHTML`), `alta.versions`. `alta.rpc` (calls to the plugin's own handlers) is not available yet.
+- **`alta`** (the argument of `mount`, and `useAlta()`): `alta.context` (project, session, key, the `input` the canvas was opened with), `alta.visible` (pause timers and reads while it is false), `alta.closed` (an `AbortSignal`: end what the script started), `alta.host` (`openFile`, `openDiff`, `openSession`, `openCanvas`, `openLink`, `notify`, `runCommand`, `setTitle`, `setStatus`, `setBadge`), `alta.theme` (the colors as values), `alta.html(text)` (a string cleaned as fragments are: the only way to put a string in `innerHTML`), `alta.versions`. `alta.rpc` (the script of a canvas calls the C# of its own plugin, below).
 - Effects run twice in development (strict mode): write them so they can run again. A reload of the plugin, or an edit of a module, is a new address; the tab mounts the new module and the old one is released by `alta.closed`.
 - An error in a module is shown in its tab, with a button that copies it; read it, fix the file, and `alta plugin reload` again.
 
-`samples/canvas-board` is a complete React canvas (Blueprint tabs and menu, a chart, Markdown, a file link, `alta.host`) whose module is a file of the package; `samples/canvas-checklist` is a canvas without script. Look at the result in the window as described in "Look at the window".
+**Talking to the plugin.** A script reads and changes the state of its plugin with `alta.rpc`. Register the handlers in the `Open` handler of the canvas, before it returns the view:
+
+```csharp
+canvas.Rpc.Handle<GetBoard, Board>("board.get", (request, ct) => ValueTask.FromResult(_board.Read()));   // result
+canvas.Rpc.Handle<MoveCard>("board.move", async (request, ct) => await _board.MoveAsync(request, ct));    // no result
+canvas.Rpc.Stream<WatchBoard, BoardChange>("board.watch", (request, ct) => _board.WatchAsync(ct));        // IAsyncEnumerable: one item at a time
+await canvas.Rpc.PublishAsync("board.changed", new BoardChanged(1));                                      // an event (not kept)
+```
+
+```js
+const board = await alta.rpc.invoke("board.get", {});           // or useRpc("board.get", {}) in a component
+for await (const change of await alta.rpc.stream("board.watch", {}, { signal: alta.closed })) draw(change);   // or useStream("board.watch")
+const stop = await alta.rpc.subscribe("board.changed", change => refresh());
+```
+
+- Requests and results are ordinary records, in camelCase JSON (`canvas.Rpc.JsonOptions` to change). Names are `a-z0-9._-`, at most 64, unique; they cannot be added after `Open` returns.
+- Throw `PluginRpcException("not_found", "No such card.")` for an error the script should test (`error.code`, `error.retryable`). Anything else becomes `internal_error` for the script and is logged by the plugin's logger; a stream cannot carry a code, so put expected failures in an item.
+- Every handler gets a token cancelled when the script cancels, the call times out (30 s), the connection ends, or the instance closes or the plugin reloads: pass it on. Limits: 1 MiB a frame, 8 calls, 8 streams and 8 subscriptions at once, about 200 calls a second.
+- A hidden tab pauses its streams; `useRpc` reads again when the tab is shown or the connection is made again; a call is never replayed by the window.
+- Only the script of a canvas has `alta.rpc`; dialogs, prompt content and cards get `rpc_unavailable`.
+
+`samples/canvas-board` is a complete React canvas (Blueprint tabs and menu, a chart, Markdown, a file link, `alta.host`) whose module is a file of the package and whose board lives in the plugin (a call, a stream, an event, errors, `alta board add --title ...`); `samples/canvas-checklist` is a canvas without script. Look at the result in the window as described in "Look at the window".
 
 ## Status items and content around the prompt
 

@@ -46,10 +46,19 @@ export type AltaHost = Readonly<{
   setBadge(badge: string | number | null): void;
 }>;
 
-/** The calls and streams of the plugin's own handlers. The carried RPC is not part of this version: every call answers with an error. */
+/**
+ * The calls, the streams and the events of the plugin's own handlers (`canvas.Rpc` in C#). Every failure is an {@link AltaError} with a stable
+ * `code` and a `retryable` mark; a call is never replayed by the window.
+ */
 export type AltaRpc = Readonly<{
+  /** Calls a handler of the plugin and gives its result. The input is any JSON value; without one the handler reads `{}`. */
   invoke(name: string, input?: unknown, options?: Readonly<{ signal?: AbortSignal }>): Promise<unknown>;
+  /** Calls a handler that answers with a stream, and gives its items one at a time. Stopping the iteration, or aborting the signal, ends the stream on the plugin's side. */
   stream(name: string, input?: unknown, options?: Readonly<{ signal?: AbortSignal }>): Promise<AsyncIterable<unknown>>;
+  /** Listens to an event that the plugin sends (`PublishAsync`). Resolves once the plugin has the subscription; the function it gives stops the listening. Events sent before are not kept. */
+  subscribe(name: string, handler: (value: unknown) => void, options?: Readonly<{ signal?: AbortSignal }>): Promise<() => void>;
+  /** Counts the times the connection to the plugin was made again after it ended (the plugin was reloaded, the page reconnected): what was fetched before is stale. */
+  generation: AltaSignal<number>;
 }>;
 
 /** What a script of a plugin is given: the one object through which it reaches the window, so that it touches no global. */
@@ -90,25 +99,33 @@ export type AltaOptions = Readonly<{
   sanitize: (html: string) => string;
   readTheme: () => AltaTheme;
   subscribeTheme: (listener: () => void) => () => void;
-  /** The carried RPC of the plugin, when the window has one; scripts otherwise get the error `rpc_unavailable`. */
+  /** The calls of the plugin of the script, when the window carries them (the script of a canvas); scripts otherwise get the error `rpc_unavailable`. */
   rpc?: AltaRpc;
 }>;
 
 /** What the window keeps of an `alta` object it made: the object, how to tell it the tab is shown or hidden, and how to end it. */
 export type AltaHandle = Readonly<{ alta: Alta; setVisible(visible: boolean): void; dispose(): void }>;
 
-/** The error a call that is not available in this version rejects with. */
+/**
+ * The error of a call of `alta.rpc`, or of any request a script makes that the window cannot serve. `code` is stable: the ones of a plugin
+ * (`PluginRpcException`), the ones of the transport (`connection_closed`, `timeout`, `too_many_requests`, `payload_too_large`, `operation_canceled`,
+ * `command_not_found`, `invalid_request`, `internal_error`) and `rpc_unavailable`. `retryable` says whether the same call can succeed later.
+ */
 export class AltaError extends Error {
-  constructor(readonly code: string, message: string) {
+  readonly retryable: boolean;
+  readonly correlationId?: string;
+
+  constructor(readonly code: string, message: string, options?: Readonly<{ retryable?: boolean; correlationId?: string }>) {
     super(message);
     this.name = "AltaError";
+    this.retryable = options?.retryable ?? false;
+    this.correlationId = options?.correlationId;
   }
 }
 
-const unavailableRpc: AltaRpc = Object.freeze({
-  invoke: () => Promise.reject(new AltaError("rpc_unavailable", "alta.rpc is not available in this version of CodeAlta.")),
-  stream: () => Promise.reject(new AltaError("rpc_unavailable", "alta.rpc is not available in this version of CodeAlta.")),
-});
+const noGeneration: AltaSignal<number> = Object.freeze({ value: 0, subscribe: () => () => { } });
+const unavailable = () => Promise.reject(new AltaError("rpc_unavailable", "alta.rpc is not available here: only the script of a canvas can call its plugin."));
+const unavailableRpc: AltaRpc = Object.freeze({ invoke: unavailable, stream: unavailable, subscribe: unavailable, generation: noGeneration });
 
 function textOf(value: unknown, limit: number): string | null {
   return typeof value === "string" && value.length > 0 && value.length <= limit && !/[\u0000-\u001f\u007f]/u.test(value) ? value : null;

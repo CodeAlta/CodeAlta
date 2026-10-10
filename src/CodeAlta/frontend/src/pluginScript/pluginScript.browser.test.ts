@@ -118,7 +118,7 @@ test("the script of plugin HTML: a component drawn in the tree, a mount on the f
     // alta.rpc is the one the window carries, and says it is not there until it does.
     await evaluate("scriptFixture.clear(); scriptFixture.drain(); scriptFixture.render({ path: '/plugin/k/one/rpc.js' })");
     assert.equal(await wait("document.querySelector('.rpc-result')?.textContent.startsWith('error:')"), true);
-    assert.equal(await evaluate("document.querySelector('.rpc-result').textContent"), "error: alta.rpc is not available in this version of CodeAlta.");
+    assert.equal(await evaluate("document.querySelector('.rpc-result').textContent"), "error: alta.rpc is not available here: only the script of a canvas can call its plugin.");
     await evaluate("scriptFixture.clear(); scriptFixture.drain(); scriptFixture.render({ path: '/plugin/k/one/rpc.js', rpc: true })");
     assert.equal(await wait("document.querySelector('.rpc-result')?.textContent === 'rows 3 latest 3'"), true, "the hooks give what the carried calls and streams give");
     assert.ok((await evaluate<string[]>("scriptFixture.drain()")).some(line => line.startsWith("rpc:") && line.includes("board.get")));

@@ -132,6 +132,45 @@ internal sealed class CanvasesService
         return new(status, markdown);
     }
 
+    /// <summary>
+    /// Opens the connection of the script of an instance to its plugin: the host opens a session for it and names it. Every frame of
+    /// the connection names the instance and this identifier, and the answers come back as <c>rpc</c> events of <c>watch</c>.
+    /// Connecting again ends the connection that was open.
+    /// </summary>
+    [NeoRpcMethod("rpcOpen")]
+    public CanvasRpcOpenResponse RpcOpen(CanvasRpcOpenRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, 0);
+        if (!DesktopCanvases.ValidLine(request.InstanceId, DesktopCanvases.MaximumIdUnits)) return new("invalid_request", null, 0);
+        var (status, connection) = _canvases!.RpcOpen(request.InstanceId!);
+        return new(status, connection, CanvasRpcEndpoint.MaximumFrameBytes);
+    }
+
+    /// <summary>
+    /// Gives the frames of a connection to the session that serves it. A call is not waited for: its answer comes back as a frame.
+    /// The answer is <c>closed</c> when the connection is not the open one, so the page ends it.
+    /// </summary>
+    [NeoRpcMethod("rpcSend")]
+    public CanvasStatusResponse RpcSend(CanvasRpcSendRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (!DesktopCanvases.ValidLine(request.InstanceId, DesktopCanvases.MaximumIdUnits) || !DesktopCanvases.ValidLine(request.Connection, 64)
+            || request.Frames is not { Length: > 0 and <= MaximumRpcFrames } frames || frames.Any(static frame => frame is null)) return new("invalid_request");
+        return new(_canvases!.RpcSend(request.InstanceId!, request.Connection!, frames));
+    }
+
+    /// <summary>Ends a connection that the page closed.</summary>
+    [NeoRpcMethod("rpcClose")]
+    public CanvasStatusResponse RpcClose(CanvasRpcCloseRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (!DesktopCanvases.ValidLine(request.InstanceId, DesktopCanvases.MaximumIdUnits) || !DesktopCanvases.ValidLine(request.Connection, 64)) return new("invalid_request");
+        return new(_canvases!.RpcClose(request.InstanceId!, request.Connection!) ? "ok" : "unknown");
+    }
+
     /// <summary>What plugins ask of the tabs and push to them, until the page goes away.</summary>
     [NeoRpcMethod("watch")]
     public NeoRpcChannel<CanvasEvent> Watch(CanvasWatchRequest request, CancellationToken cancellationToken)
@@ -149,6 +188,7 @@ internal sealed class CanvasesService
     private const int MaximumNameUnits = 128;
     private const int MaximumFieldUnits = 64 * 1024;
     private const int MaximumFields = 128;
+    private const int MaximumRpcFrames = 256;
 
     private string? Refuse(string? epoch)
     {
@@ -264,6 +304,24 @@ internal sealed record CanvasDescribeRequest(string? ExpectedEpoch, string? Inst
 /// <summary><c>ok</c> with the Markdown, or null when the canvas does not describe itself; or a refusal code.</summary>
 internal sealed record CanvasDescribeResponse(string Status, string? Markdown);
 
+/// <summary>Opens the connection of the script of an instance to its plugin.</summary>
+internal sealed record CanvasRpcOpenRequest(string? ExpectedEpoch, string? InstanceId);
+
+/// <summary>
+/// <c>ok</c> with the identifier of the connection and the largest frame it carries, or <c>unknown</c> (no such instance),
+/// <c>unavailable</c> (the instance has no calls: its plugin registered none and its tab has no script, or no page watches), or a refusal code.
+/// </summary>
+/// <param name="Status">The status code.</param>
+/// <param name="Connection">The identifier of the connection, which every frame after it names.</param>
+/// <param name="MaximumFrameBytes">The largest frame the page may send, in UTF-8 bytes.</param>
+internal sealed record CanvasRpcOpenResponse(string Status, string? Connection, int MaximumFrameBytes);
+
+/// <summary>Frames of a connection, as JSON, in the order the script wrote them.</summary>
+internal sealed record CanvasRpcSendRequest(string? ExpectedEpoch, string? InstanceId, string? Connection, string[]? Frames);
+
+/// <summary>Ends a connection.</summary>
+internal sealed record CanvasRpcCloseRequest(string? ExpectedEpoch, string? InstanceId, string? Connection);
+
 /// <summary>Asks for the events of the canvases.</summary>
 internal sealed record CanvasWatchRequest(string? ExpectedEpoch);
 
@@ -274,7 +332,9 @@ internal sealed record CanvasWatchRequest(string? ExpectedEpoch);
 /// <c>open</c> (a plugin asks for a tab: its canvas, its space and context, and whether to bring it to the front),
 /// <c>update</c> (an instance shows another fragment, title or status: only what changed is set),
 /// <c>state</c> (the plugin of an instance stopped, or its canvas is gone: <c>plugin_stopped</c>, <c>unknown_canvas</c>, <c>failed</c>),
-/// <c>closed</c> (the plugin closed an instance: close its tab) or
+/// <c>closed</c> (the plugin closed an instance: close its tab),
+/// <c>rpc</c> (frames that the plugin of an instance sends to the script of its tab, see <c>rpcOpen</c>),
+/// <c>rpcClosed</c> (the connection of an instance ended: the plugin was replaced, the instance closed, or the session failed) or
 /// <c>plugins</c> (plugins were started, replaced or stopped: read the canvases again).
 /// </param>
 internal sealed record CanvasEvent(string Kind)
@@ -332,4 +392,13 @@ internal sealed record CanvasEvent(string Kind)
 
     /// <summary>For <c>update</c> and <c>state</c>: <c>ready</c>, <c>plugin_stopped</c>, <c>unknown_canvas</c> or <c>failed</c>; null for no change.</summary>
     public string? State { get; init; }
+
+    /// <summary>For <c>rpc</c> and <c>rpcClosed</c>: the connection of the instance that the frames or the end belong to.</summary>
+    public string? Connection { get; init; }
+
+    /// <summary>For <c>rpc</c>: frames of the connection, as JSON, in order.</summary>
+    public string[]? Frames { get; init; }
+
+    /// <summary>For <c>rpcClosed</c>: a short token that says why the connection ended.</summary>
+    public string? Reason { get; init; }
 }

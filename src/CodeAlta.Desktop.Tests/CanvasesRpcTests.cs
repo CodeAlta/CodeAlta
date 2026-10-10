@@ -51,7 +51,7 @@ public sealed class CanvasesRpcTests
         var response = fixture.Service.List(new(Epoch));
 
         Assert.AreEqual("ok", response.Status);
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
         var board = response.Canvases[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "Application", true, 2, true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.Input, board.Actions, board.Describes));
@@ -127,6 +127,118 @@ public sealed class CanvasesRpcTests
         Assert.AreEqual(2, fixture.Plugin.BrokenAttempts);
         Assert.AreEqual(0, fixture.Broker.GetOpen().Count);
     }
+
+    [TestMethod]
+    public async Task Rpc_CarriesTheCallsOfAScriptThroughTheService_AndRefusesWhatIsNotItsOwn()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        // Nothing to connect to: a stale page, a bad request, no such instance, an instance that has no calls.
+        Assert.AreEqual("stale_epoch", fixture.Service.RpcOpen(new("other", "x")).Status);
+        Assert.AreEqual("invalid_request", fixture.Service.RpcOpen(new(Epoch, "")).Status);
+        Assert.AreEqual("unknown", fixture.Service.RpcOpen(new(Epoch, "nope")).Status);
+        Assert.AreEqual("unavailable", fixture.Service.RpcOpen(new(Epoch, (await fixture.OpenAsync("plain")).InstanceId)).Status, "its plugin registered no call and its view has no script");
+        Assert.AreEqual("unavailable", new CanvasesService().RpcOpen(new(Epoch, "x")).Status);
+
+        var first = await fixture.OpenAsync("calls", space: "work", key: "k1");
+        var second = await fixture.OpenAsync("calls", space: "work", key: "k2");
+        var one = fixture.Service.RpcOpen(new(Epoch, first.InstanceId));
+        var two = fixture.Service.RpcOpen(new(Epoch, second.InstanceId));
+        Assert.AreEqual(("ok", "ok", 1 << 20), (one.Status, two.Status, one.MaximumFrameBytes));
+        Assert.IsFalse(string.IsNullOrEmpty(one.Connection));
+        Assert.AreNotEqual(one.Connection, two.Connection);
+
+        // Each instance answers for itself, on its own connection, and the answer names both.
+        Assert.AreEqual("ok", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [Invoke("r1", "where"), Invoke("r2", "echo", "{\"a\":1}")])).Status);
+        Assert.AreEqual("ok", fixture.Service.RpcSend(new(Epoch, second.InstanceId, two.Connection, [Invoke("r3", "where")])).Status);
+        var answers = new Dictionary<string, JsonElement>();
+        while (answers.Count < 3)
+        {
+            var carried = await fixture.NextAsync("rpc");
+            foreach (var frame in carried.Frames!)
+            {
+                var root = JsonDocument.Parse(frame).RootElement.Clone();
+                answers[root.GetProperty("id").GetString()!] = root;
+                Assert.AreEqual(carried.InstanceId == first.InstanceId ? one.Connection : two.Connection, carried.Connection);
+                Assert.AreEqual(carried.InstanceId == first.InstanceId, root.GetProperty("id").GetString() != "r3", "a frame of an instance is carried with the connection of that instance");
+            }
+        }
+
+        Assert.AreEqual(("k1", first.InstanceId), (answers["r1"].GetProperty("value").GetProperty("key").GetString(), answers["r1"].GetProperty("value").GetProperty("instance").GetString()));
+        Assert.AreEqual(1, answers["r2"].GetProperty("value").GetProperty("a").GetInt32());
+        Assert.AreEqual(("k2", second.InstanceId), (answers["r3"].GetProperty("value").GetProperty("key").GetString(), answers["r3"].GetProperty("value").GetProperty("instance").GetString()));
+
+        // A connection serves the instance that opened it and nothing else.
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, second.InstanceId, one.Connection, [Invoke("x1", "where")])).Status);
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, first.InstanceId, two.Connection, [Invoke("x2", "where")])).Status);
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, "nope", one.Connection, [Invoke("x3", "where")])).Status);
+        Assert.IsFalse(fixture.HasEvent("rpc"), "nothing was answered for them");
+        Assert.AreEqual("invalid_request", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [])).Status);
+        Assert.AreEqual("invalid_request", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, null)).Status);
+        Assert.AreEqual("invalid_request", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, new string[257])).Status);
+        Assert.AreEqual("invalid_request", fixture.Service.RpcSend(new(Epoch, first.InstanceId, "bad\nid", ["{}"])).Status);
+        Assert.AreEqual("payload_too_large", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [new string('x', CanvasRpcEndpoint.MaximumFrameBytes + 1)])).Status);
+        Assert.AreEqual("unknown", fixture.Service.RpcClose(new(Epoch, first.InstanceId, two.Connection)).Status);
+        Assert.AreEqual("ok", fixture.Service.RpcClose(new(Epoch, first.InstanceId, one.Connection)).Status);
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [Invoke("x4", "where")])).Status);
+    }
+
+    [TestMethod]
+    public async Task Rpc_EndsWithItsInstance_Cancelling_TheCallsAndTellingThePage()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var first = await fixture.OpenAsync("calls", space: "work", key: "k1");
+        var second = await fixture.OpenAsync("calls", space: "play", key: "k2");
+        var one = fixture.Service.RpcOpen(new(Epoch, first.InstanceId));
+        var two = fixture.Service.RpcOpen(new(Epoch, second.InstanceId));
+        fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [Invoke("slow1", "slow")]));
+        await fixture.Plugin.SlowStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // The page closes the tab: what the plugin was doing for it is cancelled, and nothing is left to talk to.
+        Assert.AreEqual("ok", (await fixture.Service.CloseAsync(new(Epoch, first.InstanceId), default)).Status);
+
+        await fixture.Plugin.SlowCancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var ended = await fixture.NextAsync("rpcClosed");
+        Assert.AreEqual((first.InstanceId, one.Connection), (ended.InstanceId, ended.Connection));
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, first.InstanceId, one.Connection, [Invoke("late", "where")])).Status);
+
+        // A space that goes away takes its instances with it.
+        await fixture.Service.CloseSpaceAsync(new(Epoch, "play"), default);
+        var gone = await fixture.NextAsync("rpcClosed");
+        Assert.AreEqual((second.InstanceId, two.Connection), (gone.InstanceId, gone.Connection));
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, second.InstanceId, two.Connection, [Invoke("late", "where")])).Status);
+    }
+
+    [TestMethod]
+    public async Task Rpc_DropsTheConnectionsOfAPageThatIsReplacedOrGone_AndHasNoneForNoPage()
+    {
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        var page = fixture.Watch();
+        var opened = await fixture.OpenAsync("calls", space: "work", key: "k1");
+        var before = fixture.Service.RpcOpen(new(Epoch, opened.InstanceId));
+        Assert.AreEqual("ok", before.Status);
+        Assert.AreEqual("ok", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, before.Connection, [Invoke("r1", "where")])).Status);
+        await page.NextAsync("rpc");
+
+        // A page that reloads watches again: the connection of the one before cannot be answered any more.
+        var next = fixture.Watch();
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, before.Connection, [Invoke("r2", "where")])).Status);
+        await page.EndedAsync();
+        var after = fixture.Service.RpcOpen(new(Epoch, opened.InstanceId));
+        Assert.AreEqual("ok", after.Status);
+        Assert.AreEqual("ok", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r3", "where")])).Status);
+        await next.NextAsync("rpc");
+
+        // A page that goes away leaves no connection and no way to open one.
+        next.Dispose();
+        SpinWait.SpinUntil(() => fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r4", "where")])).Status == "closed", TimeSpan.FromSeconds(30));
+        Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, after.Connection, [Invoke("r5", "where")])).Status);
+        Assert.AreEqual("unavailable", fixture.Service.RpcOpen(new(Epoch, opened.InstanceId)).Status);
+        page.Dispose();
+    }
+
+    private static string Invoke(string id, string command, string args = "{}")
+        => $$"""{"neoastra":1,"kind":"invoke","id":"{{id}}","command":"{{command}}","args":{{args}}}""";
 
     [TestMethod]
     public async Task Visibility_IsToldToThePlugin()
@@ -802,7 +914,7 @@ public sealed class NotesPlugin : PluginBase
 
         var declared = view.List();
 
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain" }, declared.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls" }, declared.Select(static canvas => canvas.Id).ToArray());
         var board = declared[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "application", "{\"type\":\"object\"}", true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.InputSchema, board.Describes));
@@ -1125,6 +1237,10 @@ public sealed class NotesPlugin : PluginBase
 
         public ConcurrentDictionary<string, PluginCanvasContext> Contexts { get; } = new();
 
+        public TaskCompletionSource SlowStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource SlowCancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public ConcurrentQueue<string> Closed { get; } = new();
 
         public ConcurrentQueue<(string Instance, string Name, string? Value, IReadOnlyDictionary<string, string> Values)> Actions { get; } = new();
@@ -1198,6 +1314,24 @@ public sealed class NotesPlugin : PluginBase
             {
                 Id = "plain", Title = "Plain",
                 Open = (_, _) => ValueTask.FromResult(PluginCanvasView.Html("<p>plain</p>")),
+            };
+            yield return new PluginCanvasContribution
+            {
+                Id = "calls", Title = "Calls",
+                Open = (canvas, _) =>
+                {
+                    Contexts[canvas.InstanceId] = canvas;
+                    canvas.Rpc.Handle<JsonElement, JsonElement>("echo", (request, _) => ValueTask.FromResult(request));
+                    canvas.Rpc.Handle<JsonElement, JsonElement>("where", (_, _) => ValueTask.FromResult(JsonSerializer.SerializeToElement(new { instance = canvas.InstanceId, key = canvas.Key })));
+                    canvas.Rpc.Handle<JsonElement, JsonElement>("slow", async (_, cancellationToken) =>
+                    {
+                        SlowStarted.TrySetResult();
+                        try { await Task.Delay(Timeout.Infinite, cancellationToken); }
+                        catch (OperationCanceledException) { SlowCancelled.TrySetResult(); throw; }
+                        return default;
+                    });
+                    return ValueTask.FromResult(PluginCanvasView.Html("<p>calls</p>") with { ScriptSource = ScriptText });
+                },
             };
         }
 
