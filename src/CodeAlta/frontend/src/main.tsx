@@ -221,7 +221,7 @@ import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/h
 import { createCanvasHub, type CanvasClosedInstance, type CanvasOpenRequest } from "./canvases/canvasHub";
 import { createCanvasInstances } from "./canvases/canvasInstances";
 import { CanvasesPanel } from "./canvases/CanvasesPanel";
-import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, removeCanvasTabFromSpace, withCanvasStatus, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
+import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, removeCanvasTabFromSpace, sessionCanvasMenuEntries, withCanvasStatus, type CanvasScopeProject, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
 import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
 import { PluginButtons } from "./pluginButtons/PluginButtons";
 import { usePluginMenuEntries } from "./pluginButtons/pluginMenu";
@@ -1100,14 +1100,14 @@ function App() {
     openFile(canvasTabOf(item, target));
   }
   // What the menu of a session row offers of the plugins: their canvases about a session, a few lines and then the page of the canvases.
-  function sessionCanvasEntries(session: WorkspaceSession): SessionMenuEntry[] {
-    const menu = owned ? canvasMenuItems(canvasCatalog, "Session") : null;
-    if (!menu || menu.items.length === 0) return [];
-    const project = selectedProject && !selectedProject.archived && session.scopeKind === "project" && session.projectId === selectedProject.id ? { id: selectedProject.id, path: selectedProject.path } : null;
-    return [{ key: "canvases", divider: true },
-      ...menu.items.map(item => ({ key: `canvas:${item.pluginKey}/${item.id}`, label: t("Open {title}", { title: item.title }), icon: "canvases" as const,
-        onSelect: () => { dismissSessionMenu(false); openCanvas(item, { project, sessionId: session.id }); } })),
-      ...(menu.more ? [{ key: "canvases-more", label: t("More…"), icon: "canvases" as const, onSelect: () => { dismissSessionMenu(false); openFile(canvasesTab); } }] : [])];
+  // `scopeProject` is the project of the scope the row is listed under: the selected one, or the one of an open scope that is not
+  // selected, whose sessions never borrow the project in front.
+  function sessionCanvasEntries(session: WorkspaceSession, scopeProject: CanvasScopeProject | null | undefined): SessionMenuEntry[] {
+    return sessionCanvasMenuEntries(owned ? canvasCatalog : [], session, scopeProject, {
+      label: title => t("Open {title}", { title }), more: t("More…"),
+      open: (item, target) => { dismissSessionMenu(false); openCanvas(item, target); },
+      openPage: () => { dismissSessionMenu(false); openFile(canvasesTab); },
+    });
   }
   // Opens a canvas for what is selected: the search, the palette and the menus of rows do not ask which project.
   function openCanvasHere(item: CanvasItem) {
@@ -2299,12 +2299,12 @@ function App() {
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions entries={shown.entries} global={scope === null} more={shown.more} extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)}
+    return <ExplorerSessions entries={shown.entries} global={scope === null} projectId={scope} more={shown.more} extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action) => openScopeSession(scope, session, action)} menuEntries={session => sessionCanvasEntries(session, project)} deleteAsks={confirms.sessionDelete}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
 
@@ -3058,7 +3058,7 @@ function App() {
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
-                  ...sessionCanvasEntries(session),
+                  ...sessionCanvasEntries(session, selectedProject),
                   ...sessionMenuPlugins,
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}

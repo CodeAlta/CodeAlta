@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Desktop;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
@@ -151,6 +152,55 @@ public sealed class StatisticsCanvasCarriedRpcTests
     }
 
     [TestMethod]
+    public async Task TheLineOfASessionMenu_IsGivenForTheSessionOfARow_AndItsCommandAsksForTheCanvasOfThatSession()
+    {
+        // What the menu of a session row does, for a row that is not selected: the page asks for the lines of that row, then runs the
+        // command of the line for that row. Nothing here says which project or session is selected: the host never needs it.
+        await using var fixture = await Fixture.CreateAsync();
+        var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = fixture.Global });
+        var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(fixture.Root, "project")).FullName);
+        var ui = new PluginUiService(projects, fixture.Runtime, fixture.Ui, Epoch, fixture.Broker);
+        try
+        {
+            // A chat: a session of no project.
+            var chat = await ui.ButtonsAsync(new(Epoch, "SessionMenu", "work", null, "chat-of-the-row"), default);
+            Assert.AreEqual("ok", chat.Status);
+            var line = chat.Buttons.Single();
+            Assert.AreEqual(("statistics-session", "SessionMenu", "Statistics of this session", (string?)null, false, false), (line.ButtonId, line.Place, line.Label, line.Canvas, line.Disabled, line.Hidden));
+            Assert.IsNotNull(line.CommandId);
+            // The command is the hidden one: the palette and the help do not list it.
+            var command = (await ui.ContributionsAsync(new(Epoch, null), default)).Commands.Single(candidate => candidate.Id == line.CommandId);
+            Assert.AreEqual(("statistics-session", false, false, true, false), (command.Name, command.Palette, command.Help, command.NeedsSession, command.NeedsProject));
+
+            Assert.AreEqual("started", (await ui.InvokeCommandAsync(new(Epoch, line.CommandId, null, "chat-of-the-row", false, null, "work"), default)).Status);
+            var opened = await fixture.NextAsync(static value => value.Kind == "open");
+            Assert.AreEqual((fixture.Key, "statistics", "work", "session:chat-of-the-row", (string?)null, (string?)null, true),
+                (opened.PluginKey, opened.CanvasId, opened.SpaceId, opened.Key, opened.ProjectId, opened.SessionId, opened.Focus));
+
+            // A session of a project: the line is asked and run for that project and that session.
+            var row = (await ui.ButtonsAsync(new(Epoch, "SessionMenu", "work", project.Id, "session-of-the-project"), default)).Buttons.Single();
+            Assert.IsFalse(row.Disabled);
+            Assert.AreEqual("started", (await ui.InvokeCommandAsync(new(Epoch, row.CommandId, project.Id, "session-of-the-project", false, null, "work"), default)).Status);
+            var second = await fixture.NextAsync(static value => value.Kind == "open");
+            Assert.AreEqual(("statistics", "session:session-of-the-project", (string?)null, (string?)null), (second.CanvasId, second.Key, second.ProjectId, second.SessionId),
+                "the canvas of the application, told apart by the session of its key");
+            Assert.AreNotEqual(opened.InstanceId, second.InstanceId, "a tab for each session");
+
+            // The canvas the window then opens is titled for that session, and is the same one when it is asked again.
+            var tab = await fixture.Service.OpenAsync(new(Epoch, fixture.Key, "statistics", "work", null, null, "session:chat-of-the-row", true), default);
+            Assert.AreEqual(("ok", "Statistics: chat-of-", opened.InstanceId), (tab.Status, tab.Title, tab.InstanceId));
+
+            // Without a session the command does not run: never the canvas of every session in its place.
+            Assert.AreEqual("unavailable", (await ui.InvokeCommandAsync(new(Epoch, line.CommandId, project.Id, null, false, null, "work"), default)).Status);
+            Assert.IsTrue((await ui.ButtonsAsync(new(Epoch, "SessionMenu", "work", project.Id, null), default)).Buttons.Single().Disabled);
+        }
+        finally
+        {
+            await ui.CloseAsync();
+        }
+    }
+
+    [TestMethod]
     public async Task APageThatStartsWatching_IsToldToAskAgainForTheTabsThatWait()
     {
         await using var fixture = await Fixture.CreateAsync(watch: false);
@@ -257,11 +307,12 @@ public sealed class StatisticsCanvasCarriedRpcTests
         private readonly List<(string Connection, JsonElement Frame)> _frames = [];
         private Task _pump = Task.CompletedTask;
 
-        private Fixture(string root, DesktopCanvases broker, PluginRuntimeManager runtime, StatisticsPlugin plugin, MemoryJournals journals)
+        private Fixture(string root, DesktopCanvases broker, PluginRuntimeManager runtime, StatisticsPlugin plugin, MemoryJournals journals, DesktopPluginUi ui)
         {
             _root = root;
             _broker = broker;
             _runtime = runtime;
+            Ui = ui;
             Plugin = plugin;
             Journals = journals;
             Service = new CanvasesService(broker, Epoch);
@@ -274,6 +325,17 @@ public sealed class StatisticsCanvasCarriedRpcTests
         public CanvasesService Service { get; }
 
         public string Key => _runtime.ActivePlugins.Single().Descriptor.RuntimeKey;
+
+        /// <summary>The folder of the fixture, and the global root of its catalog.</summary>
+        public string Root => _root;
+
+        public string Global => Path.Combine(_root, "home", ".alta");
+
+        public PluginRuntimeManager Runtime => _runtime;
+
+        public DesktopCanvases Broker => _broker;
+
+        public DesktopPluginUi Ui { get; }
 
         public static async Task<Fixture> CreateAsync(bool watch = true)
         {
@@ -295,7 +357,7 @@ public sealed class StatisticsCanvasCarriedRpcTests
                 BuiltIns = [new BuiltInPluginDefinition { Id = "statistics", DisplayName = "Statistics", PluginType = typeof(StatisticsPlugin), Factory = () => plugin }],
             });
             broker.Attach(runtime, () => "work");
-            var fixture = new Fixture(root, broker, runtime, plugin, journals);
+            var fixture = new Fixture(root, broker, runtime, plugin, journals, ui);
             if (watch) fixture.StartWatching();
             return fixture;
         }
@@ -346,7 +408,7 @@ public sealed class StatisticsCanvasCarriedRpcTests
             SpinWait.SpinUntil(() => _broker.WatchGeneration > generation, TimeSpan.FromSeconds(5));
         }
 
-        private async Task<CanvasEvent> NextAsync(Func<CanvasEvent, bool> wanted)
+        public async Task<CanvasEvent> NextAsync(Func<CanvasEvent, bool> wanted)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             foreach (var value in _kept.ToArray())

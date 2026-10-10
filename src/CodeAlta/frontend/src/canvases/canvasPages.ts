@@ -1,6 +1,7 @@
 // How a canvas is found and opened: the pieces of the Canvases page, of the search, of the menus and of the requests of
 // plugins and agents that need no component. The tab itself is `fileTabs.ts`; what a tab shows is `CanvasPanel`.
-import type { CanvasItem } from "#neoastra";
+import type { CanvasItem, WorkspaceSession } from "#neoastra";
+import type { SessionMenuEntry } from "../SessionTabMenu";
 import { canvasTab, closeFileTab, emptyFileTabs, fileTabKey, openFileTab, persistFileTabs, restoreFileTabs, sameFileTab, type FileTab, type FileTabs } from "../fileTabs";
 import { spaceShows, type Space } from "../spaces/spaces";
 
@@ -59,6 +60,34 @@ export const canvasMenuLimit = 4;
 export function canvasMenuItems(items: readonly CanvasItem[], scope: CanvasScope, limit = canvasMenuLimit): Readonly<{ items: readonly CanvasItem[]; more: boolean }> {
   const found = items.filter(item => canvasScope(item) === scope);
   return { items: found.slice(0, limit), more: found.length > limit };
+}
+
+/** The project of a scope of the Explorer, as the snapshot of the workspace has it. */
+export type CanvasScopeProject = Readonly<{ id: string; path: string; archived?: boolean }>;
+
+/**
+ * What a session canvas opened from the menu of a session row is about: the session of the row, with the project of the scope the
+ * row is listed under. That project is the one of the row, never the one that happens to be selected: a session of another project
+ * takes its own project, and a chat takes none. A project that is archived, or that is not the one of the session, is not named.
+ */
+export function sessionCanvasTarget(session: Pick<WorkspaceSession, "id" | "scopeKind" | "projectId">, scopeProject: CanvasScopeProject | null | undefined): CanvasTarget {
+  const named = scopeProject && !scopeProject.archived && session.scopeKind === "project" && session.projectId === scopeProject.id;
+  return { project: named ? { id: scopeProject.id, path: scopeProject.path } : null, sessionId: session.id };
+}
+
+/**
+ * What the menu of a session row offers of the canvases of plugins: the canvases about a session, a few lines and then the page of
+ * the canvases, after a separator; nothing when no plugin declares one. Each line opens its canvas for the session of the row
+ * (`sessionCanvasTarget`).
+ */
+export function sessionCanvasMenuEntries(items: readonly CanvasItem[], session: Pick<WorkspaceSession, "id" | "scopeKind" | "projectId">, scopeProject: CanvasScopeProject | null | undefined,
+  actions: Readonly<{ label: (title: string) => string; more: string; open: (item: CanvasItem, target: CanvasTarget) => void; openPage: () => void }>): SessionMenuEntry[] {
+  const menu = canvasMenuItems(items, "Session");
+  if (menu.items.length === 0) return [];
+  const target = sessionCanvasTarget(session, scopeProject);
+  return [{ key: "canvases", divider: true },
+    ...menu.items.map(item => ({ key: `canvas:${item.pluginKey}/${item.id}`, label: actions.label(item.title), icon: "canvases" as const, onSelect: () => actions.open(item, target) })),
+    ...(menu.more ? [{ key: "canvases-more", label: actions.more, icon: "canvases" as const, onSelect: actions.openPage }] : [])];
 }
 
 /** What the palette and the search list for a canvas: the same row, by its words. */

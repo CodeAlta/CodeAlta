@@ -2,8 +2,9 @@ import { SubAgentBadge } from "../SessionReference";
 import type { WorkspaceSession } from "#neoastra";
 import { useContext, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
+import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { ProviderBrandsContext, ProviderIcon, useProviderBrand } from "../ProviderIcon";
-import { SessionTabMenu } from "../SessionTabMenu";
+import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
 import { isSessionContextKey, isSessionDeleteKey, type SessionAction } from "../sessionRowActions";
 import { plainTitle } from "../sessionTitle";
@@ -65,12 +66,17 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
 /**
  * The sessions of an open scope of the Explorer that is not the selected one. A row opens its session, which
  * makes its scope the selected one; renaming and deleting do the same first, as they act on the selected session.
+ * The lines that plugins add to the menu of a row are those of that row: they are read and they act for its session
+ * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
+ * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, more, extended, access, marks, onAction, deleteAsks = true, onMore, onFewer, tree }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, menuEntries, deleteAsks = true, onMore, onFewer, tree }: {
   /** The sessions listed, and what stands for the sub-agents that are not. */
   entries: readonly SessionListEntry[];
   /** Whether the scope is the global sessions, and not a project. */
   global: boolean;
+  /** The project of the scope, which the lines of plugins in the menu of a row are asked about; null for the global sessions. */
+  projectId: string | null;
   /** How many more sessions the scope has than the ones listed. */
   more: number;
   /** Whether more rows than at first are shown. */
@@ -80,6 +86,8 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
+  /** What the menu of a row has after its own lines and before those of plugins, for the session of that row. */
+  menuEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
   /** Whether deleting a session asks first, which its menu says. */
   deleteAsks?: boolean;
   onMore: () => void;
@@ -90,6 +98,8 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
   const { t } = useShellLanguage();
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
   const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
+  // One menu is open at a time: its row is what plugins are asked about, whatever project and session are selected.
+  const pluginEntries = usePluginMenuEntries("SessionMenu", menu ? { projectId, sessionId: menu.id } : null);
   return <div className="session-rail"><div className="session-list">
     {entries.map(entry => {
       if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
@@ -128,6 +138,8 @@ export function ExplorerSessions({ entries, global, more, extended, access, mark
             { key: "open", label: t("Open session"), icon: "open", onSelect: () => onAction(session, "open") },
             { key: "rename", label: t("Rename…"), icon: "edit", disabled: !allowed.rename, onSelect: () => onAction(session, "rename") },
             { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
+            ...(menuEntries?.(session) ?? []),
+            ...pluginEntries,
           ]} />}
       </div>;
     })}

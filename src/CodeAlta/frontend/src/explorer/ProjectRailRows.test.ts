@@ -122,7 +122,7 @@ test("the sessions of an open scope are rows that open them, with more on demand
   const tree = { toggle: never, more: never, fewer: never };
   const list = (rows: typeof all, collapsed: readonly string[] = [], subCount = 4, extra = 0) =>
     sessionList(rows, { count: 50, subCount, active: null, extra: () => extra, collapsed: id => collapsed.includes(id) }).entries;
-  const renderList = (entries: ReturnType<typeof list>, more = 0, extended = false, global = false) => renderToStaticMarkup(createElement(ExplorerSessions, { entries, global, more, extended, tree,
+  const renderList = (entries: ReturnType<typeof list>, more = 0, extended = false, global = false) => renderToStaticMarkup(createElement(ExplorerSessions, { entries, global, projectId: global ? null : "a", more, extended, tree,
     access: () => ({ rename: true, delete: true }), marks: row => createElement("i", null, `marks of ${row.id}`), onAction: never, onMore: never, onFewer: never }));
   const render = (rows: typeof all, more: number, extended: boolean, global = false) => renderList(list(rows), more, extended, global);
   const html = render(all, 0, false);
@@ -155,7 +155,7 @@ test("a session that has sub-agents hides them and shows them, and lists more of
   const all = sessionHierarchy(snapshot([project("a", "Alpha")], sessions).sessions, sessions, "a");
   const tree = { toggle: never, more: never, fewer: never };
   const render = (collapsed: readonly string[], subCount: number, extra = 0) => renderToStaticMarkup(createElement(ExplorerSessions, {
-    entries: sessionList(all, { count: 50, subCount, active: null, extra: () => extra, collapsed: id => collapsed.includes(id) }).entries, global: false, more: 0, extended: false, tree,
+    entries: sessionList(all, { count: 50, subCount, active: null, extra: () => extra, collapsed: id => collapsed.includes(id) }).entries, global: false, projectId: "a", more: 0, extended: false, tree,
     access: () => ({ rename: true, delete: true }), marks: () => null, onAction: never, onMore: never, onFewer: never }));
   const open = render([], 4);
   const rowOf = (html: string, id: string) => html.split('class="session-row"').slice(1).find(row => row.includes(`title of ${id}`))!;

@@ -5,7 +5,7 @@ import { canvasTab, canvasesTab, changesTab, editorTab, emptyFileTabs, fileTabKe
 import { defaultSpace, type Space } from "../spaces/spaces";
 import {
   abandonedCanvas, addCanvasTabToSpace, bringCanvasTab, canvasCommandName, canvasCommands, canvasMenuItems, canvasRef, canvasRequestSpace, canvasScope, canvasStatusKey, canvasTabOf, closedCanvasTab,
-  defaultCanvasTarget, matchesCanvasCommand, newCanvasPrompt, openCanvases, removeCanvasTabFromSpace, showsCanvas, withCanvasStatus,
+  defaultCanvasTarget, matchesCanvasCommand, newCanvasPrompt, openCanvases, removeCanvasTabFromSpace, sessionCanvasMenuEntries, sessionCanvasTarget, showsCanvas, withCanvasStatus,
 } from "./canvasPages";
 
 const item = (id: string, scope: string, fields: Partial<CanvasItem> = {}): CanvasItem => ({ pluginKey: "global:tools", plugin: "Tools", package: "plugin:global:tools", id, title: id[0].toUpperCase() + id.slice(1),
@@ -55,6 +55,45 @@ test("a menu lists the first canvases of its scope and says when the page has mo
   assert.deepEqual(canvasMenuItems(items, "Session"), { items: [items[1]], more: false });
   assert.deepEqual(canvasMenuItems(items, "Project", 5).more, false);
   assert.deepEqual(canvasMenuItems([], "Session"), { items: [], more: false });
+});
+
+test("a session canvas opened from a row is about that session and the project of its row, never the selected one", () => {
+  const projectA = { id: "a", path: "/code/a", archived: false }, projectB = { id: "b", path: "/code/b", archived: false };
+  const chat = { id: "chat-1", scopeKind: "global", projectId: null }, ofB = { id: "b-1", scopeKind: "project", projectId: "b" }, ofA = { id: "a-1", scopeKind: "project", projectId: "a" };
+  // A chat has no project, whatever project is in front.
+  assert.deepEqual(sessionCanvasTarget(chat, null), { project: null, sessionId: "chat-1" });
+  assert.deepEqual(sessionCanvasTarget(chat, undefined), { project: null, sessionId: "chat-1" });
+  assert.deepEqual(sessionCanvasTarget(chat, projectA), { project: null, sessionId: "chat-1" }, "a chat does not borrow the project in front");
+  // A session of a project takes the project of its row: its id and its path.
+  assert.deepEqual(sessionCanvasTarget(ofB, projectB), { project: { id: "b", path: "/code/b" }, sessionId: "b-1" });
+  assert.deepEqual(sessionCanvasTarget(ofA, projectA), { project: { id: "a", path: "/code/a" }, sessionId: "a-1" }, "the selected scope, as it was");
+  // It is never given a project that is not its own, nor one that cannot be worked in.
+  assert.deepEqual(sessionCanvasTarget(ofB, projectA), { project: null, sessionId: "b-1" });
+  assert.deepEqual(sessionCanvasTarget(ofB, { ...projectB, archived: true }), { project: null, sessionId: "b-1" });
+  assert.deepEqual(sessionCanvasTarget(ofB, null), { project: null, sessionId: "b-1" });
+});
+
+test("the menu of a session row lists the session canvases after a separator, each for the session of the row", () => {
+  const opened: unknown[] = [];
+  let pages = 0;
+  const actions = { label: (title: string) => `Open ${title}`, more: "More…", open: (value: CanvasItem, target: unknown) => { opened.push([value.id, target]); }, openPage: () => { pages++; } };
+  const items = [item("status", "Application"), item("board", "Session"), item("steps", "Project"), item("notes", "Session")];
+  const ofB = { id: "b-1", scopeKind: "project", projectId: "b" };
+  const entries = sessionCanvasMenuEntries(items, ofB, { id: "b", path: "/code/b" }, actions);
+  assert.deepEqual(entries.map(entry => "divider" in entry ? "—" : `${entry.key}|${entry.label}|${entry.icon}`),
+    ["—", "canvas:global:tools/board|Open Board|canvases", "canvas:global:tools/notes|Open Notes|canvases"]);
+  for (const entry of entries) if (!("divider" in entry)) entry.onSelect();
+  assert.deepEqual(opened, [["board", { project: { id: "b", path: "/code/b" }, sessionId: "b-1" }], ["notes", { project: { id: "b", path: "/code/b" }, sessionId: "b-1" }]]);
+  // More than a menu lists: the page of the canvases is one line away.
+  const many = ["a", "b", "c", "d", "e"].map(id => item(id, "Session"));
+  const long = sessionCanvasMenuEntries(many, { id: "chat-1", scopeKind: "global", projectId: null }, null, actions);
+  assert.deepEqual(long.map(entry => "divider" in entry ? "—" : entry.label), ["—", "Open A", "Open B", "Open C", "Open D", "More…"]);
+  const last = long.at(-1)!;
+  if (!("divider" in last)) last.onSelect();
+  assert.equal(pages, 1);
+  // No session canvas, no line and no separator.
+  assert.deepEqual(sessionCanvasMenuEntries([item("status", "Application"), item("steps", "Project")], ofB, null, actions), []);
+  assert.deepEqual(sessionCanvasMenuEntries([], ofB, null, actions), []);
 });
 
 test("every canvas is a command, found by its words, refreshed with the declarations", () => {
