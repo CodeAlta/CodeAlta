@@ -9,6 +9,7 @@ using CodeAlta.Desktop.Automations;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -87,6 +88,43 @@ public sealed class AutomationHostTests
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Effort = "extreme" }, null), default)).Status);
         Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveAsync(new(Epoch, Input("x") with { Triggers = [new("sometimes", 0, 1, [], [], null, "opened", "trusted", null, null)] }, null), default)).Status);
         Assert.AreEqual(1, (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Count);
+    }
+
+    [TestMethod]
+    [DataRow("jira", "created", "created")]
+    [DataRow("jira", "updated", "updated")]
+    [DataRow("jira", "opened", "created")]
+    [DataRow("issue", "opened", "opened")]
+    [DataRow("pull_request", "opened", "opened")]
+    [DataRow("pull_request", "updated", "updated")]
+    public async Task Rpc_SavesAndReloadsTheEventOfItsTracker(string kind, string requestedEvent, string savedEvent)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var input = Input("Track an event") with
+        {
+            ProjectId = fixture.Project.Id,
+            Triggers = [new(kind, 0, 1, [], [], null, requestedEvent, "trusted", null, null)],
+        };
+
+        var saved = await fixture.Rpc.SaveAsync(new(Epoch, input, null), default);
+
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.GlobalPath), $"type = \"{kind}\", event = \"{savedEvent}\"");
+        var item = (await fixture.Rpc.RefreshAsync(new(Epoch), default)).Items.Single();
+        Assert.AreEqual(saved.Id, item.Id);
+        Assert.AreEqual((kind, savedEvent), (item.Triggers.Single().Type, item.Triggers.Single().Event));
+        Assert.AreEqual(0, fixture.Runner.Starts.Count, "Saving an event trigger does not run it.");
+        Assert.AreEqual(0, fixture.Commands.Count);
+    }
+
+    [TestMethod]
+    public async Task Rpc_StillRefusesAnUpdatedRepositoryIssue()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var input = Input("Track an issue") with { Triggers = [new("issue", 0, 1, [], [], null, "updated", "trusted", null, null)] };
+
+        Assert.AreEqual(("refused", "An issue trigger starts when an issue is opened."), Outcome(await fixture.Rpc.SaveAsync(new(Epoch, input, null), default)));
+        Assert.AreEqual(0, fixture.Service.Snapshot.Entries.Count);
     }
 
     [TestMethod]
@@ -415,6 +453,113 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    [DataRow("default", "create")]
+    [DataRow("default", "enable")]
+    [DataRow("default", "run")]
+    [DataRow("acceptEdits", "create")]
+    [DataRow("acceptEdits", "enable")]
+    [DataRow("acceptEdits", "run")]
+    [DataRow("unknown-session", "create")]
+    [DataRow("unknown-session", "enable")]
+    [DataRow("unknown-session", "run")]
+    public Task SameAsCreator_RefusesDeferredAutomationWorkFromAReviewedOrUnknownSession(string mode, string verb)
+        => WithPermissionCallerAsync(mode, async (fixture, host, caller) =>
+        {
+            // User-owned automations have no inherited mode. Even a disabled one cannot be enabled or run
+            // to hand work to a less-reviewed session; the user can still manage it in the window.
+            var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("By the user") with { Enabled = false }, null), default);
+            Assert.AreEqual("ok", saved.Status, saved.Message);
+            var before = File.ReadAllText(fixture.GlobalPath);
+            fixture.Runner.Refuse = "The admission guard should not reach the runner.";
+            var arguments = verb == "create"
+                ? new[] { "automation", "create", "--name", "Deferred", "--chat", "--trigger", "daily@09:00", "--content", "Work." }
+                : new[] { "automation", verb, saved.Id! };
+
+            var denied = await fixture.Run(arguments, caller: caller);
+
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.Code, denied.Text);
+            StringAssert.Contains(denied.Text, "automation.permissionDenied");
+            StringAssert.Contains(denied.Text, "The user creates, enables or runs it in the Automations tab.");
+            Assert.AreEqual(before, File.ReadAllText(fixture.GlobalPath), "Refusal changes no definition or enabled state.");
+            Assert.AreEqual(0, fixture.Runner.Starts.Count);
+            Assert.AreEqual(0, fixture.Commands.Count);
+            Assert.AreEqual(0, fixture.Service.Runs(null, 10).Count);
+            Assert.IsFalse(fixture.Service.Snapshot.Find(saved.Id!)!.Definition.Enabled);
+        });
+
+    [TestMethod]
+    [DataRow("bypassPermissions", true, true, false, false)]
+    [DataRow("default", true, false, false, false)]
+    [DataRow("default", false, true, true, false)]
+    [DataRow("default", true, true, false, true)]
+    public Task SameAsCreator_PreservesBypassDefaultLegacyAndNoSessionCallers(string mode, bool modes, bool inherit, bool review, bool noSession)
+        => WithPermissionCallerAsync(mode, async (fixture, host, sessionCaller) =>
+        {
+            var caller = noSession ? AltaCallerIdentity.Cli : sessionCaller;
+            var created = await fixture.Run(["automation", "create", "--name", "Compatible", "--chat", "--disabled", "--trigger", "daily@09:00", "--content", "Work."], caller: caller);
+            Assert.AreEqual(AltaExitCodes.Success, created.Code, created.Text);
+            var id = Text(Of(created.Records, "alta.automation.created").Single(), "id")!;
+            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: caller)).Code);
+            // Reaching a deliberately refusing fake proves admission without executing a session or command.
+            fixture.Runner.Refuse = "Controlled runner refusal.";
+            var run = await fixture.Run(["automation", "run", id], caller: caller);
+            Assert.AreEqual(AltaExitCodes.Failure, run.Code, run.Text);
+            StringAssert.Contains(run.Text, "Controlled runner refusal.");
+            Assert.AreEqual(1, fixture.Runner.Starts.Count);
+            Assert.AreEqual(0, fixture.Commands.Count);
+        }, sessionPermissionModes: modes, inherit: () => inherit, review: () => review);
+
+    [TestMethod]
+    public Task SameAsCreator_ChecksEveryCreateShapeWithoutWeakeningCommandReviewOrNonStartingActions()
+        => WithPermissionCallerAsync(SessionPermissionModes.Ask, async (fixture, host, caller) =>
+        {
+            foreach (var extra in new string[][] { [], ["--disabled"], ["--trigger", "issue@opened"], ["--trigger", "jira@created"], ["--trigger", "daily@09:00", "--disabled"] })
+            {
+                var denied = await fixture.Run(["automation", "create", "--name", "Deferred", "--chat", "--content", "Work.", .. extra], caller: caller);
+                Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.Code, denied.Text);
+                StringAssert.Contains(denied.Text, "automation.permissionDenied");
+            }
+
+            var command = await fixture.Run(["automation", "create", "--name", "Command", "--chat", "--trigger", "command@never-run", "--content", "Work."], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, command.Code, command.Text);
+            StringAssert.Contains(command.Text, "automation.commandDenied", "The raw command review guard remains independent.");
+            Assert.AreEqual(0, fixture.Service.Snapshot.Entries.Count);
+            var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("User command") with
+            {
+                Enabled = false, Triggers = [new("command", 0, 1, [], [], null, "opened", "trusted", "never-run", null)],
+            }, null), default);
+            Assert.AreEqual("ok", saved.Status, saved.Message);
+            var enable = await fixture.Run(["automation", "enable", saved.Id!], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+            StringAssert.Contains(enable.Text, "automation.commandDenied");
+            foreach (var arguments in new string[][] { ["automation", "list"], ["automation", "show", saved.Id!], ["automation", "runs"], ["automation", "disable", saved.Id!], ["automation", "delete", saved.Id!] })
+                Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(arguments, caller: caller)).Code, string.Join(' ', arguments));
+            Assert.AreEqual(0, fixture.Runner.Starts.Count);
+            Assert.AreEqual(0, fixture.Commands.Count);
+        });
+
+    [TestMethod]
+    public async Task SameAsCreator_ReadsCurrentSettingsButNeverReliesOnFutureDefaults()
+    {
+        var inherit = false;
+        var review = true;
+        await WithPermissionCallerAsync(SessionPermissionModes.Ask, (fixture, host, caller) =>
+        {
+            var runtime = host.RuntimeService;
+            Assert.IsTrue(runtime.AcceptsDeferredPromptFrom(caller.SourceSessionId));
+            inherit = true;
+            Assert.IsFalse(runtime.AcceptsDeferredPromptFrom(caller.SourceSessionId), "Even matching reviewed defaults may change before the trigger runs.");
+            review = false;
+            Assert.IsFalse(runtime.AcceptsDeferredPromptFrom(caller.SourceSessionId), "An explicit creator mode remains restrictive.");
+            Assert.IsFalse(runtime.AcceptsDeferredPromptFrom("unknown-session"), "An unknown caller is not the application's bypass default.");
+            Assert.IsTrue(runtime.AcceptsDeferredPromptFrom(null), "A user's no-session client remains outside agent inheritance.");
+            inherit = false;
+            Assert.IsTrue(runtime.AcceptsDeferredPromptFrom(caller.SourceSessionId));
+            return Task.CompletedTask;
+        }, inherit: () => inherit, review: () => review, providerMode: SessionPermissionModes.Ask);
+    }
+
+    [TestMethod]
     public void TriggerText_ReadsWhatItWrites_AndSaysWhatIsWrong()
     {
         foreach (var text in new[]
@@ -607,13 +752,60 @@ public sealed class AutomationHostTests
     // The records of one type: a command also writes a record of its result.
     private static JsonElement[] Of(List<JsonElement> records, string type) => [.. records.Where(record => Text(record, "type") == type)];
 
+    // Only in-memory provider sessions and disposable catalog/configuration roots: no model sends, credentials,
+    // plugins, automation timers or real commands. The caller uses the actual runtime's permission policy.
+    private static async Task WithPermissionCallerAsync(string mode, Func<Fixture, CodeAltaHost, AltaCallerIdentity, Task> test,
+        bool sessionPermissionModes = true, Func<bool>? inherit = null, Func<bool>? review = null, string? providerMode = null)
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-automation-permissions-").FullName;
+        try
+        {
+            var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
+            var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+            var home = Directory.CreateDirectory(Path.Combine(root, "home")).FullName;
+            var builtin = Directory.CreateDirectory(Path.Combine(root, "builtin")).FullName;
+            var provider = new RunnerProvider();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = project, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                SessionPermissionModes = sessionPermissionModes, InheritPermissionModePolicy = inherit ?? (() => true),
+                ReviewOwnedPermissionsPolicy = review ?? (() => false),
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor with { DefaultPermissionMode = providerMode }, () => new RunnerRuntime(provider)),
+            });
+            var runtime = host.RuntimeService;
+            var sessionId = "unknown-session";
+            if (mode != sessionId)
+            {
+                sessionId = (await runtime.CreateGlobalSessionAsync(new SessionExecutionOptions
+                {
+                    ProviderId = provider.Descriptor.ProviderId, WorkingDirectory = global, PermissionMode = mode,
+                    OnPermissionRequest = runtime.Permissions.OwnedDefaultPermissionHandler,
+                }, "Automation caller")).SessionId;
+            }
+
+            await using var fixture = await Fixture.CreateAsync(runtime: runtime, policy: new AltaCommandReviewPolicy(AcceptsCommands: true)
+            {
+                AcceptsCommandsOf = id => runtime.GetPermissionPolicy(id ?? string.Empty) == SessionPermissionPolicy.Approve,
+            });
+            await test(fixture, host, new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId });
+            Assert.IsFalse(provider.Sends.Reader.TryRead(out _), "The permission fixture never sends to a model.");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     // The automations of an application whose sessions are fakes, over a real project catalog: the page's service
     // and the alta commands on the same automations.
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy, SessionRuntimeService? runtime)
         {
             (_root, Project, Other) = (root, project, other);
             Service = new AutomationService(GlobalPath, token => projects.LoadAsync(token), new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false),
@@ -621,6 +813,7 @@ public sealed class AutomationHostTests
             Rpc = new AutomationsService(Service, projects, Epoch);
             var services = new AltaServiceCollection().Add(projects).Add<IAltaAutomations>(new DesktopAltaAutomations(Service, projects, acceptsCommands));
             if (policy is not null) services.Add(policy);
+            if (runtime is not null) services.Add(runtime);
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -638,13 +831,13 @@ public sealed class AutomationHostTests
         public AltaCallerIdentity Session { get; }
 
         /// <param name="acceptsCommands">False for a host that has the user review the commands of its sessions.</param>
-        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null)
+        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null, SessionRuntimeService? runtime = null)
         {
             var root = Directory.CreateTempSubdirectory("codealta-automation-host-").FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
-            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy);
+            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy, runtime);
             await fixture.Service.RefreshAsync();
             return fixture;
         }

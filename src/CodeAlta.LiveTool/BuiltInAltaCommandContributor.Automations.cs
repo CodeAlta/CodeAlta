@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.Orchestration.Runtime;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
@@ -38,6 +39,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             group,
             "An automation has a name, a prompt and triggers; each run starts a new session in its project, or a chat, and sends it the prompt. It is kept in the configuration of the user or of its project, so it outlives this session, unlike a reminder.",
             "A session started by an automation finds it with `alta automation current`. Such a session reads the automations; it does not run, create, enable, disable or delete one.",
+            "With Sessions created by agents set to Same as the session that creates them, a session whose actions are reviewed cannot create, enable or run an automation (`automation.permissionDenied`): its future sessions do not retain the caller's permission mode. The user does this in the Automations tab.",
             "`allowed` is false for an automation that came with the repository of a project and that the user has not allowed yet in the Automations tab: its triggers start nothing until then. Only the user allows it.",
             "Triggers: `daily@09:00` (several times: `daily@09:00,17:30`), `hourly@15` (minute 15; every 2 hours: `hourly@15/2`), `weekly@mon,thu@08:30`, `cron@0 9 * * 1-5` (local time), `issue@opened`, `pull_request@opened`, `pull_request@updated` (new commits), `jira@created`, `jira@updated` (an issue of the Jira project of the project, when its configuration names one). No trigger: run it with `alta automation run`.",
             "A command trigger, `command@<command line>`, keeps a command running that waits for something, such as `command@gh run watch 123 --exit-status`: each time the command ends with the exit code 0 the automation starts a session, with what the command printed after the prompt, and the command is started again; another exit code starts nothing. Everything after `command@` is the command, run in the shell of `shell_command`, in the folder of the project (the home folder for a chat). A host that has the user review the commands of its sessions refuses it (`automation.commandDenied`): the user then creates it in the Automations tab.",
@@ -174,6 +176,13 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static int AutomationSessionDenied(AltaCommandContext context)
         => PermissionDenied(context, "automation.startedByAutomation",
             "A session started by an automation does not run or change automations. Say what you would do: the user decides.");
+
+    private static bool AcceptsAutomationPrompt(AltaCommandContext context)
+        => context.Services.Get<SessionRuntimeService>()?.AcceptsDeferredPromptFrom(NormalizeOptionalText(context.Caller.SourceSessionId)) != false;
+
+    private static int AutomationPermissionDenied(AltaCommandContext context)
+        => PermissionDenied(context, "automation.permissionDenied",
+            "Sessions created by agents must keep their creator's permission policy, but an automation's future sessions do not retain it. Only a known session that bypasses permissions may create, enable or run one. The user creates, enables or runs it in the Automations tab.");
 
     private static async ValueTask<int> HandleAutomationListAsync(AltaCommandContext context, string? projectRef, bool chats)
     {
@@ -316,6 +325,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.missingAutomation", "An automation id is required.", "alta automation run");
         }
 
+        if (!AcceptsAutomationPrompt(context)) return AutomationPermissionDenied(context);
+
         if (FindAutomation(automations, reference) is not { } automation || await automations.RunAsync(automation.Id, context.CancellationToken).ConfigureAwait(false) is not { } run)
         {
             return AutomationNotFound(context, reference);
@@ -401,6 +412,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             return AutomationCommandDenied(context, null);
         }
 
+        if (!AcceptsAutomationPrompt(context)) return AutomationPermissionDenied(context);
+
         var change = await automations.CreateAsync(new AltaAutomationRequest(name, prompt)
         {
             ProjectId = projectId,
@@ -453,6 +466,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             return AutomationCommandDenied(context, null);
         }
+
+        if (verb == "enable" && !AcceptsAutomationPrompt(context)) return AutomationPermissionDenied(context);
 
         var result = await change(automations, automation.Id).ConfigureAwait(false);
         if (result.Status == "not_found")

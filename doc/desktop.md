@@ -2970,6 +2970,8 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   issue. Its authors are the people of the Jira project, so every event starts it. The prompt is followed by
   the service and the project, the key of the issue, its title, type, status, author and link. The card names
   the Jira project, or says why nothing is seen: the project names no Jira, or nobody is signed in.
+  The editor saves Jira's `created` and `updated` events as such; repository issue and pull request
+  triggers keep their separate `opened` event.
 - **Commands.** `command` keeps a command running: an executable that waits for something and ends when
   it happened (`gh run watch 123 --exit-status`, a script that waits for a file). `command` is the command
   line, one line of at most 2,048 characters; `cwd` is the folder it runs in, a path from the folder of
@@ -3585,6 +3587,19 @@ route: a session then neither creates nor reaches (`alta session send`, `queue`,
 reminder for another session) a session whose policy is looser than its own
 (`SessionRuntimeService.AcceptsPromptFrom`; a session that is not attached has the mode saved with it). A
 caller that is no session is not concerned.
+
+The same setting also guards deferred automation prompts. Under **Same as the session that creates
+them**, `alta automation create` (even disabled or without triggers), `enable` and `run` refuse a caller
+that asks for review (`default` or `acceptEdits`), or whose session is no longer known
+(`automation.permissionDenied`, `SessionRuntimeService.AcceptsDeferredPromptFrom`). Only a known live
+session that bypasses permissions may use those routes. Automations do not store a creator's mode;
+their sessions use the provider/application defaults at run time, which may change before a trigger
+fires. Refusing admission is deliberately conservative even when today's defaults ask as much as the
+caller. The user can create, enable or run it in the Automations tab instead; agents may still list,
+disable or delete one. **Bypass permissions** (the default), hosts without per-session modes, no-session
+clients and existing automation definitions keep their previous behavior; no configuration migration
+or retroactive change to saved automations is made. The independent command-trigger review guard
+and the restriction on sessions started by automations still apply.
 
 A session that waits for an answer counts among the sessions that wait for the user in the activity of
 its space (`SpaceSessionActivity.Waiting`). The page marks it with `WaitingBadge` in the Explorer (its

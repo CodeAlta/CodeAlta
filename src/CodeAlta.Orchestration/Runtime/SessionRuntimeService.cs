@@ -234,6 +234,24 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return policy <= GetPermissionPolicy(senderSessionId);
     }
 
+    /// <summary>
+    /// Gets whether a session may arrange a prompt whose future session does not retain its permission mode,
+    /// such as an automation. With <see cref="InheritPermissionMode"/>, only a known, live session that bypasses
+    /// permissions may do so: the future provider and host defaults can change before the prompt runs.
+    /// </summary>
+    /// <param name="senderSessionId">The session arranging the prompt, or null when no session does.</param>
+    /// <returns>
+    /// False for a reviewed or unknown session when per-session inheritance is enabled. Hosts without that
+    /// policy and callers that belong to no session retain their existing behavior.
+    /// </returns>
+    /// <remarks>This is prompt admission at the time of the call, not command approval or a durable execution grant.</remarks>
+    public bool AcceptsDeferredPromptFrom(string? senderSessionId)
+    {
+        if (!_sessionPermissionModes || InheritPermissionMode?.Invoke() != true || string.IsNullOrWhiteSpace(senderSessionId)) return true;
+        return _entries.TryGetValue(senderSessionId, out var entry) && !entry.IsTerminated && !entry.Attachment.IsRetiring
+            && Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), !_autoApproveOwnedPermissions()) == SessionPermissionPolicy.Approve;
+    }
+
     private string? ConfiguredPermissionMode(string? providerKey)
     {
         if (string.IsNullOrWhiteSpace(providerKey)) return null;

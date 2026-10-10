@@ -301,7 +301,7 @@ internal sealed class AutomationsService
             At = times,
             Days = days,
             Expression = kind == AutomationTriggerKind.Cron ? string.Join(' ', (item.Expression ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)) : null,
-            Event = item.Event is "updated" ? "updated" : "opened",
+            Event = item.Event is "updated" ? "updated" : kind == AutomationTriggerKind.Jira ? "created" : "opened",
             Authors = item.Authors == "anyone" ? AutomationAuthors.Anyone : AutomationAuthors.Trusted,
             Command = kind == AutomationTriggerKind.Command ? (item.Command ?? string.Empty).Trim() : null,
             Folder = kind == AutomationTriggerKind.Command ? Blank(item.Folder) : null,
@@ -321,7 +321,7 @@ internal sealed record AutomationsRequest(string? ExpectedEpoch);
 /// <param name="At">Daily and weekly: the times of day, <c>HH:mm</c>.</param>
 /// <param name="Days">Weekly: <c>sun</c> to <c>sat</c>.</param>
 /// <param name="Expression">Cron: the five fields.</param>
-/// <param name="Event">Issue and pull request: <c>opened</c> or <c>updated</c>.</param>
+/// <param name="Event">Issue: <c>opened</c>; pull request: <c>opened</c> or <c>updated</c>; Jira: <c>created</c> or <c>updated</c>.</param>
 /// <param name="Authors">Issue and pull request: <c>trusted</c> or <c>anyone</c>.</param>
 /// <param name="Command">Command: the command line the automation keeps running.</param>
 /// <param name="Folder">Command: the folder it runs in, from the folder of the project; null for that folder.</param>
