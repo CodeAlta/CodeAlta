@@ -16,7 +16,7 @@ Single source of truth for the overall project: read and follow `../AGENTS.md`.
 - `site/menu.yml` -> top navigation
 - `site/img/` -> site images, screenshots and demo videos
 - `site/css/codealta.scss` -> site styles, bundled after the shared template styles
-- `site/.lunet/js/codealta.js` -> site script (Desktop / TUI switch, home logo animation)
+- `site/.lunet/js/codealta.js` -> site script (Desktop / TUI switch, scroll-driven homepage showcase)
 - `site/config.scriban` -> site configuration and the `alta_shot` helper
 - `site/.lunet/build/**` -> generated output; do not edit by hand
 
@@ -36,6 +36,11 @@ Run from this folder after changing `site/**`:
 lunet build
 lunet serve
 ```
+
+The homepage progressively enhances ordinary feature sections into a sticky screenshot story on roomy
+screens. Preserve native scrolling, anchor/keyboard navigation and the in-flow screenshots used without
+JavaScript, on small/short screens, when printing and with reduced motion. Check actual wide and narrow
+browser rendering, keyboard navigation and the reduced-motion and no-JavaScript fallbacks.
 
 ## Content Conventions
 

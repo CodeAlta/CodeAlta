@@ -154,8 +154,18 @@
 // Hero ------------------------------------------------------------------------
 
 .alta-hero {
-  padding: 3.5rem 0 1rem;
+  padding: 1.75rem 0 3rem;
   text-align: center;
+
+  &::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset: -5rem -15% 5rem;
+    background: radial-gradient(ellipse at 35% 20%, rgba(0, 209, 255, .09), transparent 55%),
+      radial-gradient(ellipse at 75% 35%, rgba(168, 85, 247, .09), transparent 55%);
+    pointer-events: none;
+  }
 }
 
 .codealta-ascii-logo {
@@ -189,15 +199,22 @@
   -webkit-background-clip: text;
   background-clip: text;
   filter: drop-shadow(0 0 .4rem rgba(0, 209, 255, .26));
+  animation: alta-logo-colors 12s ease-in-out infinite alternate;
+}
+
+@keyframes alta-logo-colors {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
 }
 
 .alta-hero-title {
-  max-width: 50rem;
-  margin: 2.25rem auto .9rem;
-  font-size: clamp(1.9rem, 4.2vw, 3.1rem);
+  max-width: 62rem;
+  margin: 2rem auto 1rem;
+  font-size: clamp(2.1rem, 4.3vw, 3.5rem);
   font-weight: 800;
   line-height: 1.1;
   letter-spacing: -.02em;
+  padding-bottom: 0;
 }
 
 .alta-hero-lead {
@@ -212,7 +229,8 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: .85rem;
-  margin-top: 1.9rem;
+  align-items: center;
+  margin-top: 1.5rem;
 
   .btn {
     border-radius: 999px;
@@ -224,9 +242,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   justify-items: center;
-  gap: .9rem;
-  max-width: 36rem;
-  margin: 2.25rem auto 0;
+  gap: .65rem;
+  max-width: 35rem;
+  margin: 1.4rem auto 0;
   text-align: left;
 
   > * {
@@ -237,17 +255,18 @@
 // The desktop app is the one to install: its card is larger and framed by the gradient.
 .alta-install-card.alta-install-primary {
   position: relative;
-  padding: 1.1rem 1.25rem .5rem;
-  border: 2px solid transparent;
+  padding: .8rem 1.1rem .5rem;
+  border: 1px solid transparent;
   background: linear-gradient(var(--lunet-color-surface-1), var(--lunet-color-surface-1)) padding-box, var(--alta-gradient) border-box;
   box-shadow: 0 1rem 2.8rem color-mix(in srgb, var(--alta-cyan) 22%, transparent), 0 0 3rem color-mix(in srgb, var(--alta-purple) 14%, transparent);
 
   .alta-install-label {
-    font-size: 1.15rem;
+    font-size: .82rem;
+    color: var(--bs-secondary-color);
   }
 
   pre {
-    font-size: 1.05rem;
+    font-size: .98rem;
   }
 }
 
@@ -772,10 +791,252 @@ a.alta-card,
 @media (prefers-reduced-motion: reduce) {
   .logo-alta {
     background-position: 50% 50%;
+    animation: none;
   }
 
   .alta-card,
   .alta-chip {
     transition: none;
+  }
+}
+
+// Screenshot-led homepage. Native scrolling drives the story; all chapters remain in the document.
+@media (prefers-reduced-motion: no-preference) {
+  :root:has(.alta-home) { scroll-behavior: smooth; }
+}
+.alta-scroll-brand {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 3.5rem;
+  background: color-mix(in srgb, var(--lunet-color-surface-1) 94%, transparent);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--alta-card-border);
+  animation: alta-brand-in .25s ease-out;
+
+  &[hidden] { display: none; }
+  a { display: inline-flex; align-items: center; gap: .6rem; text-decoration: none; }
+  img { width: 30px; height: 30px; }
+  .alta-wordmark { font-size: 1.45rem; font-weight: 750; letter-spacing: -.04em; }
+  .logo-code { color: var(--bs-emphasis-color); }
+}
+@keyframes alta-brand-in { from { opacity: 0; transform: translateY(-.35rem); } to { opacity: 1; transform: none; } }
+.alta-home-section { margin-block: clamp(4rem, 7vw, 7rem); }
+.alta-home :focus-visible {
+  // The shared template resets :focus with !important; restore visible keyboard focus here.
+  outline: 2px solid var(--bs-link-color) !important;
+  outline-offset: 4px;
+}
+.alta-home .alta-section-head h2, .alta-terminal-copy h2, .alta-home-close h2 {
+  font-size: clamp(1.85rem, 3vw, 2.65rem);
+  letter-spacing: -.035em;
+}
+.alta-github-link { color: var(--bs-body-color); font-weight: 600; padding: .5rem; text-decoration: none; }
+.alta-github-link:hover { color: var(--lunet-color-cyan); }
+.alta-trust-row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: .65rem 1.6rem;
+  margin-top: 1.75rem;
+  font-size: .86rem;
+  color: var(--bs-secondary-color);
+
+  span { display: inline-flex; align-items: center; gap: .4rem; }
+  i { color: var(--lunet-color-cyan); }
+  strong { color: var(--bs-body-color); font-weight: 600; }
+}
+.alta-privacy-note { color: var(--bs-secondary-color); font-size: .78rem; margin: .5rem 0 0; }
+.alta-explore { padding-top: 1rem; scroll-margin-top: 5rem; }
+#install, #desktop-or-tui { scroll-margin-top: 6rem; }
+.alta-story-index {
+  display: flex;
+  gap: .15rem;
+  padding: .4rem;
+  margin-bottom: 2.5rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 1rem;
+  background: var(--alta-card-bg);
+  backdrop-filter: blur(16px);
+
+  a {
+    display: flex;
+    flex: 1 1 auto;
+    justify-content: center;
+    align-items: center;
+    gap: .5rem;
+    padding: .8rem .25rem;
+    border: 1px solid transparent;
+    border-radius: .65rem;
+    color: var(--bs-secondary-color);
+    font-size: .85rem;
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+    transition: background-color .15s, color .15s;
+  }
+  span { flex: none; font: .7rem var(--bs-font-monospace); color: var(--bs-secondary-color); }
+  a:hover { background: var(--lunet-color-surface-2); color: var(--bs-body-color); }
+  a[aria-current="step"] {
+    color: var(--bs-body-color);
+    border-color: color-mix(in srgb, var(--lunet-color-cyan) 40%, var(--alta-card-border));
+    background: color-mix(in srgb, var(--lunet-color-cyan) 12%, var(--lunet-color-surface-1));
+  }
+  a[aria-current="step"] span { color: var(--lunet-color-cyan); }
+}
+.alta-story-step {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
+  align-items: center;
+  gap: 2.5rem;
+  margin-bottom: 5rem;
+  scroll-margin-top: 11rem;
+}
+.alta-story-copy {
+  h3 { font-size: clamp(1.9rem, 2.7vw, 2.8rem); font-weight: 750; line-height: 1.12; letter-spacing: -.045em; margin: 0 0 1.2rem; }
+  > p:not(.alta-kicker) { margin-bottom: 1.5rem; color: var(--bs-secondary-color); font-size: 1.02rem; line-height: 1.7; }
+  .alta-kicker { font-size: .7rem; letter-spacing: .09em; margin-bottom: 1.25rem; }
+  .alta-kicker span { margin-right: .6rem; font-family: var(--bs-font-monospace); }
+  > a { font-size: .9rem; font-weight: 600; text-decoration: none; }
+  > a:hover { text-decoration: underline; }
+}
+.alta-story-shot img, .alta-story-frame img { aspect-ratio: 8 / 5; object-fit: contain; background: #1d2228; }
+.alta-story-stage[hidden] { display: none; }
+.alta-scroll-story.is-enhanced {
+  .alta-story-index { position: sticky; top: 4.5rem; z-index: 2; }
+  .alta-story-layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 8fr); gap: 2.5rem; align-items: start; }
+  .alta-story-step { display: flex; align-items: center; min-height: 75svh; margin: 0; padding-block: 4rem; }
+  .alta-story-copy { transform: translateY(1rem); transition: transform .6s ease; }
+  .is-current .alta-story-copy { transform: none; }
+  // Keep the original alternatives in reading order for assistive technology.
+  .alta-story-shot { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
+  .alta-story-stage {
+    position: sticky;
+    top: 10rem;
+    display: grid;
+    width: 100%;
+    max-width: calc((100svh - 14rem) * 1.6);
+    justify-self: center;
+    isolation: isolate;
+    &::before {
+      content: "";
+      position: absolute;
+      inset: -3rem;
+      z-index: -1;
+      background: radial-gradient(ellipse at 20% 40%, rgba(0, 209, 255, .12), transparent 65%), radial-gradient(ellipse at 80% 60%, rgba(168, 85, 247, .12), transparent 65%);
+      pointer-events: none;
+    }
+  }
+  .alta-story-frame {
+    grid-area: 1 / 1;
+    opacity: 0;
+    transform: translateY(1.25rem) scale(.98);
+    transition: opacity .55s ease, transform .65s cubic-bezier(.2, .7, .2, 1);
+    pointer-events: none;
+    &.is-current { opacity: 1; transform: none; z-index: 1; }
+  }
+}
+.alta-highlight-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+.alta-highlight {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 1.25rem;
+  background: var(--alta-card-bg);
+
+  img { display: block; width: 100%; height: auto; margin-top: auto; border-top: 1px solid var(--alta-card-border); }
+}
+.alta-highlight-copy {
+  padding: clamp(1.2rem, 3vw, 2rem);
+  h3 { font-size: 1.6rem; letter-spacing: -.03em; font-weight: 700; }
+  p { color: var(--bs-secondary-color); }
+  a { font-size: .9rem; font-weight: 600; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+}
+.alta-workflow-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+
+  a {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .5rem .75rem;
+    padding: 1.2rem; border: 1px solid var(--alta-card-border); border-radius: 1rem;
+    color: var(--bs-body-color); text-decoration: none; background: var(--alta-card-bg);
+  }
+  a:hover { border-color: var(--lunet-color-cyan); }
+  i { color: var(--lunet-color-cyan); }
+  span { grid-column: 2; grid-row: 2; color: var(--bs-secondary-color); font-size: .9rem; }
+  i:last-child { grid-column: 3; grid-row: 1; font-size: .8rem; }
+}
+.alta-terminal-section {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 5fr);
+  align-items: center;
+  gap: clamp(2rem, 5vw, 4rem);
+
+  .alta-window { box-shadow: var(--alta-shadow); }
+}
+.alta-terminal-copy {
+  p { color: var(--bs-secondary-color); }
+  .alta-install-card { margin: 1.5rem 0 1rem; }
+  > a { font-size: .9rem; font-weight: 600; }
+}
+.alta-home-close {
+  padding: 3rem 1.5rem;
+  border: 1px solid var(--alta-card-border);
+  border-radius: 1.5rem;
+  text-align: center;
+  background: radial-gradient(ellipse at 50% 110%, color-mix(in srgb, var(--alta-indigo) 14%, transparent), transparent 65%);
+
+  > i { display: inline-block; margin-bottom: 1rem; font-size: 2rem; color: var(--lunet-color-cyan); }
+  p { color: var(--bs-secondary-color); }
+  .alta-closing-note { margin: 1.5rem 0 0; font-size: .85rem; }
+}
+@media (min-width: 1000px) and (max-width: 1399.98px) {
+  .alta-story-index a { font-size: .78rem; }
+  .alta-story-index span { display: none; }
+}
+@media (max-width: 999.98px) {
+  .alta-story-index { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .alta-story-step { grid-template-columns: 1fr; gap: 1.5rem; scroll-margin-top: 5rem; }
+  .alta-story-copy { max-width: 32rem; }
+  .alta-workflow-links { grid-template-columns: 1fr; }
+  .alta-terminal-section { grid-template-columns: 1fr; }
+}
+@media (max-width: 575.98px) {
+  .alta-hero { padding-top: .5rem; }
+  .alta-hero > .alta-kicker { font-size: .65rem; letter-spacing: .06em; }
+  .codealta-ascii-logo { font-size: clamp(.25rem, 1.15vw, .42rem); padding: .85rem .55rem; }
+  .alta-hero-title { margin-top: 1.5rem; }
+  .alta-hero-lead { font-size: 1rem; }
+  .alta-hero-actions { gap: .75rem; }
+  .alta-hero-actions .btn { padding-inline: 1rem; font-size: .9rem; }
+  .alta-install-card.alta-install-primary pre { font-size: .8rem; }
+  .alta-install-note { font-size: .76rem; }
+  .alta-trust-row { font-size: .78rem; gap: .5rem 1rem; }
+  .alta-story-index { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .alta-story-index a { font-size: .72rem; }
+  .alta-story-index span { display: none; }
+  .alta-story-step { margin-bottom: 4rem; }
+  .alta-highlight-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .alta-scroll-brand { animation: none; }
+  .alta-story-index a { transition: none; }
+  .alta-home .btn { transition: none; }
+}
+@media print {
+  .alta-story-stage, .alta-scroll-brand { display: none !important; }
+  .alta-scroll-story.is-enhanced {
+    .alta-story-index { position: static; }
+    .alta-story-layout, .alta-story-step { display: block; min-height: 0; padding: 0; }
+    .alta-story-copy { transform: none; }
+    .alta-story-shot { position: static; width: auto; height: auto; margin: 1rem 0 3rem; clip-path: none; }
   }
 }

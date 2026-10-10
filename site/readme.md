@@ -6,8 +6,16 @@ og_type: website
 
 <div class="alta-home">
 
-<section class="alta-hero">
-  <pre class="codealta-ascii-logo" aria-label="CodeAlta"><span class="logo-code">   ██████                  ██           </span><span class="logo-alta">     ██       ██    ██</span>
+<div class="alta-scroll-brand" data-alta-scroll-brand hidden>
+  <a href="#" aria-label="CodeAlta - back to top">
+    <img src="{{site.basepath}}/img/CodeAlta.svg" alt="" width="30" height="30">
+    <span class="alta-wordmark" aria-hidden="true"><span class="logo-code">Code</span><span class="logo-alta">Alta</span></span>
+  </a>
+</div>
+
+<section class="alta-hero" aria-labelledby="home-title">
+  <p class="alta-kicker">Open source · Local projects · Your choice of AI</p>
+  <pre class="codealta-ascii-logo" role="img" aria-label="CodeAlta"><span class="logo-code">   ██████                  ██           </span><span class="logo-alta">     ██       ██    ██</span>
 <span class="logo-code">  ██░░░░██                ░██           </span><span class="logo-alta">    ████     ░██   ░██</span>
 <span class="logo-code"> ██    ░░    ██████       ░██   █████   </span><span class="logo-alta">   ██░░██    ░██  ██████   ██████</span>
 <span class="logo-code">░██         ██░░░░██   ██████  ██░░░██  </span><span class="logo-alta">  ██  ░░██   ░██ ░░░██░   ░░░░░░██</span>
@@ -15,262 +23,194 @@ og_type: website
 <span class="logo-code">░░██    ██ ░██   ░██ ░██  ░██ ░██░░░░   </span><span class="logo-alta">░██░░░░░░██  ░██   ░██    ██░░░░██</span>
 <span class="logo-code"> ░░██████  ░░██████  ░░██████ ░░██████  </span><span class="logo-alta">░██     ░██  ███   ░░██  ░░████████</span>
 <span class="logo-code">  ░░░░░░    ░░░░░░    ░░░░░░   ░░░░░░   </span><span class="logo-alta">░░      ░░  ░░░     ░░    ░░░░░░░░</span></pre>
-  <h1 class="alta-hero-title">A <span class="alta-gradient-text">desktop workspace</span> for AI coding agents</h1>
-  <p class="alta-hero-lead">
-    CodeAlta Desktop runs coding agents on your local projects: sessions in tabs you can split, a code editor, terminals and git changes in one window, with the model providers, agent prompts, MCP tools and plugins you choose.
-  </p>
-  <p class="text-secondary">
-    <span class="alta-badge"><i class="bi bi-shield-check" aria-hidden="true"></i> No telemetry</span>
-    CodeAlta does not send usage analytics to its developers.
-  </p>
-  <div class="alta-hero-actions">
-    <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
-    <a href="#desktop-or-tui" class="btn btn-outline-secondary btn-lg"><i class="bi bi-window-split"></i> Desktop or TUI?</a>
-    <a href="https://github.com/CodeAlta/CodeAlta" class="btn btn-info btn-lg"><i class="bi bi-github"></i> GitHub</a>
-  </div>
-  <div class="alta-install">
+  <div class="alta-install" id="install">
     <div class="alta-install-card alta-install-primary">
-      <div class="alta-install-label"><i class="bi bi-window"></i> CodeAlta Desktop <span class="alta-install-tag">Recommended</span></div>
+      <div class="alta-install-label"><i class="bi bi-window" aria-hidden="true"></i> Install CodeAlta Desktop</div>
       <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta
 alta</code></pre>
     </div>
-    <p class="alta-install-note">For Windows, macOS and Linux. Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a>.</p>
-    <div class="alta-install-card alta-install-secondary">
-      <div class="alta-install-label"><i class="bi bi-terminal"></i> CodeAlta TUI <small>for the terminal</small></div>
+    <p class="alta-install-note">Windows, macOS &amp; Linux · Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a> · <a href="#desktop-or-tui">Prefer a terminal?</a></p>
+  </div>
+  <h1 class="alta-hero-title" id="home-title">Your agents. <span class="alta-gradient-text">One workspace.</span></h1>
+  <p class="alta-hero-lead">Run AI coding agents on your local projects. Keep conversations, code, terminals and git changes together - with the models and tools you choose.</p>
+  <div class="alta-hero-actions">
+    <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary"><i class="bi bi-rocket-takeoff" aria-hidden="true"></i> Get started</a>
+    <a href="#explore" class="btn btn-outline-secondary">Explore the workspace <i class="bi bi-arrow-down" aria-hidden="true"></i></a>
+    <a href="https://github.com/CodeAlta/CodeAlta" class="alta-github-link"><i class="bi bi-github" aria-hidden="true"></i> View on GitHub</a>
+  </div>
+  <div class="alta-trust-row">
+    <span><i class="bi bi-shield-check" aria-hidden="true"></i> <strong>No telemetry</strong></span>
+    <span><i class="bi bi-folder2-open" aria-hidden="true"></i> Your files stay yours</span>
+    <span><i class="bi bi-code-slash" aria-hidden="true"></i> BSD-2-Clause licensed</span>
+  </div>
+  <p class="alta-privacy-note">CodeAlta does not send usage analytics to its developers.</p>
+</section>
+
+<section class="alta-explore" id="explore" aria-labelledby="explore-title">
+  <div class="alta-section-head">
+    <span class="alta-kicker">See it in action</span>
+    <h2 id="explore-title">A place for the whole workflow.</h2>
+    <p>From the first prompt to the final diff. Scroll to step inside CodeAlta Desktop.</p>
+  </div>
+  <div class="alta-scroll-story" data-alta-story>
+    <nav class="alta-story-index" aria-label="Workspace features">
+      <a href="#feature-sessions"><span>01</span> Sessions</a>
+      <a href="#feature-code"><span>02</span> Code &amp; git</a>
+      <a href="#feature-canvases"><span>03</span> Canvases</a>
+      <a href="#feature-plugins"><span>04</span> Plugins</a>
+      <a href="#feature-statistics"><span>05</span> Statistics</a>
+      <a href="#feature-worktrees"><span>06</span> Worktrees</a>
+      <a href="#feature-spaces"><span>07</span> Spaces</a>
+      <a href="#feature-welcome"><span>08</span> Welcome</a>
+      <a href="#feature-documentation"><span>09</span> Documentation</a>
+      <a href="#feature-models"><span>10</span> Model Providers</a>
+    </nav>
+    <div class="alta-story-layout">
+      <div class="alta-story-chapters">
+        <section class="alta-story-step" id="feature-sessions" aria-labelledby="feature-title-sessions" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>01</span> Sessions &amp; delegation</p>
+            <h3 id="feature-title-sessions">More minds.<br>One clear view.</h3>
+            <p>CodeAlta’s robust agent harness coordinates multiple agents and their tools for efficient, reliable parallel work. Delegate to child sessions, follow progress side by side, and keep the details in view.</p>
+            <a href="{{site.basepath}}/docs/sessions/">Meet your agents <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="A parent Markdig session and two delegated sessions arranged in three CodeAlta panes" width="2400" height="1500" fetchpriority="high"></div>
+        </section>
+        <section class="alta-story-step" id="feature-code" aria-labelledby="feature-title-code" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>02</span> Code &amp; git</p>
+            <h3 id="feature-title-code">Stay close<br>to the code.</h3>
+            <p>Search a project, edit files, run a terminal and inspect git diffs without leaving the workspace. Open any tool call to see what the agent did.</p>
+            <a href="{{site.basepath}}/docs/workspace/#code-editor">Explore the editor <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-editor-search.webp" alt="The SharpYaml code editor with a search across files and matching source lines" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-canvases" aria-labelledby="feature-title-canvases" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>03</span> Interactive canvases</p>
+            <h3 id="feature-title-canvases">Beyond<br>the conversation.</h3>
+            <p>Boards, checklists and custom tools become interactive tabs. Ask an agent to build a plugin, then use its canvas right beside the conversation.</p>
+            <a href="{{site.basepath}}/docs/plugins/developers/#canvases">Discover canvases <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-canvas-board.webp" alt="An agent session beside an interactive Board canvas with To do, Doing and Done columns" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-plugins" aria-labelledby="feature-title-plugins" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>04</span> Plugins</p>
+            <h3 id="feature-title-plugins">Imagine it.<br>Ask your agent.</h3>
+            <p>Ask your agent to create a plugin - a canvas, a dialog, a tool, a command or a button. Add it to one project or your whole workspace. Turn your ideas into the tools you want to use.</p>
+            <a href="{{site.basepath}}/docs/plugins/">Explore plugins <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-plugins.webp" alt="The Plugins window with built-in integrations and the configurable Statistics buttons" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-statistics" aria-labelledby="feature-title-statistics" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>05</span> Local statistics</p>
+            <h3 id="feature-title-statistics">A clearer picture<br>of your work.</h3>
+            <p>Explore activity, models, tokens and tool use across your projects - or focus on one session and its sub-agents. Statistics stay on your computer.</p>
+            <a href="{{site.basepath}}/docs/plugins/statistics/">Explore Statistics <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-statistics-overview.webp" alt="The Statistics dashboard showing session activity, token usage and time by project" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-worktrees" aria-labelledby="feature-title-worktrees" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>06</span> Parallel worktrees</p>
+            <h3 id="feature-title-worktrees">Work together.<br>Change apart.</h3>
+            <p>Give each session its own checkout and branch. See which worktrees are in use, open their code or diffs, and clean up when the work is done.</p>
+            <a href="{{site.basepath}}/docs/worktrees/">Manage worktrees <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-worktree-manager.webp" alt="The Worktrees window listing project checkouts, their branches, last-used sessions and actions" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-spaces" aria-labelledby="feature-title-spaces" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>07</span> Spaces</p>
+            <h3 id="feature-title-spaces">A space for<br>each kind of work.</h3>
+            <p>Keep work, personal and open-source projects in their own spaces. Switch between projects, sessions and tab layouts while your agents keep working in the background.</p>
+            <a href="{{site.basepath}}/docs/spaces/">Organize your spaces <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="The Open source workspace and the Spaces switch, with Work, Personal and Open source groups and session activity indicators" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-welcome" aria-labelledby="feature-title-welcome" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>08</span> Welcome home</p>
+            <h3 id="feature-title-welcome">Pick up where<br>you left off.</h3>
+            <p>Start from recent sessions, projects and useful shortcuts. The built-in documentation is always nearby, with an agent ready to answer your questions.</p>
+            <a href="{{site.basepath}}/docs/workspace/#welcome-page-desktop">Meet your workspace <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-landing.webp" alt="The Welcome page with recent projects and sessions, Statistics and quick access to the documentation" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-documentation" aria-labelledby="feature-title-documentation" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>09</span> Built-in documentation</p>
+            <h3 id="feature-title-documentation">The guide is<br>already here.</h3>
+            <p>Read the documentation right inside CodeAlta, beside your work. Your agent can consult the same guide to help you find a feature, understand a setting or learn a new workflow.</p>
+            <a href="{{site.basepath}}/docs/">Explore the guide <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-documentation.webp" alt="The built-in Documentation tab with the CodeAlta user guide and its navigation" width="2400" height="1500" loading="lazy"></div>
+        </section>
+        <section class="alta-story-step" id="feature-models" aria-labelledby="feature-title-models" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>10</span> Your choice of AI</p>
+            <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
+            <p>Use your Claude Code, Codex or GitHub Copilot subscription, or connect an API-based provider. Pick a provider, model and reasoning effort for each session, not the whole workspace.</p>
+            <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alta-home-section" aria-labelledby="make-it-yours">
+  <div class="alta-section-head">
+    <span class="alta-kicker">Built around your work</span>
+    <h2 id="make-it-yours">Not another chat box.</h2>
+    <p>A workspace you can inspect, extend and make your own.</p>
+  </div>
+  <div class="alta-highlight-grid">
+    <article class="alta-highlight">
+      <div class="alta-highlight-copy"><span class="alta-kicker">Transparent by design</span><h3>See the work, not just the answer.</h3><p>Read tool inputs and outputs, review modified files and follow live commands. Your agent's work is part of the conversation.</p><a href="{{site.basepath}}/docs/workspace/#timeline-cards">Inside the timeline <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
+      <img src="{{site.basepath}}/img/alta-desktop-modified-files.webp" alt="A source diff showing the exact lines an agent changed" width="2400" height="1500" loading="lazy">
+    </article>
+    <article class="alta-highlight">
+      <div class="alta-highlight-copy"><span class="alta-kicker">Extensible by design</span><h3>Your tools belong here, too.</h3><p>Bring in MCP tools and skills. Add trusted .NET plugins with their own canvases, commands and buttons - or ask an agent to build one.</p><a href="{{site.basepath}}/docs/plugins/">Make it your own <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
+      <img src="{{site.basepath}}/img/alta-desktop-canvases.webp" alt="The Canvases page with interactive Board and Checklist plugin tools" width="2400" height="1500" loading="lazy">
+    </article>
+  </div>
+  <div class="alta-workflow-links">
+    <a href="{{site.basepath}}/docs/prompts/"><i class="bi bi-signpost-split" aria-hidden="true"></i><strong>Agent prompts</strong><span>Plan, build, review - or define your own role.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
+    <a href="{{site.basepath}}/docs/automations/"><i class="bi bi-lightning-charge" aria-hidden="true"></i><strong>Automations</strong><span>Start work on a schedule or a repository event.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
+    <a href="{{site.basepath}}/docs/spaces/"><i class="bi bi-collection" aria-hidden="true"></i><strong>Spaces</strong><span>Group projects and keep separate workspaces.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
+  </div>
+</section>
+
+<section class="alta-home-section alta-terminal-section" id="desktop-or-tui" aria-labelledby="terminal-title">
+  <div class="alta-terminal-copy">
+    <span class="alta-kicker">Desktop first. Terminal ready.</span>
+    <h2 id="terminal-title">The same agents.<br>A different kind of window.</h2>
+    <p>Prefer the terminal? CodeAlta TUI shares the same profile, providers and sessions. Start in one app and continue in the other.</p>
+    <div class="alta-install-card">
+      <div class="alta-install-label"><i class="bi bi-terminal" aria-hidden="true"></i> Install CodeAlta TUI</div>
       <pre class="language-shell-session"><code>dotnet tool install -g CodeAlta.Tui
 altatui</code></pre>
     </div>
+    <a href="{{site.basepath}}/docs/desktop-and-tui/">Compare Desktop and TUI <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+  </div>
+  <div class="alta-window">
+    <video controls loop muted playsinline preload="none" poster="{{site.basepath}}/img/alta-home.png" aria-label="CodeAlta TUI workflow demonstration">
+      <source src="{{site.basepath}}/img/alta-multi-agents.mp4" type="video/mp4">
+      <a href="{{site.basepath}}/img/alta-multi-agents.mp4">Download the CodeAlta TUI workflow video.</a>
+    </video>
   </div>
 </section>
 
-<section class="my-5 py-4">
-  <div class="alta-section-head">
-    <span class="alta-kicker">CodeAlta Desktop</span>
-    <h2 class="display-6">The complete CodeAlta experience</h2>
-    <p>Sessions, code, terminals and changes side by side, and every setting in one window.</p>
-  </div>
-  <div class="alta-showcase">
-    <div class="alta-window">
-      <img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="CodeAlta Desktop with three sessions arranged in split panes: a parent session and two delegated child sessions" width="2400" height="1500">
-    </div>
-  </div>
-  <div class="alta-points">
-    <div class="alta-point">
-      <span class="alta-icon" style="--accent: #38bdf8; --accent-2: #6366f1;"><i class="bi bi-layout-split"></i></span>
-      <div>
-        <h3>Arrange your workspace</h3>
-        <p>Drag a session tab to an edge to split the window side by side or stacked. Tabs from different projects stay open together.</p>
-      </div>
-    </div>
-    <div class="alta-point">
-      <span class="alta-icon" style="--accent: #a3e635; --accent-2: #06b6d4;"><i class="bi bi-code-slash"></i></span>
-      <div>
-        <h3>Code, terminals and changes</h3>
-        <p>Each project has a code editor, terminals that agents can use too, and a Changes tab with the diff of every file.</p>
-      </div>
-    </div>
-    <div class="alta-point">
-      <span class="alta-icon" style="--accent: #34d399; --accent-2: #06b6d4;"><i class="bi bi-eye"></i></span>
-      <div>
-        <h3>Watch the agent work</h3>
-        <p>Open a tool call to follow a command in a live terminal, or to read a file or a diff in the colors of its language.</p>
-      </div>
-    </div>
-    <div class="alta-point">
-      <span class="alta-icon" style="--accent: #fb923c; --accent-2: #f43f5e;"><i class="bi bi-lightning-charge"></i></span>
-      <div>
-        <h3>Automations and worktrees</h3>
-        <p>Run a prompt every morning or on a new issue, and give each session its own branch in its own folder.</p>
-      </div>
-    </div>
-    <div class="alta-point">
-      <span class="alta-icon" style="--accent: #818cf8; --accent-2: #2dd4bf;"><i class="bi bi-cursor"></i></span>
-      <div>
-        <h3>Agents that see the window</h3>
-        <p>An agent can take a screenshot of CodeAlta, click and type, and write a plugin that the app reloads while it runs.</p>
-      </div>
-    </div>
-    <div class="alta-point">
-      <span class="alta-icon" style="--accent: #f472b6; --accent-2: #a855f7;"><i class="bi bi-sliders"></i></span>
-      <div>
-        <h3>One Settings window</h3>
-        <p>Providers, models, agent prompts, skills, plugins, MCP servers, logs and appearance are pages of the same window.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="container my-5 py-4" id="desktop-or-tui">
-  <div class="alta-section-head">
-    <span class="alta-kicker">Desktop or TUI?</span>
-    <h2 class="display-6">Start with CodeAlta Desktop</h2>
-    <p>CodeAlta also has a terminal UI. Both apps run the same agents on the same <code>~/.alta</code> profile, so a session started in one continues in the other. The desktop app does much more.</p>
-  </div>
-  <div class="alta-compare-wrap">
-    <table class="alta-compare">
-      <thead>
-        <tr><th scope="col"></th><th scope="col"><i class="bi bi-window" aria-hidden="true"></i> Desktop</th><th scope="col"><i class="bi bi-terminal" aria-hidden="true"></i> TUI</th></tr>
-      </thead>
-      <tbody>
-        <tr><th scope="row">Providers, sessions, agent prompts, skills, MCP servers, plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
-        <tr><th scope="row">Delegated agents, notes, reminders, asks</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
-        <tr><th scope="row">Sessions side by side, in panes you split</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Spaces: groups of projects, each with its own tabs</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Code editor with the files of the project and a search</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>One file at a time</small></td></tr>
-        <tr><th scope="row">Git changes: diffs, commits, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Terminals, which agents can use too</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Automations: on a schedule, on a new issue or pull request</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Worktrees created and removed from the app</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Agents that see and drive the app, and an MCP server</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Plugins written and reloaded while the app runs</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
-        <tr><th scope="row">Light and dark themes, 13 color schemes</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Terminal themes</small></td></tr>
-        <tr><th scope="row">Runs in a terminal</th><td>{{ alta_no }}</td><td>{{ alta_yes }}</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <p class="text-center mt-4 mb-0"><a href="{{site.basepath}}/docs/desktop-and-tui/">The full comparison <i class="bi bi-arrow-right"></i></a></p>
-</section>
-
-<section class="container my-5 py-4">
-  <div class="alta-section-head">
-    <span class="alta-kicker">A closer look</span>
-    <h2 class="display-6">Built for real work on real repositories</h2>
-    <p>Use the switch on a screenshot to see the same screen in the Desktop app or in the TUI.</p>
-  </div>
-  <div class="alta-tour">
-    <div class="alta-tour-row">
-      <div class="alta-tour-copy">
-        <h3>Run several agents at once</h3>
-        <p>A session can start child sessions for bounded tasks, wait for their reports, review the diffs and commit. Parent and children stay visible in the sidebar while they run.</p>
-        <a href="{{site.basepath}}/docs/sessions/">Sessions and delegation <i class="bi bi-arrow-right"></i></a>
-      </div>
-      {{ alta_shot "alta-desktop-split-side.webp" "alta-home.png" "A parent session with its delegated child sessions" "" }}
-    </div>
-    <div class="alta-tour-row">
-      <div class="alta-tour-copy">
-        <h3>See what the agent does</h3>
-        <p>Tool calls are grouped in the timeline with their status and what they wrote. Open one to follow a command in a terminal while it runs, or to read the file or the diff it worked on.</p>
-        <a href="{{site.basepath}}/docs/workspace/#timeline-cards">The timeline <i class="bi bi-arrow-right"></i></a>
-      </div>
-      {{ alta_shot "alta-desktop-tool-details.webp" "alta-tool-input-output-dialog.png" "Details of a tool call" "" }}
-    </div>
-    <div class="alta-tour-row">
-      <div class="alta-tour-copy">
-        <h3>Review every change</h3>
-        <p>Each turn ends with the list of modified files and their added and removed lines. Open a file to read its diff before you accept the work.</p>
-        <a href="{{site.basepath}}/docs/workspace/#timeline-cards">Modified files <i class="bi bi-arrow-right"></i></a>
-      </div>
-      {{ alta_shot "alta-desktop-modified-files.webp" "alta-modified-files.png" "Diff of a file modified by the agent" "" }}
-    </div>
-    <div class="alta-tour-row">
-      <div class="alta-tour-copy">
-        <h3>Use the models you already have</h3>
-        <p>Sign in with a ChatGPT or GitHub Copilot subscription, or add API keys for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI and OpenAI-compatible servers. Choose the provider, model and reasoning effort per session.</p>
-        <a href="{{site.basepath}}/docs/model-providers/">Model providers <i class="bi bi-arrow-right"></i></a>
-      </div>
-      {{ alta_shot "alta-desktop-models.webp" "alta-models.png" "Model catalog listing the models of every provider" "" }}
-    </div>
-    <div class="alta-tour-row">
-      <div class="alta-tour-copy">
-        <h3>Edit files next to the session</h3>
-        <p>On the desktop, each project has a code editor with its files, a search in files and the open files as tabs. Put it beside the session that is working on the code. In the TUI, <code>Ctrl+E</code> opens a file in an editor tab.</p>
-        <a href="{{site.basepath}}/docs/workspace/#code-editor">Code editor <i class="bi bi-arrow-right"></i></a>
-      </div>
-      {{ alta_shot "alta-desktop-code-editor.webp" "alta-code-editor.png" "Code editor with the files of a project and a source file" "" }}
-    </div>
-    <div class="alta-tour-row">
-      <div class="alta-tour-copy">
-        <h3>Pick your colors</h3>
-        <p>The desktop has light and dark themes with 13 color schemes. The TUI has its own set of terminal themes.</p>
-        <a href="{{site.basepath}}/docs/workspace/#workspace-settings">Appearance settings <i class="bi bi-arrow-right"></i></a>
-      </div>
-      {{ alta_shot "alta-desktop-themes.webp" "alta-theme-multi.png" "CodeAlta in several color themes" "" }}
-    </div>
-  </div>
-</section>
-
-<section class="my-5 py-4">
-  <div class="alta-section-head">
-    <span class="alta-kicker">CodeAlta TUI</span>
-    <h2 class="display-6">The same agents in your terminal</h2>
-    <p>A keyboard-first terminal UI with tabs, a full-width timeline, a prompt editor and dialogs for everything else.</p>
-  </div>
-  <div class="alta-showcase alta-showcase-small">
-    <div class="alta-window">
-      <div class="alta-window-bar" aria-hidden="true">
-        <span></span><span></span><span></span><strong>altatui</strong>
-      </div>
-      <video controls autoplay loop muted playsinline preload="metadata" poster="{{site.basepath}}/img/alta-home.png" aria-label="CodeAlta TUI workflow video">
-        <source src="{{site.basepath}}/img/alta-multi-agents.mp4" type="video/mp4">
-        <a href="{{site.basepath}}/img/alta-multi-agents.mp4">Download the CodeAlta TUI workflow video.</a>
-      </video>
-    </div>
-  </div>
-</section>
-
-<section class="container my-5 py-4">
-  <div class="alta-section-head">
-    <span class="alta-kicker">Workflows</span>
-    <h2 class="display-6">More than one prompt at a time</h2>
-    <p>Combine agent prompts, MCP servers, skills, delegated sessions, notes, reminders and plugins. You ask for the outcome and the agents use what the host provides.</p>
-  </div>
-  <div class="alta-grid">
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #60a5fa; --accent-2: #c084fc;"><i class="bi bi-signpost-split"></i></span> Agent prompts</h3>
-      <p>Switch between Default and Plan modes, or write your own prompts for review, triage or release work.</p>
-      <a href="{{site.basepath}}/docs/prompts/" class="stretched-link" aria-label="Agent prompts"></a>
-    </div>
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #22d3ee; --accent-2: #a78bfa;"><i class="bi bi-hdd-network"></i></span> MCP servers</h3>
-      <p>Add stdio or HTTP Model Context Protocol servers, inspect their tools and activate them for a session.</p>
-      <a href="{{site.basepath}}/docs/plugins/mcp/" class="stretched-link" aria-label="MCP servers"></a>
-    </div>
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #fb923c; --accent-2: #f43f5e;"><i class="bi bi-stars"></i></span> Advanced workflows</h3>
-      <p>Agents can ask for structured approval, keep notes, set reminders and coordinate other sessions.</p>
-      <a href="{{site.basepath}}/docs/advanced-agent-workflows/" class="stretched-link" aria-label="Advanced agent workflows"></a>
-    </div>
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #34d399; --accent-2: #facc15;"><i class="bi bi-diagram-3"></i></span> Sessions</h3>
-      <p>Sessions are saved on disk. Queue prompts, steer a running turn, compact the context and come back later.</p>
-      <a href="{{site.basepath}}/docs/sessions/" class="stretched-link" aria-label="Sessions and delegation"></a>
-    </div>
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #818cf8; --accent-2: #2dd4bf;"><i class="bi bi-mortarboard"></i></span> Skills</h3>
-      <p>Agent Skills-compatible <code>SKILL.md</code> packages add reusable instructions for a project or for all of them.</p>
-      <a href="{{site.basepath}}/docs/workspace/#skills-management" class="stretched-link" aria-label="Skills"></a>
-    </div>
-    <div class="alta-card">
-      <h3><span class="alta-icon" style="--accent: #a3e635; --accent-2: #06b6d4;"><i class="bi bi-puzzle"></i></span> Plugins</h3>
-      <p>Extend the host with trusted local .NET plugins when prompts and configuration are not enough. In the desktop app, an agent writes one for you and reloads it while the app runs.</p>
-      <a href="{{site.basepath}}/docs/plugins/" class="stretched-link" aria-label="Plugins"></a>
-    </div>
-  </div>
-</section>
-
-<section class="container my-5 py-4">
-  <div class="alta-section-head">
-    <span class="alta-kicker">Principles</span>
-    <h2 class="display-6">What CodeAlta is built on</h2>
-  </div>
-  <div class="alta-principles">
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-arrows-collapse"></i> Efficient</a>
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-eye"></i> Transparent</a>
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-keyboard"></i> Keyboard-first</a>
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-diagram-3"></i> Session-oriented</a>
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-cpu"></i> Provider-agnostic</a>
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-braces-asterisk"></i> Native .NET</a>
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-life-preserver"></i> Error-aware</a>
-    <a class="alta-chip" href="{{site.basepath}}/docs/principles/"><i class="bi bi-puzzle"></i> Extensible</a>
-  </div>
-</section>
-
-<section class="container my-5 pb-4">
-  <div class="alta-cta">
-    <h2>Start your first session</h2>
-    <p>Install CodeAlta Desktop, enable one provider and send a prompt on one of your projects.</p>
-    <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-light btn-lg"><i class="bi bi-rocket-takeoff"></i> Get started</a>
-  </div>
+<section class="alta-home-section alta-home-close" aria-labelledby="start-title">
+  <i class="bi bi-terminal" aria-hidden="true"></i>
+  <h2 id="start-title">Your next idea starts here.</h2>
+  <p>Install CodeAlta. Connect a provider. Open a project.</p>
+  <div class="alta-hero-actions"><a href="#install" class="btn btn-primary">Install CodeAlta <i class="bi bi-arrow-up" aria-hidden="true"></i></a><a href="{{site.basepath}}/docs/getting-started/" class="btn btn-outline-secondary">Read the quick start</a></div>
+  <p class="alta-closing-note">Open source, BSD-2-Clause licensed, and built with .NET. <a href="https://github.com/CodeAlta/CodeAlta">Contributions welcome.</a></p>
 </section>
 
 </div>

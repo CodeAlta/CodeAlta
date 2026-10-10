@@ -26,20 +26,80 @@
     window.scrollBy(0, tab.getBoundingClientRect().top - before);
   });
 
+  // The document is the story: every chapter, link and image works without JavaScript.
+  // A decorative sticky stage mirrors its pictures on roomy screens. Never intercept scrolling,
+  // move focus, hide chapter text, or announce every scroll position to a screen reader.
+  function scrollStory(story) {
+    var steps = Array.from(story.querySelectorAll(".alta-story-step"));
+    var links = Array.from(story.querySelectorAll(".alta-story-index a"));
+    var shots = steps.map(function (step) { return step.querySelector(".alta-story-shot"); });
+    if (!steps.length || links.length !== steps.length || shots.some(function (shot) { return !shot; })) return;
+    var roomy = window.matchMedia("(min-width: 1000px) and (min-height: 700px) and (prefers-reduced-motion: no-preference)");
+    var stage = document.createElement("div");
+    stage.className = "alta-story-stage";
+    stage.setAttribute("aria-hidden", "true");
+    stage.hidden = true;
+    var frames = shots.map(function (shot) {
+      var frame = shot.cloneNode(true);
+      frame.className = "alta-window alta-story-frame";
+      frame.querySelector("img").alt = "";
+      stage.appendChild(frame);
+      return frame;
+    });
+    story.querySelector(".alta-story-layout").appendChild(stage);
+    var selected = -1;
+    var scheduled = false;
+    function select(index) {
+      if (index === selected) return;
+      selected = index;
+      steps.forEach(function (step, i) {
+        var active = i === selected;
+        step.classList.toggle("is-current", active);
+        frames[i].classList.toggle("is-current", active);
+        if (active) links[i].setAttribute("aria-current", "step");
+        else links[i].removeAttribute("aria-current");
+      });
+    }
+    function update() {
+      scheduled = false;
+      var index = 0;
+      // Read geometry together, then write only when the chapter changes.
+      steps.forEach(function (step, i) {
+        if (step.getBoundingClientRect().top <= window.innerHeight * .5) index = i;
+      });
+      select(index);
+    }
+    function schedule() {
+      if (scheduled) return;
+      scheduled = true;
+      window.requestAnimationFrame(update);
+    }
+    function layout() {
+      story.classList.toggle("is-enhanced", roomy.matches);
+      stage.hidden = !roomy.matches;
+      schedule();
+    }
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    window.addEventListener("pageshow", schedule);
+    roomy.addEventListener("change", layout);
+    layout();
+  }
+
+  function scrollBrand() {
+    var logo = document.querySelector(".codealta-ascii-logo");
+    var brand = document.querySelector("[data-alta-scroll-brand]");
+    if (!logo || !brand || !window.IntersectionObserver) return;
+    brand.hidden = logo.getBoundingClientRect().bottom > 0;
+    new IntersectionObserver(function (entries) {
+      brand.hidden = entries[0].boundingClientRect.bottom > 0;
+    }).observe(logo);
+  }
+
   function ready() {
     applyUi(root.getAttribute("data-alta-ui") === "tui" ? "tui" : "desktop");
-
-    // Home page: slow color shift of the "Alta" half of the logo.
-    var alta = document.querySelector(".logo-alta");
-    if (!alta || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    var start;
-    function tick(timestamp) {
-      if (start === undefined) start = timestamp;
-      var phase = ((timestamp - start) / 5200) % 1;
-      root.style.setProperty("--alta-logo-shift", (phase * 100).toFixed(2) + "%");
-      window.requestAnimationFrame(tick);
-    }
-    window.requestAnimationFrame(tick);
+    scrollBrand();
+    document.querySelectorAll("[data-alta-story]").forEach(scrollStory);
   }
 
   if (document.readyState === "loading") {
