@@ -74,11 +74,35 @@ public sealed class SessionRuntimeStateRpcTests
         state = state with { Entry = entry with { BackgroundTasks = [.. Enumerable.Range(0, 40).Select(index => new SessionRuntimeBackgroundTask($"t{index}", "command", new string('\u00e9', 300), "toolu_" + index, started, null))] } };
         var many = await service.CurrentAsync(new(Epoch, "session"), default);
         Assert.AreEqual("ok", many.Status);
-        Assert.HasCount(16, many.Entry!.BackgroundTasks);
+        Assert.HasCount(24, many.Entry!.BackgroundTasks);
         Assert.IsTrue(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(many, DesktopJsonContext.Default.SessionRuntimeStateResponse).Length < 32 * 1024);
         // An attachment whose provider has no such tasks lists none.
         state = state with { Entry = entry with { BackgroundTasks = [] } };
         Assert.IsEmpty((await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.BackgroundTasks);
+    }
+
+    [TestMethod]
+    public async Task BackgroundTasksIncludeAllProviderTasksAndHostJobsWhileATurnRuns()
+    {
+        var entry = new SessionRuntimeCurrentEntry(1, false, false, "run", false, "fake", "fake", null, null, null, null)
+        {
+            BackgroundTasks =
+            [
+                .. Enumerable.Range(0, 16).Select(index => new SessionRuntimeBackgroundTask($"provider-{index}", "command", null, null, null, null)),
+                .. Enumerable.Range(0, 8).Select(index => new SessionRuntimeBackgroundTask($"job-{index}", "command", null, null, null, null) { IsJob = true }),
+            ],
+        };
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, entry);
+        var service = new SessionRuntimeStateService((_, _) => Task.FromResult(state), Epoch);
+
+        var response = await service.CurrentAsync(new(Epoch, "session"), default);
+
+        Assert.AreEqual("ok", response.Status);
+        Assert.AreEqual("run", response.Entry!.ActiveRunId);
+        Assert.HasCount(24, response.Entry.BackgroundTasks);
+        Assert.HasCount(8, response.Entry.BackgroundTasks.Where(static task => task.IsJob));
+        Assert.IsTrue(response.Entry.BackgroundTasks.All(static task => task.State == "running"));
+        CollectionAssert.AreEqual(entry.BackgroundTasks.Select(static task => task.TaskId).ToArray(), response.Entry.BackgroundTasks.Select(static task => task.TaskId).ToArray());
     }
 
     [TestMethod]

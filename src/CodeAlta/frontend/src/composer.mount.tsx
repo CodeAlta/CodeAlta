@@ -11,7 +11,7 @@ import { createQueueSubmissions } from "./sessionQueue";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createDraftIndicators } from "./promptDraft";
 import { createNextSendSelectionStore } from "./nextSendSelection";
-import type { SessionAbortRunRequest, SessionAdmission, SessionRuntimeStateResponse, SessionSendRequest, SessionSteerRequest } from "#neoastra";
+import type { SessionAbortRunRequest, SessionAdmission, SessionRuntimeBackgroundTaskResponse, SessionRuntimeStateResponse, SessionSendRequest, SessionSteerRequest } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("The composer fixture does not offer this operation"); };
 const epoch = "fixture-epoch";
@@ -19,6 +19,7 @@ const sessionId = "fixture-session";
 const runtime = "11111111-1111-4111-8111-111111111111";
 let run: string | null = null;
 let draining = false;
+let background: SessionRuntimeBackgroundTaskResponse[] = [];
 let runs = 0;
 let operations = 0;
 let sendMode: "accept" | "busy" | "refuse" = "accept";
@@ -61,6 +62,11 @@ const fixture = {
   startDrainedRun() { draining = true; return fixture.startRun(); },
   finishRun() { run = null; draining = false; },
   run: () => run,
+  background(states: string[]) {
+    background = states.map((state, index) => ({ taskId: `job-${index}`, kind: "command", description: `Background command ${index}`,
+      toolCallId: null, startedAt: new Date(Date.now() - 5_000).toISOString(), state, isJob: true,
+      exitCode: state === "completed" ? 0 : state === "failed" ? 1 : null, endedAt: state === "running" ? null : new Date().toISOString() }));
+  },
   /** What the timeline would echo for the prompts sent from this window. */
   echoes: () => submissions.outgoing(epoch, sessionId).map(echo => `${echo.state}:${echo.text}`),
   rows: () => queue.composer.list(epoch, sessionId).map(item => `${item.kind}:${item.state}:${item.count}:${item.text}`),
@@ -76,11 +82,11 @@ const props = {
   capability: createMutationCapability(epoch), draftIndicators: createDraftIndicators(), permissionReviewer: null,
   selections: createNextSendSelectionStore(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value)),
   runtimeReader: createRuntimeStateReader(async request => ({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
-    entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: [], queueDrainInProgress: draining,
+    entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: background, queueDrainInProgress: draining,
       providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null, reasoningEffort: null, agentPromptId: null,
       pendingAgentPromptId: null, activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
 };
-createRoot(document.getElementById("app")!).render(createElement("div", { id: "workspace-shell" },
+createRoot(document.getElementById("app")!).render(createElement("div", { id: "workspace-shell", className: "ide-shell" },
   createElement("div", { className: "session-workspace" },
     createElement("div", { className: "composer-region" }, createElement(OwnedSessionPanel, props)))));

@@ -32,8 +32,8 @@ export type BackgroundTask = Readonly<{
   endedAt: string | null;
 }>;
 
-/** How many tasks a session is shown with at most; the host sends no more. */
-export const maximumBackgroundTasks = 16;
+/** The host's sixteen provider tasks and eight background jobs, without dropping jobs from a busy session. */
+export const maximumBackgroundTasks = 24;
 
 /** How long a job that ended stays in the list of its session, for its output to be read. */
 export const endedJobShownMilliseconds = 10 * 60_000;

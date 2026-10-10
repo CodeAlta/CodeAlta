@@ -108,7 +108,8 @@ internal sealed class SessionRuntimeStateService
 
     // A task is what a provider says of itself: one that does not fit the wire is left out, and what it says of
     // itself is cut, so that the rest of the state is still read. The tool call is named as the timeline names it.
-    private const int MaximumBackgroundTasks = 16;
+    // The runtime combines up to sixteen provider tasks with eight host jobs, running tasks first.
+    private const int MaximumBackgroundTasks = 24;
     private static SessionRuntimeBackgroundTaskResponse? ProjectTask(SessionRuntimeBackgroundTask task)
         => task.TaskId is { Length: <= 64 } && Identity(task.TaskId) && Identity(Cut(task.Kind, 32))
             && (task.ToolCallId is null || Identity(RuntimeDisplayProjection.CompactIdentifier(task.ToolCallId)))

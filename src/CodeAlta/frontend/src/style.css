@@ -194,7 +194,11 @@ h1, h2, h3, p { margin-top: 0; }
 .session-background { flex: 0 0 auto; display: inline-block; width: 7px; height: 7px; margin-inline: 4px; border-radius: 50%; background: var(--green); opacity: .75; animation: session-background 2.4s ease-in-out infinite; }
 @keyframes session-background { 0%, 100% { opacity: .3; transform: scale(.8); } 50% { opacity: .9; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .session-background { animation: none; } }
-.background-tasks-status.bp6-button { min-height: 0; margin-inline-start: 6px; padding: 0 6px; color: inherit; font-size: inherit; }
+.background-tasks-status.bp6-button { min-height: 0; padding: 0 6px; color: var(--muted); font-size: inherit; }
+.background-tasks-status.bp6-button[data-running="true"] { color: var(--green); font-weight: 500; }
+.background-tasks-spinner { display: inline-block; flex: none; width: 12px; height: 12px; border: 2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-right-color: currentColor; border-radius: 50%; animation: background-tasks-spin 1s linear infinite; }
+@keyframes background-tasks-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .background-tasks-spinner { animation: none; } }
 .background-tasks { display: grid; gap: 6px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 12px; }
 .background-tasks h6 { margin: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .background-tasks ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; }
@@ -735,7 +739,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .history-controls > button:not(.bp6-button) { width: 30px; height: 30px; padding: 4px; border-radius: var(--bp-surface-border-radius); }
 .ide-shell .composer-status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
 .ide-shell .composer-status-line > span { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.ide-shell .composer-status-line > span:first-child { color: var(--muted); }
+.ide-shell .composer-status-line > span:first-child { color: var(--muted); flex-wrap: wrap; }
+.composer-foreground-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .ide-shell .composer-status-line[data-busy="true"] > span:first-child { color: var(--accent); }
 .ide-shell .owned-session { box-shadow: none !important; }
 .ide-shell .messages { gap: 8px; padding-bottom: 0; }

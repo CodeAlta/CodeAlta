@@ -101,10 +101,55 @@ test("a prompt sent while the session works is queued or steers, and is never re
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
 
+    // Background work is visible even when no foreground turn is thinking.
+    const backgroundStatus = "document.querySelector('.background-tasks-status')";
+    assert.equal(await evaluate(`!!${backgroundStatus}`), false);
+    await evaluate("fixture.background(['running'])");
+    assert.equal(await wait(`${backgroundStatus}?.textContent==='1 background task running' && !!document.querySelector('.background-tasks-spinner')`), true);
+    assert.equal(await evaluate("document.querySelector('.composer-status-line').dataset.busy"), "false");
+
     // An idle session takes the prompt at once; the Stop button then holds the Send slot.
     await write("first"); await enter();
     assert.equal(await wait(`fixture.sendCalls.length===1 && ${running} && promptText()===''`), true);
     assert.equal(await evaluate("!!document.querySelector('.composer-queue-strip')"), false);
+
+    // Recent results never inflate the running count, which remains separate from Thinking.
+    await evaluate("fixture.background(['running','running','completed','failed','stopped'])");
+    assert.equal(await wait(`${backgroundStatus}?.textContent==='2 background tasks running'`), true);
+    assert.equal(await evaluate("document.querySelectorAll('.composer-status-line .activity-spinner').length"), 1);
+    assert.equal(await evaluate("document.querySelectorAll('.composer-status-line .background-tasks-spinner').length"), 1);
+    assert.equal(await evaluate("document.querySelector('.background-tasks-spinner').getAttribute('aria-hidden')"), "true");
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.background-tasks-spinner')).animationName"), "background-tasks-spin");
+    await command("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.background-tasks-spinner')).animationName"), "none");
+    assert.equal(await evaluate(`${backgroundStatus}.textContent`), "2 background tasks running");
+    await command("Emulation.setEmulatedMedia", { features: [] });
+
+    for (const width of [390, 1120]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });
+      for (const theme of ["dark", "light"]) {
+        await evaluate(`document.documentElement.dataset.theme='${theme}'`);
+        const layout = await evaluate(`(()=>{const status=document.querySelector('.composer-status-line').getBoundingClientRect();
+          const tasks=${backgroundStatus}.getBoundingClientRect();const thinking=document.querySelector('.composer-foreground-status').getBoundingClientRect();
+          return {fits:tasks.width>0&&tasks.left>=status.left&&tasks.right<=status.right+1,
+            separate:tasks.left>=thinking.right||tasks.top>=thinking.bottom,
+            page:document.documentElement.scrollWidth,view:document.documentElement.clientWidth}})()`);
+        assert.ok(layout.fits && layout.separate && layout.page <= layout.view + 1, `${width}px ${theme} background status fits: ${JSON.stringify(layout)}`);
+      }
+    }
+
+    // Keyboard users can inspect the same list, including finished jobs and only two Stop controls.
+    await evaluate(`${backgroundStatus}.focus()`); await enter();
+    assert.equal(await wait("document.querySelectorAll('.background-tasks li').length===5"), true);
+    assert.equal(await evaluate("document.querySelectorAll('.background-tasks [aria-label=\"Stop this background task\"]').length"), 2);
+    await key("Escape", "Escape", 27);
+    await evaluate("fixture.background(['completed','running','failed','stopped'])");
+    assert.equal(await wait(`${backgroundStatus}?.textContent==='1 background task running'`), true);
+    await evaluate("fixture.background(['completed','failed','stopped'])");
+    assert.equal(await wait(`${backgroundStatus}?.textContent==='No background tasks running' && !document.querySelector('.background-tasks-spinner')`), true);
+    assert.equal(await evaluate("document.querySelectorAll('.composer-status-line .activity-spinner').length"), 1, "Thinking continues independently of background completion");
+    await evaluate("fixture.background([])");
+    assert.equal(await wait(`!${backgroundStatus}`), true);
 
     // Enter while the session works: the prompt waits above the composer. Nothing is sent, refused or announced.
     await write("second"); await enter();

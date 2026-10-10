@@ -915,10 +915,11 @@ ${value}` : value);
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingQueue.inFlight} onClick={() => queueTextInHost(false)} /></div>}
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
-      {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
-      {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
-        : compacting ? t("Compacting…")
-        : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}
+      <span className="composer-foreground-status">
+        {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
+        {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+          : compacting ? t("Compacting…")
+          : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</span>
       <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
         renderOutput={props => <BackgroundJobDialog {...props} outputs={toolOutputs} />} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}

@@ -69,7 +69,7 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
   const output = shown && renderOutput ? renderOutput({ task: shown, disabled: disabled || stopping.has(shown.id), onStop: stop, onClose: () => setShown(null) }) : null;
   if (listed.length === 0) return output;
   const running = listed.filter(task => task.state === "running").length;
-  const label = running === 0 ? t("Background tasks") : t(running === 1 ? "1 background task" : "{count} background tasks", { count: running });
+  const label = running === 0 ? t("No background tasks running") : t(running === 1 ? "1 background task running" : "{count} background tasks running", { count: running });
   const list = <div className="background-tasks" role="group" aria-label={t("Background tasks")}>
     <h6>{t("Background tasks")}</h6>
     <ul>{listed.map(task => {
@@ -91,7 +91,7 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
   return <>
     <PopoverNext isOpen={open} onInteraction={next => setOpen(next)} placement="top-start" content={list} popoverClassName="background-tasks-popover">
       <Button variant="minimal" size="small" className="background-tasks-status" data-running={running > 0 ? "true" : undefined}
-        icon={running > 0 ? <span className="session-background" aria-hidden="true" /> : <AppIcon name="terminal" size={13} />}>{label}</Button>
+        icon={running > 0 ? <span className="background-tasks-spinner" aria-hidden="true" /> : <AppIcon name="terminal" size={13} />}>{label}</Button>
     </PopoverNext>
     {output}
   </>;

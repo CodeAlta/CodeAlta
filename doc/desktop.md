@@ -532,8 +532,10 @@ agent of its own. Such a session is not running (it takes a prompt) and is not i
 
 - its row in the Explorer and its tab show a dot that breathes, quieter than the spinner of a run
   (`BackgroundMark`), where the spinner would be;
-- the status line above the prompt says **N background tasks** after its usual text, also while a run
-  thinks. It opens the list of the tasks, each with what it does, its kind, how long it has been going
+- the status line above the prompt says **N background tasks running** with a green ring spinner,
+  distinct from the dot-matrix **Thinking** indicator. The count excludes completed, failed and stopped
+  tasks; reduced motion keeps the ring still without hiding the count. It opens the list of the tasks,
+  each with what it does, its kind, how long it has been going
   on and a button that stops it (`BackgroundTasksStatus`);
 - the tile of the tool call that started a task says **Running in the background** in the place of
   **Completed**, with the spinner of a call that runs, and **Stopped in the background** or **Failed in
@@ -570,10 +572,11 @@ shows more than a task of a provider, because CodeAlta owns its process:
   (`WithJobTasks`: kind `command`, the title of the job or its command as the description, `IsJob`,
   `ExitCode`, `EndedAt`) and counts the ones that run in `ListOverview`, so the dot, the count and the
   spaces follow them as they follow a task of Claude Code. The wire says `isJob`, `exitCode` and
-  `endedAt`, and the state `completed` for a job that succeeded.
+  `endedAt`, and the state `completed` for a job that succeeded. The RPC and frontend accept all 24
+  entries (16 provider tasks and 8 host jobs), so a busy provider does not hide its session's jobs.
 - The list keeps a job for ten minutes after it ended (`listedBackgroundTasks`), with **Succeeded**,
-  **Failed** and its exit code, or **Stopped**; the status line then says **Background tasks** without a
-  count while nothing runs.
+  **Failed** and its exit code, or **Stopped**; the status line then says **No background tasks running**
+  with a static terminal icon. It still opens those recent results, without implying work is active.
 - A job has a button that opens what it writes in a window (`BackgroundJobDialog`): the output as it
   comes, in the read-only terminal of a tool call, with the time it has run, its exit code and **Stop**.
   The output is followed through `toolCalls.observe` with the identity of the job in the place of a
