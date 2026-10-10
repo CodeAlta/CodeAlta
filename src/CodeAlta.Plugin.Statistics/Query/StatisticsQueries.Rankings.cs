@@ -127,17 +127,18 @@ public sealed partial class StatisticsQueries
 
                 break;
             case "models":
-                foreach (var row in Aggregate(sql, query, plan, FactTables.Usage, ["SUM(f.requests)", "SUM(f.input_tokens + f.output_tokens)"], ["provider", "model"], restrict: Restrict("model", restrictKeys, key => key)))
+                // A model is the model of a provider, as in the table of the models: the same name under two providers is two rows.
+                foreach (var row in Aggregate(sql, query, plan, FactTables.Usage, ["SUM(f.requests)", "SUM(f.input_tokens + f.output_tokens)"], ["provider", "model"], restrict: Restrict("model", restrictKeys, ModelOfKey)))
                 {
-                    var entity = Get(row.Keys[1], row.Keys[1], row.Keys[0]);
+                    var entity = Get(ModelKey(row.Keys[0], row.Keys[1]), row.Keys[1], row.Keys[0]);
                     entity.Requests += row.Values[0];
                     entity.Calls += row.Values[0];
                     entity.Tokens += row.Values[1];
                 }
 
-                foreach (var row in Aggregate(sql, query, plan, FactTables.Activity, ["SUM(f.active_ms)"], ["provider", "model"], restrict: Restrict("model", restrictKeys)))
+                foreach (var row in Aggregate(sql, query, plan, FactTables.Activity, ["SUM(f.active_ms)"], ["provider", "model"], restrict: Restrict("model", restrictKeys, ModelOfKey)))
                 {
-                    Get(row.Keys[1], row.Keys[1], row.Keys[0]).TimeMs += row.Values[0];
+                    Get(ModelKey(row.Keys[0], row.Keys[1]), row.Keys[1], row.Keys[0]).TimeMs += row.Values[0];
                 }
 
                 break;
@@ -197,7 +198,12 @@ public sealed partial class StatisticsQueries
     }
 
     private static IReadOnlyList<(string Group, IReadOnlyList<string> Keys)>? Restrict(string group, IReadOnlyList<string>? keys, Func<string, string>? map = null)
-        => keys is null ? null : [(group, map is null ? keys : [.. keys.Select(map)])];
+        => keys is null ? null : [(group, map is null ? keys : [.. keys.Select(map).Distinct(StringComparer.Ordinal)])];
+
+    /// <summary>The key of a model in a ranking: its provider, a slash, its name. A provider has no slash in its name; a model may.</summary>
+    private static string ModelKey(string provider, string model) => provider + "/" + model;
+
+    private static string ModelOfKey(string key) => key[(key.IndexOf('/') + 1)..];
 
     /// <summary>Reads the line over time of the given entities, by the measure of the ranking.</summary>
     private Dictionary<string, IReadOnlyList<double>> Sparks(SqlSession sql, ResolvedQuery query, string kind, string by, string[] keys)
@@ -210,10 +216,13 @@ public sealed partial class StatisticsQueries
 
         var plan = query.Plan;
         void Collect(List<AggRow> rows, int keyIndex)
+            => CollectBy(rows, row => row.Keys[keyIndex]);
+
+        void CollectBy(List<AggRow> rows, Func<AggRow, string> keyOf)
         {
             foreach (var row in rows)
             {
-                var key = row.Keys[keyIndex];
+                var key = keyOf(row);
                 if (!result.TryGetValue(key, out var values))
                 {
                     result[key] = values = new double[plan.Buckets.Count];
@@ -230,15 +239,14 @@ public sealed partial class StatisticsQueries
                 Collect(Aggregate(sql, query, plan, FactTables.Tools, [toolAggregate], ["tool"], restrict: Restrict("tool", keys)), 0);
                 break;
             case "models":
-                if (by == "time")
-                {
-                    Collect(Aggregate(sql, query, plan, FactTables.Activity, ["SUM(f.active_ms)"], ["model"], restrict: Restrict("model", keys)), 0);
-                }
-                else
-                {
-                    Collect(Aggregate(sql, query, plan, FactTables.Usage, [by == "calls" ? "SUM(f.requests)" : "SUM(f.input_tokens + f.output_tokens)"], ["model"], restrict: Restrict("model", keys)), 0);
-                }
-
+                // The keys name a model of a provider. The facts are asked by model name, and the lines of the same name under
+                // another provider are left out.
+                var wanted = keys.ToHashSet(StringComparer.Ordinal);
+                var modelRows = by == "time"
+                    ? Aggregate(sql, query, plan, FactTables.Activity, ["SUM(f.active_ms)"], ["provider", "model"], restrict: Restrict("model", keys, ModelOfKey))
+                    : Aggregate(sql, query, plan, FactTables.Usage, [by == "calls" ? "SUM(f.requests)" : "SUM(f.input_tokens + f.output_tokens)"], ["provider", "model"], restrict: Restrict("model", keys, ModelOfKey));
+                modelRows.RemoveAll(row => !wanted.Contains(ModelKey(row.Keys[0], row.Keys[1])));
+                CollectBy(modelRows, static row => ModelKey(row.Keys[0], row.Keys[1]));
                 break;
             default:
                 var group = kind == "projects" ? "project" : "session";
@@ -337,8 +345,8 @@ public sealed partial class StatisticsQueries
         var rows = ModelRows(sql, query, int.MaxValue);
         var limit = LimitOf(query.Request);
         var top = rows.Take(limit).ToList();
-        var sparks = Sparks(sql, query, "models", "tokens", top.Select(static row => row.Model).ToArray());
-        var shaped = top.Select(row => row with { Spark = sparks.TryGetValue(row.Model, out var spark) ? spark : new double[query.Plan.Buckets.Count] }).ToList();
+        var sparks = Sparks(sql, query, "models", "tokens", top.Select(static row => ModelKey(row.Provider, row.Model)).ToArray());
+        var shaped = top.Select(row => row with { Spark = sparks.TryGetValue(ModelKey(row.Provider, row.Model), out var spark) ? spark : new double[query.Plan.Buckets.Count] }).ToList();
 
         var single = BucketPlan.Single(query.Range, query.WeekStart, Days);
         var efforts = Aggregate(sql, query, single, FactTables.Usage, ["SUM(f.requests)", "SUM(f.input_tokens + f.output_tokens)", "SUM(f.reasoning_tokens)", "SUM(f.output_tokens)"], ["provider", "model", "effort"])

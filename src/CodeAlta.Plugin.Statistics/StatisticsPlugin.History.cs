@@ -12,6 +12,9 @@ public sealed partial class StatisticsPlugin
     private readonly ISessionJournalCatalog? _journals;
     private readonly TimeSpan? _startDelay;
     private readonly TimeSpan? _flowDebounce;
+
+    // The clock of the engine and of the events of a canvas; null for the one of the system. Tests give one they move by hand.
+    private readonly TimeProvider? _time;
     private StatisticsEngine? _engine;
     private PluginTaskHandle? _job;
 
@@ -35,11 +38,12 @@ public sealed partial class StatisticsPlugin
     /// </remarks>
     public static StatisticsPlugin CreateForDesktop(ISessionJournalCatalog journals) => new(journals);
 
-    internal StatisticsPlugin(ISessionJournalCatalog journals, TimeSpan startDelay, TimeSpan flowDebounce)
+    internal StatisticsPlugin(ISessionJournalCatalog journals, TimeSpan startDelay, TimeSpan flowDebounce, TimeProvider? time = null)
         : this(journals)
     {
         _startDelay = startDelay;
         _flowDebounce = flowDebounce;
+        _time = time;
     }
 
     /// <summary>
@@ -62,6 +66,7 @@ public sealed partial class StatisticsPlugin
         var engine = new StatisticsEngine(store, _journals, new StatisticsEngineOptions
         {
             Logger = Logger,
+            Time = _time ?? TimeProvider.System,
             StartDelay = _startDelay ?? TimeSpan.FromSeconds(5),
             FlowDebounce = _flowDebounce ?? TimeSpan.FromSeconds(1),
             ProjectDirectory = directory,
@@ -130,6 +135,9 @@ public sealed partial class StatisticsPlugin
     {
         if (_engine is { } engine)
         {
+            // The engine waits a few seconds after the start of the application before it prepares its tables: a question asked
+            // before that prepares them, as a question of the canvas does.
+            await engine.InitializeAsync(cancellationToken).ConfigureAwait(false);
             return engine.Queries;
         }
 
@@ -142,6 +150,7 @@ public sealed partial class StatisticsPlugin
     {
         if (_engine is { } engine)
         {
+            await engine.InitializeAsync(cancellationToken).ConfigureAwait(false);
             return engine.Store;
         }
 

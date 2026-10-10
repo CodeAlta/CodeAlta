@@ -630,6 +630,224 @@ public sealed class StatisticsEngineTests
     }
 
     [TestMethod]
+    public async Task ASignalOfTheSessionTheHistoryReads_DoesNotCountItsBytesTwice()
+    {
+        await using var harness = await EngineHarness.CreateAsync(configure: static options => options.ChunkBytes = 1500);
+        AddSession(harness, "big", Today9, runs: 12);
+        AddSession(harness, "small", Today9.AddDays(-3));
+        var signaled = false;
+        harness.Engine.DataChanged += _ =>
+        {
+            if (!signaled)
+            {
+                // The session writes while the history is in the middle of its journal: the first chunk is saved, the others are not.
+                signaled = true;
+                harness.Engine.Signal("big");
+            }
+        };
+
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(HistoryState.Done, harness.Engine.Status.State);
+        Assert.AreEqual(14L, await harness.SumAsync("usage_q", "requests"), "The twelve requests of 'big' and the two of 'small', each once.");
+        Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "big", "small"), await harness.Store.DumpAsync());
+        await harness.Store.VerifyRollupsAsync();
+    }
+
+    [TestMethod]
+    public async Task ASessionThatWritesBeforeMoreHistoryReachesIt_IsStillReadAgainFromItsStart()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        // One session that began 40 days ago and was used 3 days ago, read with a floor of 30 days.
+        var journal = EngineHarness.Session("long", Today9.AddDays(-40), 1);
+        EngineHarness.AddRuns(journal, Today9.AddDays(-3), 1, tag: "late");
+        harness.Journals.Set(journal, Today9.AddDays(-3).AddSeconds(30));
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.LastDays(30));
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(1L, await harness.SumAsync("usage_q", "requests"));
+
+        // The user asks for everything, and the session writes before the history looked at it: the flow goes first.
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        harness.Journals.Append("long", EngineHarness.More("long", Today9), Today9.AddSeconds(30));
+        harness.Engine.Signal("long");
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(HistoryState.Done, harness.Engine.Status.State);
+        Assert.AreEqual(3L, await harness.SumAsync("usage_q", "requests"), "The request of 40 days ago is read too.");
+        Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "long"), await harness.Store.DumpAsync());
+        await harness.Store.VerifyRollupsAsync();
+    }
+
+    [TestMethod]
+    public async Task AStoppedHistory_StillCatchesUpWhatChangedWithoutASignal()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "recent", Today9, runs: 1);
+        AddSession(harness, "middle", Today9.AddDays(-10), runs: 1);
+        AddSession(harness, "old", Today9.AddDays(-40), runs: 1);
+        var changes = 0;
+        harness.Engine.DataChanged += _ =>
+        {
+            if (++changes == 2)
+            {
+                harness.Engine.StopHereAsync().AsTask().GetAwaiter().GetResult();
+            }
+        };
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(HistoryState.StoppedHere, harness.Engine.Status.State);
+        var floor = harness.Engine.Status.FloorDay;
+
+        // Another application wrote to a session and made one of its own; this one was closed meanwhile.
+        harness.Journals.Append("recent", EngineHarness.More("recent", Today9.AddMinutes(30)), Today9.AddMinutes(31));
+        AddSession(harness, "tui", Today9.AddMinutes(45), runs: 1);
+        await harness.RestartAsync();
+        var states = new List<StatisticsStatus>();
+        harness.Engine.StatusChanged += states.Add;
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(HistoryState.StoppedHere, harness.Engine.Status.State, "The history stays stopped where the user stopped it.");
+        Assert.AreEqual(floor, harness.Engine.Status.FloorDay);
+        Assert.IsTrue(states.Any(static status => status.State == HistoryState.Reading && status.Reason == "catch-up"));
+        Assert.IsNotNull(await harness.Store.Store.GetJournalAsync("tui"));
+        Assert.IsNull(await harness.Store.Store.GetJournalAsync("old"), "What is older than the stop is not read.");
+        Assert.AreEqual(4L, await harness.SumAsync("usage_q", "requests"), "recent (2), middle and tui.");
+
+        // A look later finds what changed again, without a restart.
+        harness.Journals.Append("tui", EngineHarness.More("tui", Today9.AddMinutes(50)), Today9.AddMinutes(51));
+        harness.Time.Advance(TimeSpan.FromMinutes(6));
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(5L, await harness.SumAsync("usage_q", "requests"));
+        Assert.AreEqual(HistoryState.StoppedHere, harness.Engine.Status.State);
+
+        // And the stop is kept across a restart that follows a catch-up.
+        await harness.RestartAsync();
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(HistoryState.StoppedHere, harness.Engine.Status.State);
+    }
+
+    [TestMethod]
+    public async Task StoppingBeforeAnythingIsRead_StartsTheStatisticsToday_AndMoreCanBeReadLater()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "today", Today9, runs: 1);
+        AddSession(harness, "old", Today9.AddDays(-40), runs: 1);
+
+        // The user chooses everything and stops at once, before the engine listed a journal.
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        var stopped = await harness.Engine.StopHereAsync();
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(HistoryState.StoppedHere, stopped.State);
+        Assert.AreEqual(20261009, stopped.FloorDay, "Nothing was reached: the statistics start today.");
+        Assert.IsNull(await harness.Store.Store.GetJournalAsync("old"));
+
+        // "Read more history" is not stuck: any choice that goes back before today reads.
+        var status = await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        Assert.AreEqual(HistoryState.Reading, status.State);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(HistoryState.Done, harness.Engine.Status.State);
+        Assert.IsNotNull(await harness.Store.Store.GetJournalAsync("old"));
+    }
+
+    [TestMethod]
+    public async Task ASkippedSession_StaysCountedAtTheNextLooks_AndTryAgainReadsIt()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "broken", Today9);
+        AddSession(harness, "fine", Today9.AddHours(-1));
+        harness.Journals.FailAfter("broken", 10);
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(1, harness.Engine.Status.SkippedCount);
+
+        // The next look at the journals finds nothing new: the session is still one that could not be read.
+        harness.Time.Advance(TimeSpan.FromMinutes(6));
+        await harness.Engine.DrainAsync();
+        var status = harness.Engine.Status;
+        Assert.AreEqual(HistoryState.Done, status.State);
+        Assert.AreEqual(1, status.SkippedCount);
+        Assert.AreEqual("broken", status.Skipped.Single().SessionId);
+        Assert.IsFalse(string.IsNullOrEmpty(status.Skipped.Single().Reason));
+
+        // The disk is back and the user asks to try again: the journal did not change, and it is read.
+        harness.Journals.StopFailing();
+        await harness.Engine.ResumeAsync();
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(HistoryState.Done, harness.Engine.Status.State);
+        Assert.AreEqual(0, harness.Engine.Status.SkippedCount);
+        Assert.IsNotNull(await harness.Store.Store.GetJournalAsync("broken"));
+        Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "broken", "fine"), await harness.Store.DumpAsync());
+    }
+
+    [TestMethod]
+    public async Task AJournalReplacedWhileItIsReadAgain_GivesTheFactsOfTheNewFileOnly()
+    {
+        await using var harness = await EngineHarness.CreateAsync(configure: static options => options.ChunkBytes = 1500);
+        AddSession(harness, "a", Today9, runs: 10);
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+
+        // The rows were computed by an earlier version of the facts: the session is read again from its start, in several chunks.
+        await harness.Store.Store.WriteAsync(sql =>
+            sql.Execute($"UPDATE {harness.Store.Store.Prefix}journal SET facts_version = 0, state = @p0", System.Text.Encoding.UTF8.GetBytes("{\"Version\":0}")));
+        await harness.RestartAsync(static options => options.ChunkBytes = 1500);
+        var replaced = false;
+        harness.Journals.Opening = (_, offset) =>
+        {
+            if (offset > 0 && !replaced)
+            {
+                // Between two chunks the file becomes another one.
+                replaced = true;
+                var other = EngineHarness.Session("a", Today9.AddHours(-2), runs: 9, input: 7000);
+                harness.Journals.Set(other, Today9.AddHours(-1));
+            }
+        };
+        await harness.Engine.DrainAsync();
+
+        Assert.IsTrue(replaced);
+        Assert.AreEqual(9L, await harness.SumAsync("usage_q", "requests"), "The requests of the first file are not added to those of the second.");
+        Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "a"), await harness.Store.DumpAsync());
+        await harness.Store.VerifyRollupsAsync();
+    }
+
+    [TestMethod]
+    public async Task Reset_AsksTheNamesOfTheProjectsAgain()
+    {
+        var names = new Dictionary<string, string> { ["22222222-2222-2222-2222-222222222222"] = "Alpha" };
+        await using var harness = await EngineHarness.CreateAsync(configure: options => options.ResolveProjectNames = _ => ValueTask.FromResult<IReadOnlyDictionary<string, string>>(names));
+        AddSession(harness, "a", Today9);
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual("Alpha", (await harness.Store.Store.GetProjectNamesAsync()).Single().Value);
+
+        await harness.Engine.ResetAsync();
+        Assert.AreEqual(0, (await harness.Store.Store.GetProjectNamesAsync()).Count);
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual("Alpha", (await harness.Store.Store.GetProjectNamesAsync()).Single().Value, "The names are kept again after a reset.");
+    }
+
+    [TestMethod]
+    public async Task ADayOfZeroInTheStore_IsNoDay()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "a", Today9);
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+
+        // A catch-up of a history without a floor writes 0 for "complete from everything"; the application is closed before it ends.
+        await harness.Store.Store.SetMetaAsync(new Dictionary<string, string?> { ["history.complete_from_day"] = "0" });
+        await harness.RestartAsync();
+        await harness.Engine.InitializeAsync();
+
+        Assert.IsNull(harness.Engine.Status.CompleteFromDay);
+    }
+
+    [TestMethod]
     public async Task ADeletedJournal_KeepsItsFacts_AndTheyCanBeForgotten()
     {
         await using var harness = await EngineHarness.CreateAsync();
@@ -698,6 +916,37 @@ public sealed class StatisticsEngineTests
         await harness.Engine.DrainAsync();
 
         Assert.AreEqual(2L, await harness.SumAsync("activity_year", "runs_interrupted"));
+    }
+
+    [TestMethod]
+    public async Task ARunThatWaitedForLong_IsNotLeftInterruptedWhenItGoesOn()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        // A run that has written nothing for three hours: it waits for an answer of the user.
+        var start = EngineHarness.Now.AddHours(-3);
+        AddSession(harness, "waiting", start, runs: 1, endLastRun: false);
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(1L, await harness.SumAsync("activity_year", "runs_interrupted"), "Quiet for long: taken for interrupted.");
+
+        // The answer comes, and the same run goes on and ends.
+        var more = new JournalBuilder("waiting");
+        var resumed = EngineHarness.Now.AddMinutes(-2);
+        more.Usage(resumed, "waiting-run0", input: 500, output: 50).Assistant(resumed.AddSeconds(5), "waiting-run0").Idle(resumed.AddSeconds(10), "waiting-run0");
+        harness.Journals.Append("waiting", more.ToBytes(), resumed.AddSeconds(10));
+        harness.Engine.Signal("waiting");
+        await harness.Engine.DrainAsync();
+
+        var runs = await harness.Store.Store.ReadAsync(sql => sql.Query(
+            $"SELECT run_id, outcome, requests FROM {harness.Store.Store.Prefix}run",
+            static reader => (reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2))));
+        CollectionAssert.AreEqual(new[] { ("waiting-run0", (long)RunOutcome.Completed, 2L) }, runs);
+        Assert.AreEqual(0L, await harness.SumAsync("activity_year", "runs_interrupted"));
+        Assert.AreEqual(1L, await harness.SumAsync("activity_year", "runs_completed"));
+        Assert.AreEqual(1L, await harness.SumAsync("activity_year", "runs_started"));
+        Assert.AreEqual(1L, await harness.Store.Store.ReadAsync(sql => sql.ScalarLong(
+            $"SELECT COALESCE(SUM(n), 0) FROM {harness.Store.Store.Prefix}histogram_year WHERE measure = {(int)HistogramMeasure.RunDurationMs}")), "One run, one duration.");
+        await harness.Store.VerifyRollupsAsync();
     }
 
     [TestMethod]

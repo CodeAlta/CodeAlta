@@ -88,7 +88,7 @@ public sealed record StatisticsRequest
     /// <summary>Gets the filters.</summary>
     public StatisticsFilter Filter { get; init; } = new();
 
-    /// <summary>Gets the first day of the week; null for the one of the current culture.</summary>
+    /// <summary>Gets the first day of the week; null for <see cref="StatisticsQueries.DefaultWeekStart"/>, the one of the regional settings of the computer.</summary>
     public DayOfWeek? WeekStart { get; init; }
 
     /// <summary>Gets the most rows a table or a ranking returns; null for the default of the query.</summary>

@@ -670,9 +670,6 @@ internal sealed class SessionRow
     /// <summary>Gets or sets the title the header gave.</summary>
     public string? Title { get; set; }
 
-    /// <summary>Gets or sets the working directory the header gave.</summary>
-    public string? WorkingDirectory { get; set; }
-
     /// <summary>Gets or sets the provider the session was created with, its old name folded.</summary>
     public string? Provider { get; set; }
 

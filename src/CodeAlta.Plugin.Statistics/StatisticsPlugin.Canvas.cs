@@ -30,7 +30,8 @@ public sealed partial class StatisticsPlugin
     /// <summary>The start of the key of a canvas limited to a project: <c>project:&lt;id&gt;</c>.</summary>
     internal const string ProjectKeyPrefix = "project:";
 
-    private static readonly TimeSpan EventDelay = TimeSpan.FromMilliseconds(250);
+    /// <summary>How long what the engine says in a burst is gathered before a canvas is told.</summary>
+    internal static readonly TimeSpan EventDelay = TimeSpan.FromMilliseconds(250);
 
     private AltaProjectDirectory? _directory;
     private StatisticsCanvasRpc? _rpc;
@@ -159,7 +160,7 @@ public sealed partial class StatisticsPlugin
             return;
         }
 
-        var pump = new StatisticsEventPump(canvas.Rpc, () => canvas.IsVisible, EventDelay, logger: Logger);
+        var pump = new StatisticsEventPump(canvas.Rpc, () => canvas.IsVisible, EventDelay, _time, Logger);
         Action<StatisticsStatus> onStatus = pump.Status;
         Action<StatisticsDataChange> onData = pump.Data;
         Action<bool> onVisible = pump.VisibilityChanged;
@@ -226,7 +227,8 @@ public sealed partial class StatisticsPlugin
         return result.Requested ? PluginCommandResult.Handled : PluginCommandResult.Message("The Statistics canvas cannot be shown here.");
     }
 
-    // The spaces and the projects the filters of the page choose among. The default space has every project.
+    // The spaces and the projects the filters of the page choose among (the default space has every project), and the first day of the
+    // week the questions use when they name none: the page lays its weeks out from it, as `alta statistics` cuts them.
     private async ValueTask<byte[]> WriteContextAsync(CancellationToken cancellationToken)
     {
         var directory = _directory;
@@ -236,6 +238,7 @@ public sealed partial class StatisticsPlugin
         await using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
+            writer.WriteString("weekStart", StatisticsQueries.DefaultWeekStart.ToString());
             writer.WriteStartArray("spaces");
             foreach (var space in spaces)
             {

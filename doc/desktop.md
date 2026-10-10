@@ -1184,7 +1184,7 @@ with `PluginScript.App("statistics")`) and fed by the plugin through `alta.rpc`.
 - the **Statistics** button at the top right of the title bar, before the space switch (a plugin button, icon
   `chart-column`): a small ring while the history is read, a dot while the first-time choice waits;
 - **Statistics** in the search of the window, `/statistics`, and `Ctrl+G` then `C`;
-- the **Statistics** line of the menu of a project, which opens the canvas for that project only (its own tab,
+- the **Statistics of this project** line of the menu of a project, which opens the canvas for that project only (its own tab,
   key `project:<project id>`);
 - `alta canvas open statistics`, and `alta statistics` for the numbers themselves.
 

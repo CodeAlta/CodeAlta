@@ -68,7 +68,7 @@ export function RecordCards({ records }: Readonly<{ records: readonly RecordEntr
 /** The Overview page. */
 export function OverviewPage() {
   const { t } = useText();
-  const { fmt, frame, dispatch, today } = useStatistics();
+  const { fmt, frame, dispatch, today, weekStart } = useStatistics();
   const drill = useDrill();
   const colors = usePageColors();
   const { stackBy, unit } = frame.view;
@@ -96,7 +96,7 @@ export function OverviewPage() {
       </Block>
       <Block title={t("The year")} span={12} minHeight={150} query={calendar} empty={calendar.data !== undefined && calendar.data.days.length === 0}>
         {calendar.data && <div className="stats-calendar"><CalendarHeatmap data={days} from={addDays(today, -364)} to={today} ariaLabel={t("Active time per day over the last year")}
-          describe={(date, value) => `${fmt.dayLong(date)}: ${value ? fmt.duration(value) : t("no activity")}`} onSelect={date => drill.pickDay(date)} weekStart={1} /></div>}
+          describe={(date, value) => `${fmt.dayLong(date)}: ${value ? fmt.duration(value) : t("no activity")}`} onSelect={date => drill.pickDay(date)} weekStart={weekStart} /></div>}
       </Block>
       <Block title={t("Top projects")} span={4} minHeight={170} query={projects} empty={projects.data !== undefined && projects.data.rows.length === 0}
         actions={projects.data && projects.data.truncated ? <button type="button" className="stats-link" onClick={() => drill.goto("projects")}>{t("Show all")}</button> : undefined}>

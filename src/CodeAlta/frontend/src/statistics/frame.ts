@@ -105,7 +105,7 @@ export function periodText(period: PeriodChoice): string {
 }
 
 /** The number of days of a period that is known without asking (everything but `all`); null for `all`. */
-export function knownDays(period: PeriodChoice, today?: string, weekStart = 1): number | null {
+export function knownDays(period: PeriodChoice, today?: string): number | null {
   if (period.kind === "custom") return dayDistance(period.from, period.to) + 1;
   switch (period.preset) {
     case "today": return 1;
@@ -115,19 +115,20 @@ export function knownDays(period: PeriodChoice, today?: string, weekStart = 1): 
     case "all": return null;
     case "month": case "last-month": case "year": {
       if (!today) return period.preset === "year" ? 365 : 30;
-      const range = presetRange(period.preset, today, weekStart);
+      const range = presetRange(period.preset, today);
       return range ? dayDistance(range.from, range.to) + 1 : null;
     }
   }
 }
 
 /** The days a period covers, `yyyy-MM-dd`; null for `all`, which depends on the first day with data. */
-export function resolvePeriod(period: PeriodChoice, today: string, weekStart = 1): Readonly<{ from: string; to: string }> | null {
+export function resolvePeriod(period: PeriodChoice, today: string): Readonly<{ from: string; to: string }> | null {
   if (period.kind === "custom") return { from: period.from, to: period.to };
-  return presetRange(period.preset, today, weekStart);
+  return presetRange(period.preset, today);
 }
 
-function presetRange(preset: PeriodPreset, today: string, _weekStart: number): Readonly<{ from: string; to: string }> | null {
+// No period the bar offers by name is a week: none depends on the first day of the week.
+function presetRange(preset: PeriodPreset, today: string): Readonly<{ from: string; to: string }> | null {
   switch (preset) {
     case "today": return { from: today, to: today };
     case "7d": return { from: addDays(today, -6), to: today };
@@ -182,6 +183,12 @@ const weekDays: readonly WeekDayName[] = ["Sunday", "Monday", "Tuesday", "Wednes
 
 /** The name of a day of the week, 0 for Sunday, as the host reads it. */
 export const weekDayName = (index: number): WeekDayName => weekDays[((index % 7) + 7) % 7];
+
+/** The day of the week a name of the host stands for, 0 for Sunday; undefined when it is not the name of a day. */
+export function weekDayIndex(name: string | null | undefined): number | undefined {
+  const index = name ? weekDays.findIndex(day => day.toLowerCase() === name.toLowerCase()) : -1;
+  return index < 0 ? undefined : index;
+}
 
 /** The filters of a frame as the request writes them. */
 export function filterOf(filters: Filters): StatisticsFilter {

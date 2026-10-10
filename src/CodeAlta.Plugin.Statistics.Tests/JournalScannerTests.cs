@@ -521,6 +521,11 @@ public sealed class JournalTimestampTests
     [DataRow("2026-10-09T10:11:12.+00:00")]
     [DataRow("2026-10-09T10:11:12+0000")]
     [DataRow("2026-10-09 10:11:12+00:00")]
+    // A time no calendar has, written by a damaged line: it is refused, never an exception that would skip the whole session.
+    [DataRow("0000-01-01T00:00:00+00:00")]
+    [DataRow("0000-06-15T10:11:12Z")]
+    [DataRow("0001-01-01T00:00:00+01:00")]
+    [DataRow("9999-12-31T23:59:59-01:00")]
     public void TryParseTimestamp_RefusesWhatIsNotATime(string text)
     {
         Assert.IsFalse(JournalEnvelope.TryParseTimestamp(System.Text.Encoding.UTF8.GetBytes(text), out _));

@@ -25,7 +25,8 @@ export const queryKey = (method: string, request: StatisticsRequest | null, ...r
  *
  * It asks only while `enabled` and the canvas is shown, a moment after the key settles (so a change of filter that is
  * undone at once, or a React effect that runs twice, asks nothing), cancels the question in flight when the key changes or
- * the block goes away, and asks again when the plugin announced a change in the days of the result. A result is kept after
+ * the block goes away, and asks again when the plugin announced a change in the days of the result, also when the change came
+ * while the question was in flight (its answer is then kept as stale, and asked again at once). A result is kept after
  * the block is gone, so coming back to a page shows what it had. `reportsPeriod` marks the question whose period the bar shows
  * (the length of `all` and of `auto`).
  */
@@ -35,6 +36,8 @@ export function useStatisticsQuery<T>(key: string, fetch: (signal: AbortSignal) 
   const [attempt, setAttempt] = useState(0);
   const [failure, setFailure] = useState<{ key: string; attempt: number; error: Error } | null>(null);
   const [asking, setAsking] = useState<string | null>(null);
+  // Counts the answers that came back stale: a change was announced while the question was in flight, so it is asked again.
+  const [round, setRound] = useState(0);
   const latest = useRef(fetch);
   latest.current = fetch;
   const previous = useRef<T | undefined>(undefined);
@@ -58,6 +61,9 @@ export function useStatisticsQuery<T>(key: string, fetch: (signal: AbortSignal) 
         store.set(key, data, epoch);
         setFailure(null);
         setAsking(current => current === key ? null : current);
+        // The store keeps the answer stale when the days it holds changed since the question began. Nothing else would ask again:
+        // `needs` was true and stays true, and the store tells nobody about an entry that is already stale.
+        if (store.get(key)?.stale) setRound(count => count + 1);
         rerender();
       }, (error: unknown) => {
         finished = true;
@@ -67,7 +73,7 @@ export function useStatisticsQuery<T>(key: string, fetch: (signal: AbortSignal) 
       });
     }, 0);
     return () => { clearTimeout(timer); if (!finished) controller.abort(); setAsking(current => current === key ? null : current); };
-  }, [needs, failed, key, attempt, store]);
+  }, [needs, failed, key, attempt, round, store]);
 
   const data = entry?.data;
   if (data !== undefined) previous.current = data;

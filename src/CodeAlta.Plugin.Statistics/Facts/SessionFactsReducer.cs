@@ -19,6 +19,9 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     private const long MaxToolDurationMs = 7L * 24 * 60 * 60 * 1000;
     private static readonly TimeSpan ProvenanceWindow = TimeSpan.FromSeconds(5);
 
+    /// <summary>The longest time between two records of a run that still counts as time the run was active.</summary>
+    internal static readonly TimeSpan MaxRunGap = TimeSpan.FromDays(7);
+
     private readonly string _sessionId;
     private readonly SessionFactsState _state;
     private readonly HashSet<ulong> _seenPrompts;
@@ -83,11 +86,22 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     /// Closes every run that has not ended as interrupted, at its last record. The caller decides when a session will not
     /// write any more: nothing here does it, because a run that is going is not an interrupted one.
     /// </summary>
+    /// <remarks>
+    /// The caller can only guess, from how long the session has been quiet: a run that waits for an answer of the user, or for a
+    /// long command, writes nothing either. The runs are remembered as they were (<see cref="SessionFactsState.SettledRuns"/>), and
+    /// a later record of one opens it again and takes back what its closing counted.
+    /// </remarks>
     public void InterruptOpenRuns()
     {
         foreach (var run in _state.OpenRuns.ToArray())
         {
+            var settled = new SettledRunState { Run = run, End = run.AccountedTo, Provider = CurrentProvider(), Model = CurrentModel(), Effort = _state.Effort };
             CloseRun(run, RunOutcome.Interrupted, run.AccountedTo);
+            _state.SettledRuns.Add(settled);
+            if (_state.SettledRuns.Count > SessionFactsState.MaxSettledRuns)
+            {
+                _state.SettledRuns.RemoveAt(0);
+            }
         }
     }
 
@@ -173,6 +187,15 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
         if (IsClosed(runId))
         {
+            if (_state.SettledRuns.Find(candidate => string.Equals(candidate.Run.RunId, runId, StringComparison.Ordinal)) is { } settled)
+            {
+                // Closed because its session had been quiet for long, and it goes on: it is the same run, and it was not interrupted.
+                run = Reopen(settled);
+                Account(run, timestamp);
+                _dirtyRuns.Add(runId);
+                return run;
+            }
+
             Diagnostics.RecordsAfterRunEnd++;
             if (_interrupted.Contains(runId))
             {
@@ -199,6 +222,8 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             changeApplied = true;
         }
 
+        // A session runs one turn at a time: once another run starts, a run that was closed for a quiet session did end there.
+        _state.SettledRuns.Clear();
         run = new OpenRunState
         {
             RunId = runId,
@@ -257,6 +282,14 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             return;
         }
 
+        if (to - run.AccountedTo > MaxRunGap)
+        {
+            // No run stays a week without a record: the time is one of a damaged line or of a clock that was wrong. It is not time
+            // the run was active, and it is not walked through one quarter hour at a time.
+            run.AccountedTo = to;
+            return;
+        }
+
         var provider = CurrentProvider();
         var model = CurrentModel();
         var effort = _state.Effort;
@@ -301,29 +334,53 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
 
         var startQuarter = QuarterHour.Of(run.Start);
-        var durationMs = Math.Max(0, (long)Math.Round((end - run.Start).TotalMilliseconds));
-        _batch.Observe(startQuarter, HistogramMeasure.RunDurationMs, string.Empty, durationMs);
+        var durationMs = ObserveRun(run, end, +1);
         _batch.Offer(startQuarter, ExtremeMeasure.LongestRunMs, string.Empty, durationMs, run.RunId, end);
-        _batch.Observe(startQuarter, HistogramMeasure.RunToolCalls, string.Empty, run.ToolCalls);
         _batch.Offer(startQuarter, ExtremeMeasure.MostToolCallsInRun, string.Empty, run.ToolCalls, run.RunId, end);
-        if (run.CostUsd > 0)
-        {
-            _batch.Observe(startQuarter, HistogramMeasure.RunCostMicro, CostUnits.Usd, (long)Math.Round(run.CostUsd * 1_000_000));
-        }
-
-        if (run.CostCredits > 0)
-        {
-            _batch.Observe(startQuarter, HistogramMeasure.RunCostMicro, CostUnits.Credits, (long)Math.Round(run.CostCredits * 1_000_000));
-        }
-
         _batch.Runs[run.RunId] = BuildRunRow(run, outcome, end);
         _state.OpenRuns.Remove(run);
         _dirtyRuns.Remove(run.RunId);
         _state.ClosedRuns.Add(run.RunId);
         if (_state.ClosedRuns.Count > SessionFactsState.MaxClosedRuns)
         {
+            var forgotten = _state.ClosedRuns[0];
             _state.ClosedRuns.RemoveAt(0);
+            _state.SettledRuns.RemoveAll(settled => string.Equals(settled.Run.RunId, forgotten, StringComparison.Ordinal));
         }
+    }
+
+    // Puts (+1) a run that ends in the distributions of the runs, or takes it out (-1) when the run is opened again.
+    private long ObserveRun(OpenRunState run, DateTimeOffset end, int sign)
+    {
+        var startQuarter = QuarterHour.Of(run.Start);
+        var durationMs = Math.Max(0, (long)Math.Round((end - run.Start).TotalMilliseconds));
+        ObserveSigned(startQuarter, HistogramMeasure.RunDurationMs, string.Empty, durationMs, sign);
+        ObserveSigned(startQuarter, HistogramMeasure.RunToolCalls, string.Empty, run.ToolCalls, sign);
+        if (run.CostUsd > 0)
+        {
+            ObserveSigned(startQuarter, HistogramMeasure.RunCostMicro, CostUnits.Usd, (long)Math.Round(run.CostUsd * 1_000_000), sign);
+        }
+
+        if (run.CostCredits > 0)
+        {
+            ObserveSigned(startQuarter, HistogramMeasure.RunCostMicro, CostUnits.Credits, (long)Math.Round(run.CostCredits * 1_000_000), sign);
+        }
+
+        return durationMs;
+    }
+
+    // Opens again a run that was closed as interrupted for a session that went quiet: the interruption and the place of the run in
+    // the distributions are taken back, and the run goes on as it was. The largest values it gave stay: it can only give larger ones.
+    private OpenRunState Reopen(SettledRunState settled)
+    {
+        var run = settled.Run;
+        _state.SettledRuns.Remove(settled);
+        _state.ClosedRuns.Remove(run.RunId);
+        _batch.ActivityFor(new ActivityKey(QuarterHour.Of(settled.End), settled.Provider, settled.Model, settled.Effort)).RunsInterrupted--;
+        ObserveRun(run, settled.End, -1);
+        _state.OpenRuns.Add(run);
+        Diagnostics.RunsReopened++;
+        return run;
     }
 
     private RunRow BuildRunRow(OpenRunState run, RunOutcome outcome, DateTimeOffset end)
@@ -365,7 +422,6 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             CreatedBySessionId = _state.CreatedBySessionId,
             AutomationId = _state.AutomationId,
             Title = _state.Title,
-            WorkingDirectory = _state.WorkingDirectory,
             Provider = _state.InitialProvider,
             PermissionMode = _state.PermissionMode.Length == 0 ? null : _state.PermissionMode,
             FirstRecord = _state.FirstRecord,
@@ -382,7 +438,6 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         _state.ProjectRef = header.ProjectRef ?? _state.ProjectRef;
         _state.ParentSessionId = header.ParentSessionId ?? _state.ParentSessionId;
         ApplyCreatedBy(header.CreatedBy);
-        _state.WorkingDirectory = header.WorkingDirectory ?? _state.WorkingDirectory;
         _state.Title = string.IsNullOrWhiteSpace(header.Title) ? _state.Title : header.Title;
         _state.InitialProvider = StatisticsProviders.Fold(header.ProviderKey ?? header.Provider);
         if (_state.Provider.Length == 0)
@@ -610,8 +665,8 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         _batch.ContentFor(new ContentKey(quarter, ContentKind.Prompt, prompt.Sender, prompt.Kind)).Add(measures);
         if (prompt.Sender == PromptSender.You)
         {
-            ObserveSigned(quarter, HistogramMeasure.PromptChars, prompt.Chars, sign);
-            ObserveSigned(quarter, HistogramMeasure.PromptWords, prompt.Words, sign);
+            ObserveSigned(quarter, HistogramMeasure.PromptChars, string.Empty, prompt.Chars, sign);
+            ObserveSigned(quarter, HistogramMeasure.PromptWords, string.Empty, prompt.Words, sign);
         }
 
         if (prompt.StartsRun)
@@ -620,9 +675,9 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         }
     }
 
-    private void ObserveSigned(QuarterHour quarter, HistogramMeasure measure, long value, int sign)
+    private void ObserveSigned(QuarterHour quarter, HistogramMeasure measure, string subject, long value, int sign)
     {
-        var key = new HistogramKey(quarter, measure, string.Empty, HistogramSteps.StepOf(value));
+        var key = new HistogramKey(quarter, measure, subject, HistogramSteps.StepOf(value));
         _batch.Histograms.TryGetValue(key, out var current);
         _batch.Histograms[key] = current + sign;
     }
@@ -820,8 +875,9 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         var effort = NormalizeEffort(op.ReasoningEffort) ?? _state.Effort;
         var purpose = string.Equals(op.Initiator, "compaction", StringComparison.OrdinalIgnoreCase) ? UsagePurpose.Compaction : UsagePurpose.Turn;
 
-        // A provider that reports the cost and the duration of a whole turn repeats them: the same pair twice in a run is one.
-        var repeated = run is not null && op.Cost is not null && run.LastCost == op.Cost && run.LastCostDuration == op.DurationMs;
+        // A provider that reports the cost and the duration of a whole turn repeats them: the same pair twice in a run is one. A
+        // cost without a duration is the cost of its request (the credits of Copilot), and two requests may well cost the same.
+        var repeated = run is not null && op.Cost is not null && op.DurationMs is not null && run.LastCost == op.Cost && run.LastCostDuration == op.DurationMs;
         var measures = _batch.UsageFor(new UsageKey(quarter, provider, model, effort, _state.AgentPrompt, purpose));
         if (hasTokens)
         {
@@ -1077,4 +1133,7 @@ internal sealed class ReducerDiagnostics
 
     /// <summary>Gets or sets the records of runs that were closed as interrupted because another run started.</summary>
     public long RecordsAfterInterruption { get; set; }
+
+    /// <summary>Gets or sets the runs that were closed for a session that went quiet and were opened again by a later record.</summary>
+    public long RunsReopened { get; set; }
 }

@@ -339,9 +339,9 @@ internal sealed class JournalPayloadParser
                 if (words < 2)
                 {
                     var value = reader.ValueSpan;
-                    if (value.IsEmpty || value[0] == (byte)'-' || reader.ValueIsEscaped || value.Length > 32)
+                    if (value.IsEmpty || reader.ValueIsEscaped || value.Length > 32 || !IsCommandWord(value))
                     {
-                        // An option, or something that is not a command word, ends the command words.
+                        // An option, or something that is not a command word (a sentence, a path, a value), ends the command words.
                         words = 2;
                     }
                     else if (words == 0)
@@ -368,6 +368,25 @@ internal sealed class JournalPayloadParser
         }
 
         return reader.TokenType == JsonTokenType.EndArray;
+    }
+
+    // A word of a command is written as the commands of alta are: a lower-case letter, then lower-case letters, digits, '-' or '_'.
+    private static bool IsCommandWord(ReadOnlySpan<byte> value)
+    {
+        if (value[0] is not (>= (byte)'a' and <= (byte)'z'))
+        {
+            return false;
+        }
+
+        foreach (var letter in value)
+        {
+            if (letter is not (>= (byte)'a' and <= (byte)'z' or >= (byte)'0' and <= (byte)'9' or (byte)'-' or (byte)'_'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool ParseResult(ref Utf8JsonReader reader, ToolRecord record)
@@ -1175,15 +1194,6 @@ internal sealed class JournalPayloadParser
 
                         record.CreatedBy = ParseActor(ref reader);
                     }
-                    else if (reader.ValueTextEquals("working_directory"u8))
-                    {
-                        if (!reader.Read())
-                        {
-                            return record;
-                        }
-
-                        record.WorkingDirectory = ReadString(ref reader);
-                    }
                     else if (reader.ValueTextEquals("title"u8))
                     {
                         if (!reader.Read())
@@ -1694,32 +1704,62 @@ internal sealed class JournalPayloadParser
         }
 
         var text = start[..length];
+
+        // Whether the command goes on beyond what was read: a word or a value that reaches the end is then not known to be whole.
+        var cut = length == start.Length;
         var begin = 0;
-        while (begin < text.Length && text[begin] is (byte)' ' or (byte)'(' or (byte)'&')
+        scoped ReadOnlySpan<byte> word;
+        while (true)
         {
-            begin++;
-        }
+            while (begin < text.Length && text[begin] is (byte)' ' or (byte)'(' or (byte)'&' or (byte)';')
+            {
+                begin++;
+            }
 
-        // A quoted program ends at the closing quote (its path may hold spaces); any other word ends at a separator.
-        var wordEnd = begin;
-        if (begin < text.Length && text[begin] is (byte)'"' or (byte)'\'')
-        {
-            var quote = text[begin++];
-            wordEnd = begin;
-            while (wordEnd < text.Length && text[wordEnd] != quote)
+            // A quoted program ends at the closing quote (its path may hold spaces); any other word ends at a separator.
+            var wordEnd = begin;
+            if (begin < text.Length && text[begin] is (byte)'"' or (byte)'\'')
+            {
+                var quote = text[begin++];
+                wordEnd = begin;
+                while (wordEnd < text.Length && text[wordEnd] != quote)
+                {
+                    wordEnd++;
+                }
+
+                if (wordEnd == text.Length)
+                {
+                    return null;
+                }
+
+                word = text[begin..wordEnd];
+                break;
+            }
+
+            while (wordEnd < text.Length && text[wordEnd] is not ((byte)' ' or (byte)';' or (byte)'|' or (byte)')' or (byte)'>' or (byte)'<' or (byte)'"' or (byte)'\'' or (byte)'='))
             {
                 wordEnd++;
             }
-        }
-        else
-        {
-            while (wordEnd < text.Length && text[wordEnd] is not ((byte)' ' or (byte)';' or (byte)'|' or (byte)')' or (byte)'>' or (byte)'<' or (byte)'"' or (byte)'\''))
+
+            if (wordEnd == text.Length && cut)
             {
-                wordEnd++;
+                return null;
+            }
+
+            if (wordEnd == text.Length || text[wordEnd] != (byte)'=')
+            {
+                word = text[begin..wordEnd];
+                break;
+            }
+
+            // NAME=value before the program (`PGPASSWORD=... psql`, `$env:TOKEN='...'; gh`) sets a variable for it: the value may be
+            // a secret, so it is stepped over and never kept. A value whose end cannot be told leaves the command without a program.
+            if (!TrySkipAssignedValue(text, wordEnd + 1, cut, out begin))
+            {
+                return null;
             }
         }
 
-        var word = text[begin..wordEnd];
         var slash = Math.Max(word.LastIndexOf((byte)'/'), word.LastIndexOf((byte)'\\'));
         if (slash >= 0)
         {
@@ -1740,9 +1780,54 @@ internal sealed class JournalPayloadParser
         for (var index = 0; index < word.Length; index++)
         {
             var value = word[index];
+            if (!IsProgramNameByte(value))
+            {
+                // An expression, a variable, a piece of text: not the name of a program.
+                return null;
+            }
+
             lower[index] = value is >= (byte)'A' and <= (byte)'Z' ? (byte)(value + 32) : value;
         }
 
         return _strings.Get(lower[..word.Length]);
     }
+
+    // Steps over the value of a NAME=value word: a quoted text, or a plain word. False when the value has no end that can be told
+    // (a quote that does not close, a command substitution, a value that goes beyond what was read).
+    private static bool TrySkipAssignedValue(ReadOnlySpan<byte> text, int valueStart, bool cut, out int next)
+    {
+        next = valueStart;
+        if (next < text.Length && text[next] is (byte)'"' or (byte)'\'')
+        {
+            var quote = text[next++];
+            while (next < text.Length && text[next] != quote)
+            {
+                next++;
+            }
+
+            if (next == text.Length)
+            {
+                return false;
+            }
+
+            next++;
+            return true;
+        }
+
+        while (next < text.Length && text[next] is not ((byte)' ' or (byte)';'))
+        {
+            if (text[next] is (byte)'$' or (byte)'`' or (byte)'(' or (byte)'{' or (byte)'"' or (byte)'\'')
+            {
+                return false;
+            }
+
+            next++;
+        }
+
+        return next < text.Length || !cut;
+    }
+
+    private static bool IsProgramNameByte(byte value)
+        => value is >= (byte)'a' and <= (byte)'z' or >= (byte)'A' and <= (byte)'Z' or >= (byte)'0' and <= (byte)'9'
+            or (byte)'.' or (byte)'_' or (byte)'-' or (byte)'+' or >= 0x80;
 }

@@ -151,6 +151,88 @@ public sealed class SessionFactsReducerTests
     }
 
     [TestMethod]
+    public void Run_ClosedBecauseItsSessionWentQuiet_IsOpenedAgainWhenItGoesOn()
+    {
+        // A run that waits two hours for an answer of the user, then goes on and ends.
+        var whole = new JournalBuilder();
+        whole.ModelChanged(T0, "r1", "codex", "m", "Low")
+            .User(T0.AddSeconds(1), "r1")
+            .Usage(T0.AddSeconds(40), "r1", model: "m", cost: 0.5)
+            .ToolStarted(T0.AddSeconds(41), "r1", "t1", "shell_command", "{\"command\":\"git status\"}");
+        var firstLines = whole.Lines.Count;
+        whole.ToolDone(T0.AddHours(2), "r1", "t1", "shell_command")
+            .Usage(T0.AddHours(2).AddSeconds(5), "r1", model: "m", cost: 0.25)
+            .Idle(T0.AddHours(2).AddSeconds(10), "r1");
+        var atOnce = Reduce(whole);
+
+        // Read while it waits, and closed as interrupted by the caller, which sees a session that has been quiet for long.
+        var first = new JournalBuilder();
+        foreach (var line in whole.Lines.Take(firstLines))
+        {
+            first.Add(line);
+        }
+
+        var part = CatchUp(first);
+        var settling = new SessionFactsReducer(whole.SessionId, part.Cursor.State.Clone());
+        settling.InterruptOpenRuns();
+        var settled = settling.TakeBatch();
+        Assert.AreEqual(RunOutcome.Interrupted, settled.Runs["r1"].Outcome);
+        Assert.AreEqual(1, Sum(settled.Activity, static m => m.RunsInterrupted));
+        Assert.AreEqual(0, settling.State.OpenRuns.Count);
+
+        // The rest is read from the cursor: the run is the same one, and it was not interrupted.
+        var rest = CatchUp(whole, new JournalCursor(part.Cursor.Offset, part.Cursor.FirstLine, settling.State));
+        var total = part.Batch;
+        total.Merge(settled);
+        total.Merge(rest.Batch);
+
+        Assert.AreEqual(RunOutcome.Completed, total.Runs["r1"].Outcome);
+        Assert.AreEqual(0, Sum(total.Activity, static m => m.RunsInterrupted));
+        Assert.AreEqual(1, Sum(total.Activity, static m => m.RunsCompleted));
+        Assert.AreEqual(1, Sum(total.Activity, static m => m.RunsStarted));
+        Assert.AreEqual(atOnce.ToCanonicalRunsText(), total.ToCanonicalRunsText());
+        static string WithoutLargest(FactBatch batch)
+            => string.Join('\n', batch.ToCanonicalText().Split('\n').Where(static line => !line.StartsWith("extreme ", StringComparison.Ordinal)));
+        Assert.AreEqual(WithoutLargest(atOnce), WithoutLargest(total), "Reading it in two parts with a settling between them gives the facts of reading it at once.");
+
+        // The largest values are those of the whole run. One that the closing gave and the end did not beat keeps the time of the closing.
+        Assert.AreEqual(atOnce.Extremes.Count, total.Extremes.Count);
+        foreach (var (key, value) in atOnce.Extremes)
+        {
+            Assert.AreEqual(value.Value, total.Extremes[key].Value, key.ToString());
+            Assert.AreEqual(value.RunId, total.Extremes[key].RunId, key.ToString());
+        }
+
+        Assert.AreEqual(0, rest.Cursor.State.SettledRuns.Count);
+    }
+
+    [TestMethod]
+    public void Run_ClosedBecauseItsSessionWentQuiet_StaysInterruptedWhenAnotherRunStarts()
+    {
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low").User(T0.AddSeconds(1), "r1").Usage(T0.AddSeconds(40), "r1", model: "m");
+        var part = CatchUp(b);
+        var settling = new SessionFactsReducer(b.SessionId, part.Cursor.State.Clone());
+        settling.InterruptOpenRuns();
+        var settled = settling.TakeBatch();
+
+        // The session starts another run, and a late record of the first one follows: the first one ended where it was closed.
+        b.ModelChanged(T0.AddHours(2), "r2", "codex", "m", "Low").User(T0.AddHours(2).AddSeconds(1), "r2")
+            .Usage(T0.AddHours(2).AddSeconds(2), "r1", model: "m")
+            .Idle(T0.AddHours(2).AddSeconds(30), "r2");
+        var rest = CatchUp(b, new JournalCursor(part.Cursor.Offset, part.Cursor.FirstLine, settling.State));
+        var total = part.Batch;
+        total.Merge(settled);
+        total.Merge(rest.Batch);
+
+        Assert.AreEqual(RunOutcome.Interrupted, total.Runs["r1"].Outcome);
+        Assert.AreEqual(RunOutcome.Completed, total.Runs["r2"].Outcome);
+        Assert.AreEqual(1, Sum(total.Activity, static m => m.RunsInterrupted));
+        Assert.AreEqual(2, Sum(total.Activity, static m => m.RunsStarted));
+        Assert.AreEqual(0, rest.Cursor.State.SettledRuns.Count);
+    }
+
+    [TestMethod]
     public void Run_EndingWithAnErrorFailsAndCountsTheError()
     {
         var b = new JournalBuilder();
@@ -319,6 +401,71 @@ public sealed class SessionFactsReducerTests
         Assert.AreEqual(1.0, batch.Cost.Single(static pair => pair.Key.Unit == CostUnits.Usd).Value.Total, 1e-9);
         Assert.AreEqual(5.0, batch.Runs["r1"].CostCredits, 1e-9);
         Assert.AreEqual(1.0, batch.Runs["r1"].CostUsd, 1e-9);
+    }
+
+    [TestMethod]
+    public void Usage_OfCopilotCountsEachRequestOfTheSameCost()
+    {
+        // Copilot gives the credits of each request and no duration: three requests of one credit are three credits, not one.
+        var b = new JournalBuilder("33333333-3333-3333-3333-333333333333", "copilot");
+        b.ModelChanged(T0, "r1", "copilot", "gpt-x", "Low")
+            .Usage(T0.AddSeconds(1), "r1", model: "gpt-x", input: 100, output: 10, cost: 1.0, costUnit: "AI credits")
+            .Usage(T0.AddSeconds(2), "r1", model: "gpt-x", input: 120, output: 12, cost: 1.0, costUnit: "AI credits")
+            .Usage(T0.AddSeconds(3), "r1", model: "gpt-x", input: 140, output: 14, cost: 1.0, costUnit: "AI credits")
+            .Idle(T0.AddSeconds(4), "r1");
+
+        var batch = Reduce(b);
+
+        var cost = batch.Cost.Single(static pair => pair.Key.Unit == CostUnits.Credits).Value;
+        Assert.AreEqual(3.0, cost.Total, 1e-9);
+        Assert.AreEqual(3, cost.Records);
+        Assert.AreEqual(3.0, batch.Runs["r1"].CostCredits, 1e-9);
+    }
+
+    [TestMethod]
+    public void Run_ATimeFarFromTheOthers_AddsNoActiveTimeAndNoRowForEachQuarterHour()
+    {
+        // A damaged line, or a clock that was wrong: a record of the run a year later.
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low")
+            .Usage(T0.AddSeconds(10), "r1", model: "m")
+            .Usage(T0.AddYears(1), "r1", model: "m")
+            .Idle(T0.AddYears(1).AddSeconds(5), "r1");
+
+        var batch = Reduce(b);
+
+        Assert.AreEqual(10_000 + 5_000, Sum(batch.Activity, static m => m.ActiveMs), "The year between the two records is not time the run was active.");
+        Assert.IsTrue(batch.Activity.Count <= 4, $"{batch.Activity.Count} rows of activity");
+        Assert.AreEqual(RunOutcome.Completed, batch.Runs["r1"].Outcome);
+    }
+
+    [TestMethod]
+    public void Run_AWaitOfSomeHoursIsStillTimeOfTheRun()
+    {
+        // A run that waits for a permission, or for a long command: the time between two of its records counts.
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low")
+            .Usage(T0.AddSeconds(10), "r1", model: "m")
+            .Usage(T0.AddHours(3), "r1", model: "m")
+            .Idle(T0.AddHours(3).AddSeconds(5), "r1");
+
+        var batch = Reduce(b);
+
+        Assert.AreEqual((3 * 3600 + 5) * 1000L, Sum(batch.Activity, static m => m.ActiveMs));
+    }
+
+    [TestMethod]
+    public void TheState_KeepsNoPathOfTheSession()
+    {
+        var b = new JournalBuilder();
+        b.Header(T0).State(T0.AddSeconds(1)).ModelChanged(T0.AddSeconds(2), "r1", "codex", "m", "Low").User(T0.AddSeconds(3), "r1").Idle(T0.AddSeconds(4), "r1");
+
+        var result = CatchUp(b);
+
+        // The header of the journal names the folder the session works in; the state the store keeps does not.
+        Assert.IsTrue(b.Lines[0].Contains("placeholder", StringComparison.Ordinal));
+        Assert.IsFalse(result.Cursor.State.ToJson().Contains("placeholder", StringComparison.Ordinal), result.Cursor.State.ToJson());
+        Assert.IsTrue(result.Cursor.State.ToJson().Contains("A title", StringComparison.Ordinal));
     }
 
     [TestMethod]

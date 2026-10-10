@@ -48,6 +48,8 @@ function plugin(api: FixtureApi): AltaRpc {
       case "statistics.forget-deleted": return { count: await api.forgetDeleted() };
       case "statistics.reset": return api.resetStatistics!();
       case "statistics.context": return {
+        // A day no language of the window starts its week on: the weeks of the canvas are the ones the plugin names.
+        weekStart: "Saturday",
         spaces: [{ id: "default", name: "Default", isDefault: true, projectIds: ["proj-codealta", "proj-neoastra", "proj-xenoatom"] }, { id: "work", name: "Work", isDefault: false, projectIds: ["proj-codealta", "proj-neoastra"] }],
         projects: [{ id: "proj-codealta", name: "CodeAlta" }, { id: "proj-neoastra", name: "NeoAstra" }, { id: "proj-xenoatom", name: "XenoAtom" }],
       };

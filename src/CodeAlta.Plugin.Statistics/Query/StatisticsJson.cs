@@ -34,6 +34,12 @@ public static class StatisticsJson
         try
         {
             var request = JsonSerializer.Deserialize(json, StatisticsResultJsonContext.Default.StatisticsRequest) ?? new StatisticsRequest();
+            // An enumeration is read from its name, and also from a number: one that names no value is not a request.
+            if (!Enum.IsDefined(request.Frequency) || !Enum.IsDefined(request.Comparison) || (request.WeekStart is { } weekStart && !Enum.IsDefined(weekStart)))
+            {
+                throw new ArgumentException("The request is not valid: a frequency, a comparison or a first day of the week is a name, such as \"week\", \"previousPeriod\" or \"Monday\".", nameof(json));
+            }
+
             // The deserializer does not run the initializers of the properties a request leaves out.
             return request with { Period = request.Period ?? new StatisticsRequest().Period, Filter = request.Filter ?? new StatisticsFilter() };
         }

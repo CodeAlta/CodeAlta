@@ -96,9 +96,6 @@ internal sealed class HeaderRecord : JournalRecord
     /// <summary>Gets or sets the actor that created the session.</summary>
     public JournalActor? CreatedBy { get; set; }
 
-    /// <summary>Gets or sets the working directory of the session.</summary>
-    public string? WorkingDirectory { get; set; }
-
     /// <summary>Gets or sets the title of the session at its creation.</summary>
     public string? Title { get; set; }
 

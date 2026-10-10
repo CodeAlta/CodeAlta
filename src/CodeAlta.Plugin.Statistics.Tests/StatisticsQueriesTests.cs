@@ -46,6 +46,47 @@ public sealed class StatisticsQueriesTests
     }
 
     [TestMethod]
+    public async Task WhatTheFactsKeepOfAnswersReasoningsInstructionsAndCanceledCalls_CanBeAsked()
+    {
+        await using var harness = await QueryHarness.CreateAsync("Europe/Paris");
+        // Instructions with a size in tokens, which the random facts do not have.
+        var extra = new FactBatch("instructions");
+        var quarter = QuarterHour.Of(new DateTimeOffset(2026, 6, 15, 10, 0, 0, TimeSpan.Zero));
+        var instructions = extra.ContentFor(new ContentKey(quarter, ContentKind.Instructions, PromptSender.None, PromptKind.None));
+        instructions.Count = 2;
+        instructions.Chars = 50_000;
+        instructions.ApproxTokens = 12_500;
+        await harness.AddAsync(extra);
+        var from = new DateOnly(2026, 4, 3);
+        var to = new DateOnly(2026, 9, 28);
+        var request = new StatisticsRequest { Period = "2026-04-03..2026-09-28", Frequency = StatisticsFrequency.Month };
+        static Func<FactBatch, IEnumerable<(QuarterHour, double)>> Content(Func<ContentKind, bool> kind, Func<ContentMeasures, long> value)
+            => batch => batch.Content.Where(pair => kind(pair.Key.Kind)).Select(pair => (pair.Key.Quarter, (double)value(pair.Value)));
+
+        foreach (var (metric, values) in new (string, Func<FactBatch, IEnumerable<(QuarterHour, double)>>)[]
+                 {
+                     ("tool-calls-canceled", static batch => batch.Tools.Select(static pair => (pair.Key.Quarter, (double)pair.Value.Canceled))),
+                     ("answer-chars", Content(static kind => kind == ContentKind.Answer, static measures => measures.Chars)),
+                     ("answer-words", Content(static kind => kind == ContentKind.Answer, static measures => measures.Words)),
+                     ("reasonings", Content(static kind => kind is ContentKind.Reasoning or ContentKind.ReasoningSummary, static measures => measures.Count)),
+                     ("reasoning-chars", Content(static kind => kind is ContentKind.Reasoning or ContentKind.ReasoningSummary, static measures => measures.Chars)),
+                     ("instructions", Content(static kind => kind == ContentKind.Instructions, static measures => measures.Count)),
+                     ("instruction-chars", Content(static kind => kind == ContentKind.Instructions, static measures => measures.Chars)),
+                     ("instruction-tokens", Content(static kind => kind == ContentKind.Instructions, static measures => measures.ApproxTokens)),
+                 })
+        {
+            CollectionAssert.Contains(StatisticsQueries.MetricNames.ToList(), metric);
+            var result = await harness.Queries.SeriesAsync(request, metric);
+
+            var naive = harness.Naive(values, StatisticsFrequency.Month, from, to, DayOfWeek.Monday);
+            Assert.IsTrue(naive.Values.Sum() > 0, metric + " has facts in the test");
+            CollectionAssert.AreEqual(QueryHarness.Expected(result.Buckets, naive, StatisticsFrequency.Month), result.Series.Single().Values.ToArray(), metric);
+        }
+
+        Assert.AreEqual(12_500, (await harness.Queries.SeriesAsync(request, "instruction-tokens")).Series.Single().Total);
+    }
+
+    [TestMethod]
     public async Task AMonthIsTheSumOfItsDays_AndOfItsQuarterHours_InTheTwoSources()
     {
         await using var harness = await QueryHarness.CreateAsync("Europe/Paris");
@@ -294,17 +335,33 @@ public sealed class StatisticsQueriesTests
 
         var models = await harness.Queries.TopAsync(request, "models", "tokens");
 
-        var expected = harness.Batches.SelectMany(static batch => batch.Usage.Select(static pair => (pair.Key.Quarter, pair.Key.Model, Tokens: pair.Value.InputTokens + pair.Value.OutputTokens)))
+        // A model of two providers is two rows, as in the table of the models: the same name is not the same model.
+        var expected = harness.Batches.SelectMany(static batch => batch.Usage.Select(static pair => (pair.Key.Quarter, pair.Key.Provider, pair.Key.Model, Tokens: pair.Value.InputTokens + pair.Value.OutputTokens)))
             .Where(item => { var date = DateOnly.FromDateTime(harness.Local(item.Quarter)); return date >= new DateOnly(2026, 4, 1) && date <= new DateOnly(2026, 9, 30); })
-            .GroupBy(static item => item.Model).Select(static group => (Model: group.Key, Tokens: (double)group.Sum(static item => item.Tokens)))
+            .GroupBy(static item => (item.Provider, item.Model)).Select(static group => (group.Key.Provider, group.Key.Model, Tokens: (double)group.Sum(static item => item.Tokens)))
             .OrderByDescending(static item => item.Tokens).ToList();
+        Assert.IsTrue(expected.Select(static item => item.Model).Distinct().Count() < expected.Count, "The facts of the test have a model under several providers.");
         Assert.AreEqual(3, models.Rows.Count);
         Assert.AreEqual(expected.Count, models.TotalRows);
         Assert.IsTrue(models.Truncated);
-        CollectionAssert.AreEqual(expected.Take(3).Select(static item => item.Model).ToArray(), models.Rows.Select(static row => row.Key).ToArray());
+        CollectionAssert.AreEqual(expected.Take(3).Select(static item => item.Provider + "/" + item.Model).ToArray(), models.Rows.Select(static row => row.Key).ToArray());
+        CollectionAssert.AreEqual(expected.Take(3).Select(static item => item.Model).ToArray(), models.Rows.Select(static row => row.Label).ToArray());
+        CollectionAssert.AreEqual(expected.Take(3).Select(static item => item.Provider).ToArray(), models.Rows.Select(static row => row.Detail).ToArray());
         CollectionAssert.AreEqual(expected.Take(3).Select(static item => item.Tokens).ToArray(), models.Rows.Select(static row => row.Value).ToArray());
         Assert.AreEqual(expected[0].Tokens / expected.Sum(static item => item.Tokens), models.Rows[0].Share, 1e-9);
-        Assert.AreEqual(models.Rows[0].Value, models.Rows[0].Spark.Sum(), 0.001);
+        foreach (var row in models.Rows)
+        {
+            Assert.AreEqual(row.Value, row.Spark.Sum(), 0.001, row.Key);
+        }
+
+        // The ranking and the table of the models agree, row for row, and so do their lines over time.
+        var table = await harness.Queries.ModelsAsync(request);
+        CollectionAssert.AreEqual(models.Rows.Select(static row => row.Key).ToArray(), table.Rows.Select(static row => row.Provider + "/" + row.Model).ToArray());
+        CollectionAssert.AreEqual(models.Rows.Select(static row => row.Value).ToArray(), table.Rows.Select(static row => (double)(row.InputTokens + row.OutputTokens)).ToArray());
+        foreach (var (ranked, row) in models.Rows.Zip(table.Rows))
+        {
+            CollectionAssert.AreEqual(ranked.Spark.ToArray(), row.Spark.ToArray(), ranked.Key);
+        }
 
         foreach (var (kind, by) in new[] { ("tools", "calls"), ("tools", "time"), ("projects", "time"), ("projects", "tokens"), ("sessions", "calls"), ("models", "time") })
         {
@@ -546,6 +603,10 @@ public sealed class StatisticsQueriesTests
         Assert.IsTrue(empty.Filter.IsEmpty);
         Assert.AreEqual("30d", StatisticsJson.ParseRequest("null").Period);
         Assert.Throws<ArgumentException>(() => StatisticsJson.ParseRequest("""{"frequency":"sometimes"}"""));
+        // A number that names no value is refused as a name that is none.
+        Assert.Throws<ArgumentException>(() => StatisticsJson.ParseRequest("""{"frequency":99}"""));
+        Assert.Throws<ArgumentException>(() => StatisticsJson.ParseRequest("""{"comparison":7}"""));
+        Assert.Throws<ArgumentException>(() => StatisticsJson.ParseRequest("""{"weekStart":12}"""));
     }
 
     [TestMethod]

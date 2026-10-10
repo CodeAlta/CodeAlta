@@ -238,13 +238,16 @@ internal sealed class CanvasPluginHarness : IAsyncDisposable
 
     public TestCanvas Canvas { get; private set; } = null!;
 
-    /// <summary>Makes the plugin of a window over an empty store, activated. The engine waits an hour before it reads: only what a test asks for happens.</summary>
-    public static async Task<CanvasPluginHarness> CreateAsync(StoreHarness? store = null, TimeSpan? startDelay = null, PluginFrontends frontend = PluginFrontends.Desktop)
+    /// <summary>
+    /// Makes the plugin of a window over an empty store, activated. The engine waits an hour before it reads: only what a test asks for happens.
+    /// With <paramref name="time"/> the engine and the events of the canvas wait on that clock: nothing is sent until the test moves it.
+    /// </summary>
+    public static async Task<CanvasPluginHarness> CreateAsync(StoreHarness? store = null, TimeSpan? startDelay = null, PluginFrontends frontend = PluginFrontends.Desktop, ManualTime? time = null)
     {
         var owns = store is null;
         store ??= await StoreHarness.CreateAsync();
         var journals = new FakeJournalCatalog();
-        var plugin = new StatisticsPlugin(journals, startDelay ?? TimeSpan.FromHours(1), TimeSpan.Zero);
+        var plugin = new StatisticsPlugin(journals, startDelay ?? TimeSpan.FromHours(1), TimeSpan.Zero, time);
         var services = new WindowServices(store.Database);
         plugin.AttachRuntimeContext(services.Context(frontend));
         await plugin.OnActivatedAsync();

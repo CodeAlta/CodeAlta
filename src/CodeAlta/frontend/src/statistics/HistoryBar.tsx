@@ -1,5 +1,5 @@
 import { Button, Callout, PopoverNext, ProgressBar } from "@blueprintjs/core";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { AppIcon } from "../AppIcon";
 import { showToast } from "../appToaster";
 import { useText } from "./text";
@@ -34,9 +34,10 @@ export function FirstTimeCard({ status }: Readonly<{ status: StatisticsStatus }>
   const takes = seconds < 60 ? t("less than a minute") : duration(timeLeft({ ...status, etaSeconds: seconds }));
   const since = status.oldestDateReached ? fmt.dayLong(`${String(status.oldestDateReached).slice(0, 4)}-${String(status.oldestDateReached).slice(4, 6)}-${String(status.oldestDateReached).slice(6, 8)}`) : null;
   const disabled = history.busy;
-  return <section className="stats-first" aria-labelledby="stats-first-title">
+  const titleId = useId();
+  return <section className="stats-first" aria-labelledby={titleId}>
     <div className="stats-first-mark" aria-hidden="true"><AppIcon name="usage" size={26} /></div>
-    <h2 id="stats-first-title">{t("Statistics of your sessions")}</h2>
+    <h2 id={titleId}>{t("Statistics of your sessions")}</h2>
     <p>{known && since
       ? status.sessionsTotal === 1 ? t("1 session since {date} can be read to build your statistics. It takes {time} and runs in the background.", { date: since, time: takes })
         : t("{count} sessions since {date} can be read to build your statistics. It takes {time} and runs in the background.", { count: status.sessionsTotal.toLocaleString(locale), date: since, time: takes })
@@ -75,23 +76,25 @@ export function HistoryBar() {
   }, [status, visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (view === "none" || view === "choice") return null;
-  if (!status || view === "starting") return <div className="stats-history" data-view="starting" role="status"><span>{t("Preparing the statistics…")}</span></div>;
+  // What a screen reader is told (`role="status"`) is the sentence of the state, in each view: never the whole bar, whose buttons would be
+  // read with it, and not the numbers of the progress, which change at every step and which the progress bar already gives.
+  if (!status || view === "starting") return <div className="stats-history" data-view="starting"><span role="status">{t("Preparing the statistics…")}</span></div>;
   const reached = reachedDay(status);
   const left = status.sessionsTotal - status.sessionsDone;
   const reason = status.reason;
-  return <div className="stats-history" data-view={view} role="status">
+  return <div className="stats-history" data-view={view}>
     {view === "reading" && <>
       <ProgressBar className="stats-progress" value={progressOf(status)} intent="primary" stripes={false} animate={false} aria-label={t("Reading the history")} />
       <div className="stats-history-line">
-        <span>{reason === "facts-improved" ? t("Statistics were improved in this version. The history is being read again; what you see stays until then.")
-          : reason === "catch-up" ? left === 1 ? t("Catching up with 1 session…") : t("Catching up with {count} sessions…", { count: left.toLocaleString(locale) })
-          : <>{reason === "extended" ? t("Reading more history") : t("Reading the history")}: {t("{done} of {total} sessions", { done: status.sessionsDone.toLocaleString(locale), total: status.sessionsTotal.toLocaleString(locale) })}
+        <span>{reason === "facts-improved" ? <span role="status">{t("Statistics were improved in this version. The history is being read again; what you see stays until then.")}</span>
+          : reason === "catch-up" ? <span role="status">{left === 1 ? t("Catching up with 1 session…") : t("Catching up with {count} sessions…", { count: left.toLocaleString(locale) })}</span>
+          : <><span role="status">{reason === "extended" ? t("Reading more history") : t("Reading the history")}</span>: {t("{done} of {total} sessions", { done: status.sessionsDone.toLocaleString(locale), total: status.sessionsTotal.toLocaleString(locale) })}
             {reached && <>, {t("back to {date}", { date: fmt.day(reached) })}</>}.{timeLeft(status) && <> {sentenceCase(t("{time} left.", { time: duration(timeLeft(status)) }), locale)}</>}</>}</span>
         <Button size="small" icon={<AppIcon name="pause" size={13} />} disabled={history.busy} onClick={() => void history.pause()}>{t("Pause")}</Button>
       </div>
     </>}
     {view === "paused" && <div className="stats-history-line">
-      <span>{reached
+      <span role="status">{reached
         ? left === 1 ? t("History paused at {date}. 1 session left.", { date: fmt.day(reached) }) : t("History paused at {date}. {count} sessions left.", { date: fmt.day(reached), count: left.toLocaleString(locale) })
         : left === 1 ? t("History paused. 1 session left.") : t("History paused. {count} sessions left.", { count: left.toLocaleString(locale) })}</span>
       <span className="stats-history-buttons">
@@ -100,9 +103,9 @@ export function HistoryBar() {
       </span>
     </div>}
     {view === "stopped" && <div className="stats-history-line">
-      <span>{reached ? t("The charts start on {date}.", { date: fmt.dayLong(reached) }) : t("The charts start where the reading stopped.")}</span>
+      <span role="status">{reached ? t("The charts start on {date}.", { date: fmt.dayLong(reached) }) : t("The charts start where the reading stopped.")}</span>
     </div>}
-    {view === "skipped" && <div className="stats-history-line">
+    {view === "skipped" && <div className="stats-history-line" role="status">
       <PopoverNext placement="bottom-start" content={<div className="stats-popover stats-skipped">
         <ul>{status.skipped.map(item => <li key={item.sessionId}><code>{item.sessionId.slice(0, 8)}</code><span>{item.reason}</span></li>)}</ul>
         <Button size="small" onClick={() => void history.resume()} disabled={history.busy}>{t("Try again")}</Button>
@@ -111,7 +114,7 @@ export function HistoryBar() {
       </PopoverNext>
     </div>}
     {view === "failed" && <Callout className="stats-failed" intent="danger" icon={<AppIcon name="error" size={16} />} title={t("The statistics could not start")}>
-      <p>{status.error ?? t("Something went wrong.")}</p><Button size="small" onClick={() => void history.resume()} disabled={history.busy}>{t("Try again")}</Button></Callout>}
+      <p role="status">{status.error ?? t("Something went wrong.")}</p><Button size="small" onClick={() => void history.resume()} disabled={history.busy}>{t("Try again")}</Button></Callout>}
     {history.error && <p className="stats-history-error" role="alert">{history.error}</p>}
   </div>;
 }

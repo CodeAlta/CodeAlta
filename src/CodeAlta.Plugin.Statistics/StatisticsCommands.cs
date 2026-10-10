@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CodeAlta.Plugin.Statistics.History;
 using CodeAlta.Plugin.Statistics.Query;
 using CodeAlta.Plugin.Statistics.Store;
@@ -9,6 +10,19 @@ using XenoAtom.CommandLine;
 using Command = XenoAtom.CommandLine.Command;
 
 namespace CodeAlta.Plugin.Statistics;
+
+/// <summary>The record a command of the statistics writes on its error stream when it fails.</summary>
+/// <param name="Type">Always <c>alta.error</c>.</param>
+/// <param name="Version">The version of the record.</param>
+/// <param name="CorrelationId">The correlation of the command.</param>
+/// <param name="Code">A stable code, such as <c>usage.invalidQuery</c>.</param>
+/// <param name="ExitCode">The exit code of the command.</param>
+/// <param name="Message">A sentence made to be shown.</param>
+internal sealed record StatisticsCommandError(string Type, int Version, string? CorrelationId, string Code, int ExitCode, string Message);
+
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
+[JsonSerializable(typeof(StatisticsCommandError))]
+internal sealed partial class StatisticsCommandJsonContext : JsonSerializerContext;
 
 /// <summary>
 /// The <c>alta statistics</c> commands: the numbers of the Statistics page for agents and for the user, read from the same store, so that
@@ -33,7 +47,7 @@ internal static class StatisticsCommands
         Help(
             command,
             "The numbers are counted from the sessions the user chose to read, and kept up to date while sessions run. Every result says in `query.coverage` whether the history is read for the period, and which filters it could not apply in `query.ignoredFilters`.",
-            "A period is `today`, `7d` (any `Nd`: the last N days, today included), `week`, `month`, `last-month`, `year`, `all`, or `2026-01-01..2026-03-31` (an end left out is today). Days are local days.",
+            "A period is `today`, `yesterday`, `7d` (any `Nd`: the last N days, today included), `week`, `month`, `last-month`, `year`, `all`, or `2026-01-01..2026-03-31` (an end left out is today). Days are local days.",
             "A cost is given for each unit: dollars and AI credits never add up. A space filter names the projects the space has today.",
             "Examples: `alta statistics summary --period 7d`; `alta statistics series tokens --period 90d --by week --group model`; `alta statistics top tools --by time --limit 5`; `alta statistics session <id> --with-children`; `alta statistics status`.");
         return command;
@@ -161,7 +175,7 @@ internal static class StatisticsCommands
                 return Fail(context, "statistics.failed", exception.Message);
             }
         });
-        Help(command, "`state` is needs-choice (nothing is read until the user chooses), reading, paused, stoppedHere or done. `completeFromDay` is the first day (yyyymmdd) the numbers are complete from; `running` says whether this application reads the sessions (CodeAlta Desktop does).");
+        Help(command, "`state` is starting, needsChoice (nothing is read until the user chooses), reading, paused, stoppedHere, done or failed. `completeFromDay` is the first day (yyyymmdd) the numbers are complete from; `running` says whether this application reads the sessions (CodeAlta Desktop does).");
         return command;
     }
 
@@ -249,12 +263,13 @@ internal static class StatisticsCommands
 
     private static async ValueTask<(StatisticsStatus Status, bool Running)?> ReadStatusAsync(StatisticsPlugin plugin, PluginAltaCommandContext context)
     {
+        // Where the engine runs, the store is the one of the engine, prepared: the state is known, never the one of an engine that waits to start.
+        var store = await plugin.OpenStoreAsync(context, context.CancellationToken).ConfigureAwait(false);
         if (plugin.Statistics is { } service)
         {
             return (service.Status, true);
         }
 
-        var store = await plugin.OpenStoreAsync(context, context.CancellationToken).ConfigureAwait(false);
         if (store is null)
         {
             return null;
@@ -348,8 +363,18 @@ internal static class StatisticsCommands
 
     private static int Fail(PluginAltaCommandContext context, string code, string message, int exitCode = Failure)
     {
-        context.Stderr.WriteLine(JsonSerializer.Serialize(new { type = "alta.error", version = 1, correlationId = context.CorrelationId, code, exitCode, message }, JsonSerializerOptions.Web));
+        var error = new StatisticsCommandError("alta.error", 1, context.CorrelationId, code, exitCode, message);
+        context.Stderr.WriteLine(JsonSerializer.Serialize(error, StatisticsCommandJsonContext.Default.StatisticsCommandError));
         return exitCode;
+    }
+
+    /// <summary>Reads the name of a value of an enumeration, in any case. A number or a list of names is not a name.</summary>
+    private static bool TryParseName<TEnum>(string text, out TEnum value)
+        where TEnum : struct, Enum
+    {
+        value = default;
+        var name = text.Trim();
+        return name.Length > 0 && name.All(char.IsAsciiLetter) && Enum.TryParse(name, ignoreCase: true, out value) && Enum.IsDefined(value);
     }
 
     private static Command Group(string name, string description) => new(name, description) { new CommandUsage(), new HelpOption() };
@@ -377,12 +402,12 @@ internal static class StatisticsCommands
 
         public void AddTo(Command command, bool frequency)
         {
-            command.Add("period=", "The period: today, 7d, 30d, 90d, week, month, last-month, year, all, or <from>..<to> (default 30d).", value => _period = value ?? "30d");
+            command.Add("period=", "The period: today, yesterday, 7d, 30d, 90d (any Nd), week, month, last-month, year, all, or <from>..<to> (default 30d).", value => _period = value ?? "30d");
             if (frequency)
             {
                 command.Add("by=", "The frequency of the buckets: auto (default), hour, day, week, month or year.", value => _by = value);
                 command.Add("compare=", "Compare with the period before (`previous`) or the same dates a year before (`year`).", value => _compare = value);
-                command.Add("week-start=", "The first day of the week, such as monday; the one of the culture by default.", value => _weekStart = value);
+                command.Add("week-start=", "The first day of the week, such as monday. By default the one of the regional settings of this computer, as on the Statistics page.", value => _weekStart = value);
             }
 
             command.Add("project=", "Only the sessions of this project: its id, slug or name.", value => _project = value);
@@ -398,7 +423,7 @@ internal static class StatisticsCommands
         public StatisticsRequest ToRequest()
         {
             var frequency = StatisticsFrequency.Auto;
-            if (_by is not null && !Enum.TryParse(_by, ignoreCase: true, out frequency))
+            if (_by is not null && !TryParseName(_by, out frequency))
             {
                 throw new ArgumentException($"'{_by}' is not a frequency: use auto, hour, day, week, month or year.");
             }
@@ -413,7 +438,7 @@ internal static class StatisticsCommands
             DayOfWeek? weekStart = null;
             if (_weekStart is not null)
             {
-                weekStart = Enum.TryParse<DayOfWeek>(_weekStart, ignoreCase: true, out var day) ? day : throw new ArgumentException($"'{_weekStart}' is not a day of the week.");
+                weekStart = TryParseName<DayOfWeek>(_weekStart, out var day) ? day : throw new ArgumentException($"'{_weekStart}' is not a day of the week: use its name, such as monday.");
             }
 
             if (_limit is < 1)

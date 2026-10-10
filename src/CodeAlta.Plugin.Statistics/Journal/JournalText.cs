@@ -315,13 +315,19 @@ internal static class JournalEnvelope
             return false;
         }
 
-        if (position != text.Length || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(Math.Max(year, 1), month) || hour > 23 || minute > 59 || second > 59)
+        if (position != text.Length || year < 1 || month is < 1 or > 12 || day < 1 || day > DateTime.DaysInMonth(year, month) || hour > 23 || minute > 59 || second > 59)
         {
             return false;
         }
 
-        var utc = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Utc).AddTicks(fractionTicks).AddMinutes(-offsetMinutes);
-        value = new DateTimeOffset(utc, TimeSpan.Zero);
+        // The offset may carry a time of the first or the last day of the calendar out of it: such a time is not one.
+        var ticks = new DateTime(year, month, day, hour, minute, second, DateTimeKind.Utc).Ticks + fractionTicks - (offsetMinutes * TimeSpan.TicksPerMinute);
+        if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)
+        {
+            return false;
+        }
+
+        value = new DateTimeOffset(ticks, TimeSpan.Zero);
         return true;
     }
 

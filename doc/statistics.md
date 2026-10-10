@@ -14,6 +14,13 @@ This page documents what the Statistics plugin (`src/CodeAlta.Plugin.Statistics`
 
 The tables live in the SQLite database of the instance (`<state root>/data/alta.sqlite3`; the developer instance has its own), through the `IPluginDatabase` service of the host (`doc/plugins.md`, "Plugin database"): prefix `statistics_`, owner `plugin:statistics`, one writer at a time, write-ahead log. The tables are created by `MigrateAsync(1)`. Nothing in them is text of a session: only counts and sums, the names of providers, models, tools and MCP servers, the program of a shell command (`git`) and the first two words of an `alta` command, the extension of a changed file, and the id, the title and the project of a session.
 
+A name that is taken out of a command is kept only when it is written as a name, because the rest of a command may hold a secret:
+
+| Name | What is kept | What is not |
+| --- | --- | --- |
+| The program of a shell command | The first word, without its folder and `.exe`, in lower case, when it is made of letters, digits, `.`, `_`, `-` and `+` (at most 40) | A variable set before the program is stepped over with its value (`PGPASSWORD=… psql` counts `psql`, `$env:TOKEN='…'; gh` counts `gh`); a command whose value has no end that can be told (a command substitution, a quote that does not close, a value beyond the first 160 bytes) has no program. An expression or a variable (`$x`, `[IO.File]::…`) is not a program |
+| The command of `alta` | The first two words written as commands are (a lower-case letter, then lower-case letters, digits, `-`, `_`; at most 32) | Options and everything after them, and any other word: a sentence, a path, a name with a capital |
+
 | Table | One row per | Holds |
 | --- | --- | --- |
 | `journal` | Session file | Where the reading stopped: the offset, the length and the stamp of the file when the reading began (zero while the reading did not reach the end), the mark of its first line, the state of the facts (JSON, with its version), the version of the facts the rows were computed with, the first quarter hour that was kept (the floor), the number of runs that had no end, whether the file is gone |
@@ -53,8 +60,9 @@ The history and the flow do the same thing to a session (`SessionCatchUp`, `doc/
 | A journal read in several chunks (64 MiB each) | One transaction per chunk: the writes stay short, whatever the size of the file. The largest journal of the author's profile is 1.5 GB |
 | The file is not the one the cursor belongs to (a header prepended, a file replaced, a shorter file, a state of another version of the facts) | `CatchUpResult.Restarted`: the session is read again from the start, the chunks are kept in memory (facts are small), and **one** transaction replaces the rows of the session, so the old numbers stay until the new ones are complete |
 | The read is canceled (pause, stop, application closing) | It stops at a line end; what was read is saved with its cursor. The `journal` row then holds a length and a stamp of zero, so that it is never taken for a complete reading |
-| A session that has been quiet for an hour (`DeadAfter`) with a run that has no end | `InterruptOpenRuns` closes the run as interrupted, once: a session that is not running writes nothing more |
-| A session whose journal is not readable | It is skipped and counted (`StatisticsStatus.SkippedCount` and the first fifty with their reason); the job goes on. It is tried again when the journal changes, not at every look |
+| A session that has been quiet for an hour (`DeadAfter`) with a run that has no end | `InterruptOpenRuns` closes the run as interrupted, once: a session that is not running writes nothing more. The engine cannot tell a dead session from a run that waits for the user, so a later record of that run opens it again and takes the interruption back (`doc/statistics-facts.md`, "Interrupted") |
+| A session whose journal is not readable | It is skipped and counted (`StatisticsStatus.SkippedCount` and the first fifty with their reason); the job goes on. It is tried again when the journal changes, not at every look, and it stays counted at the following looks. `ResumeAsync` on a history that is done or stopped with skipped sessions ("Try again") tries them again as they are |
+| The file is replaced between two chunks of a session that is read again | The facts kept of the first file are dropped: the batch of a restarted reading holds the session from its start |
 
 ## The history job
 
@@ -70,11 +78,11 @@ Nothing is read until the user chose. The state is then `needsChoice`, and `alta
 | The last N days | `--days N` (30 and 90 are usual) | The first local day of the N days, today included | The journals changed since the floor are read. Only the facts from the floor are kept: the statistics start there |
 | Nothing of the past | `--from-today` | Today | Nothing is read now. The flow keeps today, and a session of today that began earlier keeps only what happened since the start of the day |
 
-The choice, the floor, a pause and a stop are kept in `meta`, so they survive a restart. **Reading more** is the same call with a choice that goes further back (a larger N, or `--all`); one that does not go further back changes nothing. The sessions already read with a higher floor are read again from the start and replaced (`journal.floor_q`).
+The choice, the floor, a pause and a stop are kept in `meta`, so they survive a restart. **Reading more** is the same call with a choice that goes further back (a larger N, or `--all`); one that does not go further back changes nothing. The sessions already read with a higher floor are read again from the start and replaced (`journal.floor_q`). Until then a session that writes is caught up by the flow with the floor its rows have: the floor of a row is lowered only by the reading that replaces it, so a session cannot lose its older days to a signal that came first.
 
 ### What is left to do, and in which order
 
-At the start, after a choice, and every five minutes (sessions of another application), the engine lists the journals of the session store (`ISessionJournalCatalog`, the **whole** store, not the sessions the Explorer shows) and compares them with the `journal` table:
+At the start, after a choice, and every five minutes (sessions of another application), whether the history is done or was stopped by the user, the engine lists the journals of the session store (`ISessionJournalCatalog`, the **whole** store, not the sessions the Explorer shows) and compares them with the `journal` table:
 
 | Journal | To do |
 | --- | --- |
@@ -110,11 +118,11 @@ The list is ordered by the **last change of the file, the most recent first**, s
 | --- | --- | --- | --- |
 | Choose or read more | `ChooseHistoryAsync(HistoryChoice)` | `history read` | See above |
 | Pause | `PauseAsync()` | `history pause` | The reading stops at a line end and keeps its cursor; the flow goes on; kept across restarts |
-| Resume | `ResumeAsync()` | `history resume` | |
-| Stop here | `StopHereAsync()` | `history stop` | The floor becomes `completeFromDay`: the statistics start at the date reached, and "read more" goes further back |
+| Resume | `ResumeAsync()` | `history resume` | A paused reading goes on. On a history that is done or stopped with sessions that could not be read, they are tried again |
+| Stop here | `StopHereAsync()` | `history stop` | The floor becomes `completeFromDay`: the statistics start at the date reached, and "read more" goes further back. Stopped before a journal was listed, the statistics start today. A stopped history still catches up what changes from its floor (the state is `reading` with the reason `catch-up` meanwhile, and `stoppedHere` again after) |
 | Forget deleted | `ForgetDeletedAsync()` | `history forget-deleted` | Removes the facts of the sessions whose journal is gone |
 
-The reading is **gentle**: one thread of its own with a priority below normal for the reading itself (the CPU and disk work), one session at a time, and the flow first, between two sessions and between two chunks of a large journal.
+The reading is **gentle**: one thread of its own with a priority below normal for the reading itself (the CPU and disk work), one session at a time, and the flow first, between two sessions and between two chunks of a large journal. Between two chunks the flow catches up the **other** sessions: the session whose journal is being read stays in the flow until its last chunk is saved, because a catch-up from the saved cursor would read bytes the history is about to read, and they would be counted twice.
 
 ## The flow
 
@@ -129,10 +137,10 @@ The reading is **gentle**: one thread of its own with a priority below normal fo
 | Property | Choices |
 | --- | --- |
 | `period` | `today`, `yesterday`, `Nd` (the last N days, today included), `week`, `month`, `last-month`, `year`, `all`, or `yyyy-MM-dd..yyyy-MM-dd` (an end left out is today, a start left out is the first day with data). Local days |
-| `frequency` | `auto`, `hour`, `day`, `week` (from `weekStart`, or the culture), `month`, `year`. `auto`: hours for one day, days up to 90 days, weeks up to a year, months beyond. At most 5,000 buckets |
+| `frequency` | `auto`, `hour`, `day`, `week` (from `weekStart`), `month`, `year`. `auto`: hours for one day, days up to 90 days, weeks up to a year, months beyond. At most 5,000 buckets |
 | `comparison` | `none`, `previousPeriod` (the period of the same length before), `samePeriodLastYear` |
 | `filter` | `space` (the projects it has **today**, and the chats: the sessions of no project, which the Explorer shows in every space), `project`, `provider`, `model`, `effort`, `origin` (`you`, `agent`, `automation`, `reminder`), `toolKind` |
-| `weekStart`, `limit` | The first day of the week; the most rows or lines (default 50, 20 for series lines, 10 for rankings; at most 500) |
+| `weekStart`, `limit` | The first day of the week; the most rows or lines (default 50, 20 for series lines, 10 for rankings; at most 500). A request that names no first day gets `StatisticsQueries.DefaultWeekStart`, the one of the regional settings of the computer. `alta statistics` uses it unless `--week-start` is given, and the canvas reads it with `statistics.context` and names it in every request and in its calendars, so a command and the page cut the same weeks |
 
 Counts and sums are read from the roll-ups (days, and months or years when the period is made of whole months or years); a question that needs the session (a project, a space, a session) or the hour reads the quarter hours. A filter the facts cannot honor for a question (the origin of a prompt on the tokens of a quarter hour) is **not applied** and the result names it in `query.ignoredFilters`: provider and model apply to activity, requests and cost (not to tools or prompts), effort to activity and requests, tool kind to tools, origin to prompts, project and space to everything.
 
@@ -141,8 +149,8 @@ Every result starts with `query` (`QueryHeader`): the period as asked, `from` an
 | Method | Result (JSON) | What |
 | --- | --- | --- |
 | `SummaryAsync` | `SummaryResult`: `buckets`, `tiles[]`, `costs[]` | The tiles of the Overview: sessions, runs, active time, prompts you sent, requests, tokens (all, input, output, fresh, cache read, cache write, reasoning), tool calls and failures, lines added and removed, files changed, errors, compactions; each has `value`, `previous`, `change` (a ratio) and `spark` (one value per bucket). The cost has a tile for **each unit**: dollars and AI credits never add up |
-| `SeriesAsync(metric, group)` | `SeriesResult`: `metric`, `unit`, `group`, `buckets[]`, `series[]` (`key`, `label`, `values[]`, `previous[]`, `total`, `previousTotal`) | One metric per bucket. `StatisticsQueries.MetricNames`: runs (and by outcome), active time, errors, compactions, requests, tokens of each kind, tool calls, failures, time, bytes, files and lines, prompts (and yours, characters, words, attachments), answers, cost, sessions active and started. `GroupNames`: provider, model, effort, project, delegated (your sessions or sub-agents), tool, kind, origin, purpose, unit, prompt-kind. The runs cut by origin, or filtered by it, are read from the table of runs, which knows who sent the prompt of each. The lines beyond the limit are added up as `other`. `sessions-active` counts **different** sessions in the facts, never a sum of buckets |
-| `TopAsync(kind, by)` | `TopResult`: `rows[]` (`key`, `label`, `detail`, `value`, `share`, `tokens`, `timeMs`, `calls`, `requests`, `failures`, `spark[]`), `totalRows`, `truncated` | Tools, models, projects or sessions by tokens, time or calls |
+| `SeriesAsync(metric, group)` | `SeriesResult`: `metric`, `unit`, `group`, `buckets[]`, `series[]` (`key`, `label`, `values[]`, `previous[]`, `total`, `previousTotal`) | One metric per bucket. `StatisticsQueries.MetricNames`: runs (and by outcome), active time, errors, compactions, requests, tokens of each kind, tool calls, failures, canceled calls, time, bytes, files and lines, prompts (and yours, characters, words, attachments), answers (and their characters and words), the reasonings a model showed (`reasonings`, `reasoning-chars`), the instructions of the sessions (`instructions`, `instruction-chars`, `instruction-tokens`), cost, sessions active and started. `GroupNames`: provider, model, effort, project, delegated (your sessions or sub-agents), tool, kind, origin, purpose, unit, prompt-kind. The runs cut by origin, or filtered by it, are read from the table of runs, which knows who sent the prompt of each. The lines beyond the limit are added up as `other`. `sessions-active` counts **different** sessions in the facts, never a sum of buckets |
+| `TopAsync(kind, by)` | `TopResult`: `rows[]` (`key`, `label`, `detail`, `value`, `share`, `tokens`, `timeMs`, `calls`, `requests`, `failures`, `spark[]`), `totalRows`, `truncated` | Tools, models, projects or sessions by tokens, time or calls. A model is the model of a provider, as in the table of the models: its `key` is `provider/model`, its `label` the model and its `detail` the provider, and the same name under two providers is two rows |
 | `ToolsAsync`, `ModelsAsync`, `ProjectsAsync`, `SessionsAsync(sort)` | `ToolsResult`, `ModelsResult`, `ProjectsResult`, `SessionsResult` | The tables of the pages: tools with failure rate, time, median and 90th percentile and a line; models with each kind of token, cache share, time, context fill, costs by unit and a line, and models by effort; projects with sessions, runs, time, tokens, calls, costs and a line; sessions with their numbers (a deleted session is listed with `deleted` and its numbers) |
 | `DistributionAsync(measure, subject)` | `DistributionResult`: `steps[]` (`lower`, `upper`, `count`), `count`, `p50`, `p90` | A distribution in the fixed steps (run duration, tool duration, request tokens, prompt size, run cost, tool calls of a run). Percentiles are interpolated inside the step they fall in, exact within about 19% |
 | `CalendarAsync`, `WeekHourAsync` | `CalendarResult` (`days[]`), `WeekHourResult` (`weekdays[]`, `activeMs[7][24]`, `runs[7][24]`) | A year of days; the day of the week by hour |
@@ -220,13 +228,14 @@ The menu of the canvas also has "Forget deleted sessions" and, when the binding 
 - Only the page that is shown is mounted, and only it asks. A question is held under its key (the method, the request, its arguments) in a store of the canvas that keeps 96 results; coming back to a page shows them at once.
 - A question starts a moment after its key settles and is canceled when the key changes or the block goes away, so the effects that run twice under React StrictMode ask once.
 - While `context.visible` is false nothing is asked and the charts draw nothing. The status and the changes that arrive meanwhile are kept and applied when the canvas is shown again.
-- `DataChanged` events are gathered for a second; then the results whose period (or compared period) holds a changed day are marked stale, and the page that is shown asks for those again, the others not.
+- `DataChanged` events are gathered for a second; then the results whose period (or compared period) holds a changed day are marked stale, and the page that is shown asks for those again, the others not. A change that arrives while a question is in flight leaves its answer stale when it comes back, and the block asks again at once.
+- Several canvases stay mounted in one window (the one of the application, the one of a project): the ids of the tabs and of the first-time card come from `useId`, so no two elements share one. What the history bar tells a screen reader (`role="status"`) is the sentence of its state, not the bar: the buttons are not read with it, and the numbers of the progress are left to the progress bar.
 - A chart is drawn with the SVG renderer (canvas above 1,500 buckets). The hatch of what is not read yet is CSS over the plot box the option fixes, so it is not a legend entry or a row of the table.
 - Numbers and dates are written with the locale of the window (`Intl`): `1.2M`, `1 h 05`, `$1,511`; the sentences are in `statistics/messages.ts`, in six languages.
 
 ### Tests
 
-`statistics.test.ts` (the pure parts: periods and frequencies, the frame and its query string, the request, the formatters, the options, the steps, the store, the history states, the filters, the fixture), `golden.test.ts` (the JSON shapes), and `statistics.browser.test.ts`, which mounts the canvas in headless Edge under the production policy and React StrictMode over a recording fixture API: every page in both themes, the requests the frame produces, the first time, the pause, a hidden tab, a burst of changes, an error and its retry, an empty period, 220 page switches, the keyboard, the languages, narrow and zoomed. The pictures are in `tmp/statistics/`.
+`statistics.test.ts` (the pure parts: periods and frequencies, the frame and its query string, the request, the formatters, the options, the steps, the store, the history states, the filters, the fixture), `golden.test.ts` (the JSON shapes), and `statistics.browser.test.ts`, which mounts the canvas in headless Edge under the production policy and React StrictMode over a recording fixture API: every page in both themes, the requests the frame produces, the first time, the pause, a hidden tab, a burst of changes, an error and its retry, an empty period, 220 page switches, the keyboard, the languages, narrow and zoomed, and a change that arrives while a question is in flight. `canvas.browser.test.ts` mounts the module of the plugin (`canvas.tsx`) the same way, over an `alta` object whose calls cross the wire as JSON.
 
 ## The plugin side of the canvas
 
@@ -256,7 +265,7 @@ Each call is a record the script sends (`StatisticsCall`: `request`, `metric`, `
 | `statistics.choose-history` | `{ kind: "all" \| "fromToday" \| "days", days }` | the status after the choice |
 | `statistics.pause`, `.resume`, `.stop-here`, `.reset` | | the status after the call |
 | `statistics.forget-deleted` | | `{ count }` |
-| `statistics.context` | | `{ spaces: [{ id, name, isDefault, projectIds }], projects: [{ id, name }] }`, read through `alta space list` and `alta project list`; the default space has every project |
+| `statistics.context` | | `{ weekStart, spaces: [{ id, name, isDefault, projectIds }], projects: [{ id, name }] }`: the first day of the week of the questions (`Monday`), and the spaces and projects read through `alta space list` and `alta project list`; the default space has every project. The module asks for it when the tab is first shown, not while it is hidden |
 
 A question waits for the tables to exist (`InitializeAsync`), then for one of four places (`MaximumConcurrentQuestions`, shared by all the canvases), so a page that asks twelve things at once does not hold twelve readers of the database. They run while the history is read: reading uses its own connection and the database is in write-ahead mode. A result of more than 3 MiB (`StatisticsCanvasRpc.MaximumResultBytes`, under the 4 MiB the transport carries) is refused with `result_too_large`: choose a shorter period or add a filter; the queries cap their own rows (`StatisticsQueries.MaxLimit`) well below that.
 
@@ -285,6 +294,8 @@ The commands are the same questions, for agents and for the user. Each writes **
 | `history read (--days N \| --all \| --from-today)`, `history pause`, `history resume`, `history stop`, `history forget-deleted` | `alta.statistics.history` (the status after the action, and `action`), `alta.statistics.forgotten` (`sessions`). Only where the engine runs (CodeAlta Desktop): elsewhere `statistics.notRunning` |
 | `estimate <text>` | `alta.statistics.estimate`, as before |
 
+A frequency (`--by`), a comparison and a first day of the week (`--week-start`) are names (`week`, `previous`, `monday`): a number, or several names, is a usage error. The error record is `StatisticsCommandError` (`type`, `version`, `correlationId`, `code`, `exitCode`, `message`), written with a source-generated serializer as every result is. Where the engine runs, a command asked before the engine prepared its tables (it waits a few seconds after the start of the application) prepares them first, as a question of the canvas does, so `status` never answers `starting` for a state that is known.
+
 The history controls change what CodeAlta keeps, not a setting of the user; an agent runs them only when the user asks.
 
 ## Measured
@@ -307,5 +318,5 @@ A cold disk was not measured. `dotnet test src -c Release --filter RealProfileHi
 - The facts count what is in the journals (`doc/statistics-facts.md`, "Limits"). A session that was deleted before it was read cannot be counted.
 - The spaces of a project are the ones it has today. A space has the chats too (a chat belongs to no project, and the Explorer shows it in every space); a project filter leaves them out.
 - The origin of a prompt filters prompts and runs; time and tokens of a quarter hour have no sender, and a result says so in `query.ignoredFilters`.
-- A run that is still going when the application is closed is closed as interrupted by the next start once its session has been quiet for an hour.
+- A run that is still going when the application is closed is closed as interrupted by the next start once its session has been quiet for an hour. So is a run that waits more than an hour for the user, until it goes on: it is then opened again.
 - The statistics of the developer instance are its own (`<state root>/data/alta.sqlite3`, its own sessions).

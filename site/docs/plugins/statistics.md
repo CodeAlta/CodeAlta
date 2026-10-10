@@ -28,14 +28,14 @@ In CodeAlta Desktop the numbers have a page of their own, in a tab. Open it from
 | The title bar | The **Statistics** button at the top right, before the space switch. It shows a small ring while your history is being read, and a dot while it waits for you to choose how much to read |
 | The keyboard | `Ctrl+G`, then `C` |
 | The search | **Statistics**, or `/statistics` |
-| A project | **Statistics** in the menu of a project row opens the page for that project only, in a tab of its own |
+| A project | **Statistics of this project** in the menu of a project row opens the page for that project only, in a tab of its own |
 | An agent | `alta canvas open statistics` |
 
 Each space has its own Statistics tab, which starts on the space it shows; a space counts its projects and your chats (the sessions of no project), which the Explorer lists in every space. CodeAlta TUI has no page: it keeps the card of each turn and the `alta statistics` commands.
 
 ## The statistics of all your sessions
 
-CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: how many runs, how long they took, which models and tools were used, how many tokens, and what was changed in files. It keeps **numbers only**. The text of your prompts, the answers and the tool results are never copied, and a file is only counted by its extension. The numbers stay on your computer, in the database of CodeAlta, and are kept after a session is deleted unless you ask for them to be forgotten.
+CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: how many runs, how long they took, which models and tools were used, how many tokens, and what was changed in files. It keeps **numbers only**. The text of your prompts, the answers and the tool results are never copied, a file is only counted by its extension, and of a command an agent ran only the name of its program is kept, never its arguments or a variable set before it. The numbers stay on your computer, in the database of CodeAlta, and are kept after a session is deleted unless you ask for them to be forgotten.
 
 The first time, nothing is read until you choose how much of your history to use. The page says how many sessions can be read and since when, and offers:
 
@@ -45,7 +45,7 @@ The first time, nothing is read until you choose how much of your history to use
 | Last 90 days | Only the sessions with activity in that time are read, and the statistics start at that day |
 | Start from today | Nothing of the past is read; the statistics begin with what happens from now on |
 
-The most recent sessions are read first, so today and this week are right within seconds, and the older days follow. The reading runs on one thread at a low priority and never slows a session. You can pause it, resume it, stop it where it is, and later read more history. If CodeAlta closes meanwhile, nothing is lost: each session that was read is kept, and the reading goes on at the next start. Sessions written by CodeAlta TUI are caught up by CodeAlta Desktop, at its next start and every few minutes while it runs.
+The most recent sessions are read first, so today and this week are right within seconds, and the older days follow. The reading runs on one thread at a low priority and never slows a session. You can pause it, resume it, stop it where it is, and later read more history; a history you stopped still follows the sessions that change from the day it starts at. If CodeAlta closes meanwhile, nothing is lost: each session that was read is kept, and the reading goes on at the next start. Sessions written by CodeAlta TUI are caught up by CodeAlta Desktop, at its next start and every few minutes while it runs.
 
 When a new version of CodeAlta computes more from your sessions, they are read again, one by one, and what you see stays until each session's new numbers are ready.
 
@@ -110,7 +110,7 @@ Show my tokens per week for the last 90 days, by model.
 | `alta statistics history ...` | Choose how much history to read, pause, resume, stop, or forget the sessions that were deleted |
 | `alta statistics estimate <text>` | The size of a text in bytes and approximate tokens |
 
-A period is `today`, `7d`, `30d`, `90d`, `week`, `month`, `last-month`, `year`, `all`, or two dates. Days are your local days, in your time zone. A cost is given for each unit, dollars or AI credits, and is never added across units: only some providers report a cost. A space filter uses the projects the space has today.
+A period is `today`, `yesterday`, any number of days such as `7d`, `30d` or `90d` (the last days, today included), `week`, `month`, `last-month`, `year`, `all`, or two dates. Days are your local days, in your time zone, and a week starts on the first day of the week of your computer's regional settings, on the page and in the commands. A cost is given for each unit, dollars or AI credits, and is never added across units: only some providers report a cost. A space filter uses the projects the space has today.
 
 Every answer says whether the history is read for the period, so an agent can tell you that the numbers before a day are not complete yet. For the broader model of agent commands, see [Advanced Agent Workflows](../advanced-agent-workflows.md).
 

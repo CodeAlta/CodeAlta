@@ -6,8 +6,9 @@ import { filterChoices, ignoredKinds, unsetFilters } from "./filters";
 import { createFormatter, dayOfNumber, etaParts, sentenceCase } from "./format";
 import {
   addDays, addMonths, allowedFrequencies, autoFrequency, bucketCount, decodeFrame, defaultFrame, encodeFrame, filterOf, firstDayOfWeek, frameReducer, initialFrame, knownDays,
-  localToday, periodText, requestOf, resolveFrequency, resolvePeriod, type Frame,
+  localToday, periodText, requestOf, resolveFrequency, resolvePeriod, weekDayIndex, type Frame,
 } from "./frame";
+import { statisticsContext } from "./canvasContext";
 import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, timeLeft } from "./history";
 import { distributionOption, hatchFraction, periodOfBrush, ratioSeries, timeSeriesOption, unreadBuckets } from "./options";
 import { QueryStore, joinRanges } from "./queryStore";
@@ -98,6 +99,19 @@ test("the request of a page is the frame: period, frequency, comparison, the fil
   assert.deepEqual(opened.filters, { space: { value: "s", label: "Work" } });
   assert.deepEqual(initialFrame({ spaceId: "s", projectId: "p", projectName: "CodeAlta" }).filters, { project: { value: "p", label: "CodeAlta" } }, "a project is narrower than a space");
   assert.ok([0, 1, 6].includes(firstDayOfWeek("en-US")) && [0, 1, 6].includes(firstDayOfWeek("not a locale")));
+});
+
+test("the first day of the week is the one the plugin names, read from the name the host writes", () => {
+  assert.equal(weekDayIndex("Sunday"), 0);
+  assert.equal(weekDayIndex("monday"), 1);
+  assert.equal(weekDayIndex("Saturday"), 6);
+  assert.equal(weekDayIndex("Someday"), undefined);
+  assert.equal(weekDayIndex(undefined), undefined);
+  const alta = { context: { pluginKey: "builtin:statistics", canvasId: "statistics", instanceId: "i", spaceId: null, projectId: null, sessionId: null, key: null, input: null }, host: { openSession: () => { } } } as unknown as Parameters<typeof statisticsContext>[0];
+  const directory = { spaces: [], projects: [] };
+  assert.equal(statisticsContext(alta, true, { ...directory, weekStart: "Saturday" }).weekStart, 6);
+  assert.equal(statisticsContext(alta, true, directory).weekStart, undefined, "a plugin that names none leaves the week of the language of the window");
+  assert.equal(statisticsContext(alta, true, null).weekStart, undefined);
 });
 
 test("numbers, durations, costs and dates are written as the locale writes them", () => {

@@ -5,24 +5,133 @@ using CodeAlta.Plugin.Statistics.Store;
 
 namespace CodeAlta.Plugin.Statistics.Tests;
 
-/// <summary>A clock the tests set by hand.</summary>
+/// <summary>
+/// A clock the tests set by hand. Its timers are its own too: a delay that waits on this clock (<c>Task.Delay(span, time)</c>) ends
+/// when <see cref="Advance"/> carries the clock past it, never with the time of the machine.
+/// </summary>
 internal sealed class ManualTime : TimeProvider
 {
+    private readonly object _gate = new();
+    private readonly List<ManualTimer> _timers = [];
     private DateTimeOffset _now;
     private long _ticks;
 
     public ManualTime(DateTimeOffset now) => _now = now;
 
-    public override DateTimeOffset GetUtcNow() => _now;
+    /// <summary>Gets the number of timers that wait for the clock to move.</summary>
+    public int PendingTimers
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _timers.Count(static timer => timer.Due is not null);
+            }
+        }
+    }
 
-    public override long GetTimestamp() => _ticks;
+    public override DateTimeOffset GetUtcNow()
+    {
+        lock (_gate)
+        {
+            return _now;
+        }
+    }
+
+    public override long GetTimestamp()
+    {
+        lock (_gate)
+        {
+            return _ticks;
+        }
+    }
 
     public override long TimestampFrequency => 1000;
 
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+    {
+        var timer = new ManualTimer(this, callback, state);
+        lock (_gate)
+        {
+            _timers.Add(timer);
+        }
+
+        timer.Change(dueTime, period);
+        return timer;
+    }
+
+    /// <summary>Moves the clock, and runs the timers that came due, in the order of their time, before it returns.</summary>
     public void Advance(TimeSpan span)
     {
-        _now += span;
-        _ticks += (long)span.TotalMilliseconds;
+        DateTimeOffset target;
+        lock (_gate)
+        {
+            target = _now + span;
+        }
+
+        while (true)
+        {
+            ManualTimer? next;
+            lock (_gate)
+            {
+                next = _timers.Where(timer => timer.Due is { } due && due <= target).MinBy(static timer => timer.Due);
+                if (next is null)
+                {
+                    _ticks += (long)(target - _now).TotalMilliseconds;
+                    _now = target;
+                    return;
+                }
+
+                var due = next.Due!.Value;
+                if (due > _now)
+                {
+                    _ticks += (long)(due - _now).TotalMilliseconds;
+                    _now = due;
+                }
+
+                next.Due = next.Period is { } period ? _now + period : null;
+            }
+
+            next.Fire();
+        }
+    }
+
+    private sealed class ManualTimer(ManualTime owner, TimerCallback callback, object? state) : ITimer
+    {
+        public DateTimeOffset? Due { get; set; }
+
+        public TimeSpan? Period { get; private set; }
+
+        public void Fire() => callback(state);
+
+        public bool Change(TimeSpan dueTime, TimeSpan period)
+        {
+            lock (owner._gate)
+            {
+                if (!owner._timers.Contains(this))
+                {
+                    return false;
+                }
+
+                Due = dueTime == Timeout.InfiniteTimeSpan ? null : owner._now + dueTime;
+                Period = period == Timeout.InfiniteTimeSpan || period == TimeSpan.Zero ? null : period;
+                return true;
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (owner._gate)
+            {
+                owner._timers.Remove(this);
+            }
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
+        }
     }
 }
 
@@ -37,6 +146,9 @@ internal sealed class FakeJournalCatalog : ISessionJournalCatalog
 
     /// <summary>Gets how many times the files were listed.</summary>
     public int Lists { get; private set; }
+
+    /// <summary>Gets or sets what a test does when a file is about to be opened, with the session and the offset: a file that changes between two readings.</summary>
+    public Action<string, long>? Opening { get; set; }
 
     /// <summary>Gets the sum of the lengths of the files.</summary>
     public long TotalBytes
@@ -123,6 +235,7 @@ internal sealed class FakeJournalCatalog : ISessionJournalCatalog
 
     public ValueTask<Stream?> OpenAsync(string sessionId, long offset = 0, CancellationToken cancellationToken = default)
     {
+        Opening?.Invoke(sessionId, offset);
         lock (_gate)
         {
             Opens++;

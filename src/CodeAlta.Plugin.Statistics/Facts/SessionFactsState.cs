@@ -10,8 +10,11 @@ namespace CodeAlta.Plugin.Statistics.Facts;
 /// </summary>
 internal sealed class SessionFactsState
 {
-    /// <summary>The version of the facts: a state of another version is not used, and the session is read again.</summary>
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// The version of the facts: a state of another version is not used, and the session is read again. Version 2 keeps no variable
+    /// of a shell command as its program and no working directory, and counts every cost that has no duration.
+    /// </summary>
+    public const int CurrentVersion = 2;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -27,6 +30,9 @@ internal sealed class SessionFactsState
 
     /// <summary>The number of prompt identifiers that are remembered as seen.</summary>
     public const int MaxSeenPrompts = 2048;
+
+    /// <summary>The number of runs closed for a session that went quiet that are remembered, so that a run that goes on is opened again.</summary>
+    public const int MaxSettledRuns = 4;
 
     /// <summary>Gets or sets the version of the facts this state belongs to.</summary>
     public int Version { get; set; } = CurrentVersion;
@@ -54,9 +60,6 @@ internal sealed class SessionFactsState
 
     /// <summary>Gets or sets the title.</summary>
     public string? Title { get; set; }
-
-    /// <summary>Gets or sets the working directory.</summary>
-    public string? WorkingDirectory { get; set; }
 
     /// <summary>Gets or sets the provider the session was created with.</summary>
     public string? InitialProvider { get; set; }
@@ -96,6 +99,12 @@ internal sealed class SessionFactsState
 
     /// <summary>Gets or sets the identifiers of the runs that ended last.</summary>
     public List<string> ClosedRuns { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the runs that were closed as interrupted because their session had been quiet for long, as they were then: a
+    /// later record of one of them opens it again, and what its closing counted is taken back. Emptied when another run starts.
+    /// </summary>
+    public List<SettledRunState> SettledRuns { get; set; } = [];
 
     /// <summary>Gets or sets the tool calls that started and have not ended.</summary>
     public List<OpenToolState> OpenTools { get; set; } = [];
@@ -230,6 +239,25 @@ internal sealed class OpenRunState
 
     /// <summary>Gets or sets the duration of the last costed record.</summary>
     public double? LastCostDuration { get; set; }
+}
+
+/// <summary>A run that was closed as interrupted because its session had been quiet for long, with what its closing was counted under.</summary>
+internal sealed class SettledRunState
+{
+    /// <summary>Gets or sets the run as it was when it was closed.</summary>
+    public OpenRunState Run { get; set; } = new();
+
+    /// <summary>Gets or sets the time the run was closed at: its last record.</summary>
+    public DateTimeOffset End { get; set; }
+
+    /// <summary>Gets or sets the provider the interruption was counted for.</summary>
+    public string Provider { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the model the interruption was counted for.</summary>
+    public string Model { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the reasoning effort the interruption was counted for.</summary>
+    public string Effort { get; set; } = string.Empty;
 }
 
 /// <summary>A tool call that started and has not ended.</summary>

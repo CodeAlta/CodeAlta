@@ -56,6 +56,12 @@ internal sealed class FakeAlta : IPluginAltaService
 [TestClass]
 public sealed class StatisticsPluginTests
 {
+    /// <summary>
+    /// The time zone of the stores of these tests: the one of the machine. A plugin always cuts its days in that zone, so a store made
+    /// in another one would have its roll-ups added up again by the first command, and the numbers of a test would be those of other days.
+    /// </summary>
+    private static string LocalZone => TimeZoneInfo.Local.Id;
+
     private static async Task<(int ExitCode, string Stdout, string Stderr)> RunAsync(StatisticsPlugin plugin, IPluginServices services, params string[] args)
     {
         var stdout = new StringWriter();
@@ -87,7 +93,7 @@ public sealed class StatisticsPluginTests
     [TestMethod]
     public async Task TheCommands_ReadTheSameNumbersAsTheQueries()
     {
-        await using var harness = await QueryHarness.CreateAsync("UTC", now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
+        await using var harness = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
         var plugin = new StatisticsPlugin();
         var services = new TestServices(harness.Store.Database, new FakeAlta());
 
@@ -121,7 +127,7 @@ public sealed class StatisticsPluginTests
     [TestMethod]
     public async Task AProjectFilter_IsResolvedThroughTheProjectsOfTheHost()
     {
-        await using var harness = await QueryHarness.CreateAsync("UTC");
+        await using var harness = await QueryHarness.CreateAsync(LocalZone);
         var plugin = new StatisticsPlugin();
         var services = new TestServices(harness.Store.Database, new FakeAlta());
 
@@ -170,6 +176,303 @@ public sealed class StatisticsPluginTests
         Assert.AreEqual(2, choose.ExitCode);
         Assert.AreEqual(1, notRunning.ExitCode);
         StringAssert.Contains(notRunning.Stderr, "statistics.notRunning");
+    }
+
+    /// <summary>Checks that a record of a command holds the result of the query, property for property, after its envelope.</summary>
+    private static void AssertRecordIs<T>(string type, T expected, JsonElement record)
+    {
+        Assert.AreEqual(type, record.GetProperty("type").GetString());
+        Assert.AreEqual(1, record.GetProperty("version").GetInt32());
+        Assert.AreEqual("corr-1", record.GetProperty("correlationId").GetString());
+        using var document = JsonDocument.Parse(StatisticsJson.Serialize(expected));
+        var properties = 0;
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            Assert.IsTrue(record.TryGetProperty(property.Name, out var value), property.Name);
+            if (property.NameEquals("query"))
+            {
+                // The header names today, which is the day of the clock of the test for the query and the real one for the command.
+                foreach (var name in new[] { "period", "from", "frequency", "timeZone", "compareFrom", "compareTo" })
+                {
+                    Assert.AreEqual(
+                        property.Value.TryGetProperty(name, out var wanted) ? wanted.GetRawText() : null,
+                        value.TryGetProperty(name, out var found) ? found.GetRawText() : null,
+                        "query." + name);
+                }
+
+                continue;
+            }
+
+            Assert.AreEqual(property.Value.GetRawText(), value.GetRawText(), property.Name);
+            properties++;
+        }
+
+        Assert.IsTrue(properties > 0, "the result has more than its header");
+    }
+
+    [TestMethod]
+    public async Task TheDetails_AreTheNamesOfTheQuery_AndAListIsRequired()
+    {
+        await using var harness = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
+        var plugin = new StatisticsPlugin();
+        var services = new TestServices(harness.Store.Database, new FakeAlta());
+        var request = new StatisticsRequest { Period = "2026-04-01..2026-09-30", Limit = 2 };
+
+        foreach (var list in new[] { "shell-program", "alta-command", "changed-file-extension" })
+        {
+            var result = await RunAsync(plugin, services, "details", list, "--period", "2026-04-01..2026-09-30", "--limit", "2");
+
+            Assert.AreEqual(0, result.ExitCode, result.Stderr);
+            var expected = await harness.Queries.DetailsAsync(request, list);
+            Assert.AreEqual(2, expected.Rows.Count, list);
+            AssertRecordIs("alta.statistics.details", expected, Single(result.Stdout));
+        }
+
+        // A project narrows the names to its sessions.
+        var ofProject = await RunAsync(plugin, services, "details", "shell-program", "--period", "2026-04-01..2026-09-30", "--project", "alpha");
+        Assert.AreEqual(0, ofProject.ExitCode, ofProject.Stderr);
+        AssertRecordIs("alta.statistics.details", await harness.Queries.DetailsAsync(new StatisticsRequest { Period = "2026-04-01..2026-09-30", Filter = new StatisticsFilter { Project = "project-0" } }, "shell-program"), Single(ofProject.Stdout));
+
+        var unknown = await RunAsync(plugin, services, "details", "colors");
+        Assert.AreEqual(2, unknown.ExitCode);
+        StringAssert.Contains(unknown.Stderr, "usage.invalidQuery");
+        Assert.AreNotEqual(0, (await RunAsync(plugin, services, "details")).ExitCode, "The command line asks for the list.");
+    }
+
+    [TestMethod]
+    public async Task OneSession_IsGivenAlone_OrWithTheSessionsItCreated()
+    {
+        // The life of a session ends today: the query it is compared with has the clock of the command, which is the one of the machine.
+        await using var harness = await QueryHarness.CreateAsync(LocalZone, now: DateTimeOffset.UtcNow);
+        var plugin = new StatisticsPlugin();
+        var services = new TestServices(harness.Store.Database, new FakeAlta());
+
+        // The projects the command learns from the host, for the query it is compared with.
+        harness.Directory.Projects.AddRange([new ProjectInfo("project-0", "alpha", "Alpha", ["work"]), new ProjectInfo("project-1", "beta", "Beta", [])]);
+
+        // session-1 created session-2 (QueryHarness).
+        var alone = await RunAsync(plugin, services, "session", "session-1");
+        var withChildren = await RunAsync(plugin, services, "session", "session-1", "--with-children");
+        var byStart = await RunAsync(plugin, services, "session", "session-4", "--with-children");
+
+        Assert.AreEqual(0, alone.ExitCode, alone.Stderr);
+        Assert.AreEqual(0, withChildren.ExitCode, withChildren.Stderr);
+        AssertRecordIs("alta.statistics.session", (await harness.Queries.SessionAsync("session-1", false))!, Single(alone.Stdout));
+        AssertRecordIs("alta.statistics.session", (await harness.Queries.SessionAsync("session-1", true))!, Single(withChildren.Stdout));
+        Assert.AreEqual(0, Single(alone.Stdout).GetProperty("children").GetArrayLength());
+        CollectionAssert.AreEqual(new[] { "session-2" }, Single(withChildren.Stdout).GetProperty("children").EnumerateArray().Select(static child => child.GetProperty("sessionId").GetString()).ToArray());
+        static double Tokens(JsonElement record) => record.GetProperty("totals").EnumerateArray().Single(static tile => tile.GetProperty("id").GetString() == "tokens").GetProperty("value").GetDouble();
+        Assert.IsTrue(Tokens(Single(withChildren.Stdout)) > Tokens(Single(alone.Stdout)), "The tokens of the child are added to those of the session.");
+        Assert.AreEqual(0, byStart.ExitCode, byStart.Stderr);
+        Assert.AreEqual(1, Single(byStart.Stdout).GetProperty("children").GetArrayLength());
+    }
+
+    [TestMethod]
+    public async Task TheComparison_TheOriginAndTheKindOfTool_ReachTheQuery()
+    {
+        await using var harness = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
+        var plugin = new StatisticsPlugin();
+        var services = new TestServices(harness.Store.Database, new FakeAlta());
+        string[] period = ["--period", "2026-06-01..2026-06-30", "--by", "week", "--week-start", "monday"];
+        var request = new StatisticsRequest { Period = "2026-06-01..2026-06-30", Frequency = StatisticsFrequency.Week, WeekStart = DayOfWeek.Monday };
+
+        var previous = await RunAsync(plugin, services, ["summary", .. period, "--compare", "previous"]);
+        var year = await RunAsync(plugin, services, ["summary", .. period, "--compare", "year"]);
+        var none = await RunAsync(plugin, services, ["summary", .. period, "--compare", "none"]);
+        var origin = await RunAsync(plugin, services, ["series", "prompts", .. period, "--origin", "agent"]);
+        var toolKind = await RunAsync(plugin, services, ["series", "tool-calls", .. period, "--tool-kind", "shell"]);
+        var both = await RunAsync(plugin, services, ["series", "tokens", .. period, "--provider", "codex", "--model", "gpt-5-mini", "--effort", "high"]);
+
+        foreach (var result in new[] { previous, year, none, origin, toolKind, both })
+        {
+            Assert.AreEqual(0, result.ExitCode, result.Stderr);
+        }
+
+        AssertRecordIs("alta.statistics.summary", await harness.Queries.SummaryAsync(request with { Comparison = StatisticsComparison.PreviousPeriod }), Single(previous.Stdout));
+        Assert.AreEqual("2026-05-02", Single(previous.Stdout).GetProperty("query").GetProperty("compareFrom").GetString(), "The 30 days before the first of June.");
+        AssertRecordIs("alta.statistics.summary", await harness.Queries.SummaryAsync(request with { Comparison = StatisticsComparison.SamePeriodLastYear }), Single(year.Stdout));
+        Assert.AreEqual("2025-06-01", Single(year.Stdout).GetProperty("query").GetProperty("compareFrom").GetString());
+        Assert.IsFalse(Single(none.Stdout).GetProperty("query").TryGetProperty("compareFrom", out _));
+
+        var byOrigin = await harness.Queries.SeriesAsync(request with { Filter = new StatisticsFilter { Origin = "agent" } }, "prompts", null);
+        AssertRecordIs("alta.statistics.series", byOrigin, Single(origin.Stdout));
+        var every = await harness.Queries.SeriesAsync(request, "prompts", null);
+        Assert.IsTrue(byOrigin.Series.Sum(static line => line.Total) < every.Series.Sum(static line => line.Total), "The prompts of agents are some of the prompts.");
+
+        var byKind = await harness.Queries.SeriesAsync(request with { Filter = new StatisticsFilter { ToolKind = "shell" } }, "tool-calls", null);
+        AssertRecordIs("alta.statistics.series", byKind, Single(toolKind.Stdout));
+        Assert.IsTrue(byKind.Series.Sum(static line => line.Total) < (await harness.Queries.SeriesAsync(request, "tool-calls", null)).Series.Sum(static line => line.Total));
+
+        AssertRecordIs("alta.statistics.series", await harness.Queries.SeriesAsync(request with { Filter = new StatisticsFilter { Provider = "codex", Model = "gpt-5-mini", Effort = "high" } }, "tokens", null), Single(both.Stdout));
+
+        var bad = await RunAsync(plugin, services, ["summary", .. period, "--compare", "decade"]);
+        Assert.AreEqual(2, bad.ExitCode);
+        StringAssert.Contains(bad.Stderr, "usage.invalidQuery");
+    }
+
+    [TestMethod]
+    public async Task TheWeeksOfACommand_StartOnTheDayAsked_AndOnTheDayOfTheComputerOtherwise()
+    {
+        await using var harness = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
+        var plugin = new StatisticsPlugin();
+        var services = new TestServices(harness.Store.Database, new FakeAlta());
+        // A period that starts on a Wednesday: its second bucket is the first whole week.
+        string[] weeks = ["series", "tokens", "--period", "2026-06-03..2026-06-30", "--by", "week"];
+        static DayOfWeek FirstWholeWeek(string stdout)
+            => DateOnly.ParseExact(Single(stdout).GetProperty("buckets")[1].GetProperty("start").GetString()![..10], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture).DayOfWeek;
+
+        var monday = await RunAsync(plugin, services, [.. weeks, "--week-start", "monday"]);
+        var sunday = await RunAsync(plugin, services, [.. weeks, "--week-start", "Sunday"]);
+        Assert.AreEqual(0, monday.ExitCode, monday.Stderr);
+        Assert.AreEqual(DayOfWeek.Monday, FirstWholeWeek(monday.Stdout));
+        Assert.AreEqual(DayOfWeek.Sunday, FirstWholeWeek(sunday.Stdout));
+
+        // Without the option, the day of the regional settings: the one the page is told, so both cut the same weeks.
+        var before = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            var saturday = (System.Globalization.CultureInfo)System.Globalization.CultureInfo.InvariantCulture.Clone();
+            saturday.DateTimeFormat.FirstDayOfWeek = DayOfWeek.Saturday;
+            System.Globalization.CultureInfo.CurrentCulture = saturday;
+            Assert.AreEqual(DayOfWeek.Saturday, StatisticsQueries.DefaultWeekStart);
+            var byDefault = await RunAsync(plugin, services, weeks);
+            Assert.AreEqual(0, byDefault.ExitCode, byDefault.Stderr);
+            Assert.AreEqual(DayOfWeek.Saturday, FirstWholeWeek(byDefault.Stdout));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = before;
+        }
+
+        // A day or a frequency is a name: a number is not one, even one that an enumeration has.
+        foreach (var arguments in new[] { new[] { "--week-start", "someday" }, ["--week-start", "3"], ["--week-start", "9"], ["--by", "2"], ["--by", "99"] })
+        {
+            var refused = await RunAsync(plugin, services, ["series", "tokens", "--period", "2026-06-03..2026-06-30", .. arguments]);
+            Assert.AreEqual(2, refused.ExitCode, string.Join(' ', arguments) + refused.Stdout);
+            StringAssert.Contains(refused.Stderr, "usage.invalidQuery");
+        }
+    }
+
+    [TestMethod]
+    public async Task AnError_IsOneRecordWithItsCodeItsExitCodeAndItsSentence()
+    {
+        await using var harness = await QueryHarness.CreateAsync();
+        var plugin = new StatisticsPlugin();
+
+        var result = await RunAsync(plugin, new TestServices(harness.Store.Database, new FakeAlta()), "summary", "--period", "so\"on");
+
+        var lines = result.Stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.AreEqual(1, lines.Length, result.Stderr);
+        var error = JsonDocument.Parse(lines[0]).RootElement;
+        CollectionAssert.AreEqual(new[] { "type", "version", "correlationId", "code", "exitCode", "message" }, error.EnumerateObject().Select(static property => property.Name).ToArray());
+        Assert.AreEqual("alta.error", error.GetProperty("type").GetString());
+        Assert.AreEqual(1, error.GetProperty("version").GetInt32());
+        Assert.AreEqual("corr-1", error.GetProperty("correlationId").GetString());
+        Assert.AreEqual("usage.invalidQuery", error.GetProperty("code").GetString());
+        Assert.AreEqual(2, error.GetProperty("exitCode").GetInt32());
+        StringAssert.Contains(error.GetProperty("message").GetString(), "'so\"on' is not a period");
+    }
+
+    [TestMethod]
+    public async Task TheHistoryCommands_ChooseReadMorePauseResumeAndStop_WhereTheEngineRuns()
+    {
+        var time = new ManualTime(EngineHarness.Now);
+        await using var harness = await CanvasPluginHarness.CreateAsync(startDelay: Timeout.InfiniteTimeSpan, time: time);
+        var recent = EngineHarness.Session("recent", EngineHarness.Now.AddHours(-3), 1);
+        harness.Journals.Set(recent, EngineHarness.Now.AddHours(-2));
+        var old = EngineHarness.Session("old", EngineHarness.Now.AddDays(-50), 1);
+        harness.Journals.Set(old, EngineHarness.Now.AddDays(-50).AddMinutes(1));
+        var engine = (StatisticsEngine)harness.Plugin.Statistics!;
+        // The plugin cuts its days in the zone of the machine: today, and the first of the last 30 days, are days of that zone.
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(EngineHarness.Now, TimeZoneInfo.Local).DateTime);
+        var floor30 = Store.LocalDays.ToDay(today.AddDays(-29));
+        async Task<JsonElement> HistoryAsync(params string[] arguments)
+        {
+            var result = await RunAsync(harness.Plugin, harness.Services, ["history", .. arguments]);
+            Assert.AreEqual(0, result.ExitCode, string.Join(' ', arguments) + result.Stderr);
+            var record = Single(result.Stdout);
+            Assert.AreEqual("alta.statistics.history", record.GetProperty("type").GetString());
+            Assert.AreEqual(arguments[0], record.GetProperty("action").GetString());
+            Assert.IsTrue(record.GetProperty("running").GetBoolean());
+            return record;
+        }
+
+        // The first choice: the last 30 days. It starts the reading.
+        var chosen = await HistoryAsync("read", "--days", "30");
+        Assert.AreEqual("reading", chosen.GetProperty("state").GetString());
+        Assert.AreEqual("days:30", chosen.GetProperty("choice").GetString());
+        Assert.AreEqual(floor30, chosen.GetProperty("floorDay").GetInt32());
+
+        var paused = await HistoryAsync("pause");
+        Assert.AreEqual("paused", paused.GetProperty("state").GetString());
+        var resumed = await HistoryAsync("resume");
+        Assert.AreEqual("reading", resumed.GetProperty("state").GetString());
+        await engine.DrainAsync();
+        Assert.AreEqual(HistoryState.Done, engine.Status.State);
+        Assert.IsNull(await engine.Store.GetJournalAsync("old"), "Older than the 30 days.");
+
+        // A choice that does not go further back changes nothing; one that does reads more.
+        var less = await HistoryAsync("read", "--days", "7");
+        Assert.AreEqual("done", less.GetProperty("state").GetString());
+        Assert.AreEqual("days:30", less.GetProperty("choice").GetString());
+        var more = await HistoryAsync("read", "--all");
+        Assert.AreEqual("reading", more.GetProperty("state").GetString());
+        Assert.AreEqual("all", more.GetProperty("choice").GetString());
+        Assert.AreEqual("extended", more.GetProperty("reason").GetString());
+
+        // Stopped where it is: the statistics keep starting where they did, and the status command says so.
+        var stopped = await HistoryAsync("stop");
+        Assert.AreEqual("stoppedHere", stopped.GetProperty("state").GetString());
+        Assert.AreEqual(floor30, stopped.GetProperty("floorDay").GetInt32());
+        var status = Single((await RunAsync(harness.Plugin, harness.Services, "status")).Stdout);
+        Assert.AreEqual("stoppedHere", status.GetProperty("state").GetString());
+        Assert.IsTrue(status.GetProperty("running").GetBoolean());
+
+        // From today, on a history that was never chosen, is the third choice.
+        await engine.ResetAsync();
+        var fromToday = await HistoryAsync("read", "--from-today");
+        Assert.AreEqual("from-today", fromToday.GetProperty("choice").GetString());
+        Assert.AreEqual(Store.LocalDays.ToDay(today), fromToday.GetProperty("floorDay").GetInt32());
+
+        // Two choices at once, or none, are a usage error.
+        Assert.AreEqual(2, (await RunAsync(harness.Plugin, harness.Services, "history", "read", "--all", "--days", "3")).ExitCode);
+        Assert.AreEqual(2, (await RunAsync(harness.Plugin, harness.Services, "history", "read")).ExitCode);
+    }
+
+    [TestMethod]
+    public async Task ForgetDeleted_RemovesTheSessionsWhoseJournalIsGone_AndSaysHowMany()
+    {
+        await using var query = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
+        await using var harness = await CanvasPluginHarness.CreateAsync(query.Store, startDelay: Timeout.InfiniteTimeSpan, time: new ManualTime(EngineHarness.Now));
+        await query.Store.Store.MarkDeletedAsync(["session-0", "session-3"]);
+        var sessions = await query.Store.CountAsync("session");
+
+        var forgotten = await RunAsync(harness.Plugin, harness.Services, "history", "forget-deleted");
+        var again = await RunAsync(harness.Plugin, harness.Services, "history", "forget-deleted");
+
+        Assert.AreEqual(0, forgotten.ExitCode, forgotten.Stderr);
+        var record = Single(forgotten.Stdout);
+        Assert.AreEqual("alta.statistics.forgotten", record.GetProperty("type").GetString());
+        Assert.AreEqual(2, record.GetProperty("sessions").GetInt32());
+        Assert.AreEqual(sessions - 2, await query.Store.CountAsync("session"));
+        Assert.AreEqual(0, Single(again.Stdout).GetProperty("sessions").GetInt32());
+        await query.Store.VerifyRollupsAsync();
+    }
+
+    [TestMethod]
+    public async Task AQuestionAskedBeforeTheEngineIsReady_PreparesTheTablesFirst()
+    {
+        // A database that never had the tables of the statistics, and an engine that has not started its work yet.
+        await using var store = await StoreHarness.CreateAsync(initialize: false);
+        await using var harness = await CanvasPluginHarness.CreateAsync(store, startDelay: Timeout.InfiniteTimeSpan, time: new ManualTime(EngineHarness.Now));
+
+        var summary = await RunAsync(harness.Plugin, harness.Services, "summary");
+        var status = await RunAsync(harness.Plugin, harness.Services, "status");
+
+        Assert.AreEqual(0, summary.ExitCode, summary.Stderr);
+        Assert.AreEqual("alta.statistics.summary", Single(summary.Stdout).GetProperty("type").GetString());
+        Assert.AreEqual(0, status.ExitCode, status.Stderr);
+        Assert.AreEqual("needsChoice", Single(status.Stdout).GetProperty("state").GetString(), "The state is known, not 'starting'.");
     }
 
     [TestMethod]

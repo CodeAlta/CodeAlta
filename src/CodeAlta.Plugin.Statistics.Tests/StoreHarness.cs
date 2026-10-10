@@ -10,6 +10,8 @@ namespace CodeAlta.Plugin.Statistics.Tests;
 /// <summary>A real application database in a temporary folder, with the store of the statistics plugin over it.</summary>
 internal sealed class StoreHarness : IAsyncDisposable
 {
+    private bool _initialize = true;
+
     private StoreHarness(string root, TimeZoneInfo timeZone)
     {
         Root = root;
@@ -26,11 +28,12 @@ internal sealed class StoreHarness : IAsyncDisposable
 
     public StatisticsStore Store { get; private set; } = null!;
 
-    public static async Task<StoreHarness> CreateAsync(TimeZoneInfo? timeZone = null, string? root = null)
+    /// <summary>Makes the database and the store. With <paramref name="initialize"/> false the tables of the statistics are not created: the database of a first start.</summary>
+    public static async Task<StoreHarness> CreateAsync(TimeZoneInfo? timeZone = null, string? root = null, bool initialize = true)
     {
         root ??= Path.Combine(Path.GetTempPath(), "CodeAlta.Plugin.Statistics.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var harness = new StoreHarness(root, timeZone ?? TimeZoneInfo.Utc);
+        var harness = new StoreHarness(root, timeZone ?? TimeZoneInfo.Utc) { _initialize = initialize };
         await harness.OpenAsync();
         return harness;
     }
@@ -55,7 +58,7 @@ internal sealed class StoreHarness : IAsyncDisposable
         }
     }
 
-    public static TimeZoneInfo Zone(string id) => TimeZoneInfo.FindSystemTimeZoneById(id);
+    public static TimeZoneInfo Zone(string id) => id == TimeZoneInfo.Local.Id ? TimeZoneInfo.Local : TimeZoneInfo.FindSystemTimeZoneById(id);
 
     public async Task<string> DumpAsync(params string[] skipTables)
     {
@@ -207,6 +210,9 @@ internal sealed class StoreHarness : IAsyncDisposable
         Application = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = Path.Combine(Root, "data", "alta.sqlite3") });
         Database = new PluginDatabase(Application, "builtin:statistics");
         Store = new StatisticsStore(Database, new LocalDays(TimeZone));
-        await Store.InitializeAsync();
+        if (_initialize)
+        {
+            await Store.InitializeAsync();
+        }
     }
 }

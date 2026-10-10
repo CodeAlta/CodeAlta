@@ -28,6 +28,8 @@ test("the module asks the plugin for the spaces first, draws the pages over what
     // The space of the tab is the filter the canvas starts with, and the name is the one the plugin gave.
     assert.ok(questions.filter(call => call.input.request?.period === "30d").every(call => call.input.request.filter?.space === "work"));
     assert.equal(await page.evaluate(`document.querySelector('.stats-chip-text').textContent`), "Space: Work");
+    // The weeks are the ones of the plugin: every question names the first day the plugin gave, not the one of the language of the window.
+    assert.ok(questions.filter(call => call.input.request).every(call => call.input.request.weekStart === "Saturday"), JSON.stringify(questions.map(call => call.input.request?.weekStart)));
     // The events of the plugin are listened to once, and the double run of the effects leaves nothing listening twice.
     const counts = await page.evaluate<{ open: number; closed: number }>(`({ ...canvasFixture.subscriptions })`);
     assert.equal(counts.open - counts.closed, 1, "one listening is left");
@@ -92,6 +94,27 @@ test("a tab that is hidden asks for nothing and one that is shown again catches 
     const after = await page.evaluate<{ open: number; closed: number }>(`({ ...canvasFixture.subscriptions })`);
     assert.equal(after.open, before.open + 1, "it listens again");
     assert.equal(after.open - after.closed, 1, "and only once");
+  }, options);
+});
+
+test("a tab that is restored hidden asks the plugin nothing at all until it is shown", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    await render(page, { scenario: "ready", visible: false });
+    await idle(700);
+    assert.deepEqual(names(await calls(page)), [], "not even the spaces: a hidden tab reads nothing");
+    assert.equal(await page.evaluate(`!!document.querySelector('.stats-loading')`), true, "it waits");
+
+    await page.evaluate(`canvasFixture.setVisible(true)`);
+    await page.until(settled, "the overview of the tab that is shown");
+    const all = await calls(page);
+    assert.equal(all[0].name, "statistics.context", "the directory comes first, once the tab is shown");
+
+    // Hidden and shown again: the directory is kept, it is not asked a second time.
+    await page.evaluate(`canvasFixture.clearCalls(); canvasFixture.setVisible(false)`);
+    await idle(200);
+    await page.evaluate(`canvasFixture.setVisible(true)`);
+    await idle(500);
+    assert.ok(!names(await calls(page)).includes("statistics.context"));
   }, options);
 });
 

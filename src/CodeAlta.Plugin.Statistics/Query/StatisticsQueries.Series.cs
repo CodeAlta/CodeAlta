@@ -28,6 +28,7 @@ public sealed partial class StatisticsQueries
         new("reasoning-tokens", FactTables.Usage, "SUM(f.reasoning_tokens)", "tokens"),
         new("tool-calls", FactTables.Tools, "SUM(f.calls)", "count"),
         new("tool-failures", FactTables.Tools, "SUM(f.failures)", "count"),
+        new("tool-calls-canceled", FactTables.Tools, "SUM(f.canceled)", "count"),
         new("tool-time", FactTables.Tools, "SUM(f.duration_ms_total)", "ms"),
         new("tool-bytes-in", FactTables.Tools, "SUM(f.bytes_in)", "bytes"),
         new("tool-bytes-out", FactTables.Tools, "SUM(f.bytes_out)", "bytes"),
@@ -44,6 +45,15 @@ public sealed partial class StatisticsQueries
         new("prompt-images", FactTables.Content, "SUM(f.images)", "count", Where: "f.kind = 0"),
         new("prompt-skills", FactTables.Content, "SUM(f.skills)", "count", Where: "f.kind = 0"),
         new("answers", FactTables.Content, "SUM(f.count)", "count", Where: "f.kind = 1"),
+        new("answer-chars", FactTables.Content, "SUM(f.chars)", "count", Where: "f.kind = 1"),
+        new("answer-words", FactTables.Content, "SUM(f.words)", "count", Where: "f.kind = 1"),
+
+        // The reasonings a model showed, and the summaries of the ones it did not: what was written, not the tokens it cost.
+        new("reasonings", FactTables.Content, "SUM(f.count)", "count", Where: "f.kind IN (2, 3)"),
+        new("reasoning-chars", FactTables.Content, "SUM(f.chars)", "count", Where: "f.kind IN (2, 3)"),
+        new("instructions", FactTables.Content, "SUM(f.count)", "count", Where: "f.kind = 4"),
+        new("instruction-chars", FactTables.Content, "SUM(f.chars)", "count", Where: "f.kind = 4"),
+        new("instruction-tokens", FactTables.Content, "SUM(f.approx_tokens)", "tokens", Where: "f.kind = 4"),
         new("cost", FactTables.Cost, "SUM(f.total_micro)", "cost", Scale: 1e-6, PerUnit: true),
     }.ToFrozenDictionary(static metric => metric.Name, StringComparer.OrdinalIgnoreCase);
 

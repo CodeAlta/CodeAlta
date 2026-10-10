@@ -14,10 +14,12 @@ export const eventsName = "statistics.events";
 /** A change that touches every day: what the canvas applies when it cannot know what it missed (the connection to the plugin was made again). */
 export const everyDay: StatisticsDataChange = Object.freeze({ revision: 0, fromDay: 10101, toDay: 99991231, sessionIds: Object.freeze([]) as readonly string[] });
 
-/** The spaces and the projects the plugin knows, for the filters of the canvas. */
+/** The spaces and the projects the plugin knows, for the filters of the canvas, and the first day of the week of its questions. */
 export type StatisticsDirectory = Readonly<{
   spaces: readonly Readonly<{ id: string; name: string; isDefault: boolean; projectIds: readonly string[] }>[];
   projects: readonly Readonly<{ id: string; name: string }>[];
+  /** The first day of the week a question uses when its request names none: the one of the regional settings of the computer. */
+  weekStart?: string;
 }>;
 
 /** The API of the canvas, and what else the application asks of the plugin. */

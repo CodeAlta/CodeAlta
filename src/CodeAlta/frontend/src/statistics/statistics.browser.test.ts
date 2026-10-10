@@ -199,6 +199,10 @@ test("the first time asks how much history to read, then shows the progress, the
     const text = await page.evaluate<string>(`document.querySelector('.stats-history .stats-history-line').textContent`);
     assert.match(text, /Reading the history: 0 of 906 sessions, back to Oct 9\./);
     assert.match(text, /left\./);
+    // What a screen reader is told is the state, once: not the whole bar, whose numbers and buttons change or stay at every step.
+    assert.equal(await page.evaluate(`document.querySelector('.stats-history').getAttribute('role')`), null);
+    assert.equal(await page.evaluate(`document.querySelector('.stats-history [role="status"]').textContent`), "Reading the history");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.stats-history [role="status"] button, .stats-history [role="status"] [role="progressbar"]').length`), 0);
     await page.until(settled, "the first numbers");
     // While it reads, the canvas is in use, and what is not read is hatched.
     await page.evaluate(`statsFixture.control.advance(300)`);
@@ -211,6 +215,7 @@ test("the first time asks how much history to read, then shows the progress, the
     await page.clickText('.stats-history button', "Pause");
     await page.until(`document.querySelector('.stats-history[data-view="paused"]')`, "the pause");
     assert.match(await page.evaluate<string>(`document.querySelector('.stats-history-line').textContent`), /^History paused at .*\. 606 sessions left\.ResumeStop here$/);
+    assert.match(await page.evaluate<string>(`document.querySelector('.stats-history [role="status"]').textContent`), /^History paused at .*\. 606 sessions left\.$/);
     await page.shot("paused-dark");
     await page.clickText('.stats-history button', "Resume");
     await page.until(`document.querySelector('.stats-history[data-view="reading"]')`, "reading again");
@@ -245,6 +250,22 @@ test("the first time asks how much history to read, then shows the progress, the
     await page.clickText('.stats-confirm button', "Reset");
     await page.until(`document.querySelector('.stats-first') && !document.querySelector('.stats-confirm')`, "the first-time card");
     assert.equal(await resets(), 1);
+  });
+});
+
+test("two Statistics tabs in one window share no element id, and each names its own parts", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    const repeated = `(() => { const ids = [...document.querySelectorAll('.statistics-canvas [id]')].map(element => element.id); return [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))]; })()`;
+    // The application canvas and the canvas of a project stay mounted together: the card of the first time, twice.
+    await render(page, { scenario: "first-time", copies: 2 });
+    await page.until(`document.querySelectorAll('.stats-first').length === 2`, "two cards");
+    assert.deepEqual(await page.evaluate(repeated), []);
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('.stats-first')].every(card => card.getAttribute('aria-labelledby') === card.querySelector('h2').id && document.getElementById(card.querySelector('h2').id) === card.querySelector('h2'))`), true);
+    // And the pages, twice: every tab controls its own panel.
+    await render(page, { scenario: "ready", copies: 2 });
+    await page.until(`document.querySelectorAll('[role="tablist"]').length === 2 && ${settled}`, "two canvases");
+    assert.deepEqual(await page.evaluate(repeated), []);
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('.statistics-canvas')].every(canvas => { const tab = canvas.querySelector('[role="tab"][aria-selected="true"]'); const panel = canvas.querySelector('[role="tabpanel"]'); return panel.id === tab.getAttribute('aria-controls') && panel.getAttribute('aria-labelledby') === tab.id; })`), true);
   });
 });
 
@@ -332,6 +353,28 @@ test("a change announced by the plugin makes the page ask again for those days o
     const keys = again.map(call => JSON.stringify([call.method, call.request, call.args]));
     assert.equal(new Set(keys).size, keys.length, "each question once");
     assert.ok(again.some(call => call.method === "summary") && again.some(call => call.method === "series"));
+  });
+});
+
+test("a change that arrives while a question is in flight is not lost: the block asks again when its answer comes back stale", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    await render(page, { scenario: "ready" });
+    await page.until(settled, "the overview");
+    await page.evaluate(`statsFixture.clearCalls()`);
+    // The answers take two and a half seconds from now on. A change makes the page ask, a second later, and another change of the
+    // same days arrives while those questions are in flight: their answers are older than it.
+    await page.evaluate(`statsFixture.control.setLatency(2500)`);
+    await page.evaluate(`statsFixture.control.emitData(20261009, 20261009)`);
+    await page.until(`statsFixture.calls().some(call => call.method === 'summary')`, "the first round of questions");
+    await page.evaluate(`statsFixture.control.emitData(20261009, 20261009)`);
+    await idle(1300);
+    await page.evaluate(`statsFixture.control.setLatency(0)`);
+    await page.until(`statsFixture.calls().filter(call => call.method === 'summary').length >= 2`, "the summary asked again once its stale answer came back");
+    await page.until(settled, "settled");
+    await idle(1500);
+    const again = questions(await calls(page));
+    assert.equal(again.filter(call => call.method === "summary").length, 2, "asked once for each change, and not a third time");
+    assert.ok(again.filter(call => call.method === "series").length >= 2, "the charts too");
   });
 });
 

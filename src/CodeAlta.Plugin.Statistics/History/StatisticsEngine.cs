@@ -81,10 +81,12 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     private readonly Dictionary<string, string> _projectNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<SkippedSession> _skipped = [];
 
-    // Journals that failed to be read, as they were: a journal that failed is tried again when it changes, and not at every look.
-    private readonly Dictionary<string, (long Length, long StampTicks)> _failed = new(StringComparer.OrdinalIgnoreCase);
+    // Journals that failed to be read, as they were and with the reason: a journal that failed is tried again when it changes or when
+    // the user asks, and not at every look. Only the step that runs reads and writes it.
+    private readonly Dictionary<string, FailedJournal> _failed = new(StringComparer.OrdinalIgnoreCase);
 
     private bool _initialized;
+    private bool _retryFailed;
     private HistoryPhase _phase = HistoryPhase.Starting;
     private HistoryChoice? _choice;
     private int? _floorDay;
@@ -159,6 +161,8 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
 
     private sealed record TodoItem(SessionJournalFile File, bool Restart, long BytesToRead);
 
+    private readonly record struct FailedJournal(long Length, long StampTicks, string Reason);
+
     /// <summary>What the first-time card says before anything is read: the journals that exist, their size, and the day of the oldest.</summary>
     private sealed record JournalOverview(int Sessions, long Bytes, int? EarliestDay);
 
@@ -185,8 +189,10 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 _reason = meta.GetValueOrDefault(ReasonKey) is "first-read" or "extended" ? meta[ReasonKey] : null;
                 _paused = meta.GetValueOrDefault(PausedKey) == "1";
                 _stopped = meta.GetValueOrDefault(StoppedKey) == "1";
-                _completeFromDay = meta.TryGetValue(CompleteFromKey, out var complete) && int.TryParse(complete, NumberStyles.None, CultureInfo.InvariantCulture, out var from) ? from : null;
-                _phase = _choice is null ? HistoryPhase.NeedsChoice : _stopped ? HistoryPhase.Stopped : _paused ? HistoryPhase.Paused : meta.GetValueOrDefault(DoneKey) == "1" ? HistoryPhase.Done : HistoryPhase.Reading;
+                // A catch-up writes 0 for "complete from everything": it is no day.
+                _completeFromDay = meta.TryGetValue(CompleteFromKey, out var complete) && int.TryParse(complete, NumberStyles.None, CultureInfo.InvariantCulture, out var from) && from > 0 ? from : null;
+                // A pause made while a stopped history caught up comes first: the reading it paused ends back in the stop.
+                _phase = _choice is null ? HistoryPhase.NeedsChoice : _paused ? HistoryPhase.Paused : _stopped ? HistoryPhase.Stopped : meta.GetValueOrDefault(DoneKey) == "1" ? HistoryPhase.Done : HistoryPhase.Reading;
                 _initialized = true;
             }
 
@@ -422,6 +428,14 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         await InitializeAsync(cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
+            if (_phase is (HistoryPhase.Done or HistoryPhase.Stopped) && _skippedCount > 0)
+            {
+                // "Try again" of the sessions that could not be read: the next step looks at them again, changed or not.
+                _retryFailed = true;
+                Wake();
+                return _status;
+            }
+
             if (_phase is not HistoryPhase.Paused)
             {
                 return _status;
@@ -449,12 +463,18 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 return _status;
             }
 
-            // The statistics start where the reading is: what is older is not read, and "read more history" goes on from there.
-            _floorDay = _completeFromDay ?? _floorDay;
+            // The statistics start where the reading is: what is older is not read, and "read more history" goes on from there. A first
+            // reading that listed no journal yet reached nothing: the statistics start today, as if nothing of the past had been asked.
+            _floorDay = _reason == "first-read" && _todo is null && _completeFromDay is null
+                ? LocalDays.ToDay(Today())
+                : _completeFromDay ?? _floorDay;
             _floorQuarter = ComputeFloorQuarter(_floorDay);
+            _completeFromDay = _floorDay;
             _stopped = true;
             _paused = false;
             _phase = HistoryPhase.Stopped;
+            // What is read from now on is a catch-up of what changed, never the rest of the reading that was stopped.
+            _reason = null;
             _todo = null;
             CancelHistoryReading();
         }
@@ -510,6 +530,10 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
 
             _flow.Clear();
             _failed.Clear();
+            // The table of the names is emptied with the others: they are asked again for the sessions that are read next.
+            _projectNames.Clear();
+            _projectNamesStale = true;
+            _lastProjectRefresh = DateTimeOffset.MinValue;
             await _store.ResetAsync(cancellationToken).ConfigureAwait(false);
             revision = Interlocked.Increment(ref _revision);
         }
@@ -559,7 +583,7 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             return false;
         }
 
-        if (await ProcessDueFlowAsync(cancellationToken).ConfigureAwait(false))
+        if (await ProcessDueFlowAsync(null, cancellationToken).ConfigureAwait(false))
         {
             return true;
         }
@@ -568,20 +592,32 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         lock (_gate)
         {
             phase = _phase;
+            if (_retryFailed)
+            {
+                _retryFailed = false;
+                _failed.Clear();
+                _lastRescan = DateTimeOffset.MinValue;
+            }
         }
 
         switch (phase)
         {
             case HistoryPhase.Reading:
                 return await ProcessNextHistoryAsync(cancellationToken).ConfigureAwait(false);
-            case HistoryPhase.Done when _time.GetUtcNow() - _lastRescan >= _options.RescanInterval:
+
+            // A stopped history is complete from its floor, as one that is done: what changed without a signal (a session of another
+            // application, the last second before the application closed, a run that never ended) is caught up the same way.
+            case HistoryPhase.Done or HistoryPhase.Stopped when _time.GetUtcNow() - _lastRescan >= _options.RescanInterval:
                 return await RescanAsync(cancellationToken).ConfigureAwait(false);
             default:
                 return false;
         }
     }
 
-    private async Task<bool> ProcessDueFlowAsync(CancellationToken cancellationToken)
+    // The session the history is in the middle of is left in the flow: its reading goes on from a cursor the history holds, so a
+    // catch-up from the saved one would read the same bytes, and the history would count them a second time. It is caught up from
+    // the flow at the next step, once the history has saved its last chunk.
+    private async Task<bool> ProcessDueFlowAsync(string? sessionBeingRead, CancellationToken cancellationToken)
     {
         HistoryChoice? choice;
         lock (_gate)
@@ -590,7 +626,10 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         }
 
         var now = _time.GetUtcNow();
-        var due = _flow.Where(pair => pair.Value <= now).Select(static pair => pair.Key).ToArray();
+        var due = _flow
+            .Where(pair => pair.Value <= now && !string.Equals(pair.Key, sessionBeingRead, StringComparison.OrdinalIgnoreCase))
+            .Select(static pair => pair.Key)
+            .ToArray();
         if (due.Length == 0)
         {
             return false;
@@ -747,7 +786,8 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     {
         lock (_gate)
         {
-            _phase = HistoryPhase.Done;
+            // The catch-up of a stopped history ends where the user stopped it.
+            _phase = _stopped ? HistoryPhase.Stopped : HistoryPhase.Done;
             _todo = null;
             _reason = null;
             _currentSession = null;
@@ -784,11 +824,14 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         var floorQuarter = _floorQuarter;
         var items = new List<TodoItem>();
         var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var stillFailed = new List<SkippedSession>();
         await foreach (var file in _journals.ListAsync(cancellationToken).ConfigureAwait(false))
         {
             present.Add(file.SessionId);
-            if (_failed.TryGetValue(file.SessionId, out var failed) && failed == (file.Length, file.LastWriteUtc.UtcTicks))
+            if (_failed.TryGetValue(file.SessionId, out var failed) && failed.Length == file.Length && failed.StampTicks == file.LastWriteUtc.UtcTicks)
             {
+                // Not tried again until it changes, and still one of the sessions that could not be read.
+                stillFailed.Add(new SkippedSession(file.SessionId, failed.Reason));
                 continue;
             }
 
@@ -822,10 +865,18 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             await _store.MarkDeletedAsync(gone, cancellationToken).ConfigureAwait(false);
         }
 
+        foreach (var sessionId in _failed.Keys.Where(id => !present.Contains(id)).ToArray())
+        {
+            _failed.Remove(sessionId);
+        }
+
         lock (_gate)
         {
             _todo = new Queue<TodoItem>(items.OrderByDescending(static item => item.File.LastWriteUtc));
             ResetProgress();
+            // The progress starts again with the list; the sessions that could not be read and are left alone stay in the status.
+            _skippedCount = stillFailed.Count;
+            _skipped.AddRange(stillFailed.Take(_options.MaxSkippedListed));
             _sessionsTotal = items.Count;
             _bytesTotal = items.Sum(static item => item.BytesToRead);
             if (_reason is null or "catch-up" or "facts-improved")
@@ -857,7 +908,7 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            _failed[file.SessionId] = (file.Length, file.LastWriteUtc.UtcTicks);
+            _failed[file.SessionId] = new FailedJournal(file.Length, file.LastWriteUtc.UtcTicks, exception.Message);
             throw;
         }
     }
@@ -869,6 +920,11 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         FactBatch? accumulated = null;
         var replace = restart;
         var floorQuarter = _floorQuarter;
+
+        // A session that goes on from its cursor keeps the floor its rows were read with: when the user asked for more history since,
+        // what is older than that floor is still missing, and only a reading from the start (which the history does, seeing the
+        // higher floor of the row) may record the lower one.
+        var keptFloorQuarter = cursor is not null && row is { Deleted: false } ? Math.Max(floorQuarter, row.FloorQuarter) : floorQuarter;
         var changedDays = new SortedSet<int>();
         var changedSessions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { sessionId };
         while (true)
@@ -900,8 +956,10 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             }
 
             var done = result.ReachedEnd || cancellationToken.IsCancellationRequested;
-            if (accumulated is null)
+            if (accumulated is null || result.Restarted)
             {
+                // The file was not the one of the cursor: the batch holds the facts of the session from its start, and what was kept
+                // of the other file is dropped.
                 accumulated = result.Batch;
             }
             else
@@ -932,7 +990,7 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 Replace = replace,
                 FileLength = result.ReachedEnd ? file.Length : 0,
                 FileStampTicks = result.ReachedEnd ? file.LastWriteUtc.UtcTicks : 0,
-                FloorQuarter = floorQuarter,
+                FloorQuarter = replace ? floorQuarter : keptFloorQuarter,
                 Meta = history ? HistoryMeta() : null,
             };
             var applied = await _store.ApplyAsync(request, CancellationToken.None).ConfigureAwait(false);
@@ -960,10 +1018,10 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 return;
             }
 
-            // Between two chunks of a large journal the flow goes first.
-            if (history && _flow.Any(pair => pair.Value <= _time.GetUtcNow()))
+            // Between two chunks of a large journal the flow of the other sessions goes first.
+            if (history && !_flow.IsEmpty)
             {
-                await ProcessDueFlowAsync(_lifetime).ConfigureAwait(false);
+                await ProcessDueFlowAsync(sessionId, _lifetime).ConfigureAwait(false);
             }
         }
     }
@@ -1161,7 +1219,7 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         bool done;
         lock (_gate)
         {
-            done = _phase == HistoryPhase.Done;
+            done = _phase is HistoryPhase.Done or HistoryPhase.Stopped;
         }
 
         if (done)
@@ -1203,9 +1261,11 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         return newFloor is null || newFloor < _floorDay;
     }
 
+    private DateOnly Today() => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(_time.GetUtcNow().UtcDateTime, _days.TimeZone));
+
     private int? FloorDayOf(HistoryChoice choice)
     {
-        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(_time.GetUtcNow().UtcDateTime, _days.TimeZone));
+        var today = Today();
         return choice.Kind switch
         {
             HistoryChoiceKind.All => null,

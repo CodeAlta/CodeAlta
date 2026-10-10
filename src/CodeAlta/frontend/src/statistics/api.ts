@@ -89,6 +89,11 @@ export type StatisticsContext = Readonly<{
   /** Starts the canvas filtered on this project (the menu of a project). */
   projectId?: string | null;
   projectName?: string | null;
+  /**
+   * The first day of the week, 0 for Sunday, as the plugin has it from the regional settings of the computer: the weeks of the canvas
+   * are then the weeks of `alta statistics`. The one of the language of the window when absent.
+   */
+  weekStart?: number;
   /** Opens a session in a tab of the window. */
   openSession?: (sessionId: string) => void;
   /** Where the canvas keeps its state; the browser's local storage when absent. */

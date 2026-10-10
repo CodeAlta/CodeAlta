@@ -345,6 +345,8 @@ public sealed class StatisticsCanvasPluginTests
         var projects = context.GetProperty("projects").EnumerateArray().ToDictionary(project => project.GetProperty("id").GetString()!, project => project.GetProperty("name").GetString());
         Assert.AreEqual("Alpha", projects["project-0"]);
         Assert.AreEqual("Beta", projects["project-1"]);
+        // The page lays its weeks out from the day the questions use when a request names none.
+        Assert.AreEqual(StatisticsQueries.DefaultWeekStart.ToString(), context.GetProperty("weekStart").GetString());
     }
 
     // ---- when a call cannot be answered ----
@@ -450,45 +452,58 @@ public sealed class StatisticsCanvasPluginTests
     [TestMethod]
     public async Task TheStatusAndTheDaysThatChange_ReachTheScript_GatheredInABurst_AndNotWhileTheTabIsHidden()
     {
+        // The delay of the events is the one of a clock the test moves: no assertion below depends on how fast the machine is.
+        var time = new ManualTime(EngineHarness.Now);
+        var delay = StatisticsPlugin.EventDelay;
         await using var query = await QueryHarness.CreateAsync(sessions: 0, chosen: false);
-        await using var harness = await CanvasPluginHarness.CreateAsync(query.Store);
+        // The engine never starts its loop: the only timers of the clock are the delays of the events.
+        await using var harness = await CanvasPluginHarness.CreateAsync(query.Store, startDelay: Timeout.InfiniteTimeSpan, time: time);
         await harness.OpenAsync();
         var builder = EngineHarness.Session("s1", EngineHarness.Now.AddDays(-2), runs: 2);
         harness.Journals.Set(builder, EngineHarness.EndOf(builder, EngineHarness.Now.AddDays(-2), 2));
 
-        // A burst of controls: one status event, the last state.
+        // A burst of controls: one status event, the last state, once the delay has passed and not before.
         await harness.Plugin.Statistics!.ChooseHistoryAsync(HistoryChoice.All);
         await harness.Plugin.Statistics.PauseAsync();
         await harness.Plugin.Statistics.ResumeAsync();
         await harness.Plugin.Statistics.PauseAsync();
+        time.Advance(delay - TimeSpan.FromMilliseconds(1));
+        Assert.AreEqual(0, harness.Rpc.TakeEvents().Count, "nothing is sent before the delay");
+        time.Advance(TimeSpan.FromMilliseconds(1));
         await WaitAsync(() => harness.Rpc.Events.Count > 0, "the status event");
-        await Task.Delay(500);
+        time.Advance(delay + delay);
         var events = harness.Rpc.TakeEvents();
         Assert.AreEqual(1, events.Count, "gathered");
         Assert.AreEqual((StatisticsCanvasRpc.EventsName, "status", "paused"), (events[0].Name, events[0].Value.GetProperty("kind").GetString(), events[0].Value.GetProperty("status").GetProperty("state").GetString()));
 
-        // Hidden: nothing goes; shown again: what changed since arrives.
+        // Hidden: the delay passes and nothing goes; shown again: what changed since arrives, after the delay.
         harness.Canvas.SetVisible(false);
         await harness.Plugin.Statistics.ResumeAsync();
-        await Task.Delay(600);
-        Assert.AreEqual(0, harness.Rpc.TakeEvents().Count, "a hidden tab hears nothing");
+        await WaitAsync(() => time.PendingTimers > 0, "the delay of the hidden tab");
+        time.Advance(delay);
+        Assert.AreEqual(0, time.PendingTimers, "the delay of the hidden tab ended");
         harness.Canvas.SetVisible(true);
+        // The delay that ended while the tab was hidden sent nothing; showing the tab starts one, unless the first is still on its way out.
+        time.Advance(delay);
         await WaitAsync(() => harness.Rpc.Events.Count > 0, "the status held back");
         var held = harness.Rpc.TakeEvents().Single();
         Assert.AreEqual("reading", held.Value.GetProperty("status").GetProperty("state").GetString());
 
         // A reset says that every day changed, and what the status is.
         await harness.Plugin.Statistics.ResetAsync();
+        time.Advance(delay);
         await WaitAsync(() => harness.Rpc.Events.Count >= 2, "the data event and the status event");
         var reset = harness.Rpc.TakeEvents();
+        Assert.AreEqual(2, reset.Count);
         var data = reset.Single(item => item.Value.GetProperty("kind").GetString() == "data").Value.GetProperty("change");
         Assert.AreEqual((10101, 99991231), (data.GetProperty("fromDay").GetInt32(), data.GetProperty("toDay").GetInt32()));
         Assert.AreEqual("needsChoice", reset.Single(item => item.Value.GetProperty("kind").GetString() == "status").Value.GetProperty("status").GetProperty("state").GetString());
 
-        // Closed: the tab is not told any more, and nothing is left listening on the engine.
+        // Closed: the tab is not told any more, and nothing is left listening on the engine or waiting on the clock.
         harness.Canvas.Close();
         await harness.Plugin.Statistics.ChooseHistoryAsync(HistoryChoice.FromToday);
-        await Task.Delay(600);
+        Assert.AreEqual(0, time.PendingTimers, "a closed tab starts no delay");
+        time.Advance(delay + delay);
         Assert.AreEqual(0, harness.Rpc.TakeEvents().Count);
     }
 }

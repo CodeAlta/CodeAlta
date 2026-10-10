@@ -1,5 +1,5 @@
 import { Tab, Tabs } from "@blueprintjs/core";
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
 import type { StatisticsApi, StatisticsContext } from "./api";
 import { FrameBar } from "./FrameBar";
 import { FirstTimeCard, HistoryBar } from "./HistoryBar";
@@ -19,7 +19,8 @@ import { ProjectsPage } from "./pages/ProjectsPage";
 import { PromptsPage } from "./pages/PromptsPage";
 import { SessionsPage } from "./pages/SessionsPage";
 import { ToolsPage } from "./pages/ToolsPage";
-import "./statistics.css";
+
+// The style of the canvas (statistics.css) is part of the stylesheet of the page: a module of a plugin brings none.
 
 const pages: Record<PageId, () => ReactNode> = {
   overview: () => <OverviewPage />, activity: () => <ActivityPage />, models: () => <ModelsPage />, cost: () => <CostPage />, tools: () => <ToolsPage />, prompts: () => <PromptsPage />,
@@ -52,13 +53,15 @@ function Canvas() {
   const { frame, dispatch, status, visible } = useStatistics();
   const view = historyView(status);
   const root = useRef<HTMLDivElement>(null);
+  // Several canvases stay mounted in one window (the one of the application, the one of a project): the ids of the tabs are per canvas.
+  const tabsId = useId();
   usePageTabsEdges(root, frame.page, view !== "choice");
   return <div className="statistics-canvas" ref={root} data-visible={visible} data-history={view}>
     <FrameBar />
     <HistoryBar />
     {view === "choice" && status
       ? <div className="stats-page stats-page-first"><FirstTimeCard status={status} /></div>
-      : <Tabs id="statistics-pages" className="stats-tabs" selectedTabId={frame.page} onChange={next => dispatch({ type: "page", page: next as PageId })} renderActiveTabPanelOnly animate={false}
+      : <Tabs id={tabsId} className="stats-tabs" selectedTabId={frame.page} onChange={next => dispatch({ type: "page", page: next as PageId })} renderActiveTabPanelOnly animate={false}
         aria-label={t("Statistics pages")}>
         {pageIds.map(page => <Tab key={page} id={page} disabled={false} title={pageLabel(t, page)} panel={<div className="stats-page" data-page={page}>{pages[page]()}</div>} />)}
       </Tabs>}

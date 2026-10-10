@@ -254,14 +254,26 @@ public sealed class StatisticsStoreTests
     public async Task NoRowHoldsAText_OfASession_ButItsTitle()
     {
         await using var harness = await StoreHarness.CreateAsync();
-        var batch = SyntheticFacts.Batch(new Random(1), "s", SyntheticFacts.SpringStart, 96, 20);
-        batch.Session!.WorkingDirectory = @"C:\secret\folder";
-        await harness.Store.ApplyAsync(Request(batch, "s"));
+        // A journal as the application writes it: its header names the folder of the session, its prompt and its answer are text.
+        var journal = new JournalBuilder("s");
+        var start = JournalBuilder.Time(0);
+        journal.Header(start).State(start.AddSeconds(1)).User(start.AddSeconds(2), "r1", "a prompt nobody else reads").Assistant(start.AddSeconds(3), "r1", "an answer of the model")
+            .ToolStarted(start.AddSeconds(4), "r1", "t", "shell_command", "{\"command\":\"PGPASSWORD=hunter2 psql\"}");
+        var result = SessionFactsReducerTests.CatchUp(journal);
+        await harness.Store.ApplyAsync(new ApplyRequest { SessionId = "s", Batch = result.Batch, Cursor = result.Cursor });
 
+        // Every table, and the state of the reading the journal table keeps beside the offset.
         var dump = await harness.DumpAsync();
+        var state = System.Text.Encoding.UTF8.GetString(await harness.Store.ReadAsync(sql => (byte[])sql.Scalar($"SELECT state FROM {harness.Store.Prefix}journal")!));
 
-        Assert.DoesNotContain("secret", dump);
+        foreach (var text in new[] { "placeholder", "nobody", "answer of", "hunter2", "PGPASSWORD" })
+        {
+            Assert.DoesNotContain(text, dump, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(text, state, StringComparison.OrdinalIgnoreCase);
+        }
+
         Assert.Contains("A title", dump);
+        Assert.Contains("psql", dump);
     }
 
     [TestMethod]

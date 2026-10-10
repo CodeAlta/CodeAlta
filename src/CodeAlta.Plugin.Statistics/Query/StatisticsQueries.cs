@@ -27,6 +27,12 @@ public sealed partial class StatisticsQueries
     /// <summary>The most rows a table or a ranking returns, whatever the request asks.</summary>
     public const int MaxLimit = 500;
 
+    /// <summary>
+    /// Gets the first day of the week of a request that names none: the one of the regional settings of the computer. The page of the
+    /// statistics is told this day and <c>alta statistics</c> uses it, so that a command and the page cut the same weeks.
+    /// </summary>
+    public static DayOfWeek DefaultWeekStart => CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek;
+
     private readonly StatisticsStore _store;
     private readonly IProjectDirectory? _directory;
     private readonly TimeProvider _time;
@@ -75,7 +81,7 @@ public sealed partial class StatisticsQueries
             },
             cancellationToken).ConfigureAwait(false);
 
-        var weekStart = request.WeekStart ?? CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek;
+        var weekStart = request.WeekStart ?? DefaultWeekStart;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(_time.GetUtcNow().UtcDateTime, Days.TimeZone));
         var range = PeriodParser.Resolve(request.Period ?? "30d", today, firstDay is { } first ? LocalDays.ToDate(first) : null, weekStart);
         var frequency = request.Frequency == StatisticsFrequency.Auto ? BucketPlan.AutoFrequency(range) : request.Frequency;

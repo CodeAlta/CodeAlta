@@ -127,6 +127,26 @@ public sealed class JournalComponentTests
     [DataRow("npm\\ntest", "npm")]
     [DataRow("", null)]
     [DataRow("   ", null)]
+    // A variable set for the command is not its program, and its value is never kept.
+    [DataRow("PGPASSWORD=hunter2 psql -h db", "psql")]
+    [DataRow("FOO=1 BAR=two make all", "make")]
+    [DataRow("TOKEN=abc/def curl https://example.org", "curl")]
+    [DataRow("API_KEY=\\\"sk live\\\" node app.js", "node")]
+    [DataRow("API_KEY='sk live' node app.js", "node")]
+    [DataRow("$env:GH_TOKEN='abc'; gh pr list", "gh")]
+    [DataRow("$env:GH_TOKEN = 'abc'; gh pr list", null)]
+    [DataRow("PGPASSWORD=hunter2", null)]
+    [DataRow("PGPASSWORD=", null)]
+    [DataRow("TOKEN=$(cat secret.txt) deploy", null)]
+    [DataRow("TOKEN=`cat secret.txt` deploy", null)]
+    [DataRow("KEY='never closed psql", null)]
+    [DataRow("KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa psql", null)]
+    // What is not the name of a program is not kept either.
+    [DataRow("\\\"hunter2=x\\\" | tool", null)]
+    [DataRow("[System.IO.File]::ReadAllText('x')", null)]
+    [DataRow("@'", null)]
+    [DataRow("Get-ChildItem -Recurse", "get-childitem")]
+    [DataRow("g++ -O2 a.cpp", "g++")]
     public void ShellProgram_IsTheFirstWordOfTheCommand(string rawJsonText, string? expected)
     {
         var b = new JournalBuilder();
@@ -138,6 +158,30 @@ public sealed class JournalComponentTests
         scanner.Scan(stream, 0, null, sink, long.MaxValue, CancellationToken.None);
 
         Assert.AreEqual(expected, ((ToolRecord)sink.Records.Single()).ShellProgram);
+    }
+
+    [TestMethod]
+    [DataRow("\"session\",\"create\",\"--project\",\"p\"", "session create")]
+    [DataRow("\"session\",\"set_agent\",\"--prompt-id\",\"plan\"", "session set_agent")]
+    [DataRow("\"mcp\",\"activate\",\"codealta-dev\"", "mcp activate")]
+    [DataRow("\"notes\",\"set\",\"--stdin\"", "notes set")]
+    [DataRow("\"--help\"", null)]
+    // A word that is not written as a command is a value: a sentence, a name, a path. It is not kept.
+    [DataRow("\"ask\",\"What is the password of prod?\"", "ask")]
+    [DataRow("\"task\",\"Hunter2\"", "task")]
+    [DataRow("\"estimate\",\"src/secret.txt\"", "estimate")]
+    [DataRow("\"A sentence first\",\"list\"", null)]
+    public void AltaCommand_IsTheFirstTwoCommandWords(string words, string? expected)
+    {
+        var b = new JournalBuilder();
+        var line = $"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Started\",\"activityId\":\"a\",\"name\":\"alta\",\"details\":{{\"toolCallId\":\"a\",\"toolName\":\"alta\",\"arguments\":{{\"args\":[{words}]}},\"readFiles\":[],\"modifiedFiles\":[]}},{b.Envelope(JournalBuilder.Time(0), "r")}";
+        using var scanner = new JournalScanner();
+        var sink = new CollectingSink();
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(line + "\n"));
+
+        scanner.Scan(stream, 0, null, sink, long.MaxValue, CancellationToken.None);
+
+        Assert.AreEqual(expected, ((ToolRecord)sink.Records.Single()).AltaCommand);
     }
 
     [TestMethod]
@@ -220,7 +264,6 @@ public sealed class JournalComponentTests
             CreatedBySessionId = "creator",
             AutomationId = "auto",
             Title = "t",
-            WorkingDirectory = "w",
             InitialProvider = "codex",
             OriginCounted = true,
             FirstRecord = new DateTimeOffset(2026, 10, 9, 10, 0, 0, TimeSpan.Zero),

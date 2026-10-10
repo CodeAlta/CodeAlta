@@ -37,6 +37,8 @@ function recording(api: FixtureApi): StatisticsApi {
 type Options = {
   scenario?: FixtureScenario; visible?: boolean; width?: number; spaceId?: string | null; instanceId?: string; latencyMs?: number; locale?: string; estimates?: boolean;
   projectId?: string | null; sessionCount?: number;
+  /** How many canvases are drawn side by side over the same fixture: two tabs of the statistics in one window. */
+  copies?: number;
 };
 
 let root: Root | null = null;
@@ -54,7 +56,11 @@ function draw() {
   };
   const locale = state.locale ?? "en";
   flushSync(() => root!.render(createElement(StrictMode, null, createElement(ShellLanguageContext.Provider, { value: { locale: locale as "en", choice: locale as "en", setLanguage: nothing } },
-    createElement("div", { id: "stats-host", style: { width: state.width ? `${state.width}px` : "100%", height: "100%" } }, createElement(StatisticsCanvas, { key: context.instanceId, api: wrapped!, context }))))));
+    createElement("div", { id: "stats-host", style: { width: state.width ? `${state.width}px` : "100%", height: "100%" } },
+      ...Array.from({ length: state.copies ?? 1 }, (_, index) => {
+        const own = index === 0 ? context : { ...context, instanceId: `${context.instanceId}-${index + 1}` };
+        return createElement(StatisticsCanvas, { key: own.instanceId, api: wrapped!, context: own });
+      }))))));
 }
 
 const fixture = {

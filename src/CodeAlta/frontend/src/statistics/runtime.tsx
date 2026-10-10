@@ -160,7 +160,8 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
     if (visible && latestStatus.current) setStatus(latestStatus.current);
   }, [visible]);
 
-  const weekStart = useMemo(() => firstDayOfWeek(locale), [locale]);
+  // The weeks are those of the plugin when it says where they start, so that a chart and `alta statistics` cut the same weeks.
+  const weekStart = useMemo(() => context.weekStart ?? firstDayOfWeek(locale), [context.weekStart, locale]);
   const fmt = useMemo(() => createFormatter(locale, { credits: amount => t("{amount} AI credits", { amount }), none: "–" }), [locale]); // eslint-disable-line react-hooks/exhaustive-deps
   const request = useCallback((extra?: Partial<StatisticsRequest>) => requestOf(frame, weekStart, extra), [frame, weekStart]);
   const colorIndex = useCallback((key: string) => {
