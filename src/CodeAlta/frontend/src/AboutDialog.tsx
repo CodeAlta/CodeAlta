@@ -12,7 +12,7 @@ function recordedText(value: unknown, maxLength: number): string | null {
 type About = { product: string | null; version: string | null; build: string | null; mode: MessageKey };
 
 /** What the running host reported about itself; nothing is inferred when it reported nothing. */
-function aboutFacts(status: BootStatus | undefined, bootError: boolean, demo: boolean): About {
+export function aboutFacts(status: BootStatus | undefined, bootError: boolean, demo: boolean): About {
   const browserDemo = demo || status?.state === "demo";
   const verified = !browserDemo && !bootError && !!status;
   const version = verified ? recordedText(status.version, 256) : null;

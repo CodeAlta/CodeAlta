@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { BootStatus, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { aboutFacts } from "../AboutDialog";
+import { locales, translate } from "../localization";
 import { landingProjects, landingSessions, landingStartupMilliseconds, opensLandingAtStartup } from "./landingWindow";
 
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `/code/${id}`, archived });
@@ -9,6 +11,27 @@ const session = (id: string, over: Partial<WorkspaceSession> = {}): WorkspaceSes
   projectId: null, providerKey: null, scopeKind: "global", updatedAt: "2026-10-09T10:00:00Z", workspacePath: null, worktreeMissing: false, worktreeName: null, worktreePath: null, worktreeRoot: null, ...over,
 });
 const snapshot = (projects: WorkspaceProject[], sessions: WorkspaceSession[]): WorkspaceSnapshot => ({ configured: true, displayTextTruncated: false, projects, projectsTruncated: false, sessions, sessionsTruncated: false });
+
+test("Welcome and About share the literal running host version and do not invent one for a demo or unavailable build", () => {
+  const status: BootStatus = { state: "owned", hostAvailable: true, hostEpoch: "epoch", productName: "CodeAlta", version: "1.2.3-preview.4+build.567",
+    commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false, developerMode: false, configRecovery: false, providerSetup: false };
+  assert.equal(aboutFacts(status, false, false).version, status.version);
+  for (const version of ["development", "", " ", "bad\nversion", "bad\u202eversion", "x".repeat(257)]) {
+    assert.equal(aboutFacts({ ...status, version }, false, false).version, null);
+  }
+  assert.equal(aboutFacts(status, true, false).version, null);
+  assert.equal(aboutFacts(status, false, true).version, null);
+  assert.equal(aboutFacts({ ...status, state: "demo" }, false, false).version, null);
+  assert.equal(aboutFacts(undefined, false, false).version, null);
+});
+
+test("Home, Version and the development fallback are translated in every shell language", () => {
+  for (const locale of locales.filter(locale => locale !== "en")) {
+    assert.notEqual(translate(locale, "Home"), "Home");
+    assert.notEqual(translate(locale, "Development build"), "Development build");
+    assert.ok(translate(locale, "Version"));
+  }
+});
 
 test("the page opens for the start once the window is ready and its canvas is declared", () => {
   const start = { ready: true, handled: false, openAtStartup: true, elapsedMilliseconds: 0, declared: true };

@@ -25,6 +25,8 @@ export type LandingProviders = Readonly<{ ready: number; detecting: boolean }>;
 export type LandingShell = Readonly<{
   /** The host the window talks to, or null while there is none: the page then reads no card. */
   epoch: string | null;
+  /** The running host's version, validated as on the About page; null for a development or unavailable build. */
+  version: string | null;
   /** The space the window shows. */
   space: Readonly<{ id: string; name: string; isDefault: boolean }>;
   /** The projects of the space that are not archived, or null while the window has not read them. */

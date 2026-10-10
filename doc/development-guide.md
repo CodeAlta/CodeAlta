@@ -148,6 +148,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `monaco/`: the Monaco setup shared by every editor of the page, the languages, and the text and diff editors.
 - `terminal/`: the terminals (the link to the host, the xterm.js view, the tab, the list of the Explorer, the options, the font).
 - `canvases/`: the tabs that plugins provide (the link to the host, the tab and its placeholder, the control of a plugin that does not run).
+- `landing/`: the Desktop Welcome canvas and its startup preferences. The title-bar Home button runs the built-in `/landing` command, reusing the canvas tab without changing startup preferences. Its version comes from the same validated host facts as Settings > About.
 - `pluginScript/`: what runs the script of plugins (the `alta` object, the module loader, the error boundary, the `html` tag, the components of the `codealta` module).
 - `lent/`: the entries of the libraries lent to plugins and the `codealta` module (below).
 - `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).

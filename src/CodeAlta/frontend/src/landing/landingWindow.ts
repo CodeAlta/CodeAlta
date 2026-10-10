@@ -10,6 +10,8 @@ import { landingCanvasId, landingPluginKey, type LandingProject, type LandingSes
 export type LandingShellInput = Readonly<{
   /** The host the window talks to, or null. */
   epoch: string | null;
+  /** The running version, from the same host facts as Settings > About. */
+  version: string | null;
   /** The space the window shows. */
   space: Readonly<{ id: string; name: string; isDefault: boolean }>;
   /** The projects and the sessions of that space, as the window has them; undefined while it has not read them. */
@@ -35,13 +37,13 @@ export function landingSessions(snapshot: WorkspaceSnapshot): LandingSession[] {
 }
 
 /**
- * What the shell lends the landing page. It changes with the host, the space and the catalogs only: what the shell does (a command, a
+ * What the shell lends the landing page. It changes with the host, its version, the space and the catalogs only: what the shell does (a command, a
  * project, a session) is read when the page asks, so a new function of the shell does not draw the page again.
  */
 export function useLandingShell(input: LandingShellInput): LandingShell {
   const latest = useRef(input);
   latest.current = input;
-  const { epoch, snapshot } = input, { id, name, isDefault } = input.space;
+  const { epoch, version, snapshot } = input, { id, name, isDefault } = input.space;
   const projects = useMemo(() => snapshot ? landingProjects(snapshot) : null, [snapshot]);
   const sessions = useMemo(() => snapshot ? landingSessions(snapshot) : null, [snapshot]);
   // What the page reads from the host changes with the host and the space only: a new list of sessions does not read the cards again.
@@ -56,14 +58,14 @@ export function useLandingShell(input: LandingShellInput): LandingShell {
     readCards: signal => pluginUi.landingCards({ expectedEpoch: epoch, spaceId: id }, { signal, timeoutMilliseconds: 20_000 }),
   }), [epoch, id]);
   return useMemo<LandingShell>(() => ({
-    epoch, space: { id, name, isDefault }, projects, sessions, ...readers,
+    epoch, version, space: { id, name, isDefault }, projects, sessions, ...readers,
     run: command => latest.current.run(command),
     notifyUnavailable: label => latest.current.notifyUnavailable(label),
     // Only a project the page lists: the shell selects nothing that the space does not show.
     openProject: projectId => { if (projects?.some(project => project.id === projectId)) latest.current.openProject(projectId); },
     openSession: sessionId => { if (sessions?.some(session => session.id === sessionId)) latest.current.openSession(sessionId); },
     runCardCommand: (commandId, projectId, label) => latest.current.runCardCommand(commandId, projectId, label),
-  }), [epoch, id, name, isDefault, projects, sessions, readers]);
+  }), [epoch, version, id, name, isDefault, projects, sessions, readers]);
 }
 
 /** How long after the window is ready the landing page is still opened for the start: a plugin that comes later does not open it. */

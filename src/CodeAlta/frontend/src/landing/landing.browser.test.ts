@@ -120,6 +120,23 @@ test("the landing page welcomes, lists what was used last, draws the cards of pl
       assert.equal(await count(".landing-row"), 0);
     });
 
+    await context.test("the welcome quietly identifies the running version, with the same development fallback as About", async () => {
+      await evaluate("landingFixture.reset(); landingFixture.show()");
+      assert.deepEqual(await text(".landing-hero .landing-version"), ["1.2.3+build.456"]);
+      for (const dark of [false, true]) {
+        await evaluate(`document.documentElement.dataset.theme=${JSON.stringify(dark ? "dark" : "light")};
+          document.documentElement.classList.toggle('bp6-dark', ${dark}); landingFixture.show({ dark: ${dark}, width: 360 })`);
+        const version = await rect(".landing-version"), hero = await rect(".landing-hero");
+        assert.ok(version && hero && version.width > 0 && version.left >= hero.left && version.right <= hero.right);
+        assert.equal(await evaluate("getComputedStyle(document.querySelector('.landing-version')).fontSize"), "12px");
+      }
+      await evaluate("landingFixture.show({ version: null })");
+      assert.deepEqual(await text(".landing-version"), ["Development build"]);
+      await evaluate("landingFixture.show({ version: '1.2.3+' + 'a'.repeat(128) })");
+      const version = await rect(".landing-version"), hero = await rect(".landing-hero");
+      assert.ok(version && hero && version.right <= hero.right, "Long build metadata wraps in a narrow Welcome tab");
+    });
+
     await context.test("the lists show what was used last and open it, and the Documentation is the one of the application", async () => {
       await evaluate("landingFixture.reset(); landingFixture.show(landingFixture.sample())");
       assert.equal(await wait("document.querySelectorAll('[data-list=sessions] .landing-row').length === 3"), true);

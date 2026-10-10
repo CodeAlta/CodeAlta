@@ -179,7 +179,7 @@ import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from ".
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
 import { translate, type MessageKey } from "./localization";
 import { ApplicationLogsPanel } from "./ApplicationLogsPanel";
-import { AboutSettings } from "./AboutDialog";
+import { aboutFacts, AboutSettings } from "./AboutDialog";
 import type { ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
@@ -191,7 +191,7 @@ import { askPluginComposer, noPluginContributions, pluginCommandAvailable, plugi
   findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue, pluginsChangedEvent } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
 import { commandDefinitions, resolveCommandKey, type CommandId } from "./commandRegistry";
-import { LandingShellContext } from "./landing/landingShell";
+import { landingCanvasId, landingPluginKey, LandingShellContext } from "./landing/landingShell";
 import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
@@ -2057,7 +2057,9 @@ function App() {
     void pluginUi.invokeCommand({ expectedEpoch: pluginEpoch, commandId, projectId: cardProjectId, sessionId: null, sessionBusy: false, draftText: null, spaceId: shownSpace.current },
       { timeoutMilliseconds: 8000 }).then(reply => { if (reply.status !== "started") unavailable(); }, unavailable);
   }
-  const landingShell = useLandingShell({ epoch: pluginEpoch, space: findSpace(spacesState.spaces, spaceId), snapshot, run: runNamedCommand, notifyUnavailable: landingUnavailable,
+  const landingCommand = pluginContributed.commands.find(command => command.pluginKey === landingPluginKey && command.name === "landing");
+  const landingShell = useLandingShell({ epoch: pluginEpoch, version: aboutFacts(status, !!error, demoMode).version,
+    space: findSpace(spacesState.spaces, spaceId), snapshot, run: runNamedCommand, notifyUnavailable: landingUnavailable,
     openProject: id => { selectProject(id); focusPromptSoon(); }, openSession: id => void openAutomationSession(id), runCardCommand: runLandingCardCommand });
   useLandingAtStartup(owned && tabsReady, canvasCatalog, openCanvasHere);
 
@@ -2916,6 +2918,9 @@ function App() {
           <PluginButtons place="TitleBar" context={pluginButtonContext} />
           {spacesState.available && <SpaceSwitch spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} canEdit={owned} request={spaceMenuRequest}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onCreate={() => setSpaceDialog(true)} onOrganize={() => navigate("spaces")} />}
+          <Button variant="minimal" size="small" className="home-open" icon={<AppIcon name="home" size={16} />} disabled={!owned || !landingCommand}
+            active={!!fileTabs.active && isCanvasTab(fileTabs.active) && fileTabs.active.pluginKey === landingPluginKey && fileTabs.active.canvasId === landingCanvasId}
+            aria-label={t("Home")} title={t("Home")} onClick={() => { if (landingCommand) runPluginCommand(landingCommand.id); }} />
           <Button variant="minimal" size="small" className="documentation-open" icon={<AppIcon name="documentation" size={16} />} disabled={!owned}
             active={!!fileTabs.active && isDocumentationTab(fileTabs.active)} aria-label={t("Documentation")} title={t("Documentation")} onClick={() => openDocumentation()} />
           {shellPreferences && <WindowZoom zoom={shellPreferences.zoom} run={runCommand} />}

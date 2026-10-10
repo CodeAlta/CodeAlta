@@ -31,8 +31,8 @@ const fresh = () => ({
 });
 const state = fresh();
 
-type Shown = { visible: boolean; dark: boolean; epoch: string | null; projects: readonly LandingProject[] | null; sessions: readonly LandingSession[] | null; width: number | null; space: LandingShell["space"] };
-const first = (): Shown => ({ visible: true, dark: true, epoch: "epoch-1", projects: [], sessions: [], width: null, space: { id: "all", name: "All projects", isDefault: true } });
+type Shown = { visible: boolean; dark: boolean; epoch: string | null; version: string | null; projects: readonly LandingProject[] | null; sessions: readonly LandingSession[] | null; width: number | null; space: LandingShell["space"] };
+const first = (): Shown => ({ visible: true, dark: true, epoch: "epoch-1", version: "1.2.3+build.456", projects: [], sessions: [], width: null, space: { id: "all", name: "All projects", isDefault: true } });
 let shown = first();
 
 const storage = new Map<string, string>();
@@ -40,7 +40,7 @@ const memory = { getItem: (key: string) => storage.get(key) ?? null, setItem: (k
 let preferences: LandingPreferenceStore = createLandingPreferences(memory);
 
 // The functions of the shell keep their identity from one drawing to the next, as the ones the window lends do.
-const lent: Omit<LandingShell, "epoch" | "space" | "projects" | "sessions"> = {
+const lent: Omit<LandingShell, "epoch" | "version" | "space" | "projects" | "sessions"> = {
   readProviders: async () => { state.providerReads++; return state.providers; },
   readCards: async () => {
     state.cardReads++;
@@ -86,7 +86,7 @@ function Startup({ ready, catalog }: { ready: boolean; catalog: readonly Readonl
 }
 
 function draw() {
-  const shell: LandingShell = { ...lent, epoch: shown.epoch, space: shown.space, projects: shown.projects, sessions: shown.sessions };
+  const shell: LandingShell = { ...lent, version: shown.version, epoch: shown.epoch, space: shown.space, projects: shown.projects, sessions: shown.sessions };
   // Under StrictMode, as in the application: React then runs each effect of a new component twice.
   flushSync(() => root.render(createElement(StrictMode, null, createElement(PluginUiContext.Provider, { value: ui },
     createElement("div", { id: "frame", style: { width: shown.width ?? undefined, padding: 12, boxSizing: "border-box" } },

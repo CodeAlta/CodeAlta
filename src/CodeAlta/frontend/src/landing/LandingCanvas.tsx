@@ -180,7 +180,10 @@ export function LandingCanvas({ shell, visible, dark, openCanvas, preferences = 
       <header className="landing-hero">
         <LandingAccent animate={chosen.animate} visible={visible} dark={dark} />
         <div className="landing-hero-text">
-          <div className="landing-wordmark" role="img" aria-label="CodeAlta"><span aria-hidden="true">Code</span><span className="logo-alta" aria-hidden="true">Alta</span></div>
+          <div className="landing-identity">
+            <div className="landing-wordmark" role="img" aria-label="CodeAlta"><span aria-hidden="true">Code</span><span className="logo-alta" aria-hidden="true">Alta</span></div>
+            <span className="landing-version" title={t("Version")}>{shell.version ?? t("Development build")}</span>
+          </div>
           <h1>{t("Welcome")}</h1>
           <p className="landing-tagline">{t("Pick up where you left off, or start something new.")}</p>
           <div className="landing-hero-actions">

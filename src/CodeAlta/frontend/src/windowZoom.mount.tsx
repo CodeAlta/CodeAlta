@@ -1,4 +1,4 @@
-// The end of the title bar as the window lays it out: a populated tab strip, Documentation, the zoom and the
+// The end of the title bar as the window lays it out: a populated tab strip, Home, Documentation, the zoom and the
 // theme switch, before the native caption buttons. The host is a fake one that steps as the real one does.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -47,6 +47,7 @@ function Fixture() {
     <SessionTabStrip layout={layout} state={sessions} snapshot={snapshot} files={files} capture={() => () => true}
       select={() => { }} close={() => { }} reopen={() => { }} renderFile={tab => <div>{tab.name ?? tab.projectId}</div>}>New session</SessionTabStrip>
     <div className="window-actions">
+      <Button variant="minimal" size="small" className="home-open" icon={<AppIcon name="home" size={16} />} aria-label="Home" />
       <Button variant="minimal" size="small" className="documentation-open" icon={<AppIcon name="documentation" size={16} />} aria-label="Documentation" />
       {shell && <WindowZoom zoom={shell.zoom} run={run} />}
       <Button variant="minimal" size="small" className="theme-switch" icon={<AppIcon name="themeDark" size={16} />} aria-label="Theme" />

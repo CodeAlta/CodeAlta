@@ -4,6 +4,7 @@ type Row = readonly [string, string, string, string, string];
 
 export const landingMessages = {
   "Welcome": ["Bienvenida", "Bienvenue", "Willkommen", "ようこそ", "欢迎"],
+  "Home": ["Inicio", "Accueil", "Startseite", "ホーム", "主页"],
   "Pick up where you left off, or start something new.": ["Continúa donde lo dejaste o empieza algo nuevo.", "Reprenez là où vous vous étiez arrêté, ou commencez autre chose.", "Machen Sie dort weiter, wo Sie aufgehört haben, oder beginnen Sie etwas Neues.", "前回の続きから再開するか、新しい作業を始めましょう。", "从上次中断的地方继续，或开始新的工作。"],
   "Open a project": ["Abrir un proyecto", "Ouvrir un projet", "Projekt öffnen", "プロジェクトを開く", "打开项目"],
   "Documentation": ["Documentación", "Documentation", "Dokumentation", "ドキュメント", "文档"],

@@ -22,7 +22,9 @@ export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedI
 function markTitleBars(host: HTMLElement) {
   const bounds = host.getBoundingClientRect();
   host.querySelectorAll<HTMLElement>(".flexlayout__tabset_tabbar_outer").forEach(bar => {
-    const box = bar.getBoundingClientRect();
+    // Reserved title-bar padding can exceed a narrow pane. Its stable bounds, not the padded bar's,
+    // determine the edges; otherwise the end marker repeatedly removes and reapplies its own padding.
+    const box = (bar.closest(".flexlayout__tabset") ?? bar).getBoundingClientRect();
     const top = box.width > 0 && Math.abs(box.top - bounds.top) < 2;
     bar.toggleAttribute("data-neoastra-drag-region", top);
     bar.toggleAttribute("data-titlebar-start", top && Math.abs(box.left - bounds.left) < 2);

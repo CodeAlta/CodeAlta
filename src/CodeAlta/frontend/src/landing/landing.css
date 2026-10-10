@@ -9,6 +9,8 @@
 .landing-pixels { position: absolute; inset: 0 0 0 auto; z-index: -1; width: 62%; height: 100%; image-rendering: pixelated; pointer-events: none;
   -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 60%); mask-image: linear-gradient(to right, transparent 0%, #000 60%); }
 .landing-hero-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 560px; }
+.landing-identity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.landing-version { min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-size: 12px; }
 .landing-wordmark { display: flex; font: 700 14px/1 "Cascadia Code", Consolas, ui-monospace, monospace; letter-spacing: 0.08em; color: var(--muted); user-select: none; }
 .landing[data-animate="false"] .landing-wordmark .logo-alta { animation: none; }
 /* Behind another tab nothing of the page moves. */

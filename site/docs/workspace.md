@@ -104,7 +104,7 @@ CodeAlta Desktop has a start page, in a tab titled **Welcome**. It shows:
 - the cards of your plugins, such as the **Statistics** overview of the last seven days with a button that opens the [Statistics](plugins/statistics.md) page;
 - **Explore**: the documentation, the Canvases page, Plugins, Model Providers, Settings and the keyboard shortcuts.
 
-Open it with **Welcome** in the search, or `/landing`. It is a tab like the others: close it with `Ctrl+W`, and it is restored with your tabs when it was left open. An agent opens it with `alta landing open`.
+Open it with the **Home** icon in the title bar, **Welcome** in the search, or `/landing`. Home returns to the same Welcome tab if it is already open. The current CodeAlta version appears beside its name on the page, as in **Settings > About**. It is a tab like the others: close it with `Ctrl+W`, and it is restored with your tabs when it was left open. An agent opens it with `alta landing open`.
 
 **Documentation** opens the documentation that ships with CodeAlta, in the window.
 

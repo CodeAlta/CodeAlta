@@ -23,7 +23,7 @@ const frame = `(() => {
 // The height of the title bar, the width the mark takes when it is alone, and the width the Explorer starts with.
 const bar = 38, mark = 248, explorer = 272;
 
-test("the Explorer has its column in a wide window and opens over the tabs in a narrow one, under a title bar that stays in place", { skip: !edge, timeout: 60_000 }, async () => {
+test("the title bar keeps Explorer in place and Home opens or focuses one Welcome tab", { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-window-frame-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -31,7 +31,7 @@ test("the Explorer has its column in a wide window and opens over the tabs in a 
     await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"),
       bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" },
       define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, plugins: [{ name: "isolated-window-frame", setup(bundle) {
-        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./projectFocus.neoastra.mount.ts", import.meta.url)) }));
+        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./windowFrame.neoastra.mount.ts", import.meta.url)) }));
         bundle.onResolve({ filter: /^monaco-editor\/.*\?worker$/ }, args => ({ path: args.path, namespace: "fixture-worker" }));
         bundle.onLoad({ filter: /.*/, namespace: "fixture-worker" }, async () => {
           const worker = await build({ entryPoints: [fileURLToPath(new URL("../node_modules/monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url))],
@@ -42,7 +42,8 @@ test("the Explorer has its column in a wide window and opens over the tabs in a 
           } }` };
         });
       } }] });
-    await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/flexlayout-react/style/light.css", import.meta.url), "utf8") + readFileSync(new URL("./style.css", import.meta.url), "utf8"));
+    await writeFile(join(root, "style.css"), readFileSync(new URL("../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
+      + readFileSync(new URL("../node_modules/flexlayout-react/style/light.css", import.meta.url), "utf8") + readFileSync(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
@@ -96,10 +97,13 @@ test("the Explorer has its column in a wide window and opens over the tabs in a 
 
     await command("Page.enable");
     await command("Runtime.enable");
+    await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'languages',{get:()=>['en-US']});
+      localStorage.setItem('settingsFixtureOwned','true');
+      localStorage.setItem('codealta.desktop.landing.startup.v1','off');` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await size(800, 900);
     await command("Page.navigate", { url: pathToFileURL(page).href });
-    assert.equal(await wait(`!!document.querySelector('#catalog-prompt') && !!document.querySelector('.flexlayout__tabset_tabbar_outer[data-titlebar-start]')`), true, exceptions.join("\n"));
+    assert.equal(await wait(`!!document.querySelector('#catalog-prompt, #session-prompt') && !!document.querySelector('.flexlayout__tabset_tabbar_outer[data-titlebar-start]')`), true, exceptions.join("\n"));
 
     // A narrow window starts without the Explorer: the mark is at the start of the title bar, the first tab strip
     // starts after it, and the content has the whole window.
@@ -117,6 +121,43 @@ test("the Explorer has its column in a wide window and opens over the tabs in a 
     await size(1280, 900);
     assert.deepEqual(await shown(true), { mark: [0, 0, explorer + 2, bar], explorer: [0, bar, explorer, 900 - bar], content: [explorer + 2, 0, 1280 - explorer - 2, 900], tabs: 0 });
     assert.deepEqual(await shown(false), { ...alone, content: [0, 0, 1280, 900] });
+
+    const home = `document.querySelector('.window-actions button[aria-label="Home"]')`;
+    const welcomeTabs = `Array.from(document.querySelectorAll('.flexlayout__tab_button')).filter(tab=>tab.textContent.trim()==='Welcome')`;
+    assert.equal(await wait(`${home} && !${home}.disabled`), true, "The top bar offers an accessible Home button");
+    assert.equal(await evaluate(`${home}.title`), "Home");
+    assert.equal(await evaluate(`${welcomeTabs}.length`), 0, "Startup preference stays off");
+    await evaluate(`${home}.focus()`);
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await wait(`${welcomeTabs}.length === 1 && ${home}.classList.contains('bp6-active')`), true);
+    await evaluate(`${home}.click(); ${home}.click()`);
+    assert.equal(await wait("windowFrameFixture.commands.length === 3"), true);
+    await frames();
+    assert.equal(await evaluate(`${welcomeTabs}.length`), 1, "Repeated clicks reuse the tab");
+    assert.deepEqual(await evaluate("windowFrameFixture.commands.map(command=>command.commandId)"), ["welcome-command", "welcome-command", "welcome-command"]);
+    assert.equal(await evaluate("windowFrameFixture.opens.every(open=>open.projectId===null && open.sessionId===null && open.key===null)"), true);
+    await evaluate("document.querySelector('.activity-canvases').click()");
+    assert.equal(await wait(`!${home}.classList.contains('bp6-active')`), true);
+    await evaluate(`${home}.click()`);
+    assert.equal(await wait(`${welcomeTabs}.length === 1 && ${home}.classList.contains('bp6-active')`), true, "Home focuses Welcome from another tab");
+    // The control remains visible and clickable in both themes, even in a narrow window.
+    for (const width of [1280, 390]) {
+      await size(width, 650);
+      for (const dark of [false, true]) {
+        const theme = dark ? "dark" : "light";
+        assert.equal(await evaluate(`(async()=>{for(let i=0;i<4 && document.documentElement.dataset.theme!==${JSON.stringify(theme)};i++) {
+          document.querySelector('.theme-switch').click(); await new Promise(resolve=>requestAnimationFrame(resolve));
+        } return document.documentElement.dataset.theme})()`), theme);
+        assert.equal(await evaluate(`(()=>{const e=${home}, r=e.getBoundingClientRect(), icon=e.querySelector('svg');
+          return r.width>=28 && r.height>=28 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=38
+            && e.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))
+            && !!icon && getComputedStyle(icon).stroke!=='none' && getComputedStyle(e).visibility==='visible'})()`), true, `Home at ${width}px, dark=${dark}`);
+      }
+    }
+    assert.equal(await evaluate("localStorage.getItem('codealta.desktop.landing.startup.v1')"), "off", "Opening Welcome never changes startup");
+    await evaluate("windowFrameFixture.enabled=false; projectFocusFixture.notify({kind:'plugins-changed',runningSessions:0,busyTerminals:0})");
+    assert.equal(await wait(`${home}.disabled`), true, "Home is unavailable when the built-in Landing page is disabled, not routed to another plugin");
     assert.deepEqual(exceptions, []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
