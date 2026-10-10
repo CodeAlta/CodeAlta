@@ -254,6 +254,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var uiSessions = new Ui.DesktopUiSessions();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
             application.MainWindow = window;
+            // What a resize uncovers is filled in the theme's background, not in white, until the view covers it.
+            var windowBackground = new DesktopWindowBackground(window);
+            windowBackground.Apply(appearance.Background);
             window.Closed += (_, _) => closed.TrySetResult();
             var shutdownWindow = window;
             // The application's shutdown starts once, from the window being closed without a tray to stay in,
@@ -434,11 +437,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             application.NotifyReady();
             // So does the start that waits in a terminal for this window.
             DesktopTerminalStart.NotifyShown(options.StartToken);
-            // The page's theme: kept for the next start, and the window controls follow it now.
+            // The page's theme: kept for the next start, and the window controls and background follow it now.
             void RememberAppearance(DesktopAppearance remembered)
             {
                 remembered.Save(options.DataRoot);
-                application.Dispatcher.Post(() => { if (!startedWindow.IsClosed) startedWindow.TitleBar = DesktopWindowChrome.TitleBar(remembered); });
+                application.Dispatcher.Post(() =>
+                {
+                    if (startedWindow.IsClosed) return;
+                    startedWindow.TitleBar = DesktopWindowChrome.TitleBar(remembered);
+                    windowBackground.Apply(remembered.Background);
+                });
             }
             // As the terminal application does: one look at nuget.org for a newer version. An instance on
             // explicit roots is automation and stays off the network.
@@ -797,6 +805,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             appearance.ApplyToBrowser();
             await using var window = application.CreateWindow(DesktopWindowChrome.WindowOptions(developer: false, appearance));
             application.MainWindow = window;
+            new DesktopWindowBackground(window).Apply(appearance.Background);
             var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             window.Closed += (_, _) => closed.TrySetResult();
 
