@@ -62,7 +62,10 @@ plugins and their MCP servers) starts beside the view rather than before it. The
 drawn for the application's theme, not the system's: dark symbols on the light theme, light ones on
 the dark themes, and they follow a theme change at once. The theme and its background are kept in
 `appearance.json` in the WebView data directory, which is what lets the window open in the right
-colors before any page exists.
+colors before any page exists. On Windows the window is also filled in that background where the view
+has not drawn yet, the part a resize uncovers: NeoAstra registers its window class with the system's
+window color, white, so `DesktopWindowBackground` gives the class a brush of the theme's background
+when the window is created, and a new one when the page changes its theme.
 
 The view loads the documents of the application and no other: the start-up screen, then the
 application (`DesktopApplication.DecideNavigation`). Its history still holds the start-up screen, which
