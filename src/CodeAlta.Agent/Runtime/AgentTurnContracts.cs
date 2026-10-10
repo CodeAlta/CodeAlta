@@ -89,6 +89,37 @@ internal interface IAgentProviderBackgroundTasks
 }
 
 /// <summary>
+/// A turn executor whose provider can let a session be followed and driven from elsewhere (Claude Code's Remote
+/// Control).
+/// </summary>
+internal interface IAgentProviderRemoteControl
+{
+    /// <summary>
+    /// Registers what is called when the remote control of a session changes. The handler is called while the
+    /// provider is being read: it must not wait.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="handler">What is called for each change.</param>
+    /// <returns>The registration, which is disposed to end it.</returns>
+    IDisposable OnRemoteControlChanged(string sessionId, Action<AgentRemoteControl> handler);
+
+    /// <summary>Returns the remote control of a session now.</summary>
+    /// <param name="sessionId">The session.</param>
+    AgentRemoteControl GetRemoteControl(string sessionId);
+
+    /// <summary>
+    /// Turns the remote control of a session on or off. The request is the one a turn would have, without its
+    /// prompt: the provider starts what it needs from it when nothing runs.
+    /// </summary>
+    /// <param name="request">What the session runs with.</param>
+    /// <param name="enabled">Whether the session is to be controlled remotely.</param>
+    /// <param name="name">The name the session is shown under remotely, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The remote control of the session after the request.</returns>
+    Task<AgentRemoteControl> SetRemoteControlAsync(AgentTurnRequest request, bool enabled, string? name, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// A turn executor whose provider runs tools itself (an agent CLI): the session still shows and records each
 /// tool call, but the definition that "runs" it comes from the executor.
 /// </summary>

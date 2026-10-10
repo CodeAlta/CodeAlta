@@ -41,6 +41,25 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets a value indicating whether the CLI answers a switch of permission mode it takes.</summary>
     public bool AnswerPermissionModeSwitch { get; set; } = true;
 
+    /// <summary>Gets or sets a value indicating whether `initialize` says Remote Control is available.</summary>
+    public bool RemoteControlAvailable { get; set; } = true;
+
+    /// <summary>Gets or sets the error the CLI answers Remote Control with; <see langword="null"/> to connect it.</summary>
+    public string? RemoteControlError { get; set; }
+
+    /// <summary>Gets or sets what the CLI waits for before it answers a request that turns Remote Control on; <see langword="null"/> to answer at once.</summary>
+    public Task? RemoteControlAnswer { get; set; }
+
+    /// <summary>Gets or sets what the CLI waits for before it answers <c>initialize</c>; <see langword="null"/> to answer at once.</summary>
+    public Task? InitializeAnswer { get; set; }
+
+    /// <summary>Gets the number of bridges connected so far, which numbers their links.</summary>
+    public int BridgesConnected => _bridges;
+
+    internal int NextBridge() => Interlocked.Increment(ref _bridges);
+
+    private int _bridges;
+
     /// <summary>Gets or sets the permission mode the settings of the user give a process started without one.</summary>
     public string SettingsPermissionMode { get; set; } = "default";
 
@@ -123,6 +142,14 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     /// <summary>Gets the permission mode the process is in.</summary>
     public string PermissionMode { get; private set; }
 
+    /// <summary>Gets whether the process has Remote Control on.</summary>
+    public bool RemoteControlOn { get; private set; }
+
+    /// <summary>Gets the Remote Control requests the host wrote to the process, in order.</summary>
+    public IReadOnlyList<JsonElement> RemoteControlRequests => [.. _received
+        .Where(static message => Type(message) == "control_request" && message.GetProperty("request").GetProperty("subtype").GetString() == "remote_control")
+        .Select(static message => message.GetProperty("request"))];
+
     /// <summary>Gets the modes the host asked the process to switch to, refused or not.</summary>
     public IReadOnlyList<string> PermissionModeRequests => [.. _received
         .Where(static message => Type(message) == "control_request" && message.GetProperty("request").GetProperty("subtype").GetString() == "set_permission_mode")
@@ -179,6 +206,8 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                 {
                     replay["isReplay"] = true;
                     replay["session_id"] = SessionId;
+                    // As Claude Code 2.1.295 marks a prompt of a person, from the host or from claude.ai alike.
+                    replay["origin"] = new JsonObject { ["kind"] = "human" };
                 }));
                 _ = Task.Run(async () =>
                 {
@@ -493,6 +522,10 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                         ? new JsonObject { ["email"] = "someone@example.test", ["organization"] = "Someone's Organization", ["subscriptionType"] = "Claude Max", ["apiProvider"] = "firstParty" }
                         : new JsonObject { ["tokenSource"] = "none", ["apiProvider"] = "firstParty" },
                     ["current_permission_mode"] = PermissionMode,
+                    // What Claude Code 2.1.295 says of Remote Control.
+                    ["remote_control_available"] = _cli.RemoteControlAvailable,
+                    ["remote_control_auto_enable"] = false,
+                    ["remote_control_auto_connect_default"] = false,
                 };
                 if (_cli.ListsToolsAtStart)
                 {
@@ -502,6 +535,10 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                         await ListToolsAtStartAsync().ConfigureAwait(false);
                         Respond(requestId, initialized);
                     });
+                }
+                else if (_cli.InitializeAnswer is { } held)
+                {
+                    _ = held.ContinueWith(_ => Respond(requestId, initialized), TaskScheduler.Default);
                 }
                 else
                 {
@@ -531,6 +568,49 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                 break;
             case "mcp_message":
                 Respond(requestId, null);
+                break;
+            case "remote_control":
+                // What Claude Code 2.1.295 writes: the bridge is ready before the answer, connected after it.
+                if (!request.GetProperty("enabled").GetBoolean())
+                {
+                    RemoteControlOn = false;
+                    Respond(requestId, null);
+                    break;
+                }
+
+                if (_cli.RemoteControlError is { } refused)
+                {
+                    RespondError(requestId, refused);
+                    break;
+                }
+
+                var bridge = request.TryGetProperty("reattach_session_id", out var reattach) && reattach.ValueKind == JsonValueKind.String
+                    ? reattach.GetString()!
+                    : $"cse_{_cli.NextBridge()}";
+                void Connect()
+                {
+                    RemoteControlOn = true;
+                    Emit(new JsonObject { ["type"] = "system", ["subtype"] = "bridge_state", ["state"] = "ready", ["session_id"] = SessionId });
+                    Respond(requestId, new JsonObject
+                    {
+                        ["session_url"] = $"https://claude.ai/code/session_{bridge[4..]}",
+                        ["connect_url"] = "https://claude.ai/code?environment=",
+                        ["environment_id"] = "",
+                        ["bridge_epoch"] = 1,
+                        ["bridge_session_id"] = bridge,
+                    });
+                    Emit(new JsonObject { ["type"] = "system", ["subtype"] = "bridge_state", ["state"] = "connected", ["bridge_epoch"] = 1, ["session_id"] = SessionId });
+                }
+
+                if (_cli.RemoteControlAnswer is { } answer)
+                {
+                    _ = answer.ContinueWith(_ => Connect(), TaskScheduler.Default);
+                }
+                else
+                {
+                    Connect();
+                }
+
                 break;
             case "set_permission_mode":
                 // What Claude Code 2.1.295 answers.

@@ -191,6 +191,29 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task RemoteControl_IsACapabilityOfTheSession_ToldByEventsThatAreNotRecorded()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+        var remote = (IAgentRemoteControlProvider)session;
+        Assert.IsTrue(remote.SupportsRemoteControl);
+        Assert.AreEqual(AgentRemoteControl.Off, remote.RemoteControl);
+
+        var state = await remote.SetRemoteControlAsync(true, "Fix the parser").WaitAsync(Timeout);
+
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, state.Status);
+        Assert.AreEqual(state, remote.RemoteControl);
+        Assert.AreEqual("Fix the parser", cli.Last.RemoteControlRequests.Single().GetProperty("name").GetString());
+        Assert.IsTrue(events.Snapshot().OfType<AgentRemoteControlEvent>().Any(e => e.RemoteControl == state));
+        Assert.IsFalse((await session.GetHistoryAsync()).OfType<AgentRemoteControlEvent>().Any(), "The state of a running provider is not history.");
+
+        Assert.AreEqual(AgentRemoteControl.Off, await remote.SetRemoteControlAsync(false, null).WaitAsync(Timeout));
+    }
+
+    [TestMethod]
     public async Task CancelledPermission_StopsTheTurnWithoutAFailure()
     {
         using var directory = TestTempDirectory.Create();
@@ -267,6 +290,122 @@ public sealed class ClaudeCodeSessionTests
             () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
 
         StringAssert.Contains(failure.Message, "turn limit");
+    }
+
+    [TestMethod]
+    public async Task TurnStoppedOnClaudeAi_EndsAsAStopInCodeAlta()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var turns = 0;
+        cli.OnUserMessage = (process, user) =>
+        {
+            if (++turns == 2)
+            {
+                process.EmitTextTurn("msg_2", "still here", user);
+                return Task.CompletedTask;
+            }
+
+            var input = new JsonObject { ["command"] = "ping -n 61 127.0.0.1" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            // What Claude Code 2.1.295 writes when the turn is stopped on claude.ai while the command runs.
+            process.EmitToolResult("toolu_1", "The user doesn't want to proceed with this tool use. The tool use was rejected.", isError: true);
+            process.Emit(new JsonObject
+            {
+                ["type"] = "user",
+                ["session_id"] = process.SessionId,
+                ["parent_tool_use_id"] = null,
+                ["message"] = new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = "[Request interrupted by user for tool use]" }),
+                },
+            });
+            process.Emit(new JsonObject
+            {
+                ["type"] = "result",
+                ["subtype"] = "error_during_execution",
+                ["is_error"] = true,
+                ["terminal_reason"] = "aborted_tools",
+                ["stop_reason"] = "tool_use",
+                ["session_id"] = process.SessionId,
+                ["errors"] = new JsonArray("[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=tool_use"),
+                ["user_message_uuids"] = new JsonArray(user.GetProperty("uuid").GetString()),
+            });
+            process.Emit(new JsonObject { ["type"] = "command_lifecycle", ["command_uuid"] = user.GetProperty("uuid").GetString(), ["state"] = "cancelled", ["session_id"] = process.SessionId });
+            process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "idle", ["session_id"] = process.SessionId });
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
+
+        // The record of a stop in CodeAlta, not the diagnostic of the CLI.
+        var error = events.Snapshot().OfType<AgentErrorEvent>().Single();
+        Assert.AreEqual("Run cancelled before the assistant response completed.", error.Message);
+        Assert.IsTrue(events.Snapshot().OfType<AgentActivityEvent>().Any(static e => e.ActivityId == "toolu_1" && e.Phase == AgentActivityPhase.Failed));
+
+        // The session goes on with the next message.
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
+        Assert.IsTrue(events.Snapshot().OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant && e.Content == "still here"));
+    }
+
+    [TestMethod]
+    public async Task PermissionAnsweredOnClaudeAi_IsNotAnsweredAgainNorTakenForAStop()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<JsonElement>? answer = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            var input = new JsonObject { ["command"] = "ping -n 61 127.0.0.1" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            var (requestId, response) = process.BeginRequest(new JsonObject
+            {
+                ["subtype"] = "can_use_tool",
+                ["tool_name"] = "Bash",
+                ["input"] = input.DeepClone(),
+                ["tool_use_id"] = "toolu_1",
+            });
+            answer = response;
+            await asked.Task.WaitAsync(Timeout).ConfigureAwait(false);
+            // The prompt was answered on claude.ai: the CLI withdraws it here, and the command runs.
+            process.Emit(new JsonObject { ["type"] = "control_cancel_request", ["request_id"] = requestId });
+            process.EmitToolResult("toolu_1", "Reply from 127.0.0.1");
+            // The turn then fails on its own.
+            process.EmitResult("API Error: overloaded", user, isError: true, subtype: "error_during_execution");
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(
+            runtime,
+            directory,
+            onPermission: async (_, cancellationToken) =>
+            {
+                // As the permission card of CodeAlta does, a prompt closed from elsewhere ends as cancelled.
+                asked.TrySetResult();
+                try
+                {
+                    await Task.Delay(-1, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                }
+
+                return new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel);
+            });
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "overloaded");
+        Assert.IsNotNull(answer);
+        Assert.IsFalse(answer.IsCompleted, "A withdrawn prompt is not answered.");
     }
 
     [TestMethod]

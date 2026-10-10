@@ -289,6 +289,36 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task PermissionMode_IsSentBeforeEachTurn_WhileRemoteControlIsOn()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var conversation = new List<AgentConversationMessage> { User("one") };
+        var previous = await ExecuteAsync(executor, CreateRequest(conversation) with { PermissionMode = "acceptEdits" });
+        var process = cli.Last;
+
+        async Task SendAsync(string text)
+        {
+            conversation.AddRange([previous.AssistantMessage, User(text)]);
+            previous = await ExecuteAsync(executor, CreateRequest(conversation, previous) with { PermissionMode = "acceptEdits" });
+        }
+
+        // The CLI is in the mode of the turn: nothing is asked of it.
+        await SendAsync("two");
+        Assert.AreEqual(0, process.PermissionModeRequests.Count);
+
+        // From claude.ai the mode can be changed where CodeAlta does not see it: a turn of CodeAlta puts the CLI in
+        // its own mode again.
+        Assert.AreEqual(AgentRemoteControlStatus.Connected,
+            (await executor.SetRemoteControlAsync(CreateRequest(conversation), enabled: true, null, CancellationToken.None).WaitAsync(Timeout)).Status);
+        await SendAsync("three");
+        await SendAsync("four");
+
+        Assert.AreSame(process, cli.Last, "The CLI is switched, not started again: the bridge stays.");
+        CollectionAssert.AreEqual(new[] { "acceptEdits", "acceptEdits" }, process.PermissionModeRequests.ToArray());
+    }
+
+    [TestMethod]
     public async Task ChangeOfPermissionMode_SwitchesTheRunningCliWithoutARestart()
     {
         var cli = new ClaudeCodeFakeCli { SettingsPermissionMode = "auto" };
@@ -356,6 +386,256 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         Assert.AreEqual("default", process.PermissionMode);
         CollectionAssert.AreEqual(new[] { "acceptEdits", "default" }, process.PermissionModeRequests.ToArray());
+    }
+
+    [TestMethod]
+    public async Task PromptSentFromClaudeAi_IsThePromptOfTheTurnItStarts()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var asked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var registration = executor.OnProviderTurn("session-1", () => asked.TrySetResult());
+        await ExecuteAsync(executor, CreateRequest([User("hello")]));
+        Assert.IsNull(executor.GetPendingProviderTurn("session-1"), "The CLI replays the prompts of this side too: they start no turn of their own.");
+
+        // What Claude Code 2.1.295 writes for a prompt sent from claude.ai, then the turn it runs by itself.
+        var process = cli.Last;
+        process.Emit(new JsonObject
+        {
+            ["type"] = "user",
+            ["message"] = new JsonObject { ["role"] = "user", ["content"] = "Run the tests" },
+            ["session_id"] = process.SessionId,
+            ["parent_tool_use_id"] = null,
+            ["uuid"] = "80335cc4-287a-4cfc-b7ae-329dc864db72",
+            ["isReplay"] = true,
+            ["origin"] = new JsonObject { ["kind"] = "human" },
+        });
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = process.SessionId });
+        process.EmitAssistant("msg_remote", new JsonArray(ClaudeCodeFakeProcess.TextBlock("The tests pass.")));
+        process.EmitResult("The tests pass.");
+        await asked.Task.WaitAsync(Timeout);
+
+        Assert.AreEqual("Run the tests", executor.GetPendingProviderTurn("session-1"), "The run that shows the turn records the prompt as it was sent.");
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_StartsTheCliWhenNoneRuns_AndConnectsItAgainWithItsLinkAfterARestart()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var conversation = new List<AgentConversationMessage>();
+
+        // Nothing runs yet: the CLI is started for Remote Control alone, without a turn.
+        var state = await executor.SetRemoteControlAsync(CreateRequest(conversation), enabled: true, "My session", CancellationToken.None).WaitAsync(Timeout);
+
+        Assert.AreEqual(new AgentRemoteControl(AgentRemoteControlStatus.Connected, "https://claude.ai/code/session_1"), state);
+        var first = cli.Last;
+        var asked = first.RemoteControlRequests.Single();
+        Assert.AreEqual("My session", asked.GetProperty("name").GetString());
+        Assert.IsFalse(asked.TryGetProperty("reattach_session_id", out _), "A first connection has no link to keep.");
+        Assert.AreEqual(0, first.UserMessages.Count);
+
+        // A turn with another effort starts the CLI again: the new process is connected with the same link.
+        conversation.Add(User("one"));
+        await ExecuteAsync(executor, CreateRequest(conversation) with { ReasoningEffort = AgentReasoningEffort.Low });
+
+        Assert.AreEqual(2, cli.Processes.Count);
+        Assert.IsTrue(first.IsDisposed);
+        Assert.AreEqual("cse_1", cli.Last.RemoteControlRequests.Single().GetProperty("reattach_session_id").GetString());
+        Assert.AreEqual(new AgentRemoteControl(AgentRemoteControlStatus.Connected, "https://claude.ai/code/session_1"), executor.GetRemoteControl("session-1"));
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_KeepsTheCliRunningUntilItIsTurnedOff()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            IdleTimeout = TimeSpan.FromMilliseconds(100),
+        });
+        var changes = new List<AgentRemoteControl>();
+        using var registration = executor.OnRemoteControlChanged("session-1", change => { lock (changes) changes.Add(change); });
+
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        await Task.Delay(600);
+        Assert.IsFalse(cli.Last.IsDisposed, "The bridge ends with the process: an idle process is kept while Remote Control is on.");
+
+        var off = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: false, null, CancellationToken.None).WaitAsync(Timeout);
+
+        Assert.AreEqual(AgentRemoteControl.Off, off);
+        Assert.IsFalse(cli.Last.RemoteControlOn);
+        Assert.IsTrue(await WaitUntilAsync(() => cli.Last.IsDisposed), "Turned off, the idle process is closed again.");
+        lock (changes)
+        {
+            CollectionAssert.AreEqual(
+                new[] { AgentRemoteControlStatus.Connecting, AgentRemoteControlStatus.Connected, AgentRemoteControlStatus.Off },
+                changes.Select(static change => change.Status).ToArray());
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false, null, "not available")]
+    [DataRow(true, "Remote Control initialization failed", "Remote Control initialization failed")]
+    public async Task RemoteControl_TheCliCannotConnect_IsAFailureThatSaysWhy(bool available, string? refusal, string expected)
+    {
+        var cli = new ClaudeCodeFakeCli { RemoteControlAvailable = available, RemoteControlError = refusal };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        var state = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+
+        Assert.AreEqual(AgentRemoteControlStatus.Failed, state.Status);
+        StringAssert.Contains(state.Error, expected);
+        StringAssert.Contains(state.Error, "claude.ai login");
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_FollowsTheBridge_AndAnswersTheWorkSecretWithNothing()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        var process = cli.Last;
+
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "bridge_state", ["state"] = "reconnecting", ["session_id"] = process.SessionId });
+        Assert.IsTrue(await WaitUntilAsync(() => executor.GetRemoteControl("session-1").Status == AgentRemoteControlStatus.Connecting));
+        Assert.AreEqual("https://claude.ai/code/session_1", executor.GetRemoteControl("session-1").SessionUrl, "The link stays while the bridge connects again.");
+        process.Emit(new JsonObject { ["type"] = "system", ["subtype"] = "bridge_state", ["state"] = "connected", ["session_id"] = process.SessionId });
+        Assert.IsTrue(await WaitUntilAsync(() => executor.GetRemoteControl("session-1").Status == AgentRemoteControlStatus.Connected));
+
+        var secret = await process.RequestAsync(new JsonObject { ["subtype"] = "remote_control_work_secret" });
+        Assert.AreEqual("success", secret.GetProperty("subtype").GetString());
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_FailsWhenTheCliStopsByItself_AndIsConnectedAgainByTheNextProcess()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+
+        cli.Last.Exit(1);
+
+        Assert.IsTrue(await WaitUntilAsync(() => executor.GetRemoteControl("session-1").Status == AgentRemoteControlStatus.Failed),
+            "A bridge that ended with its process is not shown as connected.");
+        StringAssert.Contains(executor.GetRemoteControl("session-1").Error, "Claude Code stopped");
+
+        await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        Assert.AreEqual(2, cli.Processes.Count);
+        Assert.AreEqual("cse_1", cli.Last.RemoteControlRequests.Single().GetProperty("reattach_session_id").GetString());
+        Assert.AreEqual(new AgentRemoteControl(AgentRemoteControlStatus.Connected, "https://claude.ai/code/session_1"), executor.GetRemoteControl("session-1"));
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_ThatFailed_DoesNotKeepTheCliRunning()
+    {
+        var cli = new ClaudeCodeFakeCli { RemoteControlError = "Remote Control initialization failed" };
+        var options = cli.CreateOptions();
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            IdleTimeout = TimeSpan.FromMilliseconds(100),
+        });
+
+        var state = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+
+        Assert.AreEqual(AgentRemoteControlStatus.Failed, state.Status);
+        Assert.IsTrue(await WaitUntilAsync(() => cli.Last.IsDisposed), "No bridge runs: the idle process is closed.");
+        Assert.AreEqual(state, executor.GetRemoteControl("session-1"), "The failure stays shown once its process is closed.");
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_TurnedOffWhileItConnects_LeavesTheBridgeOff()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        await ExecuteAsync(executor, CreateRequest([User("one")]));
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        cli.RemoteControlAnswer = answer.Task;
+
+        var on = executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None);
+        Assert.IsTrue(await WaitUntilAsync(() => cli.Last.RemoteControlRequests.Count == 1));
+        var off = await executor.SetRemoteControlAsync(CreateRequest([]), enabled: false, null, CancellationToken.None).WaitAsync(Timeout);
+        answer.SetResult();
+        await on.WaitAsync(Timeout);
+
+        Assert.AreEqual(AgentRemoteControl.Off, off);
+        Assert.AreEqual(AgentRemoteControl.Off, executor.GetRemoteControl("session-1"));
+        Assert.IsTrue(await WaitUntilAsync(() => !cli.Last.RemoteControlOn), "A bridge connected after it was turned off is turned off again.");
+
+        // The bridge that was turned off is not taken up again by the next connection.
+        cli.RemoteControlAnswer = null;
+        await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout);
+        Assert.IsFalse(cli.Last.RemoteControlRequests[^1].TryGetProperty("reattach_session_id", out _));
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_RequestCancelledWhileTheCliAnswers_IsNotLeftConnecting()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        await ExecuteAsync(executor, CreateRequest([User("one")]));
+        var answer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        cli.RemoteControlAnswer = answer.Task;
+
+        // The caller gives up (the window's request timed out): the CLI still connects, and says so.
+        using var caller = new CancellationTokenSource();
+        var on = executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, caller.Token);
+        Assert.IsTrue(await WaitUntilAsync(() => cli.Last.RemoteControlRequests.Count == 1));
+        await caller.CancelAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => on.WaitAsync(Timeout));
+        Assert.AreEqual(AgentRemoteControlStatus.Connecting, executor.GetRemoteControl("session-1").Status);
+        answer.SetResult();
+
+        Assert.IsTrue(await WaitUntilAsync(() => executor.GetRemoteControl("session-1").Status == AgentRemoteControlStatus.Connected));
+        Assert.AreEqual("https://claude.ai/code/session_1", executor.GetRemoteControl("session-1").SessionUrl);
+    }
+
+    [TestMethod]
+    public async Task RemoteControl_RequestCancelledWhileTheCliStarts_SaysNothingConnects()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        cli.InitializeAnswer = started.Task;
+
+        using var caller = new CancellationTokenSource();
+        var on = executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, caller.Token);
+        Assert.IsTrue(await WaitUntilAsync(() => cli.Processes.Count == 1 && executor.GetRemoteControl("session-1").Status == AgentRemoteControlStatus.Connecting));
+        await caller.CancelAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => on.WaitAsync(Timeout));
+        started.SetResult();
+
+        var state = executor.GetRemoteControl("session-1");
+        Assert.AreEqual(AgentRemoteControlStatus.Failed, state.Status, "Nothing connects it before the next prompt: it does not show as connecting.");
+        StringAssert.Contains(state.Error, "Try again");
+        Assert.IsTrue(await WaitUntilAsync(() => cli.Processes[0].IsDisposed), "A process given up before it was ready is not kept.");
+
+        // Try again starts one, and connects it.
+        cli.InitializeAnswer = null;
+        Assert.AreEqual(AgentRemoteControlStatus.Connected, (await executor.SetRemoteControlAsync(CreateRequest([]), enabled: true, null, CancellationToken.None).WaitAsync(Timeout)).Status);
+        Assert.AreEqual(2, cli.Processes.Count);
+    }
+
+    private static async Task<bool> WaitUntilAsync(Func<bool> condition)
+    {
+        for (var attempt = 0; attempt < 500; attempt++)
+        {
+            if (condition())
+            {
+                return true;
+            }
+
+            await Task.Delay(10);
+        }
+
+        return condition();
     }
 
     [TestMethod]

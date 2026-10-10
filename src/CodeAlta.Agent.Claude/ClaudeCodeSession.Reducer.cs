@@ -447,6 +447,13 @@ internal sealed partial class ClaudeCodeSession
 
             if (@event.OwnTurn == 0 || !more)
             {
+                if (IsStoppedTurn(result, subtype))
+                {
+                    // The turn was stopped where CodeAlta did not stop it (claude.ai, over Remote Control): it ends as
+                    // a stop in CodeAlta does, not as a failure.
+                    throw new OperationCanceledException("The turn was stopped in Claude Code.");
+                }
+
                 throw CreateFailure(result, subtype);
             }
 
@@ -731,6 +738,11 @@ internal sealed partial class ClaudeCodeSession
             Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: DateTimeOffset.UtcNow);
     }
+
+    // Claude Code ends a turn that was stopped while the model wrote or while its tools ran with these reasons.
+    private static bool IsStoppedTurn(JsonElement result, string? subtype)
+        => string.Equals(subtype, "error_during_execution", StringComparison.Ordinal) &&
+           ClaudeCodeJson.GetString(result, "terminal_reason") is "aborted_streaming" or "aborted_tools";
 
     private InvalidOperationException CreateFailure(JsonElement result, string? subtype)
     {
