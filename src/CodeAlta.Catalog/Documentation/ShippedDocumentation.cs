@@ -94,10 +94,15 @@ public sealed record ShippedDocumentationSearchHit(string Path, string Title, st
 /// </summary>
 /// <remarks>
 /// <para>
-/// Only what the folder of the guide holds is ever read. The pages and the pictures are listed once, without
-/// following a link of the file system (a symbolic link, a junction), and a caller names one of them by its path
+/// The pages and the pictures are listed once, skipping links of the file system (symbolic links, junctions),
+/// and a caller names one of them by its path
 /// below the folder or by its file name: a name that is not in the list is answered with nothing, whatever it is
 /// (a full path, a path with <c>..</c>, an address).
+/// </para>
+/// <para>
+/// Every file read rechecks the file and its ancestors through the guide root, refusing observed links or
+/// missing directories. These checks are not atomic with opening the file: concurrent filesystem replacement
+/// can still race them. The parents of the supplied guide root are trusted.
 /// </para>
 /// <para>
 /// A page is the Markdown of the site, which the site runs templates over. <see cref="ReadPage"/> replaces the
@@ -323,7 +328,7 @@ public sealed partial class ShippedDocumentation
         try
         {
             var root = new DirectoryInfo(Root);
-            if (root.Exists)
+            if (root.Exists && !IsLink(root))
             {
                 Collect(root, string.Empty, 0, pages, menus);
                 var pictures = new DirectoryInfo(System.IO.Path.Combine(Root, ImageFolder));
@@ -476,15 +481,29 @@ public sealed partial class ShippedDocumentation
         return Encoding.UTF8.GetString(span);
     }
 
-    // The bytes of a file that the guide listed: it is still a file of the folder of the guide, no link, and no larger than the limit.
+    // Recheck the canonical file path and every ancestor, including the approved root, on each read.
+    // Cached entries and leaf attributes do not reveal an ancestor replaced by a link. This is not atomic with open.
+    private bool IsFileInGuide(string fullPath)
+    {
+        if (!fullPath.StartsWith(Root + System.IO.Path.DirectorySeparatorChar, PathComparison)) return false;
+        var file = new FileInfo(fullPath);
+        if (!file.Exists || IsLink(file)) return false;
+        for (var directory = file.Directory; directory is not null; directory = directory.Parent)
+        {
+            if (!directory.Exists || IsLink(directory)) return false;
+            if (string.Equals(directory.FullName, Root, PathComparison)) return true;
+        }
+
+        return false;
+    }
+
+    // The bounded bytes of a listed file, after point-in-time path/link validation.
     private ReadOnlyMemory<byte>? ReadBounded(string fullPath, int maximum)
     {
         try
         {
             var full = System.IO.Path.GetFullPath(fullPath);
-            if (!full.StartsWith(Root + System.IO.Path.DirectorySeparatorChar, PathComparison)) return null;
-            var file = new FileInfo(full);
-            if (!file.Exists || IsLink(file)) return null;
+            if (!IsFileInGuide(full)) return null;
             using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 1, FileOptions.SequentialScan);
             if (stream.Length > maximum) return null;
             var buffer = new byte[(int)stream.Length];
@@ -498,12 +517,13 @@ public sealed partial class ShippedDocumentation
     }
 
     // The size a picture declares in its header: PNG, GIF and the three forms of WebP. Null for anything else.
-    private static (int Width, int Height)? ReadSize(string fullPath)
+    private (int Width, int Height)? ReadSize(string fullPath)
     {
         Span<byte> header = stackalloc byte[32];
         int read;
         try
         {
+            if (!IsFileInGuide(fullPath)) return null;
             using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 1, FileOptions.None);
             read = stream.ReadAtLeast(header, header.Length, throwOnEndOfStream: false);
         }

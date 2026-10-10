@@ -168,6 +168,82 @@ public sealed class ShippedDocumentationTests
     }
 
     [TestMethod]
+    [DataRow("plugins", "plugins/nested/page.md", false)]
+    [DataRow("plugins/nested", "plugins/nested/page.md", false)]
+    [DataRow("img", "shot.png", true)]
+    [DataRow("", "plugins/nested/page.md", false)]
+    [DataRow("", "shot.png", true)]
+    public void CachedReads_RejectAnAncestorOrRootReplacedByALink(string ancestor, string name, bool image)
+    {
+        using var guide = Guide.Create();
+        var file = Path.Combine(guide.Root, image ? "img/" + name : name);
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        if (image) File.WriteAllBytes(file, [1, 2, 3]);
+        else File.WriteAllText(file, "# Inside\n\nThe indexed page.");
+        var documentation = new ShippedDocumentation(guide.Root);
+        if (image) CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, documentation.ReadImage(name)!.Content.ToArray());
+        else StringAssert.Contains(documentation.ReadPage(name)!.ToMarkdown(), "The indexed page.");
+
+        var replaced = Path.Combine(guide.Root, ancestor);
+        var outside = Directory.CreateDirectory(Path.Combine(guide.Parent, "elsewhere")).FullName;
+        var outsideFile = Path.Combine(outside, Path.GetRelativePath(replaced, file));
+        Directory.CreateDirectory(Path.GetDirectoryName(outsideFile)!);
+        if (image) File.WriteAllBytes(outsideFile, [9, 8, 7]);
+        else File.WriteAllText(outsideFile, "# Outside\n\nOutside-only sentinel.");
+
+        var original = replaced + ".indexed";
+        Directory.Move(replaced, original);
+        try
+        {
+            CreateDirectoryLink(replaced, outside);
+            // The lexical path and its leaf are still ordinary indexed files; only their ancestor changed.
+            Assert.IsTrue(File.Exists(file));
+            Assert.IsNull(new FileInfo(file).LinkTarget);
+            if (image) Assert.IsNull(documentation.ReadImage(name));
+            else
+            {
+                Assert.IsNull(documentation.ReadPage(name));
+                Assert.AreEqual(0, documentation.Search("Outside-only sentinel").Count);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(replaced)) Directory.Delete(replaced);
+            Directory.Move(original, replaced);
+        }
+
+        // The same cached allowlist still works once the real directory is put back.
+        if (image) CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, documentation.ReadImage(name)!.Content.ToArray());
+        else StringAssert.Contains(documentation.ReadPage(name)!.ToMarkdown(), "The indexed page.");
+    }
+
+    [TestMethod]
+    public void LinkedRoot_IsNotIndexed()
+    {
+        using var guide = Guide.Create();
+        var linkedRoot = Path.Combine(guide.Parent, "linked-guide");
+        CreateDirectoryLink(linkedRoot, guide.Root);
+        try
+        {
+            var documentation = new ShippedDocumentation(linkedRoot);
+            Assert.IsFalse(documentation.Available);
+            Assert.AreEqual(0, documentation.ListPages().Count);
+            Assert.IsNull(documentation.ReadPage("readme.md"));
+            Assert.IsNull(documentation.ReadImage("shot.png"));
+        }
+        finally { Directory.Delete(linkedRoot); }
+    }
+
+    private static void CreateDirectoryLink(string link, string target)
+    {
+        try { Directory.CreateSymbolicLink(link, target); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Inconclusive("This account cannot create directory symbolic links.");
+        }
+    }
+
+    [TestMethod]
     public void Page_ReplacesTheTemplatesOfTheSite_AndNamesEveryLinkedPageFromTheGuide()
     {
         using var guide = Guide.Create();

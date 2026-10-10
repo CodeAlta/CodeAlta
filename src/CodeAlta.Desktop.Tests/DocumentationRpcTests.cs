@@ -101,6 +101,44 @@ public sealed class DocumentationRpcTests
     }
 
     [TestMethod]
+    public void CachedGuide_ReplacedByADirectoryLink_ReturnsNoOutsidePageImageOrSearchText()
+    {
+        using var fixture = Fixture.Create();
+        var service = fixture.Service();
+        Assert.AreEqual("ok", service.Menu(new(Epoch)).Status);
+        Assert.AreEqual("ok", service.Page(new(Epoch, "sessions.md")).Status);
+        Assert.AreEqual("ok", service.Image(new(Epoch, "alta-desktop-home.webp")).Status);
+        var outside = Directory.CreateDirectory(Path.Combine(fixture.Root, "elsewhere")).FullName;
+        Directory.CreateDirectory(Path.Combine(outside, "img"));
+        File.WriteAllText(Path.Combine(outside, "sessions.md"), "# Outside\n\nOutside-only sentinel.");
+        File.WriteAllBytes(Path.Combine(outside, "img", "alta-desktop-home.webp"), [9, 8, 7]);
+        var original = fixture.GuideRoot + ".indexed";
+        Directory.Move(fixture.GuideRoot, original);
+        try
+        {
+            try { Directory.CreateSymbolicLink(fixture.GuideRoot, outside); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                Assert.Inconclusive("This account cannot create directory symbolic links.");
+            }
+
+            var page = service.Page(new(Epoch, "sessions.md"));
+            Assert.AreEqual("not_found", page.Status);
+            Assert.IsNull(page.Path);
+            Assert.AreEqual(0, page.Blocks.Count);
+            Assert.AreEqual(new DocumentationImageResponse("not_found", null, null), service.Image(new(Epoch, "alta-desktop-home.webp")));
+            var search = service.Search(new(Epoch, "Outside-only sentinel"));
+            Assert.AreEqual("ok", search.Status);
+            Assert.AreEqual(0, search.Hits.Count);
+        }
+        finally
+        {
+            if (Directory.Exists(fixture.GuideRoot)) Directory.Delete(fixture.GuideRoot);
+            Directory.Move(original, fixture.GuideRoot);
+        }
+    }
+
+    [TestMethod]
     public void Search_FindsATextInTheGuide()
     {
         using var fixture = Fixture.Create();
