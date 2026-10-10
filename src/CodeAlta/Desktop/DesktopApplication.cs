@@ -55,10 +55,25 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static int RunWithCapture(DesktopLaunchOptions options, Func<DesktopLaunchOptions, DesktopLogCapture?, int> run)
     {
-        var capture = DesktopLogging.Initialize(options.DataRoot);
-        var result = run(options, capture);
-        if (capture is not null && result == 0) LogManager.Shutdown();
-        return result;
+        var capture = DesktopLogging.Initialize(options.DataRoot, out var flushPending);
+        var result = 1;
+        try
+        {
+            result = run(options, capture);
+            if (result != 0)
+                DesktopLogging.ReportFailure(null, $"Desktop startup or native lifetime ended with exit code {result}; termination is not confirmed.");
+            return result;
+        }
+        catch (Exception failure)
+        {
+            DesktopLogging.ReportFailure(failure, "Desktop startup or native lifetime failed");
+            throw;
+        }
+        finally
+        {
+            if (capture is not null && result == 0) LogManager.Shutdown();
+            else flushPending?.Invoke(); // Persist failures without invalidating retained callbacks' loggers.
+        }
     }
 
     private static int RunCore(DesktopLaunchOptions options, DesktopLogCapture? capture)
@@ -175,8 +190,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         }
         catch (Exception failure)
         {
-            LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "Owned desktop startup or native lifetime failed");
-            Console.Error.WriteLine("Owned desktop startup or native lifetime failed; termination is not confirmed.");
+            DesktopLogging.ReportFailure(failure, "Owned desktop startup or native lifetime failed; termination is not confirmed.");
             return 1;
         }
         finally { GC.KeepAlive(desktop); } // Strong owner/lease lifetime across the synchronous native loop.
@@ -718,7 +732,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         catch (Exception failure)
         {
             workspacePrepared.TrySetResult();
-            LogManager.GetLogger("CodeAlta.Desktop").Error(failure, "Owned desktop initialization or application flow failed");
+            DesktopLogging.ReportFailure(failure, "Owned desktop initialization or application flow failed");
             bodyFailed = true;
             closeRequested.TrySetResult();
         }
@@ -886,7 +900,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         catch (Exception exception)
         {
             ExitCode = 1; // Also covers failures from asynchronous disposal after normal close.
-            Console.Error.WriteLine(exception);
+            DesktopLogging.ReportFailure(exception, "Desktop initialization or application flow failed");
         }
         finally
         {

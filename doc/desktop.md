@@ -1829,6 +1829,23 @@ export, file deletion or logging-policy controls are provided.
 Logs may contain sensitive content; this screen renders them as inert text locally,
 without link activation or external requests.
 
+Startup and native-lifetime failures are also reported to stderr with their full exception chain,
+including native loader errors. Before a failed run returns or rethrows, `DesktopApplication` drains
+the diagnostics queued by its own logger to `logs/codealta.log` under the desktop data root. A private
+queue marker flushes the rolling file without appearing in the file or the captured log view. These
+failure reports and the marker wait for queue capacity instead of dropping on overflow; normal
+logging remains asynchronous. The marker has a five-second completion wait and reports an
+unconfirmed flush to stderr. This is not an overall I/O deadline or a guarantee against an unwritable
+disk, abrupt process termination, or native crashes that never reach managed error handling.
+
+A nonzero result or thrown startup does **not** retire logging: callbacks from unconfirmed work can
+still use their existing loggers. Only the existing successful-run path shuts down a logger the
+desktop initialized; a pre-existing logger stays with its owner. `DesktopLoggingTests` uses inert
+startup delegates and disposable log files, and checks failure text before fixture cleanup, normal
+success, full stderr details, and logging from retained callbacks. It does not exercise native Linux
+loading. In a Unix terminal, `alta --wait` keeps stderr attached; the ordinary handed-over process
+may have detached it, so its launcher instead reports the failure exit code and log folder.
+
 ### Models
 
 The **Models** Settings section (or `Ctrl+G`, then `Ctrl+O`) opens a model catalog in owned
