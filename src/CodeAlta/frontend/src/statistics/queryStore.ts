@@ -10,7 +10,7 @@ export type QueryEntry<T = unknown> = Readonly<{ data: T; stale: boolean }>;
 /** The days a change touches, `yyyymmdd`; null for every day. */
 export type DayRange = Readonly<{ from: number; to: number }> | null;
 
-type Held = { data: unknown; stale: boolean; from: number; to: number; compareFrom: number; compareTo: number };
+type Held = { data: unknown; stale: boolean; allTime: boolean; from: number; to: number; compareFrom: number; compareTo: number };
 
 const dayNumber = (day: string | undefined): number => day ? Number(day.replaceAll("-", "")) : 0;
 
@@ -21,9 +21,9 @@ export const headerOf = (data: unknown): QueryHeader | undefined => {
   return typeof query === "object" && query !== null && "from" in query ? query as QueryHeader : undefined;
 };
 
-/** Whether a range of days touches the period of a result, or the period it was compared with. */
-function touches(held: Held, range: DayRange): boolean {
-  if (range === null || held.from === 0) return true;
+/** Whether days touch a result or its comparison, including All-time lifetimes that may grow beyond their returned days. */
+function touches(held: Held, range: DayRange, includeAllTime: boolean): boolean {
+  if (range === null || held.from === 0 || includeAllTime && held.allTime) return true;
   return (held.from <= range.to && held.to >= range.from) || (held.compareFrom !== 0 && held.compareFrom <= range.to && held.compareTo >= range.from);
 }
 
@@ -31,7 +31,7 @@ function touches(held: Held, range: DayRange): boolean {
 export class QueryStore {
   private readonly _entries = new Map<string, Held>();
   private readonly _listeners = new Set<() => void>();
-  private readonly _log: { epoch: number; range: DayRange }[] = [];
+  private readonly _log: { epoch: number; range: DayRange; includeAllTime: boolean }[] = [];
   private _epoch = 0;
 
   /** Creates a store that keeps at most `limit` results. */
@@ -55,21 +55,22 @@ export class QueryStore {
   /** Keeps a result. `startedAt` is the epoch the read began at: a change announced since that touches the result leaves it stale. */
   set(key: string, data: unknown, startedAt: number = this._epoch): void {
     const header = headerOf(data);
-    const held: Held = { data, stale: false, from: dayNumber(header?.from), to: dayNumber(header?.to), compareFrom: dayNumber(header?.compareFrom), compareTo: dayNumber(header?.compareTo) };
-    held.stale = this._log.some(item => item.epoch > startedAt && touches(held, item.range));
+    const held: Held = { data, stale: false, allTime: header?.period?.trim().toLowerCase() === "all",
+      from: dayNumber(header?.from), to: dayNumber(header?.to), compareFrom: dayNumber(header?.compareFrom), compareTo: dayNumber(header?.compareTo) };
+    held.stale = this._log.some(item => item.epoch > startedAt && touches(held, item.range, item.includeAllTime));
     this._entries.delete(key);
     this._entries.set(key, held);
     while (this._entries.size > this._limit) this._entries.delete(this._entries.keys().next().value as string);
   }
 
-  /** Marks the results that touch these days stale, and tells the listeners. */
-  invalidate(range: DayRange): number {
+  /** Marks results stale and tells listeners. Session scopes include All-time answers: their returned lifetime can expand in either direction. */
+  invalidate(range: DayRange, includeAllTime = false): number {
     this._epoch++;
-    this._log.push({ epoch: this._epoch, range });
+    this._log.push({ epoch: this._epoch, range, includeAllTime });
     if (this._log.length > 64) this._log.shift();
     let marked = 0;
     for (const held of this._entries.values()) {
-      if (!held.stale && touches(held, range)) { held.stale = true; marked++; }
+      if (!held.stale && touches(held, range, includeAllTime)) { held.stale = true; marked++; }
     }
     if (marked > 0) for (const listener of [...this._listeners]) listener();
     return marked;

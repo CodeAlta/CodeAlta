@@ -130,7 +130,9 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
       pendingState.timer = null;
       const range = pendingState.range;
       pendingState.range = undefined;
-      if (range !== undefined) store.invalidate(range);
+      // A session's All-time answer ends at its last record, not today. New facts or a new descendant can lie outside it.
+      // Events do not identify ancestors (and their session list may be truncated), so they cannot safely exclude this scope.
+      if (range !== undefined) store.invalidate(range, !!context.sessionId);
     };
     const listen = (event: StatisticsEvent) => {
       if (!alive) return;
@@ -156,7 +158,7 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
       pendingState.timer = null;
       pendingState.range = undefined;
     };
-  }, [api, store]);
+  }, [api, store, context.sessionId]);
 
   // Shown again: the status the canvas missed.
   useEffect(() => {

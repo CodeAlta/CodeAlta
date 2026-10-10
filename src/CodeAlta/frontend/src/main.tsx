@@ -1072,7 +1072,7 @@ function App() {
     // Another space: its tabs, in memory when the window left it in this run and in storage otherwise. The window stays where it is.
     const kept = spaceTabs.current.get(space);
     const next = addCanvasTabToSpace({ kept: kept?.files, read: () => localStorage.getItem(spaceStorageKey(fileTabsKey, space)),
-      write: value => localStorage.setItem(spaceStorageKey(fileTabsKey, space), value) }, tab, request.focus, keep);
+      write: value => localStorage.setItem(spaceStorageKey(fileTabsKey, space), value), closed: removed => canvasInstances.closed(removed, space) }, tab, request.focus, keep);
     if (kept) spaceTabs.current.set(space, { ...kept, files: next });
   }
   // A plugin closed an instance that no tab listened to: its tab goes with it, wherever it is. The tab of a space that is not shown is

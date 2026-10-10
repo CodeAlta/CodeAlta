@@ -2,7 +2,7 @@
 // plugins and agents that need no component. The tab itself is `fileTabs.ts`; what a tab shows is `CanvasPanel`.
 import type { CanvasItem, WorkspaceSession } from "#neoastra";
 import type { SessionMenuEntry } from "../SessionTabMenu";
-import { canvasTab, closeFileTab, emptyFileTabs, fileTabKey, openFileTab, persistFileTabs, restoreFileTabs, sameFileTab, type FileTab, type FileTabs } from "../fileTabs";
+import { canvasTab, closeFileTab, emptyFileTabs, fileTabKey, isCanvasTab, openFileTab, persistFileTabs, restoreFileTabs, sameFileTab, type FileTab, type FileTabs } from "../fileTabs";
 import { spaceShows, type Space } from "../spaces/spaces";
 
 /** What one instance of a canvas is about. */
@@ -130,12 +130,17 @@ export function bringCanvasTab(state: FileTabs, tab: FileTab, focus: boolean, ke
 /**
  * Adds a canvas tab to a space that the window does not show, and does not move the window: the tabs the window kept of that space in this
  * run, else the ones it stored, get the tab, and what comes out is stored again for the next time the space is shown. A tab is in front
- * of its space only when asked, as it is in the space that is shown.
+ * of its space only when asked, as it is in the space that is shown. Removed canvas tabs notify their owner: their panels already
+ * left the page with the space, and cannot release an instance again when capacity evicts its tab.
  */
-export function addCanvasTabToSpace(source: Readonly<{ kept: FileTabs | undefined; read: () => string | null; write: (value: string) => void }>,
+export function addCanvasTabToSpace(source: Readonly<{ kept: FileTabs | undefined; read: () => string | null; write: (value: string) => void; closed?: (tab: FileTab) => void }>,
   tab: FileTab, focus: boolean, keep: (tab: FileTab) => boolean = () => false): FileTabs {
-  const next = bringCanvasTab(source.kept ?? restoreFileTabs(source.read) ?? emptyFileTabs(), tab, focus, keep);
+  const previous = source.kept ?? restoreFileTabs(source.read) ?? emptyFileTabs();
+  const next = bringCanvasTab(previous, tab, focus, keep);
   persistFileTabs(source.write, next);
+  for (const removed of previous.open) {
+    if (isCanvasTab(removed) && !next.open.some(value => sameFileTab(value, removed))) source.closed?.(removed);
+  }
   return next;
 }
 

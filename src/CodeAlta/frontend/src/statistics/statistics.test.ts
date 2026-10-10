@@ -276,6 +276,36 @@ test("the store keeps results by question, marks the days that changed, and forg
   assert.equal(joinRanges({ from: 2, to: 3 }, null), null);
 });
 
+test("scoped All-time answers become stale beyond their returned lifetime, including in-flight answers", () => {
+  const store = new QueryStore();
+  const all = { query: { period: " ALL ", from: "2026-10-09", to: "2026-10-09" } };
+  const fixed = { query: { ...all.query, period: "2026-10-09..2026-10-09" } };
+  store.set("all", all);
+  store.set("fixed", fixed);
+  assert.equal(store.invalidate({ from: 20261010, to: 20261010 }, true), 1);
+  assert.equal(store.get("all")!.stale, true, "new facts or a new descendant can extend the session lifetime");
+  assert.equal(store.get("fixed")!.stale, false, "a fixed period still matches only its days");
+
+  const started = store.epoch;
+  store.invalidate({ from: 20261008, to: 20261008 }, true);
+  store.set("late", all, started);
+  store.set("late-fixed", fixed, started);
+  assert.equal(store.get("late")!.stale, true, "an earlier imported day also extends the lifetime, even during a read");
+  assert.equal(store.get("late-fixed")!.stale, false);
+  store.set("fresh", all);
+  assert.equal(store.get("fresh")!.stale, false, "a read started after the change is fresh");
+
+  const unrestricted = new QueryStore();
+  unrestricted.set("all", all);
+  assert.equal(unrestricted.invalidate({ from: 20261010, to: 20261010 }), 0, "unrestricted canvases keep day-range matching");
+  assert.equal(unrestricted.get("all")!.stale, false);
+  const unrestrictedStart = unrestricted.epoch;
+  unrestricted.invalidate({ from: 20261008, to: 20261008 });
+  unrestricted.set("late", all, unrestrictedStart);
+  assert.equal(unrestricted.get("late")!.stale, false, "in-flight matching keeps the same scope policy");
+  assert.equal(unrestricted.invalidate(null), 2, "a full invalidation still touches every result");
+});
+
 test("the history bar and the first-time card follow the status", () => {
   assert.equal(historyView(null), "starting");
   assert.equal(historyView(status({ state: "needsChoice" })), "choice");
