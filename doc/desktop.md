@@ -432,6 +432,44 @@ another project they open the session first. `Delete` on the row that has the fo
 **Delete…** does. The form of a new session and the
 notices of an unconfirmed action belong to the selected project.
 
+**Move to project…** in the menu of a session of a project (not of a chat) opens a window that lists the
+other projects of the shown space that are not archived (`MoveSessionDialog.tsx`); choosing one moves the
+session there. Dragging the row of a session onto the row of another project does the same
+(`useSessionRowDrag` in `explorer/sessionDrag.ts`): any row of a project can be dragged, not only the selected
+one, a label of the session follows the pointer, and the project row under it is highlighted (`data-over`).
+The drag is made of pointer events, like the drag of a session tab: a native HTML5 drag goes through the drop
+handling of the window's host (WebView2/OLE), which ends it at once. A press that does not move is a click,
+the click that ends a drag is swallowed, and Escape or leaving the window cancels it. Both call
+`workspace.moveSession` (`WorkspaceMoveSessionRpc.cs`), single-flight with rename and delete, which goes to
+`OwnedSessionCommandService.MoveSessionAsync` and `SessionRuntimeService.Move.cs`:
+
+- The session moves with the sessions it started in the same project, at every level; they move first and it
+  moves last, so a move stopped half way (`move_partial`) leaves the session where it was.
+- Nothing moves while one of them runs, has queued work, waits for an answer, runs with Remote Control or
+  has background tasks of its provider (`session_in_use`, `interaction_pending`, `requires_recovery`).
+- Each journal is rewritten once, atomically (`SessionViewJournalStore.MoveSessionAsync`, temporary file then
+  replace): the header (`project_ref`, `working_directory`), the summary and the local state change together,
+  so the lists never see the session half moved. No file moves: journals are kept by date.
+- A session that works in a git worktree keeps it when the target project is another checkout of the same
+  repository (and not the checkout of that worktree itself); otherwise it leaves it. A worktree folder is never
+  deleted.
+- A session that was never named takes the name and the default summary of its new project.
+- The attachment of the session is retired: the next send starts it in its new folder, and its first
+  attachment tells the agent in its developer instructions that it was moved, from which folder to which.
+  That notice is kept in memory only: after a restart the agent learns its folder from its instructions alone.
+- A provider that keeps its own copy of a conversation per folder moves it (`IAgentSessionRelocationProvider`,
+  called through `AgentHub` without starting the provider). Claude Code keeps its transcript under
+  `projects/<folder name>/` of its configuration folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`), with the
+  CLI's own folder naming (`ClaudeCodeProjectFolders`): the transcript and its companion folder are copied,
+  checked and the source deleted (`ClaudeCodeTranscriptRelocation`), so that `--resume` started in the new
+  folder finds the real conversation. A transcript that cannot be moved is a warning, never a failure: the
+  session then goes on in a new conversation of the CLI seeded with the history CodeAlta recorded.
+
+The window shows the outcome in a toast, with the first warning of the host if there is one (the log has
+them all). The tabs of the moved sessions are pointed at their new project in every space, in the same update
+as the list that shows them there (`retargetSessionTabs`); otherwise the reconciliation of the list would drop
+them. A moved tab is a new tab of the dock, so it can open in another place of its pane.
+
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
 **Other projects**. The star of a row and the menu of the row add and remove a favorite. A favorite is
 a preference of the window: nothing is written to the project or to the catalog.

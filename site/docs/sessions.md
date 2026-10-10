@@ -30,6 +30,20 @@ In CodeAlta Desktop, the links of a message work, yours and the agent's:
 
 Click a link, or press Enter on a link that has the keyboard focus, which Tab moves to. Cmd-click on macOS, Ctrl-click on Windows and Linux, Shift-click and middle click work too. Agents are asked to write the files they name as such links. The same links work in the notes of a session, in issues and pull requests, in work items and in the Markdown preview of the code editor, where a relative path is read from the folder of the document.
 
+## Move a session to another project
+
+In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.
+
+- Choose **Move to project…** in the menu of the session, then the project. Or drag the row of the session onto the row of the project in the sidebar.
+- The sessions it started in its project, its [sub-agents](#sub-agents), move with it.
+- A session can move only while it is idle: not while it runs, waits for an answer, has queued prompts, runs with Remote Control or has background tasks.
+- From then on the session works in the folder of its new project. When the new project is another checkout of the same repository, a session that worked in its own git worktree keeps working there.
+- Its history moves with it, and its agent is told where it comes from. Messages from before the move still name the old folder.
+- A session of Claude Code goes on with the same conversation: CodeAlta moves the copy Claude Code keeps of it (under `~/.claude/projects/`) to the folder of the new project. If that copy cannot be moved, a message says so, and the session goes on in a new conversation of Claude Code that starts with the history.
+- A session that was never named takes the name of its new project.
+
+Chats cannot be moved to a project, and a project session cannot become a chat.
+
 ## Busy sessions and queues
 
 `Enter` sends immediately when idle and enqueues when busy, in both Desktop and TUI.

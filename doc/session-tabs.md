@@ -183,6 +183,12 @@ retains tabs but disables selection until verified data returns. Unknown/unmatch
 legacy sidebar rows retain their existing inspection behavior but are not
 persisted as cross-scope tabs. Archived is not deleted.
 
+The one change of identity the window makes itself is a move of a session to another project: with the host's
+answer naming each moved session and its new project, `retargetSessionTabs` (`sessionMove.ts`) points their
+open, closed and active tabs at the new project and path, in the shown space, in the tabs kept for the other
+spaces and in the tabs stored for spaces not entered yet, in the same update as the refreshed list. A tab keeps
+its place in the list; the dock gets a new node for it.
+
 Malformed/oversized stored state falls back to the existing initial catalog
 selection. Valid explicitly empty state opens the local draft on restart. Invalid
 identities within structurally valid state are removed, never rebound by title
