@@ -908,6 +908,16 @@ a.alta-card,
 .alta-story-stage[hidden] { display: none; }
 .alta-scroll-story.is-enhanced {
   .alta-story-index { position: sticky; top: 4.5rem; z-index: 2; }
+  // Covers the gap under the brand banner, so the chapters scrolling by never show through it.
+  .alta-story-index::before {
+    content: "";
+    position: absolute;
+    inset: -1rem -1px -1px;
+    z-index: -1;
+    border-radius: 0 0 1rem 1rem;
+    background: var(--bs-body-bg);
+    pointer-events: none;
+  }
   // Decorative reading progress, driven by --alta-story-progress (0 to 1) from the site script.
   .alta-story-index::after {
     content: "";
@@ -1026,13 +1036,22 @@ a.alta-card,
   p { color: var(--bs-secondary-color); }
   .alta-closing-note { margin: 1.5rem 0 0; font-size: .85rem; }
 }
+@media (min-width: 1400px) {
+  // Thirteen chapters fit on one row with the number above the name.
+  .alta-story-index a { flex-direction: column; gap: .1rem; padding: .5rem .2rem; font-size: .8rem; line-height: 1.25; }
+}
 @media (min-width: 1000px) and (max-width: 1399.98px) {
-  .alta-story-index a { font-size: .78rem; }
+  // Two rows of chapters; the stage starts below them.
+  .alta-story-index { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .alta-story-index a { padding: .5rem .25rem; font-size: .78rem; line-height: 1.25; }
   .alta-story-index span { display: none; }
+  .alta-scroll-story.is-enhanced .alta-story-stage { top: 11.5rem; height: calc(100svh - 12.5rem); max-width: calc((100svh - 15.5rem) * 1.6); }
+  .alta-story-step { scroll-margin-top: 12rem; }
   .alta-workflow-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 999.98px) {
   .alta-story-index { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .alta-story-index a:last-child:nth-child(3n + 1) { grid-column: 1 / -1; }
   .alta-story-step { grid-template-columns: 1fr; gap: 1.5rem; scroll-margin-top: 5rem; }
   .alta-story-copy { max-width: 32rem; }
   .alta-workflow-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1067,7 +1086,7 @@ a.alta-card,
     .alta-story-index { position: static; }
     .alta-story-layout, .alta-story-step { display: block; min-height: 0; padding: 0; }
     .alta-story-copy { padding-left: 0; transform: none; }
-    .alta-story-copy::before, .alta-story-index::after { display: none; }
+    .alta-story-copy::before, .alta-story-index::before, .alta-story-index::after { display: none; }
     .alta-story-shot { position: static; width: auto; height: auto; margin: 1rem 0 3rem; clip-path: none; }
   }
 }
