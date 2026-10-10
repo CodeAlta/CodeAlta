@@ -618,11 +618,14 @@ public sealed class DesktopOwnedSessionTests
         await f.Wait(clock.TimerCreated());
         clock.Advance(TimeSpan.FromSeconds(60));
         var done = await f.Wait(ReminderCount(reminders, f.SessionId, 1));
+        Assert.AreEqual(1, done.CompletedCount);
         Assert.AreEqual(0, done.Reminders.Single().LastExitCode);
         Assert.IsNull(done.Reminders.Single().LastError);
 
         // The provider of the fixture takes nothing in a turn that runs, so the reminder waits for the end of the
         // turn and starts the next one.
+        var stillRunning = await f.Wait(f.Keep(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId)));
+        Assert.AreEqual(state.Entry.ActiveRunId, stillRunning.Entry!.ActiveRunId);
         Assert.IsFalse(f.Provider.Sends.Reader.TryRead(out _));
         f.Provider.EmitIdle!("the turn ended");
         var next = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
@@ -632,14 +635,77 @@ public sealed class DesktopOwnedSessionTests
 
     private static async Task<ReminderListResponse> ReminderCount(ReminderService reminders, string sessionId, int count)
     {
-        for (var attempt = 0; attempt < 100000; attempt++)
+        var changes = Channel.CreateUnbounded<bool>();
+        void Changed(object? sender, EventArgs args) => changes.Writer.TryWrite(true);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        // Subscribe before reading: a firing between the snapshot and the wait must not be missed.
+        // Changed is invalidation, not completion; always requery the real reminder owner.
+        reminders.Reminders.Changed += Changed;
+        try
         {
-            var list = await reminders.List(new("fixture-epoch", sessionId), default);
-            if (list.Reminders.Single().FiredCount == count) return list;
-            await Task.Yield();
+            while (true)
+            {
+                var list = await reminders.List(new("fixture-epoch", sessionId), deadline.Token);
+                if (list.Reminders.Single().FiredCount == count) return list;
+                await changes.Reader.ReadAsync(deadline.Token);
+            }
         }
-        Assert.Fail("The owner receipt did not settle the reminder firing.");
-        throw new InvalidOperationException("Unreachable.");
+        finally { reminders.Reminders.Changed -= Changed; }
+    }
+
+    [TestMethod]
+    public async Task ReminderCount_WaitsWithoutPollingAndObservesAnAlreadyCompletedFiring()
+    {
+        using var clock = new ReminderRpcTests.LiteralClock();
+        var deliveryStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDelivery = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var reminders = new ReminderService("fixture-epoch", (_, _) => Task.FromResult(true),
+            _ => throw new AssertFailedException("No idle-session send expected."),
+            (_, _) => { deliveryStarted.TrySetResult(); return releaseDelivery.Task; }, clock);
+        Assert.AreEqual("ok", (await reminders.Create(new("fixture-epoch", "session", "text", 60, 1), default)).Status);
+        await clock.TimerCreated();
+
+        Task<ReminderListResponse>? waiting = null;
+        try
+        {
+            clock.Advance(TimeSpan.FromSeconds(60));
+            await deliveryStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // Delivery is pending behind a manual gate. A Task.Yield polling loop posts immediately;
+            // awaiting the reminder's actual change signal does not, regardless of thread-pool throughput.
+            var context = new PostingContext();
+            var previous = SynchronizationContext.Current;
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(context);
+                waiting = ReminderCount(reminders, "session", 1);
+            }
+            finally { SynchronizationContext.SetSynchronizationContext(previous); }
+
+            Assert.AreEqual(0, context.PostCount, "Waiting for a firing must not spin while delivery is pending.");
+            Assert.IsFalse(waiting.IsCompleted);
+        }
+        finally
+        {
+            releaseDelivery.TrySetResult("queued");
+            if (waiting is not null) await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.IsNotNull(waiting);
+        Assert.AreEqual(1, waiting.Result.CompletedCount);
+        Assert.AreEqual(0, waiting.Result.Reminders.Single().LastExitCode);
+        var alreadyFired = await ReminderCount(reminders, "session", 1).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual(1, alreadyFired.Reminders.Single().FiredCount);
+    }
+
+    private sealed class PostingContext : SynchronizationContext
+    {
+        private int _postCount;
+        internal int PostCount => Volatile.Read(ref _postCount);
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+            Interlocked.Increment(ref _postCount);
+            base.Post(callback, state);
+        }
     }
 
     [TestMethod]
