@@ -118,7 +118,7 @@ import { ConfirmPopover } from "./ConfirmPopover";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import { sessionHierarchy } from "./sessionHierarchy";
-import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
+import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
 import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { projectRailProjection } from "./explorer/projectRail";
@@ -224,7 +224,7 @@ import { CanvasesPanel } from "./canvases/CanvasesPanel";
 import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, removeCanvasTabFromSpace, sessionCanvasMenuEntries, withCanvasStatus, type CanvasScopeProject, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
 import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
 import { PluginButtons } from "./pluginButtons/PluginButtons";
-import { usePluginMenuEntries } from "./pluginButtons/pluginMenu";
+import { SessionRowMenu } from "./pluginButtons/pluginMenu";
 import { PluginButtonsActiveContext, PluginButtonsContext, createHiddenButtons, type PluginButtonContext, type PluginButtonView, type PluginButtonsHost } from "./pluginButtons/pluginButtonModel";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
@@ -1597,8 +1597,6 @@ function App() {
     && visibleSessions.some(session => session.id === menuTarget.id)
     && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
-  // What plugins add to the menu of the session row that is open: read for that row.
-  const sessionMenuPlugins = usePluginMenuEntries("SessionMenu", activeMenu ? { projectId: activeMenu.projectId, sessionId: activeMenu.id } : null);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   // The terminals belong to the application: this window lists them, and shows in tabs those it was asked to.
@@ -3050,7 +3048,8 @@ function App() {
               <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}
                 aria-haspopup="menu" aria-expanded={!!menu}
                 onClick={event => openSessionMenu(session.id, event.currentTarget)}><AppIcon name="ellipsis" size={16} /></button>
-              {menu && access.open && menuOrigin.current && <SessionTabMenu anchor={menuOrigin.current} container={document.body}
+              {menu && access.open && menuOrigin.current && <SessionRowMenu anchor={menuOrigin.current} container={document.body}
+                context={{ projectId: menu.projectId, sessionId: menu.id }}
                 title={t("Session actions for {title}", { title: session.title })} current={() => true}
                 // The menu closes before it runs the chosen entry; clear the target afterwards so the entry still sees it.
                 onClose={() => queueMicrotask(() => setMenuTarget(value => value === menu ? null : value))}
@@ -3059,7 +3058,6 @@ function App() {
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
-                  ...sessionMenuPlugins,
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}

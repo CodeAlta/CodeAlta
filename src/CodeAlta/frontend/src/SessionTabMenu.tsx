@@ -29,7 +29,7 @@ export function SessionTabMenu({ anchor, at, items, title, container, current, o
     place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
-  }, [anchor, at?.x, at?.y, current, onClose]);
+  }, [anchor, at?.x, at?.y, current, onClose, items]);
   function close(restore: boolean) {
     if (restore && anchor.isConnected && current() && popup.current?.contains(document.activeElement)) anchor.focus({ preventScroll: true });
     onClose();

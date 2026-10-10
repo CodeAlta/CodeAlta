@@ -1,5 +1,5 @@
-import { useContext } from "react";
-import type { SessionMenuEntry } from "../SessionTabMenu";
+import { useContext, type ComponentProps } from "react";
+import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import { PluginIcon } from "./PluginIcon";
 import { useShownPluginButtons } from "./PluginButtons";
 import { PluginButtonsContext, badgeText, type PluginButtonContext, type PluginButtonPlace, type PluginButtonView } from "./pluginButtonModel";
@@ -24,4 +24,13 @@ export function usePluginMenuEntries(place: Extract<PluginButtonPlace, "ProjectM
   const buttons = useShownPluginButtons(place, context);
   if (!context || buttons.length === 0) return [];
   return [{ key: "plugins", divider: true }, ...buttons.map(button => pluginMenuEntry(button, context, host.activate))];
+}
+
+/**
+ * A session row's menu, with plugin lines last. Read them in this child of the window's plugin provider, not in
+ * the App that creates that provider; the context names the row, not the selected session.
+ */
+export function SessionRowMenu({ context, items, ...props }: ComponentProps<typeof SessionTabMenu> & { context: PluginButtonContext }) {
+  const plugins = usePluginMenuEntries("SessionMenu", context);
+  return <SessionTabMenu {...props} items={[...items, ...plugins]} />;
 }
