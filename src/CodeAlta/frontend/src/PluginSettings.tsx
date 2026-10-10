@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { plugins, projectFiles, type CanvasItem, type PluginsEntry, type PluginsProblem } from "#neoastra";
 import { canvasScope } from "./canvases/canvasPages";
 import { AppIcon } from "./AppIcon";
 import { BrandIcon } from "./BrandIcon";
 import { pluginBrand } from "./brands";
+import { PluginButtonSwitches } from "./pluginButtons/PluginButtonSwitches";
+import { PluginButtonsContext, readPluginButtons, type PluginButtonView } from "./pluginButtons/pluginButtonModel";
 import { SettingsFileLocation, SettingsFileLocations, type SettingsFiles } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettingsEditor, type SettingsProject } from "./SettingsPage";
@@ -100,10 +102,12 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [] }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons }: {
   rows: readonly PluginRow[]; disabled: boolean;
   /** The canvases the running plugins declare: each row lists the ones of its plugin. */
   canvases?: readonly CanvasItem[];
+  /** The buttons that running plugins put in the window: each plugin lists its own with a switch. */
+  buttons?: readonly PluginButtonView[];
   onToggle: (id: string, enabled: boolean) => void; onReload: (entry: PluginsEntry) => void; onEdit?: (folder: PluginFolder) => void;
   /** Removes a source plugin: its folder goes to the trash. Without it the rows have no red button. */
   onDelete?: (entry: PluginsEntry) => void;
@@ -122,7 +126,8 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
         {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
         {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}
         {source?.path && <SettingsFileLocation path={source.path} platform={platform}
-          onReveal={source.folder && onReveal ? () => onReveal({ id: source.folder!, path: source.path!, name: source.id }) : undefined} />}</span>
+          onReveal={source.folder && onReveal ? () => onReveal({ id: source.folder!, path: source.path!, name: source.id }) : undefined} />}
+        {buttons && row.enabled && <PluginButtonSwitches buttons={buttons.filter(button => button.pluginId === row.id)} />}</span>
       <span className="settings-editor-tags"><Tag minimal round>{t(row.builtIn ? "Built-in" : entry?.scope === "Project" ? "Project" : "User")}</Tag>
         {entry && entry.kind === "Source" && entry.state !== "Enabled" && entry.state !== "Disabled"
           && <Tag minimal round intent={stateIntent[entry.state] ?? "none"}>{entry.state}</Tag>}
@@ -171,6 +176,16 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
   const disabled = busy || working;
   const listed = listing?.plugins ?? [];
   const rows = pluginRows(listed, t);
+  // The buttons that running plugins put in the window, to be shown or hidden here.
+  const buttonsHost = useContext(PluginButtonsContext);
+  const [buttons, setButtons] = useState<readonly PluginButtonView[]>([]);
+  useEffect(() => {
+    if (!epoch) { setButtons([]); return; }
+    const abort = new AbortController();
+    void buttonsHost.api.buttons({ expectedEpoch: epoch, place: null, spaceId: null, projectId, sessionId: null }, { signal: abort.signal, timeoutMilliseconds: 8000 })
+      .then(reply => { if (!abort.signal.aborted) setButtons(readPluginButtons(reply) ?? []); }, () => { if (!abort.signal.aborted) setButtons([]); });
+    return () => abort.abort();
+  }, [buttonsHost.api, epoch, projectId, revision, listing]);
   const files = useSettingsFiles({ page: "plugins", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
   const revealPlugin = (folder: PluginFolder) => void reveal({ expectedEpoch: epoch, projectId: folder.id, path: "" }, { timeoutMilliseconds: 15000 })
     .then(result => { if (result.status !== "ok") setNotice({ key: "The file manager could not be opened.", intent: "warning" }); },
@@ -227,7 +242,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} />
+      <PluginRows rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} />
     </>}
   </SettingsPage>;
 }

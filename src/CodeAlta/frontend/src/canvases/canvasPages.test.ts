@@ -9,7 +9,7 @@ import {
 } from "./canvasPages";
 
 const item = (id: string, scope: string, fields: Partial<CanvasItem> = {}): CanvasItem => ({ pluginKey: "global:tools", plugin: "Tools", package: "plugin:global:tools", id, title: id[0].toUpperCase() + id.slice(1),
-  description: null, icon: null, scope, input: false, actions: 0, describes: false, ...fields });
+  description: null, icon: null, iconData: null, scope, input: false, actions: 0, describes: false, ...fields });
 const project = { id: "p1", path: "/code/one" };
 const space = (id: string, projectIds: string[]): Space => ({ ...defaultSpace, id, name: id, isDefault: false, projectIds });
 

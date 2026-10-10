@@ -18,6 +18,9 @@ internal sealed class DesktopPluginScope
     /// <summary>Gets the session of the pane, or null for a pane that has none yet.</summary>
     public string? SessionId { get; init; }
 
+    /// <summary>Gets the space the window showed when the operation started, or null when it has none.</summary>
+    public string? SpaceId { get; init; }
+
     /// <summary>Gets a value indicating whether the session was running when the operation started.</summary>
     public bool SessionBusy { get; init; }
 
@@ -153,6 +156,16 @@ internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService,
         lock (_gate)
         {
             if (!_closed && _watcher is { } watcher) watcher(new PluginUiEvent("refresh"));
+        }
+    }
+
+    /// <inheritdoc />
+    public void InvalidateButtons()
+    {
+        // A page that is not there reads the buttons when it arrives.
+        lock (_gate)
+        {
+            if (!_closed && _watcher is { } watcher) watcher(new PluginUiEvent("buttons"));
         }
     }
 

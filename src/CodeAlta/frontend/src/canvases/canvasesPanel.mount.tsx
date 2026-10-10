@@ -11,7 +11,7 @@ import { canvasMenuItems, defaultCanvasTarget, type CanvasSelection, type Canvas
 
 const root = createRoot(document.getElementById("root")!);
 const item = (id: string, scope: string, fields: Partial<CanvasItem> = {}): CanvasItem => ({ pluginKey: "global:tools", plugin: "Tools", package: "plugin:global:tools", id,
-  title: id[0].toUpperCase() + id.slice(1), description: null, icon: null, scope, input: false, actions: 0, describes: false, ...fields });
+  title: id[0].toUpperCase() + id.slice(1), description: null, icon: null, iconData: null, scope, input: false, actions: 0, describes: false, ...fields });
 
 // What the host declares now, and what a listing of it is: the page asks again when it comes to the screen.
 let catalog: readonly CanvasItem[] = [];

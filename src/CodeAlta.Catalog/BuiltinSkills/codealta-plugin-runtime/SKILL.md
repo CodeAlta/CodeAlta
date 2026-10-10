@@ -119,7 +119,7 @@ Override only what the plugin needs.
 | Method | Adds | Desktop | TUI |
 |---|---|---|---|
 | `GetCommands()` | Commands: the palette, `/name` in the prompt, shortcuts | yes | yes |
-| `GetUiContributions()` | Status items and content around the prompt | yes | yes |
+| `GetUiContributions()` | Status items and content around the prompt; buttons in the window (`PluginUi.Button`) | yes | yes (no buttons) |
 | `GetPromptPickers()` | A picker opened by a character typed in the prompt | yes | yes |
 | `GetSessionEventProjections()` | Cards in the timeline of a session | yes | yes |
 | `GetAgentTools()` | Tools the model can call | yes | yes |
@@ -270,6 +270,24 @@ public override IEnumerable<PluginUiContribution> GetUiContributions()
 - For a terminal control instead of text: `PluginTui.Visual(region, _ => new Markup("[dim]3 notes[/]"), _ => PluginRenderResult.FromHtml(...), "name")`.
 - These callbacks run every few seconds and after each command of the plugin: read a field, never a file or the network.
 - A callback gets the project it is shown for in `context.ProjectPath` (null without a project). What takes time to compute (a git branch) is computed by background work and kept in a field. Background work has no selected project: a project plugin has its project in `Context.ScopeProjectPath`.
+
+## Buttons in the window
+
+CodeAlta Desktop draws buttons that a plugin returns from `GetUiContributions()`. A button has an icon and a label, and it runs a command of the plugin or opens a canvas of the plugin; CodeAlta TUI draws none (the command stays in its palette).
+
+```csharp
+yield return PluginUi.Button(PluginButtonPlace.TitleBar, "notes", icon: "notebook-pen", label: "Notes") with
+{
+    Command = "notes",                                                      // a command of this plugin; or Canvas = "board" to open a canvas
+    GetState = _ => new PluginButtonState { Badge = _open.Count },          // a number, PluginButtonBadge.Dot or PluginButtonBadge.Busy; Tone, Hidden, Disabled, Tooltip
+};
+```
+
+- Places: `TitleBar` (top right, before the space switch; 2 for a plugin), `Rail` (after Issues; 1), `ProjectMenu` and `SessionMenu` (a line in the menu of a row, asked about that row; 6). A button over its limit, with an invalid identifier, or naming neither or both of `Command` and `Canvas` is left out with a warning in `alta plugin status`.
+- The command runs for the context of the button: the project and session of the row (`context.ProjectId`, `context.SessionId`) and `context.Workspace.SelectedSpaceId`. A `Canvas` opens with that context and runs no handler; a canvas about a project or a session disables the button where there is none.
+- `GetState` takes a `PluginButtonContext` (place, space, project, session). It is synchronous and runs each time the window reads the buttons, so read a field. The window reads them when the selection changes, when a command of the plugin ends, and when you call `Services.Ui.InvalidateButtons()` after a change. Do not poll.
+- `Icon`: a Lucide icon name (`chart-column`), a brand logo name, or an SVG file of the package (`icons/notes.svg`, 32 KiB at most, drawn in the color of the text). A missing icon shows a neutral one. A canvas takes the same icons.
+- A person can hide a button with a right click and turn it on again in Settings > Plugins, so a plugin does not rely on a button being there. The buttons fold into a menu in a narrow window.
 
 ## Prompt pickers
 
@@ -440,7 +458,7 @@ Each folder under `samples/` is a complete plugin that the tests of CodeAlta bui
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both applications: commands with a shortcut, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
-| `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent |
+| `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
 | `report-dialog` | A dialog with Markdown, a Mermaid diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |

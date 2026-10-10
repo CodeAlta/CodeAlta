@@ -79,6 +79,8 @@ The desktop application (`src/CodeAlta`) and the terminal application (`src/Code
 
 **Prompt pickers.** `PluginPromptPickerContribution` (`GetPromptPickers`, `PluginUi.PromptPicker`) is declarative: a trigger character and a search handler. Each application supplies the picker. The desktop shows `PluginPromptPicker.tsx`; the terminal turns each contribution into a prompt-editor attachment (`TerminalPromptPickerAttachment`) with a search dialog. Both use the same token rule (the trigger at a word start, then the query), allow one picker per character and refuse `@`, `#` and `/`.
 
+**Buttons on the desktop.** `PluginButtonContribution` (`PluginUi.Button`) is desktop-only: the window lists it with `pluginUi.buttons` (a place or none, the space, project and session of the context) and the terminal ignores it. The adapter reads each button's state with `PluginContributionAdapterService.GetButtonEntries`, a callback that throws leaves the default state and one diagnostic. `Services.Ui.InvalidateButtons()` (`IPluginUiService`, a default member that does nothing in other hosts) sends a `buttons` event on `pluginUi.watch`. `pluginUi.invokeCommand` takes the space the window shows and `DesktopPluginScope.SpaceId` keeps it for the command (`IPluginWorkspaceService.SelectedSpaceId`). A file icon is read by `PluginIcons` and rebuilt as an SVG that only has shapes. See "Buttons" below.
+
 **Key bindings on the desktop.** The page accepts one stroke, or `Ctrl+G` followed by a second stroke, and gives the window's own commands precedence. A binding it cannot route leaves the command in the palette without a shortcut.
 
 **Limits.** Prompt attachments (`AddAttachmentAsync`) are not implemented in either application. Terminal prompt-editor attachments and native renderers written with `PluginTui` are terminal-only by design. Prompt processors (`GetPromptProcessors`, `OnPromptSubmittingAsync`), compaction contributions and command-line contributions are used by the terminal application only. `OnToolCallAsync` and `OnToolResultAsync` see the calls of the tools that plugins contribute, not those of the built-in tools. The desktop reads region content and status items every ten seconds, when the window gets the focus, when a command or a dialog action of a plugin ends (the `refresh` event of `pluginUi.watch`) and when plugins are started, replaced or stopped (the `plugins-changed` shell notice); it reads timeline cards when a turn ends or older history is loaded. The built-in MCP and Git plugins contribute no command to the desktop: its window has its own MCP page and issue picker.
@@ -262,6 +264,7 @@ The terminal implementation is `CodeAlta.Tui.Plugins.TerminalPluginStartupFeedba
 - compaction hooks;
 - UI contributions such as status rows, visuals, and renderers;
 - canvases: tabs that the plugin provides in CodeAlta Desktop (see "Canvases");
+- buttons that the plugin puts in the window of CodeAlta Desktop (see "Buttons"), returned with the other UI contributions;
 - transient session/timeline projections (current APIs still use some legacy `Session` names);
 - resource roots (the hosts read the skill roots; the other kinds have no consumer yet);
 - plugin-lifetime background tasks through `IPluginTaskService`.
@@ -314,6 +317,45 @@ public override IEnumerable<PluginCanvasContribution> GetCanvases()
 **For agents.** The actions of a canvas and its `Describe` handler work whether or not a tab is open, since the state is the plugin's. The window keeps no state that the plugin does not have, so a restored tab asks the plugin for it again.
 
 The `canvas-checklist` sample of the `codealta-plugin-runtime` skill is a complete canvas plugin: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent.
+
+## Buttons
+
+A plugin can put its own buttons in the window of CodeAlta Desktop: an icon and a label at a named place, which runs a command of the plugin or opens a canvas of the plugin. The terminal application draws no button; the command a button names stays in its palette. Buttons are contributions returned by `GetUiContributions()`, so they are registered, scoped and ordered like status items.
+
+```csharp
+public override IEnumerable<PluginUiContribution> GetUiContributions()
+{
+    // One click from the top right of the title bar to a canvas: nothing else to write.
+    yield return PluginUi.Button(PluginButtonPlace.TitleBar, "statistics", icon: "chart-column", label: "Statistics") with
+    {
+        Canvas = "statistics",
+    };
+
+    // A line in the menu of each project row, which runs a command and shows what is left to do.
+    yield return PluginUi.Button(PluginButtonPlace.ProjectMenu, "release", icon: "icons/release.svg", label: "Release checklist") with
+    {
+        Command = "release.open",
+        GetState = button => new PluginButtonState { Badge = StepsLeft(button.ProjectId) },
+    };
+}
+```
+
+| Place | Where | What it is asked about |
+|---|---|---|
+| `TitleBar` | The top right of the title bar, before the space switch, the zoom and the theme | The shown space and the selected project and session. At most 2 for a plugin |
+| `Rail` | The navigation rail at the left, after Issues and before Settings | The same. At most 1 for a plugin; the rail draws two buttons, and folds the rest into a menu |
+| `ProjectMenu` | A line in the menu of a project row of the Explorer | That project, whatever is selected. At most 6 |
+| `SessionMenu` | A line in the menu of a session row | That session and its project. At most 6 |
+
+**What a button does.** `PluginButtonContribution` has an `Id` (1 to 64 letters, digits, `-`, `_` or `.`, unique in the plugin; the choice of a person to hide a button is kept under it), an `Icon`, a `Label` (the tooltip, the accessible name and the text of a menu line), an `Order` among the buttons of plugins at the same place, and exactly one of `Command` and `Canvas`. `Command` names a command of the same plugin, as `PluginStatusItem.Command` does; it runs for the context of the button: the project and the session of the row for a menu, the selected ones for the title bar and the rail, and `Services.Workspace.SelectedSpaceId` is the space the window showed. `Canvas` names a canvas of the same plugin; the window opens it with the context of the button (a project canvas needs a project, a session canvas a session; without one the button is disabled), and no handler runs. A button that names neither or both, an identifier used twice, or more buttons than a place allows are left out when the plugin starts, each with a warning that `alta plugin status <id>` shows.
+
+**State.** `GetState` returns a `PluginButtonState`: a `Badge` (a number, `PluginButtonBadge.Dot`, or `PluginButtonBadge.Busy` for a small ring while the plugin reads or computes), a `Tone` (`PluginStatusTone`, which colors the icon and the badge), `Hidden`, `Disabled` and a `Tooltip` that replaces the label. The callback is synchronous and called each time the window reads the buttons, so it follows the rule of status items: read a field, never a file or the network. The window reads them when it starts, when the context changes (a project or a session is selected, a space is shown, a menu opens), when a command of the plugin ends, and when the plugin calls `Services.Ui.InvalidateButtons()`; a burst of calls is one read. Nothing reads them on a timer.
+
+**Icons.** The `Icon` is one of three things. The name of any icon of the Lucide library (`chart-column`, `list-checks`, `bell`): the window ships the icons it draws itself, and loads the rest, all in one file, the first time a plugin names one. The name of a brand logo (`github`, `anthropic`), looked up after the library. Or a file of the plugin package, such as `icons/statistics.svg`: the host reads it from the folder of the package, accepts only an SVG file of at most 32 KiB, rebuilds it with a short list of shapes (no script, style, link or image), and the window draws it as a mask in the color of the text, so it follows the theme. An icon that is not found draws a neutral plugin icon. Canvases use the same icons for their tabs.
+
+**The person keeps the window.** A right click on a button offers to hide it, and Settings > Plugins lists the buttons of each plugin with a switch. The choice is a view state of the window, kept under the plugin and the button, not under a space. In a narrow window the buttons of plugins fold into one menu before anything of the application moves.
+
+The `canvas-checklist` sample of the `codealta-plugin-runtime` skill has a button that opens its canvas, a button that runs a command with a badge, and a line in the menu of each project.
 
 ## Prompt and instruction processing
 

@@ -214,6 +214,22 @@ public static class PluginUi
             name,
             order);
 
+    /// <summary>Creates a button for the desktop window. Set <see cref="PluginButtonContribution.Command"/> or <see cref="PluginButtonContribution.Canvas"/> with a <see langword="with"/> expression.</summary>
+    /// <param name="place">Where the button is.</param>
+    /// <param name="id">The identifier of the button in its plugin.</param>
+    /// <param name="icon">A Lucide icon name, a brand logo name or the path of an SVG file of the plugin package.</param>
+    /// <param name="label">The tooltip, the accessible name and the text of a menu line.</param>
+    /// <param name="order">The ordering hint among the buttons of plugins at the same place.</param>
+    /// <returns>The button, which is not valid until it names a command or a canvas.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="id"/>, <paramref name="icon"/> or <paramref name="label"/> is null, empty or whitespace.</exception>
+    public static PluginButtonContribution Button(PluginButtonPlace place, string id, string icon, string label, int order = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(icon);
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        return new PluginButtonContribution { Place = place, Id = id, Icon = icon, Label = label, Name = id, Order = order };
+    }
+
     /// <summary>Creates a renderer contribution.</summary>
     public static PluginRendererContribution Renderer(PluginUiRegion region, string? target, PluginRenderer renderer, int order = 0)
     {

@@ -611,7 +611,7 @@ internal sealed partial class BuiltInAltaCommandContributor
                 contributions = !contributions ? null : registered
                     .Where(contribution => string.Equals(contribution.Handle.PluginRuntimeKey, plugin.RuntimeKey, StringComparison.Ordinal))
                     .Take(MaximumContributions)
-                    .Select(static contribution => new { point = contribution.Handle.Point.ToString(), name = contribution.Handle.NaturalName })
+                    .Select(static contribution => new { point = contribution.Handle.Point.ToString(), name = contribution.Handle.NaturalName, detail = contribution.Detail })
                     .ToArray(),
             }).ToArray(),
             build = build is null ? null : new

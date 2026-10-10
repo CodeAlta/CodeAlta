@@ -17,6 +17,7 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed class CanvasesService
 {
     private readonly DesktopCanvases? _canvases;
+    private readonly PluginIcons _icons = new();
     private readonly string? _epoch;
 
     /// <summary>Creates an unavailable service for launches without plugins.</summary>
@@ -68,10 +69,10 @@ internal sealed class CanvasesService
         var declaration = opening.Declaration;
         if (opening.State is not { } state)
         {
-            return new(opening.Status, null, declaration?.Canvas.Title is { } title ? Line(title) : null, null, null, false, 0, declaration?.Package, declaration?.Canvas.Icon);
+            return new(opening.Status, null, declaration?.Canvas.Title is { } title ? Line(title) : null, null, null, false, 0, declaration?.Package, declaration?.Canvas.Icon, IconData(declaration));
         }
 
-        return new("ok", state.InstanceId, state.Title, state.StatusText, state.Html, state.Actions, state.Revision, declaration?.Package, declaration?.Canvas.Icon);
+        return new("ok", state.InstanceId, state.Title, state.StatusText, state.Html, state.Actions, state.Revision, declaration?.Package, declaration?.Canvas.Icon, IconData(declaration));
     }
 
     /// <summary>Says whether a tab shows an instance now: the plugin sees it as <c>IsVisible</c>.</summary>
@@ -152,14 +153,18 @@ internal sealed class CanvasesService
         return string.Equals(epoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
     }
 
-    private static CanvasOpenResponse Refused(string status) => new(status, null, null, null, null, false, 0, null, null);
+    private static CanvasOpenResponse Refused(string status) => new(status, null, null, null, null, false, 0, null, null, null);
 
-    private static CanvasItem Item(CanvasDeclaration declaration)
+    // The icon of a canvas that names a file of its plugin: the clean SVG of that file, as the page draws it.
+    private string? IconData(CanvasDeclaration? declaration)
+        => declaration?.Canvas.Icon is { Length: > 0 and <= 64 } icon && PluginIcons.IsFile(icon) ? _icons.Read(declaration.Plugin.SourcePackage?.PackageDirectory, icon) : null;
+
+    private CanvasItem Item(CanvasDeclaration declaration)
     {
         var canvas = declaration.Canvas;
         return new(declaration.PluginKey, Line(declaration.Plugin.Descriptor.DisplayName ?? declaration.PluginKey), declaration.Package, canvas.Id, Line(canvas.Title),
             string.IsNullOrWhiteSpace(canvas.Description) ? null : Line(canvas.Description), canvas.Icon is { Length: > 0 and <= 64 } icon ? icon : null,
-            canvas.Scope.ToString(), canvas.InputSchema is not null, canvas.Actions.Count, canvas.Describe is not null);
+            canvas.Scope.ToString(), canvas.InputSchema is not null, canvas.Actions.Count, canvas.Describe is not null, IconData(declaration));
     }
 
     private static bool ValidFields(IReadOnlyDictionary<string, string>? values)
@@ -187,8 +192,9 @@ internal sealed record CanvasListResponse(string Status, CanvasItem[] Canvases);
 /// <param name="Input">The canvas accepts an input.</param>
 /// <param name="Actions">The number of actions it declares for agents.</param>
 /// <param name="Describes">It can describe what it shows in Markdown.</param>
+/// <param name="IconData">When the icon names a file of the plugin package, that file as a clean SVG data URL; null otherwise.</param>
 internal sealed record CanvasItem(string PluginKey, string Plugin, string? Package, string Id, string Title, string? Description, string? Icon, string Scope,
-    bool Input, int Actions, bool Describes);
+    bool Input, int Actions, bool Describes, string? IconData = null);
 
 /// <summary>Opens the instance a tab shows.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
@@ -215,8 +221,9 @@ internal sealed record CanvasOpenRequest(string? ExpectedEpoch, string? PluginKe
 /// <param name="Revision">Grows with every change of the content: an event with a revision that is not newer is dropped.</param>
 /// <param name="Package">The id of the folder of the plugin package, or null for a built-in plugin.</param>
 /// <param name="Icon">The name of the icon of the canvas, or null.</param>
+/// <param name="IconData">When the icon names a file of the plugin package, that file as a clean SVG data URL; null otherwise.</param>
 internal sealed record CanvasOpenResponse(string Status, string? InstanceId, string? Title, string? StatusText, string? Html, bool Actions, int Revision,
-    string? Package, string? Icon);
+    string? Package, string? Icon, string? IconData = null);
 
 /// <summary>Says whether a tab shows an instance.</summary>
 internal sealed record CanvasVisibleRequest(string? ExpectedEpoch, string? InstanceId, bool Visible);

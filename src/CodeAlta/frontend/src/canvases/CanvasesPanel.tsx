@@ -78,7 +78,7 @@ function CanvasCard({ item, tabs, projects, sessions, selection, onOpen }: {
   const actions = item.actions;
   return <Card className="canvas-card" data-open={open.length > 0 || undefined}>
     <div className="canvas-card-head">
-      <span className="canvas-card-icon"><CanvasIcon name={item.icon} size={18} /></span>
+      <span className="canvas-card-icon"><CanvasIcon name={item.icon} pluginKey={item.pluginKey} size={18} /></span>
       <strong className="canvas-card-title">{item.title}</strong>
       <Tag minimal round>{t(scopeLabels[scope])}</Tag>
     </div>

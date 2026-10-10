@@ -50,6 +50,9 @@ public sealed record PluginContributionSummary
 
     /// <summary>Gets the contribution implementation type name.</summary>
     public required string ContributionTypeName { get; init; }
+
+    /// <summary>Gets what else a person reading the list needs to know of the contribution (the place of a button, for example), or <see langword="null"/>.</summary>
+    public string? Detail { get; init; }
 }
 
 /// <summary>
@@ -140,6 +143,7 @@ public sealed class PluginContributionRegistry
                 ScopeProjectId = registration.ScopeProjectId,
                 ScopeProjectPath = registration.ScopeProjectPath,
                 ContributionTypeName = registration.Contribution.GetType().FullName ?? registration.Contribution.GetType().Name,
+                Detail = registration.Contribution is PluginButtonContribution button ? $"{button.Place} button" : null,
             }).ToArray();
         }
     }
@@ -318,6 +322,10 @@ public sealed class PluginContributionRegistry
             case PluginRendererContribution renderer:
                 yield return new ContributionConflictKey("ui-renderer", $"ui:{renderer.Region}:renderer:{renderer.Target}", $"{renderer.Region}:{renderer.Target}");
                 yield break;
+            case PluginButtonContribution button:
+                // A button belongs to the plugin that puts it: two plugins with the same identifier do not shadow each other.
+                yield return new ContributionConflictKey("ui-button", $"button:{registration.Handle.PluginRuntimeKey}:{button.Id}", button.Id);
+                yield break;
             case PluginUiContribution ui:
                 yield return new ContributionConflictKey("ui-region", $"ui:{ui.Region}:{ui.Name ?? ui.GetType().Name}", $"{ui.Region}:{ui.Name ?? ui.GetType().Name}");
                 yield break;
@@ -390,6 +398,7 @@ public sealed class PluginContributionRegistry
             PluginInstructionProcessorContribution processor => processor.Name,
             PluginPromptEditorContribution promptEditor => promptEditor.Name,
             PluginPromptPickerContribution picker => picker.Name,
+            PluginButtonContribution button => button.Id,
             PluginUiContribution ui => ui.Name,
             PluginResourceContribution resource => resource.Path,
             PluginCompactionContribution _ => null,

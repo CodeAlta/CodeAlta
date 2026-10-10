@@ -40,6 +40,8 @@ internal sealed class PluginUiService
     private readonly ProjectCatalog? _projects;
     private readonly PluginRuntimeManager? _plugins;
     private readonly DesktopPluginUi? _ui;
+    private readonly DesktopCanvases? _canvases;
+    private readonly PluginIcons _icons = new();
     private readonly string? _epoch;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Lock _gate = new();
@@ -55,9 +57,10 @@ internal sealed class PluginUiService
     /// <param name="plugins">The host's plugin runtime.</param>
     /// <param name="ui">The broker the host gave its plugins as their UI service.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <param name="canvases">The canvas broker, which says whether a canvas that a button names exists; null leaves the buttons that open a canvas out.</param>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal PluginUiService(ProjectCatalog projects, PluginRuntimeManager plugins, DesktopPluginUi ui, string epoch)
+    internal PluginUiService(ProjectCatalog projects, PluginRuntimeManager plugins, DesktopPluginUi ui, string epoch, DesktopCanvases? canvases = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(plugins);
@@ -66,6 +69,7 @@ internal sealed class PluginUiService
         _projects = projects;
         _plugins = plugins;
         _ui = ui;
+        _canvases = canvases;
         _epoch = epoch;
     }
 
@@ -127,6 +131,94 @@ internal sealed class PluginUiService
         }
     }
 
+    /// <summary>
+    /// Lists the buttons that plugins put in the window at one place (or at every place), with the state each one gave for
+    /// the project, session and space of the context: the selected ones for the title bar and the rail, the ones of the row
+    /// for a menu. A button that names a command or a canvas that its plugin does not have is left out.
+    /// </summary>
+    [NeoRpcMethod("buttons")]
+    public async Task<PluginUiButtonsResponse> ButtonsAsync(PluginUiButtonsRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        PluginUiButtonsResponse Failed(string status) => new(status, request.Place, []);
+        PluginButtonPlace? place = null;
+        if (request.Place is { } named)
+        {
+            if (!Enum.TryParse<PluginButtonPlace>(named, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed)) return Failed("invalid_request");
+            place = parsed;
+        }
+
+        if (request.SpaceId is { } space && (space.Length is 0 or > MaximumIdUnits || space.Any(char.IsControl))) return Failed("invalid_request");
+        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, cancellationToken).ConfigureAwait(false);
+        if (scope.Status != "ok") return Failed(scope.Status);
+        try
+        {
+            var active = _plugins!.ActivePlugins;
+            var options = scope.Options! with { SessionId = request.SessionId };
+            var commands = _plugins.Adapter.GetContributions<PluginCommandContribution>(PluginPoint.Command, options);
+            var buttons = new List<PluginUiWindowButton>();
+            foreach (var entry in _plugins.Adapter.GetButtonEntries(active, place, request.SpaceId, options))
+            {
+                if (buttons.Count == MaximumContributions) break;
+                if (Button(entry, active, commands, request) is { } button) buttons.Add(button);
+            }
+
+            return new("ok", request.Place, [.. buttons]);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return Failed("read_failed"); // A plugin failing in a property getter must not break the page.
+        }
+    }
+
+    private PluginUiWindowButton? Button(PluginButtonEntry entry, IReadOnlyList<ActivePluginInstance> active, IReadOnlyList<PluginContributionRegistration> commands, PluginUiButtonsRequest request)
+    {
+        var registration = entry.Registration;
+        var button = entry.Button;
+        string? commandId = null;
+        string? canvasScope = null;
+        var disabled = entry.State.Disabled;
+        if (!string.IsNullOrWhiteSpace(button.Command))
+        {
+            // A command of the same plugin, by its name as a status item names it.
+            var command = commands.FirstOrDefault(candidate => string.Equals(candidate.Handle.PluginRuntimeKey, registration.Handle.PluginRuntimeKey, StringComparison.Ordinal)
+                && string.Equals(((PluginCommandContribution)candidate.Contribution).Name, button.Command, StringComparison.OrdinalIgnoreCase));
+            if (command is null) return null;
+            commandId = command.Handle.RuntimeContributionKey;
+            var availability = ((PluginCommandContribution)command.Contribution).Availability ?? PluginCommandAvailability.Always;
+            disabled |= availability.RequiresProject && request.ProjectId is null
+                || (availability.RequiresSession || availability.RequiresIdleSession || availability.RequiresBusySession) && request.SessionId is null;
+        }
+        else
+        {
+            var canvas = _canvases?.Find(registration.Handle.PluginRuntimeKey, button.Canvas ?? string.Empty);
+            if (canvas is null) return null;
+            canvasScope = canvas.Canvas.Scope.ToString();
+            // A canvas about a project or a session needs it: without one the button stays, and cannot be used.
+            disabled |= canvas.Canvas.Scope == PluginCanvasScope.Project && request.ProjectId is null
+                || canvas.Canvas.Scope == PluginCanvasScope.Session && request.SessionId is null;
+        }
+
+        var plugin = active.FirstOrDefault(candidate => string.Equals(candidate.Descriptor.RuntimeKey, registration.Handle.PluginRuntimeKey, StringComparison.Ordinal));
+        var icon = button.Icon.Trim();
+        var iconData = PluginIcons.IsFile(icon) ? _icons.Read(plugin?.SourcePackage?.PackageDirectory, icon) : null;
+        var state = entry.State;
+        var (badge, count) = state.Badge.Kind switch
+        {
+            PluginButtonBadgeKind.Count => ("count", Math.Min(state.Badge.Count, 9999)),
+            PluginButtonBadgeKind.Dot => ("dot", 0),
+            PluginButtonBadgeKind.Busy => ("busy", 0),
+            _ => ("none", 0),
+        };
+        return new(registration.Handle.RuntimeContributionKey, registration.Handle.PluginRuntimeKey, PluginId(registration.Handle.PluginRuntimeKey, plugin), PluginName(active, registration),
+            button.Id, button.Place.ToString(), Line(icon, MaximumLabelUnits), iconData, Line(button.Label, MaximumLabelUnits), commandId, button.Canvas, canvasScope, badge, count,
+            state.Tone.ToString(), state.Hidden, disabled, string.IsNullOrWhiteSpace(state.Tooltip) ? null : Line(state.Tooltip, MaximumDescriptionUnits));
+    }
+
+    // The id Settings lists a plugin under: the folder of a source package, the name after "builtin:" for a plugin of the application.
+    private static string PluginId(string runtimeKey, ActivePluginInstance? plugin)
+        => plugin?.SourcePackage?.PackageId ?? (runtimeKey.StartsWith("builtin:", StringComparison.Ordinal) ? runtimeKey["builtin:".Length..] : runtimeKey);
+
     /// <summary>Returns what plugins show around the prompt of a pane.</summary>
     [NeoRpcMethod("regions")]
     public async Task<PluginUiRegionsResponse> RegionsAsync(PluginUiScopeRequest request, CancellationToken cancellationToken)
@@ -174,7 +266,8 @@ internal sealed class PluginUiService
         ArgumentNullException.ThrowIfNull(request);
         var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, cancellationToken).ConfigureAwait(false);
         if (scope.Status != "ok") return new(scope.Status);
-        if (request.CommandId is not { Length: > 0 and <= MaximumIdUnits } id || request.DraftText is { Length: > DesktopPluginUi.MaximumTextUnits }) return new("invalid_request");
+        if (request.CommandId is not { Length: > 0 and <= MaximumIdUnits } id || request.DraftText is { Length: > DesktopPluginUi.MaximumTextUnits }
+            || request.SpaceId is { } space && (space.Length is 0 or > MaximumIdUnits || space.Any(char.IsControl))) return new("invalid_request");
         var registration = _plugins!.Adapter.GetContributions<PluginCommandContribution>(PluginPoint.Command, scope.Options)
             .FirstOrDefault(candidate => string.Equals(candidate.Handle.RuntimeContributionKey, id, StringComparison.Ordinal));
         if (registration is null) return new("unknown_command");
@@ -188,7 +281,7 @@ internal sealed class PluginUiService
         var pane = new DesktopPluginScope
         {
             ProjectId = request.ProjectId, ProjectPath = scope.Options!.ProjectPath, SessionId = request.SessionId,
-            SessionBusy = request.SessionBusy, DraftText = request.DraftText,
+            SessionBusy = request.SessionBusy, DraftText = request.DraftText, SpaceId = request.SpaceId,
         };
         lock (_gate)
         {
@@ -371,6 +464,39 @@ internal sealed record PluginUiCommand(string Id, string PluginKey, string Plugi
 /// <summary>One prompt picker: the character that opens it and its title.</summary>
 internal sealed record PluginUiPicker(string Id, string Plugin, string Trigger, string Title, string? Placeholder);
 
+/// <summary>Asks for the buttons at one place, or at every place, for a context.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
+/// <param name="Place">The place (<c>TitleBar</c>, <c>Rail</c>, <c>ProjectMenu</c> or <c>SessionMenu</c>), or null for every place.</param>
+/// <param name="SpaceId">The space the window shows, or null.</param>
+/// <param name="ProjectId">The project of the context: the selected one, or the one of a row.</param>
+/// <param name="SessionId">The session of the context: the selected one, or the one of a row.</param>
+internal sealed record PluginUiButtonsRequest(string? ExpectedEpoch, string? Place, string? SpaceId, string? ProjectId, string? SessionId = null);
+
+/// <summary><c>ok</c> with the buttons in the order of the contributions, or a refusal code with none.</summary>
+internal sealed record PluginUiButtonsResponse(string Status, string? Place, PluginUiWindowButton[] Buttons);
+
+/// <summary>One button of a plugin, with the state the plugin gave for the context.</summary>
+/// <param name="Id">The identity of the contribution.</param>
+/// <param name="PluginKey">The runtime key of the plugin, which the page keeps the user's choice to hide the button under.</param>
+/// <param name="PluginId">The id Settings lists the plugin under.</param>
+/// <param name="Plugin">The display name of the plugin.</param>
+/// <param name="ButtonId">The identifier of the button in its plugin.</param>
+/// <param name="Place"><c>TitleBar</c>, <c>Rail</c>, <c>ProjectMenu</c> or <c>SessionMenu</c>.</param>
+/// <param name="Icon">The icon as the plugin named it: a Lucide icon, a brand logo or the path of a file of the package.</param>
+/// <param name="IconData">For a file, the clean SVG as a data URL; null when the file is not usable, and for a name.</param>
+/// <param name="Label">The tooltip, the accessible name and the text of a menu line.</param>
+/// <param name="CommandId">The identity to give back to <c>invokeCommand</c> for a button that runs a command, or null.</param>
+/// <param name="Canvas">The canvas a button opens, or null.</param>
+/// <param name="CanvasScope"><c>Application</c>, <c>Project</c> or <c>Session</c> for a button that opens a canvas, or null.</param>
+/// <param name="Badge"><c>none</c>, <c>count</c>, <c>dot</c> or <c>busy</c>.</param>
+/// <param name="Count">The number of a <c>count</c> badge.</param>
+/// <param name="Tone"><c>Info</c>, <c>Success</c>, <c>Warning</c>, <c>Error</c> or <c>Muted</c>.</param>
+/// <param name="Hidden">The plugin leaves the button out for now.</param>
+/// <param name="Disabled">The button cannot be used for now: the plugin says so, or the context lacks what the command or the canvas needs.</param>
+/// <param name="Tooltip">A tooltip that replaces the label, or null.</param>
+internal sealed record PluginUiWindowButton(string Id, string PluginKey, string PluginId, string Plugin, string ButtonId, string Place, string Icon, string? IconData, string Label,
+    string? CommandId, string? Canvas, string? CanvasScope, string Badge, int Count, string Tone, bool Hidden, bool Disabled, string? Tooltip);
+
 /// <summary><c>ok</c> with the contents in display order, or a refusal code with none.</summary>
 internal sealed record PluginUiRegionsResponse(string Status, string? ProjectId, string? SessionId, PluginUiContent[] Items);
 
@@ -383,7 +509,8 @@ internal sealed record PluginUiContent(string Id, string PluginKey, string Regio
 /// <param name="CommandId">The command, as listed by <c>contributions</c>.</param>
 /// <param name="SessionBusy">The pane's session is running.</param>
 /// <param name="DraftText">The pane's prompt draft.</param>
-internal sealed record PluginUiInvokeRequest(string? ExpectedEpoch, string? CommandId, string? ProjectId, string? SessionId, bool SessionBusy, string? DraftText);
+/// <param name="SpaceId">The space the window shows, or null; the command sees it as the space of its scope.</param>
+internal sealed record PluginUiInvokeRequest(string? ExpectedEpoch, string? CommandId, string? ProjectId, string? SessionId, bool SessionBusy, string? DraftText, string? SpaceId = null);
 
 /// <summary>A status code alone: <c>ok</c>, <c>started</c> or a refusal.</summary>
 internal sealed record PluginUiStatusResponse(string Status);

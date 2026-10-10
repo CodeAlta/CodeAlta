@@ -23,6 +23,27 @@ public sealed class CanvasSamplePlugin : PluginBase
         if (saved is not null) foreach (var pair in saved) _lists[pair.Key] = pair.Value;
     }
 
+    // Buttons in the window. The first one opens the application canvas with no code at all, the second runs a command, and both
+    // show how many items are left. The third is a line in the menu of every project row, read for that row.
+    public override IEnumerable<PluginUiContribution> GetUiContributions()
+    {
+        yield return PluginUi.Button(PluginButtonPlace.TitleBar, "checklist", icon: "list-checks", label: "Checklist") with
+        {
+            Canvas = "checklist",
+            GetState = _ => new PluginButtonState { Badge = Left("app") },
+        };
+        yield return PluginUi.Button(PluginButtonPlace.TitleBar, "tick", icon: "check", label: "Tick the next item", order: 1) with
+        {
+            Command = "checklist-tick",
+            GetState = _ => new PluginButtonState { Badge = Left("app"), Tone = Left("app") == 0 ? PluginStatusTone.Success : PluginStatusTone.Info, Disabled = Left("app") == 0 },
+        };
+        yield return PluginUi.Button(PluginButtonPlace.ProjectMenu, "project", icon: "briefcase", label: "Project checklist") with
+        {
+            Canvas = "project-checklist",
+            GetState = button => new PluginButtonState { Badge = Left("project:" + button.ProjectId) },
+        };
+    }
+
     public override IEnumerable<PluginCanvasContribution> GetCanvases()
     {
         yield return Canvas("checklist", "Checklist", "A checklist of the application.", "star", PluginCanvasScope.Application);
@@ -182,6 +203,8 @@ public sealed class CanvasSamplePlugin : PluginBase
         }
 
         await Services.State.WriteJsonAsync(PluginStateScope.User, "lists", JsonSerializer.Deserialize<Dictionary<string, List<Item>>>(snapshot)!, cancellationToken);
+        // The buttons show how many items are left: the window reads their state again.
+        Services.Ui.InvalidateButtons();
         // The state changed: every open instance of this list writes its fragment again, and says how many are done.
         foreach (var canvas in _open.Values.Where(canvas => KeyOf(canvas) == key))
         {
@@ -197,6 +220,12 @@ public sealed class CanvasSamplePlugin : PluginBase
     private List<Item> Items(string key)
     {
         lock (_gate) return _lists.TryGetValue(key, out var list) ? [.. list] : [];
+    }
+
+    // How many items of a list are left: a plain count of what is in memory, which is what a button state may do.
+    private int Left(string key)
+    {
+        lock (_gate) return _lists.TryGetValue(key, out var list) ? list.Count(static item => !item.Done) : 0;
     }
 
     private string Summary(string key)

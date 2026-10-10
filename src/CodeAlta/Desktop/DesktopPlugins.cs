@@ -176,6 +176,8 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
 
         public string? SelectedProjectPath => PluginOrchestrationBridge.CurrentToolOperation?.ProjectPath ?? ui.Scope?.ProjectPath;
 
+        public string? SelectedSpaceId => ui.Scope?.SpaceId;
+
         public IReadOnlyList<string> ProjectPaths => SelectedProjectPath is { } path ? [path] : [];
 
         public string? GetSelectedProjectPath(string relativePath)

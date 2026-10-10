@@ -5,6 +5,7 @@ import { AppWindow } from "./AppWindow";
 import { showToast } from "./appToaster";
 import { PluginHtml } from "./PluginHtml";
 import { collectPluginFields } from "./pluginHtmlSanitizer";
+import { pluginButtonsChangedEvent } from "./pluginButtons/pluginButtonModel";
 import { pluginsChangedEvent } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -49,6 +50,9 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
           } else if (event.kind === "refresh") {
             // A command or a dialog action of a plugin ended: its status items and its content follow at once.
             window.dispatchEvent(new Event(pluginsChangedEvent));
+          } else if (event.kind === "buttons") {
+            // A plugin says its buttons changed: only they are read again.
+            window.dispatchEvent(new Event(pluginButtonsChangedEvent));
           }
         }
       } catch { /* The channel ended: watch again below, unless the window is going away. */ }

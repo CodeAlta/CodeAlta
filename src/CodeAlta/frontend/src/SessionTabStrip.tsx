@@ -271,7 +271,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
             : isSkillTab(file) ? { icon: "skill" as const, tone: "teal" } : { icon: "code" as const, tone: "azure" };
           // A terminal whose shell runs a command shows it where its icon is.
           values.leading = shown?.running && shown.busy ? <span className="file-tab-icon" data-file-tone={look.tone}><ActivitySpinner size={13} /></span>
-            : isCanvasTab(file) ? <span className="file-tab-icon" data-file-tone="purple"><CanvasIcon name={file.icon} size={14} /></span>
+            : isCanvasTab(file) ? <span className="file-tab-icon" data-file-tone="purple"><CanvasIcon name={file.icon} pluginKey={file.pluginKey} size={14} /></span>
             : <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
           values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} terminal={shown} status={fileStatus?.(file)} /></span>;
           return;

@@ -56,6 +56,12 @@ public sealed record PluginAdapterOperationOptions
 /// <param name="Item">The status item.</param>
 public sealed record PluginStatusEntry(PluginContributionRegistration Registration, PluginStatusItem Item);
 
+/// <summary>A button of a plugin, with its state for a context.</summary>
+/// <param name="Registration">The button contribution.</param>
+/// <param name="Button">The button.</param>
+/// <param name="State">The state the plugin gave for the context, or the default state.</param>
+public sealed record PluginButtonEntry(PluginContributionRegistration Registration, PluginButtonContribution Button, PluginButtonState State);
+
 /// <summary>The content of a UI region and the contribution it comes from.</summary>
 /// <param name="Registration">The content contribution.</param>
 /// <param name="Content">The content.</param>
@@ -796,6 +802,46 @@ public sealed class PluginContributionAdapterService
         }
 
         return items;
+    }
+
+    /// <summary>Gets the buttons that active plugins put at a place, with their state for a context.</summary>
+    /// <param name="activePlugins">Active plugins used to build operation contexts.</param>
+    /// <param name="place">The place to read, or <see langword="null"/> for every place.</param>
+    /// <param name="spaceId">The shown space, or <see langword="null"/>.</param>
+    /// <param name="options">Operation options: the project and session the buttons are asked about.</param>
+    /// <returns>The buttons in contribution order. A button whose plugin throws from its state callback has the default state and the failure is recorded.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activePlugins"/> is null.</exception>
+    public IReadOnlyList<PluginButtonEntry> GetButtonEntries(IReadOnlyList<ActivePluginInstance> activePlugins, PluginButtonPlace? place, string? spaceId, PluginAdapterOperationOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(activePlugins);
+        if (IsHeadlessOrNonInteractive(options)) return [];
+        var entries = new List<PluginButtonEntry>();
+        foreach (var registration in GetRegistrations(PluginPoint.Ui, options))
+        {
+            if (registration.Contribution is not PluginButtonContribution button || place is { } wanted && button.Place != wanted
+                || !TryGetActivePlugin(activePlugins, registration, out var active))
+            {
+                continue;
+            }
+
+            var state = PluginButtonState.Default;
+            if (button.GetState is { } getState)
+            {
+                try
+                {
+                    state = getState(new PluginButtonContext(button.Place, spaceId, options?.ProjectId, options?.SessionId)) ?? PluginButtonState.Default;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogCallbackFailure(active, "Button state callback failed.", ex);
+                    AddDiagnostic(CreateCallbackDiagnostic(registration, "Button state callback failed.", ex));
+                }
+            }
+
+            entries.Add(new PluginButtonEntry(registration, button, state));
+        }
+
+        return entries;
     }
 
     /// <summary>Creates the content of a UI region with the contribution each one comes from.</summary>

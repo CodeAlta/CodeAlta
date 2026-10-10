@@ -158,7 +158,7 @@ test("a change that did not succeed says why in the words of plugins", () => {
 });
 
 const canvas = (id: string, plugin: Partial<CanvasItem>): CanvasItem => ({ pluginKey: "k", plugin: "P", package: null, id, title: id[0].toUpperCase() + id.slice(1), description: null, icon: null,
-  scope: "Application", input: false, actions: 0, describes: false, ...plugin });
+  iconData: null, scope: "Application", input: false, actions: 0, describes: false, ...plugin });
 
 test("a row lists the canvases its plugin declares, with their scope, before anything is opened", () => {
   const declared = [canvas("board", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Project" }), canvas("run", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Session" }),

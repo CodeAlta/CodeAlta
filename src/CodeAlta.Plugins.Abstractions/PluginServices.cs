@@ -201,6 +201,15 @@ public interface IPluginUiService
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The dialog response, or <see langword="null"/> when cancelled or unsupported.</returns>
     ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tells the host that what the buttons of the plugin say may have changed, so it reads their state again
+    /// (<see cref="PluginButtonContribution.GetState"/>). A command of the plugin that ends does it already.
+    /// </summary>
+    /// <remarks>A host that draws no buttons ignores it. It is cheap and may be called often: the host reads once for a burst.</remarks>
+    void InvalidateButtons()
+    {
+    }
 }
 
 /// <summary>
@@ -248,6 +257,12 @@ public interface IPluginWorkspaceService
 
     /// <summary>Gets the selected project path, when known.</summary>
     string? SelectedProjectPath { get; }
+
+    /// <summary>
+    /// Gets the identifier of the space the window showed when the running operation started (a command run from a button
+    /// or a menu, for example), or <see langword="null"/> when the host has no spaces or no operation is running.
+    /// </summary>
+    string? SelectedSpaceId => null;
 
     /// <summary>Gets known project paths.</summary>
     IReadOnlyList<string> ProjectPaths { get; }

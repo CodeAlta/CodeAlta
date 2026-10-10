@@ -1,0 +1,42 @@
+/* Buttons of plugins: in the title bar before the space switch, in the rail before Settings, and as lines in the menus of rows. */
+.ide-shell { --plugin-buttons-width: 0px; }
+.plugin-buttons { flex: none; display: flex; align-items: center; gap: 2px; }
+.window-actions > .plugin-buttons { margin-right: 2px; }
+.plugin-buttons > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
+.window-brand .activity-rail > .plugin-buttons > .bp6-button { min-width: 26px; }
+.plugin-buttons > .bp6-button:hover, .plugin-buttons > .bp6-button.bp6-active, .bp6-popover-open > .plugin-button.bp6-button { color: var(--text); }
+.plugin-button.bp6-button[data-tone="Success"] { color: var(--green); }
+.plugin-button.bp6-button[data-tone="Warning"] { color: var(--yellow); }
+.plugin-button.bp6-button[data-tone="Error"] { color: var(--red); }
+.plugin-button.bp6-button[data-tone="Muted"] { opacity: .7; }
+.plugin-button.bp6-button[data-tone="Success"]:hover, .plugin-button.bp6-button[data-tone="Warning"]:hover, .plugin-button.bp6-button[data-tone="Error"]:hover { filter: brightness(1.15); }
+
+/* The icon keeps its box while it loads and wherever it comes from: the badge sits over its corner and moves nothing. */
+.plugin-button-glyph { position: relative; display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; line-height: 0; }
+.plugin-icon { display: inline-block; flex: none; }
+.plugin-icon-file { background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
+.plugin-button-badge { position: absolute; pointer-events: none; box-sizing: border-box; color: var(--bp-palette-white); background: var(--accent); box-shadow: 0 0 0 1.5px var(--panel); }
+.plugin-button-badge[data-kind="count"] { top: -6px; right: -8px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 9.5px; font-weight: 600; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
+.plugin-button-badge[data-kind="dot"] { top: -3px; right: -4px; width: 8px; height: 8px; border-radius: 50%; }
+.plugin-button-badge[data-kind="busy"] { right: -6px; bottom: -5px; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); background: var(--panel); animation: plugin-button-busy .9s linear infinite; }
+@keyframes plugin-button-busy { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .plugin-button-badge[data-kind="busy"] { animation: none; border-top-color: var(--accent); border-right-color: var(--accent); } }
+.plugin-button[data-tone="Success"] .plugin-button-badge { background: var(--green); }
+.plugin-button[data-tone="Warning"] .plugin-button-badge { background: var(--yellow); color: var(--bp-palette-black); }
+.plugin-button[data-tone="Error"] .plugin-button-badge { background: var(--red); }
+.plugin-button[data-tone="Muted"] .plugin-button-badge { background: var(--muted); }
+.plugin-button[data-badge="busy"][data-tone] .plugin-button-badge { background: var(--panel); }
+
+/* The same in a menu line: at its end. */
+.plugin-menu-badge { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 8px; color: var(--bp-palette-white); background: var(--accent); font-size: 10.5px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+.plugin-menu-badge[data-kind="dot"] { min-width: 0; width: 8px; height: 8px; padding: 0; border-radius: 50%; }
+.plugin-menu-badge[data-tone="Success"] { background: var(--green); }
+.plugin-menu-badge[data-tone="Warning"] { background: var(--yellow); color: var(--bp-palette-black); }
+.plugin-menu-badge[data-tone="Error"] { background: var(--red); }
+.plugin-menu-badge[data-tone="Muted"] { background: var(--muted); }
+
+/* Settings > Plugins: the buttons of a plugin under its row, each with a switch. */
+.plugin-button-list { display: grid; gap: 2px; width: 100%; margin: 6px 0 0; padding: 0; list-style: none; }
+.plugin-button-list > li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0; color: var(--muted); font-size: 12px; }
+.plugin-button-list > li > .plugin-button-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.plugin-button-list .bp6-switch { margin: 0; }

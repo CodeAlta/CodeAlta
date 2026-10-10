@@ -151,13 +151,13 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
       ? <PluginHtml className="canvas-html" html={drawn} pluginKey={pluginKey} pane={pane} onAction={view.actions ? onAction : undefined} />
       : view.phase === "loading"
         ? <div className="canvas-loading"><ActivitySpinner size={18} label={t("Loading…")} /></div>
-        : <CanvasPlaceholder phase={view.phase} title={view.title ?? tab.name ?? t("Canvas")} icon={tab.icon} control={control} onClose={onClose} onOpenSource={onOpenSource} onRebuilt={() => setRetry(value => value + 1)} />}
+        : <CanvasPlaceholder phase={view.phase} title={view.title ?? tab.name ?? t("Canvas")} icon={tab.icon} pluginKey={tab.pluginKey} control={control} onClose={onClose} onOpenSource={onOpenSource} onRebuilt={() => setRetry(value => value + 1)} />}
   </div>;
 }
 
 /** Why a canvas shows nothing, and what to do: build the plugin again, open its source, or close the tab. */
-function CanvasPlaceholder({ phase, title, icon, control, onClose, onOpenSource, onRebuilt }: {
-  phase: Exclude<Phase, "loading" | "ready">; title: string; icon?: string; control: CanvasPluginControl | null; onClose: () => void;
+function CanvasPlaceholder({ phase, title, icon, pluginKey, control, onClose, onOpenSource, onRebuilt }: {
+  phase: Exclude<Phase, "loading" | "ready">; title: string; icon?: string; pluginKey?: string; control: CanvasPluginControl | null; onClose: () => void;
   onOpenSource: (folder: Readonly<{ id: string; path: string; name: string }>) => void; onRebuilt: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -191,7 +191,7 @@ function CanvasPlaceholder({ phase, title, icon, control, onClose, onOpenSource,
   const detail = problem ?? (state === "failed" ? probe?.message : null);
   const actions: ReactNode[] = [];
   if (control) actions.push(<Button key="rebuild" size="small" icon={building ? <ActivitySpinner size={13} /> : "build"} disabled={building} onClick={() => void rebuild()}>{t("Rebuild plugin")}</Button>);
-  return <NonIdealState className="canvas-placeholder" icon={<CanvasIcon name={icon} size={32} />} title={title} description={<>
+  return <NonIdealState className="canvas-placeholder" icon={<CanvasIcon name={icon} pluginKey={pluginKey} size={32} />} title={title} description={<>
     <span className="canvas-placeholder-reason" role="status">{description}</span>
     {detail && <code className="canvas-placeholder-detail">{detail}</code>}
   </>} action={<div className="canvas-placeholder-actions">

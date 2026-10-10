@@ -1,5 +1,6 @@
 // The page's link to the canvases of plugins: what plugins declare, the instances that tabs show, and what plugins push to them.
 import type { canvases, CanvasActionResponse, CanvasEvent, CanvasItem, CanvasOpenResponse } from "#neoastra";
+import { pluginIconFiles } from "../pluginButtons/pluginIcons";
 
 export type CanvasApi = Pick<typeof canvases, "list" | "open" | "visible" | "close" | "closeSpace" | "action" | "describe" | "watch">;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
@@ -103,6 +104,8 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
       const reply = await api.list({ expectedEpoch: host }, { timeoutMilliseconds: 15_000 });
       if (turn !== listing || epoch !== host || reply.status !== "ok") return;
       catalog = reply.canvases;
+      // An icon that is a file of the plugin comes with the list; a tab draws it from there.
+      for (const item of catalog) pluginIconFiles.register(item.pluginKey, item.icon, item.iconData);
       version++;
       for (const listener of [...catalogListeners]) listener();
     } catch { /* The host is gone: the next connection lists again. */ }
@@ -147,10 +150,12 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     /** Opens the instance a tab shows. A host that cannot answer is `unavailable`. */
     async open(request: Readonly<{ pluginKey: string; canvasId: string; spaceId: string | null; projectId: string | null; sessionId: string | null; key: string | null; visible: boolean }>): Promise<CanvasOpenResponse> {
       const host = epoch;
-      if (!host) return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null };
+      if (!host) return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null };
       try {
-        return await api.open({ expectedEpoch: host, ...request }, { timeoutMilliseconds: 45_000 });
-      } catch { return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null }; }
+        const reply = await api.open({ expectedEpoch: host, ...request }, { timeoutMilliseconds: 45_000 });
+        pluginIconFiles.register(request.pluginKey, reply.icon, reply.iconData);
+        return reply;
+      } catch { return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null }; }
     },
     /** Says whether a tab shows an instance; false when the host could not be told. */
     async setVisible(instanceId: string, visible: boolean): Promise<boolean> {

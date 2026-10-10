@@ -206,11 +206,15 @@ import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
+import "./pluginButtons/pluginButtons.css";
 import { CanvasPanel } from "./canvases/CanvasPanel";
 import { createCanvasHub, type CanvasOpenRequest } from "./canvases/canvasHub";
 import { CanvasesPanel } from "./canvases/CanvasesPanel";
 import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasTabOf, defaultCanvasTarget, newCanvasPrompt, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
 import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
+import { PluginButtons } from "./pluginButtons/PluginButtons";
+import { usePluginMenuEntries } from "./pluginButtons/pluginMenu";
+import { PluginButtonsActiveContext, PluginButtonsContext, createHiddenButtons, type PluginButtonContext, type PluginButtonView, type PluginButtonsHost } from "./pluginButtons/pluginButtonModel";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
@@ -232,6 +236,8 @@ function App() {
   const [spacesHub] = useState(() => createSpacesHub(spacesApi));
   // The tabs that plugins provide: what they declare, what they ask of the window, and what they push to their tabs.
   const [canvasHub] = useState(() => createCanvasHub(canvasesApi));
+  // The buttons of plugins that the user hid are a view state of this window, as its open tabs are.
+  const [hiddenPluginButtons] = useState(() => createHiddenButtons(typeof localStorage === "undefined" ? null : localStorage));
   const spacesState = useSyncExternalStore(spacesHub.subscribe, spacesHub.getSnapshot);
   const [spaceId, writeSpaceId] = useState(() => restoreShownSpace(() => localStorage.getItem(shownSpaceKey)));
   const shownSpace = useRef(spaceId);
@@ -1544,6 +1550,8 @@ function App() {
     && visibleSessions.some(session => session.id === menuTarget.id)
     && snapshot?.sessions.filter(session => session.id === menuTarget.id).length === 1 ? menuTarget : null;
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
+  // What plugins add to the menu of the session row that is open: read for that row.
+  const sessionMenuPlugins = usePluginMenuEntries("SessionMenu", activeMenu ? { projectId: activeMenu.projectId, sessionId: activeMenu.id } : null);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   // The terminals belong to the application: this window lists them, and shows in tabs those it was asked to.
@@ -1802,6 +1810,8 @@ function App() {
   // What plugins ask of the window for their tabs, and push to them, is read from the host that runs them.
   useEffect(() => pluginEpoch ? canvasHub.connect(pluginEpoch) : undefined, [canvasHub, pluginEpoch]);
   const pluginProjectId = projectId ?? null;
+  // What the buttons of plugins in the title bar and the rail are asked about: the selected project and session.
+  const pluginButtonContext = useMemo<PluginButtonContext>(() => ({ projectId: projectId ?? null, sessionId: sessionId ?? null }), [projectId, sessionId]);
   const [pluginRevision, setPluginRevision] = useState(0);
   useEffect(() => {
     if (!pluginEpoch) { setPluginContributed(noPluginContributions); return; }
@@ -1824,7 +1834,7 @@ function App() {
     const unavailable = () => showToast({ message: t("The command /{name} is not available here.", { name: command.name }), intent: "warning", icon: "warning-sign", timeout: 6000 });
     if (!pluginCommandAvailable(command, target)) { unavailable(); return; }
     void pluginUi.invokeCommand({ expectedEpoch: pluginEpoch, commandId, projectId: target.projectId, sessionId: target.sessionId,
-      sessionBusy: target.busy, draftText: target.draftText }, { timeoutMilliseconds: 8000 })
+      sessionBusy: target.busy, draftText: target.draftText, spaceId: shownSpace.current }, { timeoutMilliseconds: 8000 })
       .then(reply => { if (reply.status !== "started") unavailable(); }, unavailable);
   }
   const pluginKeys = useMemo(() => pluginKeymap(pluginContributed.commands), [pluginContributed]);
@@ -1838,6 +1848,40 @@ function App() {
       if (command) pluginShortcuts.current.run(command.id, pane);
     },
   }), [pluginEpoch, pluginProjectId, pluginContributed]);
+
+  // A button of a plugin runs its command or opens its canvas for the context of the button: the project of a row, not the selected one.
+  function activatePluginButton(button: PluginButtonView, context: PluginButtonContext) {
+    if (!pluginEpoch || button.disabled) return;
+    const unavailable = () => showToast({ message: t("{name} is not available here.", { name: button.label }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+    if (button.canvas) {
+      const item = canvasHub.getCatalog().find(candidate => candidate.pluginKey === button.pluginKey && candidate.id === button.canvas);
+      const session = context.sessionId ? (catalog.current ?? currentSnapshot.current)?.sessions.find(candidate => candidate.id === context.sessionId) : undefined;
+      const project = button.canvasScope === "Application" ? null : context.projectId ?? (session?.scopeKind === "project" ? session.projectId : null);
+      // The tab of a canvas the window lists is made the way the Canvases page makes it.
+      const known = project ? (catalog.current ?? currentSnapshot.current)?.projects.find(candidate => candidate.id === project && !candidate.archived) : undefined;
+      if (item && (!project || known)) { openCanvas(item, { project: known ? { id: known.id, path: known.path } : null, sessionId: context.sessionId }); return; }
+      openCanvasRequest({ pluginKey: button.pluginKey, canvasId: button.canvas, spaceId: shownSpace.current, projectId: project,
+        sessionId: button.canvasScope === "Session" ? context.sessionId : null, key: null, plugin: item?.package ?? null, focus: true,
+        title: item?.title ?? button.label, icon: item?.icon ?? button.icon });
+      return;
+    }
+    const composer = context.sessionId ? askPluginComposer("state", context.sessionId).state : null;
+    void pluginUi.invokeCommand({ expectedEpoch: pluginEpoch, commandId: button.commandId!, projectId: context.projectId, sessionId: context.sessionId,
+      sessionBusy: composer?.busy ?? false, draftText: composer?.draftText ?? null, spaceId: shownSpace.current }, { timeoutMilliseconds: 8000 })
+      .then(reply => { if (reply.status !== "started") unavailable(); }, unavailable);
+  }
+  // A button that opens a canvas is marked while that canvas is the tab in front, as the Issues button is.
+  function pluginButtonActive(button: PluginButtonView, context: PluginButtonContext): boolean {
+    const tab = fileTabs.active;
+    if (!button.canvas || !tab || !isCanvasTab(tab) || tab.pluginKey !== button.pluginKey || tab.canvasId !== button.canvas) return false;
+    return button.canvasScope === "Application" || (button.canvasScope === "Project" ? tab.projectId === context.projectId : tab.sessionId === context.sessionId);
+  }
+  const pluginButtonsLatest = useRef({ activate: activatePluginButton, active: pluginButtonActive }); pluginButtonsLatest.current = { activate: activatePluginButton, active: pluginButtonActive };
+  const pluginButtonsHost = useMemo<PluginButtonsHost>(() => ({
+    epoch: pluginEpoch, spaceId, api: pluginUi, hidden: hiddenPluginButtons,
+    activate: (button, context) => pluginButtonsLatest.current.activate(button, context),
+    isActive: (button, context) => pluginButtonsLatest.current.active(button, context),
+  }), [pluginEpoch, spaceId, hiddenPluginButtons]);
 
   // Session-scoped commands need an open session that is not behind a file tab; everything else is always offered.
   function commandAvailable(command: CommandId): boolean {
@@ -2725,7 +2769,7 @@ function App() {
     ? { expectedEpoch: referenceEpoch, projectId: referenceProject, projectPath: referencePath, sessionId, lifetime: referenceLifetime,
       capturePopup: captureReferencePopup, observe: observeReference } : null,
   [referenceAvailable, referenceEpoch, referenceProject, referencePath, sessionId, referenceLifetime, captureReferencePopup, observeReference]);
-  return <ShellLanguageContext.Provider value={language}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -2753,10 +2797,12 @@ function App() {
               active={!!fileTabs.active && isIssuesTab(fileTabs.active)} aria-label={t("Issues")} title={`${t("Issues")} (Ctrl+G, Ctrl+B)`} onClick={() => openFile(issuesTab)} />
             <Button variant="minimal" size="small" icon={<AppIcon name="canvases" size={16} />} className="activity-canvases" disabled={!owned}
               active={!!fileTabs.active && isCanvasesTab(fileTabs.active)} aria-label={t("Canvases")} title={t("Canvases")} onClick={() => openFile(canvasesTab)} />
+            <PluginButtons place="Rail" context={pluginButtonContext} />
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
           </nav>
         </WindowBrand>
         <div className="window-actions">
+          <PluginButtons place="TitleBar" context={pluginButtonContext} />
           {spacesState.available && <SpaceSwitch spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} canEdit={owned} request={spaceMenuRequest}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onCreate={() => setSpaceDialog(true)} onOrganize={() => navigate("spaces")} />}
           {shellPreferences && <WindowZoom zoom={shellPreferences.zoom} run={runCommand} />}
@@ -2918,6 +2964,7 @@ function App() {
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session),
+                  ...sessionMenuPlugins,
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
@@ -3206,7 +3253,7 @@ function App() {
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,

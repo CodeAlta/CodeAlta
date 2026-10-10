@@ -16,8 +16,8 @@ function host() {
   const waiting: ((result: IteratorResult<CanvasEvent>) => void)[] = [];
   let channels = 0;
   const api: CanvasApi = {
-    list: async request => { calls.push(`list:${request.expectedEpoch}`); return { status: "ok", canvases: [{ pluginKey: "k", plugin: "Plugin", package: null, id: "board", title: "Board", description: null, icon: null, scope: "Application", input: false, actions: 0, describes: false }] }; },
-    open: async request => { calls.push(`open:${request.canvasId}:${request.visible}`); return { status: "ok", instanceId: "i1", title: "Board", statusText: null, html: "<p>x</p>", actions: true, revision: 1, package: null, icon: null }; },
+    list: async request => { calls.push(`list:${request.expectedEpoch}`); return { status: "ok", canvases: [{ pluginKey: "k", plugin: "Plugin", package: null, id: "board", title: "Board", description: null, icon: null, scope: "Application", input: false, actions: 0, describes: false, iconData: null }] }; },
+    open: async request => { calls.push(`open:${request.canvasId}:${request.visible}`); return { status: "ok", instanceId: "i1", title: "Board", statusText: null, html: "<p>x</p>", actions: true, revision: 1, package: null, icon: null, iconData: null }; },
     visible: async request => { calls.push(`visible:${request.instanceId}:${request.visible}`); return { status: "ok" }; },
     close: async request => { calls.push(`close:${request.instanceId}`); return { status: "ok" }; },
     closeSpace: async request => { calls.push(`closeSpace:${request.spaceId}`); return { status: "ok" }; },

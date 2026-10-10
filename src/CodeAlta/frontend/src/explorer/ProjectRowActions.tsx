@@ -6,6 +6,7 @@ import { ProjectDetailsDialog } from "../ProjectDetailsEntry";
 import { projectRowAccess, projectRowCurrent, type ProjectRowContext } from "./projectRowActionAccess";
 import { isSessionContextKey } from "../sessionRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
+import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { useShellLanguage } from "../shellLanguage";
 import { modalDialogOpen } from "../modalDialogs";
 
@@ -133,6 +134,8 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     favorite?.set(value);
   }
   const access = visible && authority ? projectRowAccess(visible.project, authority.current()) : null;
+  // What plugins add to the menu of this row: read for this project, not for the selected one.
+  const pluginEntries = usePluginMenuEntries("ProjectMenu", visible && !visible.details ? { projectId: visible.project.id, sessionId: null } : null);
   // Beside the actions of the project, what the plugins offer for it: a few lines, then the page of the canvases.
   const canvases = visible && authority?.canvases && !visible.project.archived ? authority.canvases.list() : null;
   return <li ref={row} className="project-action-row" onContextMenu={event => {
@@ -167,6 +170,7 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
         ...(canvases && canvases.items.length > 0 ? [{ key: "canvases", divider: true as const },
           ...canvases.items.map(item => ({ key: `canvas:${canvasRef(item)}`, label: t("Open {title}", { title: item.title }), icon: "canvases" as const, onSelect: () => canvasAction(item, visible) })),
           ...(canvases.more ? [{ key: "canvases-more", label: t("More…"), icon: "canvases" as const, onSelect: () => canvasAction(null, visible) }] : [])] : []),
+        ...pluginEntries,
       ]} />}
     {visible?.details && visible.context.snapshot && <ProjectDetailsDialog project={visible.project} snapshot={visible.context.snapshot}
       isCurrent={() => current(visible)} onClose={() => dismiss(true)} />}

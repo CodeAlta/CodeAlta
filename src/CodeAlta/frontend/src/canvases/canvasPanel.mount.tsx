@@ -25,8 +25,8 @@ const api: CanvasApi = {
     state.calls.push(`open:${request.visible}`);
     state.opened++;
     return scenario.status === "ok"
-      ? { status: "ok", instanceId: "instance-1", title: scenario.title, statusText: scenario.statusText, html: scenario.html, actions: true, revision: scenario.revision, package: "plugin:global:board", icon: "list-checks" }
-      : { status: scenario.status, instanceId: null, title: scenario.title, statusText: null, html: null, actions: false, revision: 0, package: "plugin:global:board", icon: "list-checks" };
+      ? { status: "ok", instanceId: "instance-1", title: scenario.title, statusText: scenario.statusText, html: scenario.html, actions: true, revision: scenario.revision, package: "plugin:global:board", icon: "list-checks", iconData: null }
+      : { status: scenario.status, instanceId: null, title: scenario.title, statusText: null, html: null, actions: false, revision: 0, package: "plugin:global:board", icon: "list-checks", iconData: null };
   },
   visible: async request => { state.calls.push(`visible:${request.visible}`); return { status: "ok" }; },
   close: async () => ({ status: "ok" }),

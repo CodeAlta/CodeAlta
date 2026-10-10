@@ -133,6 +133,7 @@ Most of the API is portable: you write it once and each app shows it its own way
 | Dialog with your own content | | `PluginUi.HtmlDialog` | `PluginTui.CustomDialog` |
 | Content around the prompt | `PluginUi.Content` with Markdown or text | `PluginRenderResult.FromHtml` | `PluginTui.Visual` |
 | Status item | `PluginStatusContribution` | `Command` makes it clickable | |
+| Button | | `PluginUi.Button`, with a `Command` or a `Canvas` | |
 | Prompt picker | `PluginUi.PromptPicker` | | |
 | Timeline card | `PluginDerivedSessionEvent.Markdown` | `Html` | `PluginTerminalDerivedSessionEvent.VisualFactory` |
 
@@ -146,7 +147,7 @@ Override only the methods the plugin needs.
 | Method | Adds | Desktop | TUI |
 |---|---|---|---|
 | `GetCommands()` | Commands for the search or the palette, the `/` menu and shortcuts | yes | yes |
-| `GetUiContributions()` | Status items and content around the prompt | yes | yes |
+| `GetUiContributions()` | Status items and content around the prompt; buttons in the window | yes | yes (no buttons) |
 | `GetPromptPickers()` | A picker opened by a character typed in the prompt | yes | yes |
 | `GetSessionEventProjections()` | Cards in the session timeline | yes | yes |
 | `GetAgentTools()` | Tools the model can call | yes | yes |
@@ -298,6 +299,35 @@ yield return PluginTui.Visual(PluginUiRegion.SessionFooter,
 
 These callbacks run often. Keep them fast and do no I/O in them.
 
+## Buttons in the window
+
+CodeAlta Desktop lets a plugin put its own buttons in the window. A button has an icon and a label, and it runs a command of your plugin or opens a canvas of your plugin. CodeAlta TUI draws no button; the command stays in its palette.
+
+```csharp
+public override IEnumerable<PluginUiContribution> GetUiContributions()
+{
+    yield return PluginUi.Button(PluginButtonPlace.TitleBar, "notes", icon: "notebook-pen", label: "Notes") with
+    {
+        Command = "notes",
+        GetState = _ => new PluginButtonState { Badge = Open.Count },
+    };
+}
+```
+
+{.table}
+| Place | Where | Limit for one plugin |
+|---|---|---|
+| `TitleBar` | At the top right, before the space switch, the zoom and the theme | 2 |
+| `Rail` | In the navigation rail, after Issues and before Settings | 1 |
+| `ProjectMenu` | A line in the menu of a project in the Explorer, asked about that project | 6 |
+| `SessionMenu` | A line in the menu of a session, asked about that session | 6 |
+
+Name exactly one of `Command` (a command of the same plugin) and `Canvas` (a canvas of the same plugin; no code runs, the window opens it for the project and session of the button). `GetState` gives a badge (a number, `PluginButtonBadge.Dot`, or `PluginButtonBadge.Busy` for a small ring), a tone, and whether the button is hidden or disabled. Like status items, it runs often: read a field, do no I/O. The window reads it when a project, session or space is selected, when a command of your plugin ends, and when you call `Services.Ui.InvalidateButtons()`.
+
+The icon is the name of any [Lucide](https://lucide.dev/icons) icon, the name of a brand logo, or an SVG file of your plugin folder such as `icons/notes.svg` (at most 32 KiB, drawn in the color of the text). A button that is invalid or over its limit is left out, and `alta plugin status` says why.
+
+People can hide any button with a right click, and turn each one back on in Settings > Plugins. In a narrow window the buttons fold into one menu.
+
 ## Prompt pickers
 
 ```csharp
@@ -434,7 +464,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
-| `canvas-checklist` | A tab that the plugin provides, found from the Canvases page, the search and `alta canvas`: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent |
+| `canvas-checklist` | A tab that the plugin provides, found from the Canvases page, the search and `alta canvas`: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
 | `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |

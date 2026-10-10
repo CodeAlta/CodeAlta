@@ -244,7 +244,7 @@ public sealed class PluginRuntimeActivator
             };
             instance.AttachRuntimeContext(context);
             await instance.InitializeAsync(cancellationToken).ConfigureAwait(false);
-            var contributions = CollectContributions(discoveredType.Descriptor, context, instance, options.ActivationGeneration);
+            var contributions = CollectContributions(discoveredType.Descriptor, context, instance, options.ActivationGeneration, diagnostics);
             await instance.OnActivatedAsync(cancellationToken).ConfigureAwait(false);
             var active = new ActivePluginInstance(
                 instance,
@@ -294,7 +294,8 @@ public sealed class PluginRuntimeActivator
         PluginDescriptor descriptor,
         PluginRuntimeContext context,
         PluginBase instance,
-        int activationGeneration)
+        int activationGeneration,
+        List<PluginRuntimeDiagnostic> diagnostics)
     {
         var registrations = new List<PluginContributionRegistration>();
         Add(PluginPoint.Startup, instance.GetStartupContributions());
@@ -308,7 +309,7 @@ public sealed class PluginRuntimeActivator
         Add(PluginPoint.PromptEditor, instance.GetPromptEditorContributions());
         Add(PluginPoint.PromptPicker, instance.GetPromptPickers());
         Add(PluginPoint.Compaction, instance.GetCompactionContributions());
-        Add(PluginPoint.Ui, instance.GetUiContributions());
+        Add(PluginPoint.Ui, PluginButtonValidation.Filter(descriptor, instance.GetUiContributions(), diagnostics));
         Add(PluginPoint.SessionEventProjection, instance.GetSessionEventProjections());
         Add(PluginPoint.Resource, instance.GetResources());
         Add(PluginPoint.Canvas, instance.GetCanvases());
