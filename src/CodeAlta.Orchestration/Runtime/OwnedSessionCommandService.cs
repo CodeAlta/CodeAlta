@@ -880,7 +880,13 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     else
                     {
                         if (Asks.Enabled) operation.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token);
-                        var sendOptions = new AgentSendOptions { Input = prepared.Input, AskId = operation.AskSubmission?.AskId };
+                        var sendOptions = new AgentSendOptions
+                        {
+                            Input = prepared.Input,
+                            AskId = operation.AskSubmission?.AskId,
+                            // Without an owned execution, the default decision is still the one the send started with.
+                            OnPermissionRequest = operation.PermissionExecution is null ? _runtime.Permissions.CreateSendDefaultPermissionHandler(policy) : null,
+                        };
                         operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,
                             operation.PermissionExecution, operation.Execution.Token, operation.AskExecution, operation.AskSubmission));
                         if (await operation.SendInvocation.Outcome.ConfigureAwait(false) is { } sendFailure) ExceptionDispatchInfo.Throw(sendFailure);

@@ -574,6 +574,27 @@ public sealed class OwnedSessionCommandServiceTests
     }, sessionPermissionModes: true);
 
     [TestMethod]
+    public Task SessionPermissionModes_ASessionThatBypassesIsApproved_WhileTheHostAsks() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        f.ReviewByDefault = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+
+        // The send bypasses permissions: it has no owned execution, and its default decision approves, whatever the
+        // host does by default.
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("bypass", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Bypass } }));
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        Assert.AreEqual(SessionPermissionPolicy.Approve, f.Host.RuntimeService.GetPermissionPolicy(f.SessionId));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(f.Track(f.Provider.SendPermission!))).Kind);
+        Assert.HasCount(0, (await f.Observe(f.Host.RuntimeService.Permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task SessionPermissionModes_ATurnTheOwnerDidNotSendAsksOnTheCardOfItsSession() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
@@ -1144,7 +1165,8 @@ public sealed class OwnedSessionCommandServiceTests
         var send = f.Send();
         await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, f.Provider.PreparationDecision);
-        Assert.IsNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+        // The send reviews nothing: its default decision, fixed when it started, denies.
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!))).Kind);
         Assert.IsNull(f.Provider.FirstSendOptions.RunLifecycle);
         var denied = f.Permission(f.Provider.Options!.OnPermissionRequest);
         Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(denied)).Kind);
@@ -1372,7 +1394,7 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome);
         Assert.AreEqual(request.ExpectedRunId, result.RunId!.Value.Value);
         Assert.AreEqual(request.ExpectedRunId, f.Provider.SteerOptions!.ExpectedRunId!.Value.Value);
-        Assert.IsNull(f.Provider.FirstSendOptions!.OnPermissionRequest);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(f.Permission(f.Provider.FirstSendOptions!.OnPermissionRequest!))).Kind);
     });
 
     [TestMethod]

@@ -157,6 +157,17 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// </summary>
     public AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
 
+    // The default decision of one send that no owned execution reviews: the policy is read now, so the send keeps it
+    // until it ends, as a send with an owned execution does. The policy of its session, when it has one, is the one
+    // the send started with; otherwise the automatic approval of the host decides.
+    internal AgentPermissionRequestHandler CreateSendDefaultPermissionHandler(SessionPermissionPolicy? policy)
+    {
+        var autoApprove = policy is { } own ? own == SessionPermissionPolicy.Approve : _autoApproveOwnedPermissions();
+        return (_, token) => Task.FromResult(new AgentPermissionDecision(
+            token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
+            : autoApprove ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+    }
+
     /// <summary>Gets the host's default user-input answer for sessions it owns: the request is canceled.</summary>
     public AgentUserInputRequestHandler OwnedDefaultUserInputHandler { get; }
         = static (_, _) => Task.FromCanceled<AgentUserInputResponse>(new CancellationToken(true));
