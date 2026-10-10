@@ -15,9 +15,11 @@ internal sealed class SessionFactsState
     /// of a shell command as its program and no working directory, and counts every cost that has no duration. Version 3 reads a
     /// shell command as the shell does (the escapes of JSON undone, no program when the value of a variable has no end that can be
     /// told), keeps the title of a session short and without the paths it names, and leaves a time far from the others out of the
-    /// duration of a run.
+    /// duration of a run. Version 4 keeps no quoted text at the start of a shell command as its program unless it is called or
+    /// written as a path, no number and no word longer than 32, no word with a digit as a command of alta, and a skill name only
+    /// when it is written as one.
     /// </summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;

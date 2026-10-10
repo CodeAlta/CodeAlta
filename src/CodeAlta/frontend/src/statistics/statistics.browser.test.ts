@@ -284,6 +284,75 @@ test("tools and providers are named as people know them, the MCP servers are lis
   });
 });
 
+test("one tool is one row whatever keys it has, a model of two providers is told apart, and the chip of a provider follows its name", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
+    const texts = (title: string, selector: string) => page.evaluate<string[]>(`[...(${block(title)}?.querySelectorAll(${JSON.stringify(selector)}) ?? [])].map(item => item.textContent.trim())`);
+    const tableOf = async (title: string) => {
+      await page.evaluate(`${block(title)}.scrollIntoView({ block: "center" })`);
+      await page.until(`${block(title)}?.querySelector('.chart-table-toggle')`, `the chart of ${title}`);
+      await page.evaluate(`${block(title)}.querySelector('.chart-table-toggle').click()`);
+      await page.until(`${block(title)}.querySelector('table.chart-table tbody tr')`, `the table of ${title}`);
+      return page.evaluate<string[]>(`[...${block(title)}.querySelectorAll('table.chart-table tbody tr')].map(row => row.firstElementChild.textContent.trim())`);
+    };
+    const twice = (names: readonly string[]) => names.filter((name, index) => names.indexOf(name) !== index);
+
+    // The window has not named its providers yet: a filter set now has the key as its only name.
+    await render(page, { scenario: "ready", providers: false });
+    await page.until(settled, "the overview");
+    await page.clickText('.stats-add-filter', "Filter");
+    await page.clickText('.bp6-menu-item', "Provider");
+    await page.until(`[...document.querySelectorAll('.stats-filter-list .bp6-menu-item')].some(item => item.textContent.trim() === "claude-code")`, "the providers by their key");
+    await page.clickText('.stats-filter-list .bp6-menu-item', "claude-code");
+    await page.until(`document.querySelector('.stats-chip-text')?.textContent === "Provider: claude-code"`, "the chip with the key");
+    // The names arrive: the chip reads the name, and the filter is still on the key.
+    await page.evaluate(`statsFixture.update({ providers: true })`);
+    await page.until(`document.querySelector('.stats-chip-text')?.textContent === "Provider: Claude Code"`, "the chip follows the name");
+    assert.equal(await page.evaluate(`document.querySelector('.stats-chip-remove').getAttribute('aria-label')`), "Remove filter: Provider: Claude Code");
+    assert.ok((await calls(page)).filter(call => call.request?.filter?.provider).every(call => call.request.filter.provider === "claude-code"));
+    // A reload keeps the filter and reads the name again.
+    await page.evaluate(`statsFixture.remount()`);
+    await page.until(`document.querySelector('.stats-chip-text')?.textContent === "Provider: Claude Code" && ${settled}`, "the chip after a reload");
+    await page.click('.stats-chip-remove');
+    await page.until(`!document.querySelector('.stats-chip') && ${settled}`, "the filter removed");
+
+    // The fixture has one tool of an MCP server under two keys: one row, one line of the list, one box, one cell.
+    await openPage(page, "Tools");
+    const tools = (await texts("The tools", "tbody td:first-child")).filter(name => name.startsWith("issue_read"));
+    assert.equal(tools.length, 1, tools.join(" | "));
+    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name span"), ["issue_read"]);
+    assert.deepEqual(twice(await tableOf("Where time goes")), []);
+    await page.evaluate(`${block("Duration of one tool")}.scrollIntoView({ block: "center" })`);
+    await page.until(`${block("Duration of one tool")}?.querySelectorAll('.chart-surface svg text').length > 2`, "the durations");
+    const boxes = (await texts("Duration of one tool", ".chart-surface svg text")).filter(text => !/^[\d.,]+ (ms|s|min|h)$/.test(text));
+    assert.deepEqual(twice(boxes), [], boxes.join(" | "));
+    assert.ok(boxes.includes("issue_read (github)"), boxes.join(" | "));
+    // Both keys were asked for the box of that tool.
+    const asked = (await calls(page)).filter(call => call.method === "distribution" && call.args[0] === "tool-duration").map(call => call.args[1]);
+    assert.ok(asked.includes("ToolCall:mcp__github__issue_read") && asked.includes("McpToolCall:mcp__github__issue_read"), asked.join(", "));
+
+    // The fixture has one model under two providers: its two bars say which is which.
+    await openPage(page, "Models");
+    const bars = await tableOf("What tokens are made of");
+    assert.deepEqual(twice(bars), [], bars.join(" | "));
+    assert.ok(bars.includes("gpt-6.1 (Codex)") && bars.includes("gpt-6.1 (GitHub Copilot)") && bars.includes("claude-opus-5-5"), bars.join(" | "));
+    await page.clickText('.stats-add-filter', "Filter");
+    await page.clickText('.bp6-menu-item', "Model");
+    await page.until(`document.querySelectorAll('.stats-filter-list .bp6-menu-item').length > 2`, "the models of the filter");
+    const offered = await page.evaluate<string[]>(`[...document.querySelectorAll('.stats-filter-list .bp6-menu-item .bp6-text-overflow-ellipsis')].map(item => item.textContent.trim())`);
+    assert.deepEqual(twice(offered), [], "a model is offered once");
+    await page.key("Escape", 27);
+
+    // The axis of a time chart: round times, from 0.
+    await openPage(page, "Activity");
+    await page.evaluate(`${block("Active time")}.scrollIntoView({ block: "center" })`);
+    await page.until(`${block("Active time")}?.querySelectorAll('.chart-surface svg text').length > 4`, "the active time");
+    const marks = (await texts("Active time", ".chart-surface svg text")).filter(text => /^\d[\d,.]* ?(ms|s|min|h)?( \d\d( s)?)?$/.test(text));
+    assert.ok(marks.includes("0") && marks.length >= 3, marks.join(" | "));
+    assert.deepEqual(marks.filter(mark => !/^(0|[\d,]+ (ms|s|min|h)|[\d,]+ h (15|30|45)|\d+ min 30 s|\d+\.5 s)$/.test(mark)), [], `marks that are not round: ${marks.join(" | ")}`);
+  });
+});
+
 test("the first time asks how much history to read, then shows the progress, the pause and the end", { skip: !edge, timeout: 300_000 }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });

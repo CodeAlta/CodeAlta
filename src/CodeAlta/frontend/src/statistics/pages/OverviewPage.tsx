@@ -9,7 +9,7 @@ import { useCalendar, useRecords, useSeries, useSummary, useTop } from "../queri
 import { useStatistics } from "../runtime";
 import { useText } from "../text";
 import type { RankedRow, RecordEntry, SeriesLine, SummaryTile } from "../types";
-import { toolName } from "./shared";
+import { mergeRankedTools, toolName } from "./shared";
 import type { StackBy, UsageUnit } from "../frame";
 
 // The Overview: how much did I use CodeAlta, and on what?
@@ -114,7 +114,7 @@ export function OverviewPage() {
       </Block>
       <Block title={t("Top tools")} span={4} minHeight={170} query={tools} empty={tools.data !== undefined && tools.data.rows.length === 0}
         actions={tools.data && tools.data.truncated ? <button type="button" className="stats-link" onClick={() => drill.goto("tools")}>{t("Show all")}</button> : undefined}>
-        {tools.data && <RankedBars label={t("Tools by calls")} color={colors.at(2)} showSpark items={rankedOf(tools.data.rows, row => fmt.compact(row.calls), row => toolName(row.label), row => row.detail ? filterValueLabel(t, "toolKind", row.detail) : undefined)}
+        {tools.data && <RankedBars label={t("Tools by calls")} color={colors.at(2)} showSpark items={rankedOf(mergeRankedTools(tools.data.rows), row => fmt.compact(row.calls), row => toolName(row.label), row => row.detail ? filterValueLabel(t, "toolKind", row.detail) : undefined)}
           onSelect={item => { const kind = tools.data?.rows.find(row => row.key === item.key)?.detail; if (kind) drill.filterBy("toolKind", kind, filterValueLabel(t, "toolKind", kind)); }}
           selectLabel={item => t("Filter on {name}", { name: item.label })} />}
       </Block>

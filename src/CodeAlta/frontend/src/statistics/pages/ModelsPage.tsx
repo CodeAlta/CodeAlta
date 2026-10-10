@@ -10,7 +10,7 @@ import { useStatistics } from "../runtime";
 import { useText } from "../text";
 import type { EffortRow, ModelRow } from "../types";
 import { DistributionChart } from "../pageKit";
-import { costIn, costUnits, firstQuery } from "./shared";
+import { costIn, costUnits, firstQuery, modelNames } from "./shared";
 import type { UsageUnit } from "../frame";
 
 // Models: which providers, models and efforts do I use, for how many tokens and how long?
@@ -30,9 +30,13 @@ export function ModelsPage() {
   const input = useSeries("input-tokens", "model", { extra: { limit: 6, comparison: "none" } });
   const request = useDistribution("request-input", null);
   const cache = useMemo(() => cacheRead.data && input.data ? ratioSeries(cacheRead.data, input.data) : null, [cacheRead.data, input.data]);
+  // A row is a model of a provider: a model two of the bars have is written with its provider, or the two would read the same. A model
+  // whose other provider is not among the bars keeps its name alone.
+  const drawn = useMemo(() => (models.data?.rows ?? []).slice(0, 10), [models.data]);
+  const names = useMemo(() => modelNames(drawn, providerName), [drawn, providerName]);
   const parts = useMemo(() => models.data ? partsOption({ fmt, unit: "tokens", partNames: [t("Fresh input"), t("Cached input"), t("Cache written"), t("Output")],
     colors: [colors.at(0), colors.at(5), colors.at(2), colors.at(1)],
-    items: models.data.rows.slice(0, 10).map(row => ({ name: row.model, parts: [row.freshInputTokens, row.cacheReadTokens, row.cacheWriteTokens, row.outputTokens] })) }) : null, [models.data, fmt, t, colors]);
+    items: drawn.map(row => ({ name: names.get(`${row.provider}/${row.model}`) ?? row.model, parts: [row.freshInputTokens, row.cacheReadTokens, row.cacheWriteTokens, row.outputTokens] })) }) : null, [models.data, drawn, names, fmt, t, colors]);
   const costs = costUnits(models.data?.rows ?? []);
   const unitOptions = [{ value: "tokens", label: t("Tokens") }, { value: "requests", label: t("Requests") }, { value: "time", label: t("Time") }] as const;
 

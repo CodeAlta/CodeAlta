@@ -179,8 +179,16 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 return;
             }
 
+            // Everything that can fail is read first: the engine is started only when all of it is known, so that a start that
+            // failed, at whatever step, is a start that can be tried again.
             await _store.InitializeAsync(cancellationToken).ConfigureAwait(false);
             var meta = await _store.GetAllMetaAsync(cancellationToken).ConfigureAwait(false);
+            var projectNames = await _store.GetProjectNamesAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var (reference, name) in projectNames)
+            {
+                _projectNames[reference] = name;
+            }
+
             lock (_gate)
             {
                 _choice = meta.TryGetValue(ChoiceKey, out var text) && HistoryChoice.TryParse(text, out var choice) ? choice : null;
@@ -196,11 +204,6 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 // A start that failed before is over.
                 _error = null;
                 _initialized = true;
-            }
-
-            foreach (var (reference, name) in await _store.GetProjectNamesAsync(cancellationToken).ConfigureAwait(false))
-            {
-                _projectNames[reference] = name;
             }
 
             // The first step compares the journals with what was read: sessions that changed while the application was closed.

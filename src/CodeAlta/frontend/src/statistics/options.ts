@@ -62,6 +62,23 @@ export function seriesTable(result: SeriesResult, labels: readonly string[], pre
 /** A value rounded for a chart; a value that is not a number is a gap (`null`), not a zero. */
 const round = (value: number): number => (Number.isFinite(value) ? Math.round(value * 10_000) / 10_000 : null) as number;
 
+const second = 1000, minute = 60 * second, hour = 60 * minute, day = 24 * hour;
+/** The steps a linear axis of time may take: the ones a clock is read in. */
+const timeSteps = [1, 2, 5, 10, 20, 50, 100, 200, 500, second, 2 * second, 5 * second, 10 * second, 15 * second, 30 * second,
+  minute, 2 * minute, 5 * minute, 10 * minute, 15 * minute, 30 * minute, hour, 2 * hour, 3 * hour, 6 * hour, 12 * hour, day];
+
+/**
+ * The marks of a linear axis of time that reaches `maxMs`: a round step (1, 2, 5, 10, 15 or 30 minutes; 1, 2, 3, 6, 12 or 24 hours; then 2, 5
+ * or 10 times ten days, and so on) that cuts the axis in at most six parts, and the end of the axis, a whole number of steps. The chart library
+ * would cut milliseconds in tens, which gives marks such as "13 h 53".
+ */
+export function timeAxis(maxMs: number): Readonly<{ interval: number; max: number }> {
+  const top = Number.isFinite(maxMs) && maxMs > 0 ? maxMs : 0;
+  let interval = timeSteps.find(step => top / step <= 6);
+  for (let scale = day; interval === undefined; scale *= 10) interval = [2, 5, 10].map(factor => factor * scale).find(step => top / step <= 6);
+  return { interval, max: Math.max(1, Math.ceil(top / interval - 1e-9)) * interval };
+}
+
 /** Stacked bars, stacked areas or lines of a series over time, with the compared period as a dashed line and an optional brush. */
 export function timeSeriesOption(spec: TimeSeriesSpec): PlottedOption {
   const { result, fmt } = spec;
@@ -71,7 +88,12 @@ export function timeSeriesOption(spec: TimeSeriesSpec): PlottedOption {
   const stacked = spec.stacked ?? spec.kind !== "line";
   const maxValue = Math.max(0, ...(stacked ? result.buckets.map((_, at) => result.series.reduce((total, line) => total + (line.values[at] ?? 0), 0)) : result.series.flatMap(line => line.values)));
   const sign = (value: number) => spec.absolute ? Math.abs(value) : value;
-  const left = axisLabelWidth(fmt.axis(unit, maxValue * 1.1));
+  // An axis of time steps by a round time, up to the highest thing drawn: the lines, and the dashed line of the compared period.
+  const compared = Math.max(0, ...result.buckets.map((_, at) => result.series.reduce((total, line) => total + (line.previous?.[at] ?? 0), 0)));
+  const time = unit === "ms" ? timeAxis(Math.max(maxValue, compared)) : null;
+  const left = time
+    ? Math.max(...Array.from({ length: Math.round(time.max / time.interval) + 1 }, (_, index) => axisLabelWidth(fmt.axis(unit, index * time.interval))))
+    : axisLabelWidth(fmt.axis(unit, maxValue * 1.1));
   const plot: PlotBox = { left, right: 14, top: 12, bottom: spec.brush ? 58 : 30 };
   const boundaryGap = spec.kind === "bar";
   const series: Record<string, unknown>[] = result.series.map((line, index) => {
@@ -91,7 +113,8 @@ export function timeSeriesOption(spec: TimeSeriesSpec): PlottedOption {
     legend: result.series.length > 1 || previous.length > 0 ? { data: series.map(item => item.name as string) } : undefined,
     grid: { left: plot.left, right: plot.right, top: plot.top, bottom: plot.bottom, containLabel: false },
     xAxis: { type: "category", data: labels.long, boundaryGap, axisLabel: { hideOverlap: true, formatter: (_: string, index: number) => labels.short[index] ?? "" }, axisTick: { alignWithLabel: true } },
-    yAxis: { type: "value", axisLabel: { formatter: (value: number) => fmt.axis(unit, sign(value)) }, ...(unit === "count" ? { minInterval: 1 } : {}) },
+    yAxis: { type: "value", axisLabel: { formatter: (value: number) => fmt.axis(unit, sign(value)) }, ...(unit === "count" ? { minInterval: 1 } : {}),
+      ...(time ? { min: 0, max: time.max, interval: time.interval } : {}) },
     series,
     ...(spec.brush ? { dataZoom: [{ type: "slider", xAxisIndex: 0, height: 16, bottom: 6, brushSelect: false, filterMode: "none", showDetail: false, moveHandleSize: 6 }] } : {}),
   };
@@ -190,12 +213,14 @@ export function partsOption(spec: PartsSpec): Readonly<{ option: Record<string, 
   const { fmt } = spec;
   const items = spec.items;
   const largest = Math.max(0, ...items.map(item => item.parts.reduce((total, part) => total + part, 0)));
+  // The names have the room of the longest, up to about a third of a block: a model written with its provider is not cut.
+  const nameWidth = Math.min(210, Math.max(130, Math.round(Math.max(0, ...items.map(item => item.name.length)) * 7)));
   const option = {
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, valueFormatter: (value: unknown) => typeof value === "number" ? fmt.value(spec.unit, value) : String(value ?? "") },
     legend: { data: [...spec.partNames] },
     grid: { left: 8, right: 16, top: 8, bottom: 24, containLabel: true },
     xAxis: { type: "value", max: largest > 0 ? undefined : 1, axisLabel: { formatter: (value: number) => fmt.axis(spec.unit, value) } },
-    yAxis: { type: "category", inverse: true, data: items.map(item => item.name), axisLabel: { width: 130, overflow: "truncate" } },
+    yAxis: { type: "category", inverse: true, data: items.map(item => item.name), axisLabel: { width: nameWidth, overflow: "truncate" } },
     series: spec.partNames.map((name, index) => ({ name, type: "bar", stack: "parts", color: spec.colors[index % spec.colors.length], barMaxWidth: 26, emphasis: { focus: "series" },
       data: items.map(item => round(item.parts[index] ?? 0)) })),
   };

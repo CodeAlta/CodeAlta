@@ -63,6 +63,18 @@ export function boxStatsOfSteps(steps: readonly DistributionStep[]): BoxStats | 
   };
 }
 
+/** The steps of several distributions as one: the plugin cuts every distribution at the same edges, so the counts of a step add up. */
+export function mergeSteps(lists: readonly (readonly DistributionStep[])[]): DistributionStep[] {
+  const merged = new Map<number, DistributionStep>();
+  for (const steps of lists) {
+    for (const step of steps) {
+      const known = merged.get(step.lower);
+      merged.set(step.lower, known ? { ...known, count: known.count + step.count } : step);
+    }
+  }
+  return [...merged.values()].sort((a, b) => a.lower - b.lower);
+}
+
 /** The index of the bin a value falls in, or -1 when it is outside every bin. */
 export function binOf(bins: readonly StepBin[], value: number | undefined): number {
   if (value === undefined || bins.length === 0) return -1;

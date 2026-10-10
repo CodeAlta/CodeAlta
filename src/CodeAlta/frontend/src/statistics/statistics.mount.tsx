@@ -37,6 +37,8 @@ function recording(api: FixtureApi): StatisticsApi {
 type Options = {
   scenario?: FixtureScenario; visible?: boolean; width?: number; spaceId?: string | null; instanceId?: string; latencyMs?: number; locale?: string; estimates?: boolean;
   projectId?: string | null; sessionCount?: number;
+  /** False while the window has not said how it names its providers: the context has no names yet. */
+  providers?: boolean;
   /** How many canvases are drawn side by side over the same fixture: two tabs of the statistics in one window. */
   copies?: number;
 };
@@ -53,7 +55,7 @@ function draw() {
     instanceId: state.instanceId ?? "canvas-1", visible: state.visible, spaceId: state.spaceId, projectId: state.projectId, today: "2026-10-09",
     spaces: [{ id: "space-work", name: "Work", projectIds: ["proj-codealta", "proj-neoastra"] }, { id: "space-oss", name: "Open source", projectIds: ["proj-xenoatom", "proj-tomlyn", "proj-sharpyaml"] }],
     // The window names three of the five providers of the fixture: the two others are read under their key.
-    providers: [{ key: "claude-code", name: "Claude Code" }, { key: "codex", name: "Codex" }, { key: "copilot", name: "GitHub Copilot" }],
+    providers: state.providers === false ? undefined : [{ key: "claude-code", name: "Claude Code" }, { key: "codex", name: "Codex" }, { key: "copilot", name: "GitHub Copilot" }],
     openSession: id => { opened.push(id); }, storage,
   };
   const locale = state.locale ?? "en";

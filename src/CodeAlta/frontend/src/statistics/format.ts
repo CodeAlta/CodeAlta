@@ -85,6 +85,18 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
     if (ms < 7_200_000) return `${grouped.format(Math.round(ms / 60_000))} min`;
     return `${upToOneDecimal.format(ms / 3_600_000)} h`;
   };
+  // A mark of a linear axis of time: the axis steps by a round time (`timeAxis`), so the mark is written whole and without the zeros of a clock.
+  const timeMark = (milliseconds: number) => {
+    if (!Number.isFinite(milliseconds)) return words.none;
+    const ms = Math.round(Math.max(0, milliseconds));
+    if (ms === 0) return "0";
+    if (ms < 1000) return `${grouped.format(ms)} ms`;
+    if (ms < 60_000) return `${upToOneDecimal.format(ms / 1000)} s`;
+    const seconds = Math.round(ms / 1000);
+    if (seconds < 3600) return seconds % 60 === 0 ? `${seconds / 60} min` : `${Math.floor(seconds / 60)} min ${pad(seconds % 60)} s`;
+    const minutes = Math.round(seconds / 60);
+    return minutes % 60 === 0 ? `${grouped.format(minutes / 60)} h` : `${grouped.format(Math.floor(minutes / 60))} h ${pad(minutes % 60)}`;
+  };
   const bytes = (value: number) => {
     if (!Number.isFinite(value)) return words.none;
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -114,7 +126,7 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
   };
   const axis = (unit: string, amount: number) => {
     switch (unit) {
-      case "ms": return duration(amount);
+      case "ms": return timeMark(amount);
       case "bytes": return bytes(amount);
       case "usd": case "AI credits": return unit === "usd" ? (Math.abs(amount) >= 100 && Number.isInteger(amount) ? usdWhole : usd).format(amount) : compact(amount);
       case "ratio": return percent(amount, 0);

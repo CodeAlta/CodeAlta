@@ -11,6 +11,11 @@ namespace CodeAlta.Plugin.Statistics.Journal;
 /// </summary>
 internal sealed class JournalPayloadParser
 {
+    // The most bytes of a name that is taken out of a command or of an argument: what is longer is a value, not a name.
+    private const int MaxProgramLength = 32;
+    private const int MaxCommandWordLength = 24;
+    private const int MaxSkillNameLength = 64;
+
     private static ReadOnlySpan<byte> PromptIdSignature => "{\"prompt_id\":\""u8;
 
     private static ReadOnlySpan<byte> QueuedPromptsKey => ",\"queued_prompts\":"u8;
@@ -315,7 +320,7 @@ internal sealed class JournalPayloadParser
                     return false;
                 }
 
-                record.SkillName = ReadString(ref reader);
+                record.SkillName = SkillNameOf(ReadString(ref reader));
             }
             else if (!SkipValue(ref reader))
             {
@@ -339,7 +344,7 @@ internal sealed class JournalPayloadParser
                 if (words < 2)
                 {
                     var value = reader.ValueSpan;
-                    if (value.IsEmpty || reader.ValueIsEscaped || value.Length > 32 || !IsCommandWord(value))
+                    if (value.IsEmpty || reader.ValueIsEscaped || value.Length > MaxCommandWordLength || !IsCommandWord(value))
                     {
                         // An option, or something that is not a command word (a sentence, a path, a value), ends the command words.
                         words = 2;
@@ -370,7 +375,8 @@ internal sealed class JournalPayloadParser
         return reader.TokenType == JsonTokenType.EndArray;
     }
 
-    // A word of a command is written as the commands of alta are: a lower-case letter, then lower-case letters, digits, '-' or '_'.
+    // A word of a command is written as the commands of alta are: a lower-case letter, then lower-case letters, '-' or '_'. A word
+    // with a digit is a value (an identifier, a number, a password), as a long one is.
     private static bool IsCommandWord(ReadOnlySpan<byte> value)
     {
         if (value[0] is not (>= (byte)'a' and <= (byte)'z'))
@@ -380,7 +386,7 @@ internal sealed class JournalPayloadParser
 
         foreach (var letter in value)
         {
-            if (letter is not (>= (byte)'a' and <= (byte)'z' or >= (byte)'0' and <= (byte)'9' or (byte)'-' or (byte)'_'))
+            if (letter is not (>= (byte)'a' and <= (byte)'z' or (byte)'-' or (byte)'_'))
             {
                 return false;
             }
@@ -1754,6 +1760,16 @@ internal sealed class JournalPayloadParser
                 begin++;
             }
 
+            // Whether the word is called, with the call operator of PowerShell: one ampersand before it (`& "C:\Program Files\x.exe"`).
+            // Two are the "and" of a shell, which calls nothing.
+            var operatorAt = begin - 1;
+            while (operatorAt >= 0 && text[operatorAt] == (byte)' ')
+            {
+                operatorAt--;
+            }
+
+            var called = operatorAt >= 0 && text[operatorAt] == (byte)'&' && (operatorAt == 0 || text[operatorAt - 1] != (byte)'&');
+
             // A quoted program ends at the closing quote (its path may hold spaces); any other word ends at a separator.
             var wordEnd = begin;
             if (begin < text.Length && text[begin] is (byte)'"' or (byte)'\'')
@@ -1771,6 +1787,16 @@ internal sealed class JournalPayloadParser
                 }
 
                 word = text[begin..wordEnd];
+
+                // A quoted text that starts a command is a value in PowerShell (`"secret" | docker login --password-stdin`) and a
+                // program in a POSIX shell. It is taken for a program only when it is called, or when it is written as the path
+                // of one and is given something that is not an operator: a text that is piped, redirected, joined or left alone
+                // is a value, and a value is never kept.
+                if (!called && !IsQuotedProgram(text, word, wordEnd + 1))
+                {
+                    return null;
+                }
+
                 break;
             }
 
@@ -1781,6 +1807,12 @@ internal sealed class JournalPayloadParser
 
             if (wordEnd == text.Length && cut)
             {
+                return null;
+            }
+
+            if (wordEnd < text.Length && text[wordEnd] is (byte)'"' or (byte)'\'')
+            {
+                // The word goes on in a quoted part: it is not whole.
                 return null;
             }
 
@@ -1809,12 +1841,14 @@ internal sealed class JournalPayloadParser
             word = word[..^4];
         }
 
-        if (word.IsEmpty || word.Length > 40)
+        // The name of a program is short: a longer word (a token, a key) is not one.
+        if (word.IsEmpty || word.Length > MaxProgramLength)
         {
             return null;
         }
 
-        Span<byte> lower = stackalloc byte[40];
+        Span<byte> lower = stackalloc byte[MaxProgramLength];
+        var letters = false;
         for (var index = 0; index < word.Length; index++)
         {
             var value = word[index];
@@ -1824,10 +1858,72 @@ internal sealed class JournalPayloadParser
                 return null;
             }
 
+            letters |= value is >= (byte)'a' and <= (byte)'z' or >= (byte)'A' and <= (byte)'Z' or >= 0x80;
             lower[index] = value is >= (byte)'A' and <= (byte)'Z' ? (byte)(value + 32) : value;
         }
 
-        return _strings.Get(lower[..word.Length]);
+        // A number is a value (`12345678 | Set-Clipboard`), not a program.
+        return letters ? _strings.Get(lower[..word.Length]) : null;
+    }
+
+    // Whether a quoted text at the start of a command is written as a program is: a path (`C:\...`, `/...`, `./...`, `../...`, `~/...`,
+    // `\\server\...`), closed, then a space and something that is not an operator of the shell or the end of the command.
+    private static bool IsQuotedProgram(ReadOnlySpan<byte> text, ReadOnlySpan<byte> word, int after)
+    {
+        var path = word.Length >= 3 && IsAsciiLetter(word[0]) && word[1] == (byte)':' && IsPathSeparator(word[2]);
+        if (!path)
+        {
+            var start = word;
+            if (!start.IsEmpty && start[0] == (byte)'~')
+            {
+                start = start[1..];
+            }
+            else
+            {
+                while (!start.IsEmpty && start[0] == (byte)'.' && word.Length - start.Length < 2)
+                {
+                    start = start[1..];
+                }
+            }
+
+            path = !start.IsEmpty && IsPathSeparator(start[0]);
+        }
+
+        if (!path || after >= text.Length || text[after] != (byte)' ')
+        {
+            return false;
+        }
+
+        while (after < text.Length && text[after] == (byte)' ')
+        {
+            after++;
+        }
+
+        return after < text.Length && text[after] is not ((byte)'|' or (byte)'>' or (byte)'<' or (byte)';' or (byte)'+' or (byte)')' or (byte)',' or (byte)'&' or (byte)'=');
+    }
+
+    private static bool IsAsciiLetter(byte value) => value is >= (byte)'a' and <= (byte)'z' or >= (byte)'A' and <= (byte)'Z';
+
+    private static bool IsPathSeparator(byte value) => value is (byte)'/' or (byte)'\\';
+
+    // A skill is named with letters, digits, `.`, `_`, `-` and `:` (a plugin and its skill): any other text given as the name of a
+    // skill (a sentence, a path, a long text) is not one, and is not kept.
+    private static string? SkillNameOf(string? name)
+    {
+        if (name is not { Length: > 0 and <= MaxSkillNameLength })
+        {
+            return null;
+        }
+
+        foreach (var letter in name)
+        {
+            if (!(char.IsAsciiLetterOrDigit(letter) || letter is '.' or '_' or '-' or ':'))
+            {
+                return null;
+            }
+        }
+
+        return name;
     }
 
     // Steps over the value of a NAME=value word: a quoted text, or a plain word. False when the value has no end that can be told:
@@ -1844,7 +1940,7 @@ internal sealed class JournalPayloadParser
             var quote = text[next++];
             while (next < text.Length && text[next] != quote)
             {
-                if (quote == (byte)'"' && (text[next] is (byte)'\\' or (byte)'`' || (text[next] == (byte)'$' && next + 1 < text.Length && text[next + 1] == (byte)'(')))
+                if (quote == (byte)'"' && (text[next] is (byte)'\\' or (byte)'`' || (text[next] == (byte)'$' && next + 1 < text.Length && text[next + 1] is (byte)'(' or (byte)'{')))
                 {
                     return false;
                 }

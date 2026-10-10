@@ -23,7 +23,9 @@ export function filterChoices(key: FilterKey, sources: FilterSources): FilterCho
     case "space": return sources.spaces.map(space => ({ value: space.id, label: space.name }));
     case "project": return (sources.projects?.rows ?? []).map(row => ({ value: row.project, label: row.name })).sort((a, b) => a.label.localeCompare(b.label));
     case "provider": return unique((sources.models?.rows ?? []).map(row => row.provider)).map(value => ({ value, label: sources.provider(value) })).sort((a, b) => a.label.localeCompare(b.label));
-    case "model": return (sources.models?.rows ?? []).map(row => ({ value: row.model, label: row.model, detail: sources.provider(row.provider) }));
+    // A filter names a model, whatever its provider: a model two providers have is offered once, with both.
+    case "model": return unique((sources.models?.rows ?? []).map(row => row.model)).map(model => ({ value: model, label: model,
+      detail: unique((sources.models?.rows ?? []).filter(row => row.model === model).map(row => sources.provider(row.provider))).join(", ") }));
     case "effort": return unique((sources.models?.efforts ?? []).map(row => row.effort).filter(value => value !== "")).map(value => ({ value, label: value }));
     case "origin": return originValues.map(value => ({ value, label: sources.word("origin", value) }));
     case "toolKind": return toolKindValues.map(value => ({ value, label: sources.word("toolKind", value) }));
@@ -34,6 +36,14 @@ const unique = (values: readonly string[]) => [...new Set(values)].sort((a, b) =
 
 /** The kinds of filter not set yet, in menu order. */
 export const unsetFilters = (filters: Filters): readonly FilterKey[] => filterKeys.filter(key => !filters[key]);
+
+/**
+ * What the chip of a filter reads. A provider is always named from its key, by the names the window has now: a filter set from a chart before
+ * the names arrived, or kept from another day, follows them. The others read the label they were set with, a fixed value in its words.
+ */
+export function filterChipValue(key: FilterKey, entry: Readonly<{ value: string; label?: string }>, names: Pick<FilterSources, "word" | "provider">): string {
+  return key === "provider" ? names.provider(entry.value) : names.word(key, entry.label ?? entry.value);
+}
 
 /** The label of a filter value: the one it was set with, or the value itself. */
 export const filterEntryText = (filters: Filters, key: FilterKey): string => filters[key]?.label ?? filters[key]?.value ?? "";

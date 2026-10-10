@@ -167,6 +167,40 @@ public sealed class JournalComponentTests
     [DataRow("C:\\\\tools\\\\Git\\\\bin\\\\git.exe status", "git")]
     [DataRow("/opt/my\\\\ tool/run x", null)]
     [DataRow("KEY=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa psql", null)]
+    // A quoted text at the start of a command is a value in PowerShell and a program in a POSIX shell: it is a program only when
+    // it is called with & or written as a path, with something after it that is not an operator.
+    [DataRow("\\\"hunter2\\\" | docker login -u me --password-stdin", null)]
+    [DataRow("\\u0022hunter2\\u0022 | docker login -u me --password-stdin", null)]
+    [DataRow("'y' | prog", null)]
+    [DataRow("(\\\"hunter2\\\") | x", null)]
+    [DataRow("\\\"hunter2\\\"", null)]
+    [DataRow("'ghp_0123456789abcdefghijklmnopqrstuvwxyz' | gh auth login --with-token", null)]
+    [DataRow("\\\"hunter2\\\" -replace 'u','x' | clip", null)]
+    [DataRow("\\\"hunter2\\\".Length", null)]
+    [DataRow("\\\"hunter2\\\" arg", null)]
+    [DataRow("\\\"abc/def+ghi\\\" | base64 -d", null)]
+    [DataRow("\\\"/opt/x/run\\\"", null)]
+    [DataRow("\\\"C:\\\\tools\\\\run.exe\\\"|more", null)]
+    [DataRow("\\\"C:\\\\tools\\\\run.exe\\\" > out.txt", null)]
+    [DataRow("\\\"C:\\\\Program Files\\\\Git\\\\bin\\\\git.exe\\\" status", "git")]
+    [DataRow("\\\"/opt/my tools/bin/run\\\" --fast", "run")]
+    [DataRow("\\\"./build.sh\\\" --release", "build.sh")]
+    [DataRow("'~/bin/tool' x", "tool")]
+    [DataRow("& 'git' status", "git")]
+    [DataRow("$env:A='b'; & \\\"C:\\\\x y\\\\run.exe\\\" go", "run")]
+    // The call operator is one ampersand: what follows two is a new command, whose quoted start is a value all the same.
+    [DataRow("A=1 && \\\"hunter2\\\" | x", null)]
+    [DataRow("A=1 \\u0026\\u0026 'hunter2' | x", null)]
+    // A word in the place of a program is kept only when it is written as the name of one.
+    [DataRow("12345678 | Set-Clipboard", null)]
+    [DataRow("3.14 | x", null)]
+    [DataRow("abcdefghijklmnopqrstuvwxyz0123456 status", null)]
+    [DataRow("abcdefghijklmnopqrstuvwxyz012345 status", "abcdefghijklmnopqrstuvwxyz012345")]
+    [DataRow("7z a x.zip", "7z")]
+    [DataRow("hun\\\"ter2\\\" | x", null)]
+    // A quote inside ${...} is not the end of a double-quoted value.
+    [DataRow("PASSWORD=\\\"${PASSWORD:-\\\" hunter2\\\"}\\\" psql", null)]
+    [DataRow("X=\\\"${Y:-\\\";hunter2\\\"}\\\" psql", null)]
     // What is not the name of a program is not kept either.
     [DataRow("\\\"hunter2=x\\\" | tool", null)]
     [DataRow("[System.IO.File]::ReadAllText('x')", null)]
@@ -187,6 +221,29 @@ public sealed class JournalComponentTests
     }
 
     [TestMethod]
+    [DataRow("ilspy-decompile", "ilspy-decompile")]
+    [DataRow("anthropic-skills:docx", "anthropic-skills:docx")]
+    [DataRow("My_Skill.v2", "My_Skill.v2")]
+    // A name that is not written as the name of a skill is not kept: a sentence, a path, a text that is too long.
+    [DataRow("use the password hunter2", null)]
+    [DataRow("C:\\\\Users\\\\someone\\\\skills\\\\x", null)]
+    [DataRow("apps/web:deploy", null)]
+    [DataRow("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", null)]
+    [DataRow("", null)]
+    public void SkillName_IsKeptWhenItIsWrittenAsAName(string name, string? expected)
+    {
+        var b = new JournalBuilder();
+        var line = $"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Started\",\"activityId\":\"a\",\"name\":\"codealta_skills_activate\",\"details\":{{\"toolCallId\":\"a\",\"toolName\":\"codealta_skills_activate\",\"arguments\":{{\"skillName\":\"{name}\"}},\"readFiles\":[],\"modifiedFiles\":[]}},{b.Envelope(JournalBuilder.Time(0), "r")}";
+        using var scanner = new JournalScanner();
+        var sink = new CollectingSink();
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(line + "\n"));
+
+        scanner.Scan(stream, 0, null, sink, long.MaxValue, CancellationToken.None);
+
+        Assert.AreEqual(expected, ((ToolRecord)sink.Records.Single()).SkillName);
+    }
+
+    [TestMethod]
     [DataRow("\"session\",\"create\",\"--project\",\"p\"", "session create")]
     [DataRow("\"session\",\"set_agent\",\"--prompt-id\",\"plan\"", "session set_agent")]
     [DataRow("\"mcp\",\"activate\",\"codealta-dev\"", "mcp activate")]
@@ -197,6 +254,11 @@ public sealed class JournalComponentTests
     [DataRow("\"task\",\"Hunter2\"", "task")]
     [DataRow("\"estimate\",\"src/secret.txt\"", "estimate")]
     [DataRow("\"A sentence first\",\"list\"", null)]
+    // A command word of alta has no digit and is short: a word that has one, or a long one, is a value.
+    [DataRow("\"task\",\"hunter2\"", "task")]
+    [DataRow("\"estimate\",\"correcthorsebatterystaplex\"", "estimate")]
+    [DataRow("\"ab12cd34\",\"list\"", null)]
+    [DataRow("\"history\",\"forget-deleted\"", "history forget-deleted")]
     public void AltaCommand_IsTheFirstTwoCommandWords(string words, string? expected)
     {
         var b = new JournalBuilder();

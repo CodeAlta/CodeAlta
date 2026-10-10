@@ -878,6 +878,43 @@ public sealed class StatisticsEngineTests
         await loop.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
+    [TestMethod]
+    public async Task AStartThatFailedAtItsLastStep_IsStillAFailedStart_AndCanBeTriedAgain()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        AddSession(harness, "a", Today9);
+        var database = new FailingDatabase(harness.Store.Database);
+        var options = new StatisticsEngineOptions { Time = harness.Time, StartDelay = TimeSpan.Zero, FlowDebounce = TimeSpan.Zero };
+
+        // How many times a start reads the database: the last of them is the reading of the names of the projects.
+        await using (var counting = new StatisticsEngine(new StatisticsStore(database, new LocalDays(TimeZoneInfo.Utc)), harness.Journals, options))
+        {
+            await counting.InitializeAsync();
+        }
+
+        var readsOfAStart = database.Reads;
+        database.Reads = 0;
+        database.FailingRead = readsOfAStart;
+        var store = new StatisticsStore(database, new LocalDays(TimeZoneInfo.Utc));
+        await using var engine = new StatisticsEngine(store, harness.Journals, options);
+        using var lifetime = new CancellationTokenSource();
+        var loop = engine.RunAsync(lifetime.Token);
+        await WaitForAsync(() => engine.Status.State == HistoryState.Failed);
+
+        // The disk is back: "Try again" starts the engine, whose state is known again.
+        database.FailingRead = 0;
+        var status = await engine.ResumeAsync();
+
+        Assert.AreEqual(HistoryState.NeedsChoice, status.State);
+        Assert.IsNull(status.Error);
+        await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await WaitForAsync(() => engine.Status.State == HistoryState.Done);
+        Assert.IsNotNull(await store.GetJournalAsync("a"));
+
+        await lifetime.CancelAsync();
+        await loop.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
     private static async Task WaitForAsync(Func<bool> condition)
     {
         var limit = DateTime.UtcNow.AddSeconds(20);
@@ -893,6 +930,12 @@ public sealed class StatisticsEngineTests
     {
         public bool Failing { get; set; }
 
+        /// <summary>Gets or sets the number of reads asked so far.</summary>
+        public int Reads { get; set; }
+
+        /// <summary>Gets or sets the read that fails, counted from one; zero for none.</summary>
+        public int FailingRead { get; set; }
+
         public bool HasDatabase => inner.HasDatabase;
 
         public string TablePrefix => inner.TablePrefix;
@@ -901,7 +944,7 @@ public sealed class StatisticsEngineTests
             => Failing ? throw new IOException("The disk is not there.") : inner.MigrateAsync(version, migrate, cancellationToken);
 
         public ValueTask<T> ReadAsync<T>(Func<Microsoft.Data.Sqlite.SqliteConnection, CancellationToken, ValueTask<T>> read, CancellationToken cancellationToken = default)
-            => Failing ? throw new IOException("The disk is not there.") : inner.ReadAsync(read, cancellationToken);
+            => Failing || ++Reads == FailingRead ? throw new IOException("The disk is not there.") : inner.ReadAsync(read, cancellationToken);
 
         public ValueTask WriteAsync(Func<Microsoft.Data.Sqlite.SqliteConnection, CancellationToken, ValueTask> write, CancellationToken cancellationToken = default)
             => Failing ? throw new IOException("The disk is not there.") : inner.WriteAsync(write, cancellationToken);

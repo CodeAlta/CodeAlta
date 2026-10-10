@@ -6,7 +6,7 @@ import { filterValueLabel, triggerLabel } from "../labels";
 import { SeriesChart } from "../pageKit";
 import { useHealth } from "../queries";
 import { useStatistics } from "../runtime";
-import { toolName } from "./shared";
+import { mergeToolRows } from "./shared";
 import { useText } from "../text";
 import type { ContextFillRow, SeriesResult } from "../types";
 
@@ -27,7 +27,7 @@ export function HealthPage() {
   const errors = useMemo(() => data ? asSeries(data, "errors", t("Errors"), data.errors) : null, [data, t]);
   const interrupted = useMemo(() => data ? asSeries(data, "interrupted", t("Interrupted runs"), data.interruptedRuns) : null, [data, t]);
   const compactions = useMemo(() => data ? asSeries(data, "compactions", t("Compactions"), data.compactions) : null, [data, t]);
-  const failed = useMemo<RankedItem[]>(() => (data?.failedTools ?? []).map(row => ({ key: row.tool, label: toolName(row.tool), detail: filterValueLabel(t, "toolKind", row.kind), value: row.failures,
+  const failed = useMemo<RankedItem[]>(() => mergeToolRows(data?.failedTools ?? []).sort((a, b) => b.failures - a.failures).map(row => ({ key: row.tool, label: row.server ? `${row.name} (${row.server})` : row.name, detail: filterValueLabel(t, "toolKind", row.kind), value: row.failures,
     text: `${fmt.number(row.failures)} · ${fmt.percent(row.failureRate)}`, share: 0, spark: row.spark })), [data, t, fmt]);
   const triggers = useMemo<RankedItem[]>(() => (data?.compactionsByTrigger ?? []).map(item => ({ key: item.key, label: triggerLabel(t, item.key), value: item.value, text: fmt.number(item.value), share: 0 })), [data, t, fmt]);
   const fill: Column<ContextFillRow>[] = [

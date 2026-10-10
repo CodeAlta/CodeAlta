@@ -79,6 +79,8 @@ export const fixtureTools = [
   { tool: "ToolCall:alta", kind: "alta", median: 480, spread: 0.9, failure: 0.03 },
   { tool: "ToolCall:mcp__github__issue_read", kind: "mcp", median: 900, spread: 0.8, failure: 0.05 },
   { tool: "Skill:alta", kind: "skill", median: 70, spread: 0.5, failure: 0.0 },
+  // The same tool of an MCP server, recorded as another kind of activity: the pages show it as one tool.
+  { tool: "McpToolCall:mcp__github__issue_read", kind: "mcp", median: 900, spread: 0.8, failure: 0.05 },
 ] as const;
 
 export const fixtureProjects: readonly FixtureProject[] = [
@@ -97,6 +99,8 @@ export const fixtureModels: readonly FixtureModel[] = [
   { provider: "copilot", model: "claude-sonnet-5-5", efforts: ["medium"], costUnit: "AI credits", contextWindow: 200_000, speed: 0.9 },
   { provider: "gemini", model: "gemini-3-pro", efforts: ["medium", "high"], costUnit: null, contextWindow: 1_000_000, speed: 1.1 },
   { provider: "mistral", model: "devstral-2", efforts: ["medium"], costUnit: null, contextWindow: 128_000, speed: 1.4 },
+  // A model that a second provider has too: a row is a model of a provider.
+  { provider: "copilot", model: "gpt-6.1", efforts: ["medium"], costUnit: "AI credits", contextWindow: 400_000, speed: 1.1 },
 ];
 
 const verbs = ["Fix", "Add", "Refactor", "Review", "Explore", "Test", "Document", "Profile", "Investigate", "Plan", "Clean up", "Port"];
@@ -146,7 +150,7 @@ export function generateFixtureData(options: Readonly<{ today: string; first?: s
     return (weekday === 0 || weekday === 6 ? 0.35 : 1) * (0.5 + 1.1 * (index / span)) * (0.75 + random() * 0.5);
   });
   const projectWeights = [5, 2, 3, 1.4, 1, 1.2];
-  const modelWeights = [4, 3, 1.5, 1.2, 0.6];
+  const modelWeights = [4, 3, 1.5, 1.2, 0.6, 0.9];
   const sessions: FixtureSession[] = [];
   const cells: Cell[] = [];
   for (let number = 0; number < sessionCount; number++) {

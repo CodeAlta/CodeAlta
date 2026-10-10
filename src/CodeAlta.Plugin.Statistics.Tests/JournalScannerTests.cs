@@ -230,7 +230,7 @@ public sealed class JournalScannerTests
             .ToolDone(T0.AddSeconds(2), "r", "t3", "apply_patch", modifiedFiles: ["C:\\code\\a.CS", "/home/x/b.md", "noext"], diff: "--- a/a.cs\n+++ b/a.cs\n@@ -1,2 +1,3 @@\n ctx\n-old\n+new\n+more\n\\ No newline")
             .ToolDone(T0.AddSeconds(3), "r", "t4", "Bash", argsJson: "{\"command\":\"cd x && dotnet build\"}")
             .ToolDone(T0.AddSeconds(4), "r", "t5", "codealta_skills_activate", argsJson: "{\"skillName\":\"ilspy\"}")
-            .ToolDone(T0.AddSeconds(5), "r", "t6", "shell_command", phase: "Failed", argsJson: "{\"command\":\"\\\"quoted\\\" arg\"}");
+            .ToolDone(T0.AddSeconds(5), "r", "t6", "shell_command", phase: "Failed", argsJson: "{\"command\":\"\\\"./quoted\\\" arg\"}");
 
         var (_, sink) = Scan(b);
 

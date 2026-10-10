@@ -2,7 +2,7 @@ import { Button, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/c
 import { useMemo, useState } from "react";
 import { AppIcon } from "../AppIcon";
 import { useText } from "./text";
-import { filterChoices, ignoredKinds, unsetFilters, type FilterChoice } from "./filters";
+import { filterChipValue, filterChoices, ignoredKinds, unsetFilters, type FilterChoice } from "./filters";
 import { allowedFrequencies, encodeFrame, filterKeys, periodPresets, resolvePeriod, resolveFrequency, type FilterKey, type PeriodChoice } from "./frame";
 import { readMoreChoices } from "./history";
 import { comparisonLabel, filterKindLabel, filterValueLabel, frequencyLabel, periodLabel } from "./labels";
@@ -137,7 +137,7 @@ function CanvasMenu() {
 /** The bar. */
 export function FrameBar() {
   const { t } = useText();
-  const { frame, dispatch, resetFrame, header, openFrame } = useStatistics();
+  const { frame, dispatch, resetFrame, header, openFrame, providerName } = useStatistics();
   const ignored = ignoredKinds(header?.ignoredFilters ?? []);
   const set = filterKeys.filter(key => frame.filters[key]);
   const changed = encodeFrame({ ...frame, page: openFrame.page, view: openFrame.view }) !== encodeFrame(openFrame);
@@ -149,7 +149,7 @@ export function FrameBar() {
     <div className="stats-chips" role="group" aria-label={t("Filters")}>
       {set.map(key => {
         const entry = frame.filters[key]!;
-        const text = `${filterKindLabel(t, key)}: ${filterValueLabel(t, key, entry.label ?? entry.value)}`;
+        const text = `${filterKindLabel(t, key)}: ${filterChipValue(key, entry, { word: (kind, value) => filterValueLabel(t, kind, value), provider: providerName })}`;
         const note = ignored.has(key) ? t("This filter does not apply to this page.") : undefined;
         return <span key={key} className="stats-chip" role="group" data-ignored={note ? "" : undefined} title={note} aria-label={note ? `${text} — ${note}` : text}>
           <span className="stats-chip-text">{text}</span>

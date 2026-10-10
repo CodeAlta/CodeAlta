@@ -90,7 +90,7 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `statistics-overview`, `statistics-overview-light`, `statistics-activity`, `statistics-models`, `statistics-tools`, `statistics-tools-time`, `statistics-projects`, `statistics-filters` | The Statistics tab beside a session tab, with the numbers of a real profile for a space of public projects. `overview` is the last 90 days by week, the time by project; `overview-light` the last 30 days by day, the tokens by model, in the light theme; the pages are taken from their top, and `tools-time` is the Tools page scrolled to its end; `filters` is a crop of the bar with the **Filter** menu open. |
 | `statistics-history`, `statistics-history-reading`, `statistics-sessions` | With the sessions of the developer instance itself: the first card of the tab (a crop), the tab while the history is read, and the Sessions page of the last 30 days. |
 | `canvases`, `canvas-board`, `canvas-agent` | The Canvases page with the two canvas samples; a session whose agent used `alta canvas` and `alta statistics`, alone, and with the Board tab of the `canvas-board` sample in a pane at its right. |
-| `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, made tall enough to show the buttons of every plugin (a crop of the Settings window). |
+| `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, without the two lines of folders at its top, made tall enough to show the buttons of every plugin (a crop of the Settings window). |
 
 Changes made for a capture are applied as patches and reversed after it. Record `git status`, `HEAD` and
 `git stash list` of each repository before, and compare after: they must be the same.
@@ -129,6 +129,10 @@ What the scenes with state of their own need:
   in a picture moved aside, **Reset statistics…** and **Read all the history** leave the sessions of the scenes
   alone, each a link. The page names a session by the title it was created with: move aside too the sessions
   that were renamed since, whose first title is a test name.
+  The pages of the tab share one period: set it again before a page (the light Overview leaves 30 days by day).
+  After the database of the developer instance is put back, a session made during the pictures is no longer in
+  its list of sessions: set `session_projection_cache_complete` to `0` in `session_projection_cache_metadata`,
+  and the next start reads the journals again.
 - **The history of the statistics.** **Reset statistics…** in the menu of the page brings the first card back.
   **Read all the history** takes about two seconds on the developer instance: take the capture right after the
   click, with the page dressed before. Do it last, since the numbers are deleted.
@@ -142,6 +146,11 @@ What the scenes with state of their own need:
   they are kept in `~/.alta/plugin-data/plugin_canvas-checklist`, which the two instances share: remove it, or
   put back what was there. The session of `canvas-agent` is a real one, sent with a small model: its prompt asks
   for `alta canvas list`, `open` and `show`, then `alta statistics summary`, and for no file change.
+  The **Notes** chip of a session sits over the top right of its first message, where the time is: for these
+  two pictures it is moved down beside the short lines of the prompt (the `y` of
+  `codealta.desktop.notes-window.v1` in the local storage of the window, set before the tab opens and put back
+  after). The Plugins page names the folder of the plugins of the user, which has the name of the account:
+  `.settings-file-locations` is hidden for `plugin-buttons-settings`.
 - **Add provider.** The menu lists the built-in providers the profile does not have: take the picture on a
   profile of its own (`--catalog-root`, `--data-root` and the other roots of an isolated launch, with
   `--mcp-port`), with one provider that is disabled in its `config.toml`. `add-provider` is the crop of the

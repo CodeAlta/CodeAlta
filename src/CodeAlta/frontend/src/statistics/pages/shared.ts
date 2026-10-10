@@ -1,5 +1,5 @@
 import type { QueryState } from "../useQuery";
-import type { CostAmount, SeriesLine, SeriesResult } from "../types";
+import type { CostAmount, RankedRow, SeriesLine, SeriesResult, ToolRow } from "../types";
 
 // Small pure helpers the pages share.
 
@@ -55,4 +55,70 @@ export function toolParts(tool: string): Readonly<{ name: string; server: string
 export function toolName(tool: string): string {
   const parts = toolParts(tool);
   return parts.server ? `${parts.name} (${parts.server})` : parts.name;
+}
+
+/** A tool as a page shows it: the rows of the plugin that read the same (one name, one server, one kind) added up, with the keys they came from. */
+export type ToolGroup = ToolRow & Readonly<{ name: string; server: string | null; keys: readonly string[] }>;
+
+/**
+ * Adds up the rows of the table of tools that a page would write the same way: the plugin keys a tool by the kind of activity it was recorded
+ * as, so one tool can come under two keys (`ToolCall:mcp__github__issue_read` and `McpToolCall:mcp__github__issue_read`). The counts, the times
+ * and the sizes are sums and the longest call is the longest of all; the median and the 90th percentile, which do not add up, are those of the
+ * rows weighted by their calls. `tool` is the key with the most calls, and `keys` has them all: a question about the tool asks for each.
+ */
+export function mergeToolRows(rows: readonly ToolRow[]): ToolGroup[] {
+  const groups = new Map<string, ToolRow[]>();
+  for (const row of rows) {
+    const parts = toolParts(row.tool);
+    const id = `${row.kind}\u001f${parts.server ?? ""}\u001f${parts.name}`;
+    (groups.get(id) ?? groups.set(id, []).get(id)!).push(row);
+  }
+  return [...groups.values()].map(members => {
+    const first = [...members].sort((a, b) => b.calls - a.calls)[0];
+    const parts = toolParts(first.tool);
+    if (members.length === 1) return { ...first, name: parts.name, server: parts.server, keys: [first.tool] };
+    const sum = (pick: (row: ToolRow) => number) => members.reduce((total, row) => total + pick(row), 0);
+    const weighted = (pick: (row: ToolRow) => number | undefined) => {
+      const known = members.filter(row => pick(row) !== undefined && row.calls > 0);
+      const calls = known.reduce((total, row) => total + row.calls, 0);
+      return calls === 0 ? undefined : known.reduce((total, row) => total + pick(row)! * row.calls, 0) / calls;
+    };
+    const calls = sum(row => row.calls), failures = sum(row => row.failures);
+    const p50Ms = weighted(row => row.p50Ms), p90Ms = weighted(row => row.p90Ms);
+    const length = Math.max(...members.map(row => row.spark.length));
+    return {
+      kind: first.kind, tool: first.tool, calls, failures, failureRate: calls === 0 ? 0 : failures / calls, timeMs: sum(row => row.timeMs),
+      ...(p50Ms === undefined ? {} : { p50Ms }), ...(p90Ms === undefined ? {} : { p90Ms }), maxMs: Math.max(...members.map(row => row.maxMs)),
+      bytesIn: sum(row => row.bytesIn), bytesOut: sum(row => row.bytesOut), spark: Array.from({ length }, (_, at) => sum(row => row.spark[at] ?? 0)),
+      name: parts.name, server: parts.server, keys: members.map(row => row.tool),
+    };
+  });
+}
+
+/** The rows of a ranking of tools that read the same (one name, one kind) added up; the key is the one with the largest value. */
+export function mergeRankedTools(rows: readonly RankedRow[]): RankedRow[] {
+  const groups = new Map<string, RankedRow[]>();
+  for (const row of rows) {
+    const id = `${row.detail ?? ""}\u001f${toolName(row.label)}`;
+    (groups.get(id) ?? groups.set(id, []).get(id)!).push(row);
+  }
+  return [...groups.values()].map(members => {
+    if (members.length === 1) return members[0];
+    const first = [...members].sort((a, b) => b.value - a.value)[0];
+    const sum = (pick: (row: RankedRow) => number) => members.reduce((total, row) => total + pick(row), 0);
+    const length = Math.max(...members.map(row => row.spark.length));
+    return { ...first, value: sum(row => row.value), share: sum(row => row.share), tokens: sum(row => row.tokens), timeMs: sum(row => row.timeMs), calls: sum(row => row.calls),
+      requests: sum(row => row.requests), ...(members.some(row => row.failures !== undefined) ? { failures: sum(row => row.failures ?? 0) } : {}),
+      spark: Array.from({ length }, (_, at) => sum(row => row.spark[at] ?? 0)) };
+  }).sort((a, b) => b.value - a.value);
+}
+
+/**
+ * The name of each model of a list, by `provider/model`: the model alone, and with the name of its provider when another row has the same model
+ * under another provider, so that no two rows of a chart read the same.
+ */
+export function modelNames(rows: readonly Readonly<{ provider: string; model: string }>[], providerName: (key: string) => string): Map<string, string> {
+  const providers = new Map<string, Set<string>>();
+  for (const row of rows) (providers.get(row.model) ?? providers.set(row.model, new Set()).get(row.model)!).add(row.provider);
+  return new Map(rows.map(row => [`${row.provider}/${row.model}`, providers.get(row.model)!.size > 1 ? `${row.model} (${providerName(row.provider)})` : row.model]));
 }

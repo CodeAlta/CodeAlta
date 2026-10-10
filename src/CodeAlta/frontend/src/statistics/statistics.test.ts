@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { messages, translate, locales } from "../localization";
 import { createFixtureApi } from "./fixtureApi";
-import { filterChoices, ignoredKinds, unsetFilters } from "./filters";
+import { filterChipValue, filterChoices, ignoredKinds, unsetFilters } from "./filters";
 import { createFormatter, dayOfNumber, etaParts, sentenceCase } from "./format";
 import {
   addDays, addMonths, allowedFrequencies, autoFrequency, bucketCount, decodeFrame, defaultFrame, encodeFrame, filterOf, firstDayOfWeek, frameReducer, initialFrame, knownDays,
@@ -10,12 +10,12 @@ import {
 } from "./frame";
 import { statisticsContext } from "./canvasContext";
 import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, skippedToRetry, timeLeft } from "./history";
-import { distributionOption, hatchFraction, periodOfBrush, ratioSeries, scatterOption, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
+import { distributionOption, hatchFraction, partsOption, periodOfBrush, ratioSeries, scatterOption, timeAxis, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
 import { providerNamer, senderLabel } from "./labels";
 import { QueryStore, joinRanges } from "./queryStore";
-import { binSteps, boxStatsOfSteps, percentileOfSteps, stepsCount } from "./steps";
+import { binSteps, boxStatsOfSteps, mergeSteps, percentileOfSteps, stepsCount } from "./steps";
 import type { DistributionStep, SeriesResult, StatisticsStatus } from "./types";
-import { mcpParts, combineSeries, toolName, toolParts } from "./pages/shared";
+import { mcpParts, combineSeries, mergeRankedTools, mergeToolRows, modelNames, toolName, toolParts } from "./pages/shared";
 
 const today = "2026-10-09";
 const fmt = createFormatter("en", { credits: amount => `${amount} AI credits`, none: "–" });
@@ -502,6 +502,93 @@ test("a treemap names the cells that have room for a name, and keeps every name 
   const cells = (built.option as any).series[0].data.flatMap((item: any) => item.children) as { name: string; label?: { show: boolean } }[];
   assert.deepEqual(cells.map(cell => [cell.name, cell.label?.show ?? true]), [["shell", true], ["read_file", true], ["apply_patch", false]]);
   assert.deepEqual(built.table.rows.map(row => row[0]), ["Shell", "Shell / shell", "Files", "Files / read_file", "Files / apply_patch"]);
+});
+
+test("the chip of a provider filter reads the name the window has now, whatever label the filter was set with", () => {
+  const word = (_key: string, value: string) => value === "agent" ? "An agent" : value;
+  const before = { word, provider: providerNamer(undefined) }, after = { word, provider: providerNamer([{ key: "claude-code", name: "Claude Code" }]) };
+  // Set from a legend before the names of the providers arrived: the key was all there was.
+  const early = { value: "claude-code", label: "claude-code" };
+  assert.equal(filterChipValue("provider", early, before), "claude-code");
+  assert.equal(filterChipValue("provider", early, after), "Claude Code", "the chip follows the names when they arrive");
+  assert.equal(filterChipValue("provider", { value: "claude-code", label: "An old name" }, after), "Claude Code");
+  assert.equal(filterChipValue("provider", { value: "gone" }, after), "gone");
+  assert.equal(filterChipValue("project", { value: "p1", label: "CodeAlta" }, after), "CodeAlta");
+  assert.equal(filterChipValue("origin", { value: "agent" }, after), "An agent");
+});
+
+test("a tool the plugin has under two keys is one row, one box and one cell: its numbers are added up and its keys are kept", () => {
+  const row = (tool: string, kind: string, calls: number, more: Partial<Parameters<typeof mergeToolRows>[0][number]> = {}) => ({ kind, tool, calls, failures: 1, failureRate: 1 / calls, timeMs: calls * 10, p50Ms: 100, p90Ms: 400, maxMs: 900, bytesIn: 10, bytesOut: 20, spark: [calls, 0], ...more });
+  const merged = mergeToolRows([row("ToolCall:mcp__github__issue_read", "mcp", 30, { p50Ms: 100, maxMs: 500 }), row("ToolCall:read_file", "files", 50), row("McpToolCall:mcp__github__issue_read", "mcp", 10, { p50Ms: 500, maxMs: 900, spark: [4, 6] }),
+    row("ToolCall:alta", "alta", 5), row("Skill:alta", "skill", 2), row("ToolCall:mcp__jira__issue_read", "mcp", 1, { p50Ms: undefined })]);
+  assert.deepEqual(merged.map(item => [item.name, item.server, item.kind, item.calls]), [["issue_read", "github", "mcp", 40], ["read_file", null, "files", 50], ["alta", null, "alta", 5], ["alta", null, "skill", 2], ["issue_read", "jira", "mcp", 1]],
+    "the same name under another server or another kind is another tool");
+  const issue = merged[0];
+  assert.deepEqual(issue.keys, ["ToolCall:mcp__github__issue_read", "McpToolCall:mcp__github__issue_read"]);
+  assert.equal(issue.tool, "ToolCall:mcp__github__issue_read", "the key with the most calls names the row");
+  assert.deepEqual([issue.failures, issue.failureRate, issue.timeMs, issue.maxMs, issue.bytesIn, issue.bytesOut], [2, 2 / 40, 400, 900, 20, 40]);
+  assert.deepEqual(issue.spark, [34, 6]);
+  assert.equal(issue.p50Ms, (100 * 30 + 500 * 10) / 40, "a median does not add up: the medians weighted by their calls");
+  assert.equal(merged[4].p50Ms, undefined);
+  assert.deepEqual(merged[1].keys, ["ToolCall:read_file"]);
+
+  const ranked = (key: string, detail: string, value: number) => ({ key, label: key, detail, value, share: value / 100, tokens: 0, timeMs: value, calls: value, requests: 0, spark: [value] });
+  const top = mergeRankedTools([ranked("shell", "shell", 50), ranked("McpToolCall:mcp__github__issue_read", "mcp", 20), ranked("ToolCall:mcp__github__issue_read", "mcp", 35), ranked("ToolCall:grep", "search", 40)]);
+  assert.deepEqual(top.map(item => [item.key, item.value, item.calls, item.spark[0]]), [["ToolCall:mcp__github__issue_read", 55, 55, 55], ["shell", 50, 50, 50], ["ToolCall:grep", 40, 40, 40]]);
+
+  // The durations of the keys of one tool are one distribution: the plugin cuts every distribution at the same edges.
+  const steps = mergeSteps([[{ lower: 1, upper: 2, count: 3 }, { lower: 4, upper: 8, count: 1 }], [{ lower: 2, upper: 4, count: 5 }, { lower: 4, upper: 8, count: 2 }], []]);
+  assert.deepEqual(steps, [{ lower: 1, upper: 2, count: 3 }, { lower: 2, upper: 4, count: 5 }, { lower: 4, upper: 8, count: 3 }]);
+  assert.equal(stepsCount(steps), 11);
+});
+
+test("an axis of time steps by a round time and starts at 0", () => {
+  const minute = 60_000, hour = 60 * minute;
+  assert.deepEqual(timeAxis(69.4 * hour), { interval: 12 * hour, max: 72 * hour });
+  assert.deepEqual(timeAxis(5.2 * hour), { interval: hour, max: 6 * hour });
+  assert.deepEqual(timeAxis(50 * minute), { interval: 10 * minute, max: 50 * minute });
+  assert.deepEqual(timeAxis(7 * minute), { interval: 2 * minute, max: 8 * minute });
+  assert.deepEqual(timeAxis(40_000), { interval: 10_000, max: 40_000 });
+  assert.deepEqual(timeAxis(900), { interval: 200, max: 1000 });
+  assert.deepEqual(timeAxis(20 * 24 * hour), { interval: 5 * 24 * hour, max: 20 * 24 * hour });
+  assert.deepEqual(timeAxis(700 * 24 * hour), { interval: 200 * 24 * hour, max: 800 * 24 * hour });
+  for (const top of [1, 999, 61_000, 3.3 * hour, 26 * hour, 3_000 * hour]) {
+    const axis = timeAxis(top);
+    assert.ok(axis.max >= top && axis.max / axis.interval <= 6 && Number.isInteger(axis.max / axis.interval), `${top}: ${JSON.stringify(axis)}`);
+  }
+  assert.ok(timeAxis(0).max > 0 && timeAxis(Number.NaN).max > 0);
+  assert.deepEqual([0, 500, 30_000, 15 * minute, 90 * minute, 12 * hour, 72 * hour, 1_200 * hour].map(value => fmt.axis("ms", value)), ["0", "500 ms", "30 s", "15 min", "1 h 30", "12 h", "72 h", "1,200 h"]);
+  assert.equal(fmt.axis("ms", 90_000), "1 min 30 s");
+
+  // A time chart: the marks of its axis are the round ones, up to the highest bar, and up to the compared period when that is higher.
+  const marks = (result: SeriesResult) => {
+    const axis = (timeSeriesOption({ result, kind: "bar", fmt, color: () => "#000", previousName: "Previous", otherName: "Other", muted: "#888" }).option as any).yAxis;
+    return Array.from({ length: Math.round(axis.max / axis.interval) + 1 }, (_, index) => axis.axisLabel.formatter(axis.min + index * axis.interval));
+  };
+  const time = series([[13 * hour, 40 * hour, 9 * hour], [0, 29.4 * hour, 2 * hour]]);
+  assert.deepEqual(marks({ ...time, unit: "ms" }), ["0", "12 h", "24 h", "36 h", "48 h", "60 h", "72 h"]);
+  const compared = { ...time, unit: "ms", series: [{ ...time.series[0], values: [hour, 2 * hour, hour], previous: [hour, 9.5 * hour, hour], total: 4 * hour }] };
+  assert.deepEqual(marks(compared), ["0", "2 h", "4 h", "6 h", "8 h", "10 h"]);
+  const counts = (timeSeriesOption({ result: series([[1, 2, 3]]), kind: "bar", fmt, color: () => "#000", previousName: "Previous", otherName: "Other", muted: "#888" }).option as any).yAxis;
+  assert.equal(counts.interval, undefined, "only an axis of time is given its step");
+});
+
+test("a model two providers have is told apart by its provider, where a row would otherwise read like another", async () => {
+  const name = providerNamer([{ key: "codex", name: "Codex" }, { key: "copilot", name: "GitHub Copilot" }]);
+  const rows = [{ provider: "codex", model: "gpt-5.6-sol" }, { provider: "copilot", model: "gpt-5.6-sol" }, { provider: "codex", model: "gpt-6-astra" }, { provider: "kimi", model: "k3" }];
+  assert.deepEqual([...modelNames(rows, name)], [["codex/gpt-5.6-sol", "gpt-5.6-sol (Codex)"], ["copilot/gpt-5.6-sol", "gpt-5.6-sol (GitHub Copilot)"], ["codex/gpt-6-astra", "gpt-6-astra"], ["kimi/k3", "k3"]]);
+  assert.equal(new Set(modelNames(rows, name).values()).size, rows.length, "no two rows read the same");
+  // Only the rows that are drawn count: a model whose other provider is not among them keeps its name alone.
+  assert.deepEqual([...modelNames(rows.slice(0, 1), name).values()], ["gpt-5.6-sol"]);
+  // A name with its provider has the room it needs beside its bar, within a bound.
+  const width = (names: readonly string[]) => (partsOption({ items: names.map(item => ({ name: item, parts: [1] })), partNames: ["Tokens"], fmt, colors: ["#000"], unit: "tokens" }).option as any).yAxis.axisLabel.width as number;
+  assert.equal(width(["k3", "gpt-6-sol"]), 130);
+  assert.ok(width(["claude-opus-5-5 (Claude Code)", "k3"]) >= 29 * 7, "the longest name is not cut");
+  assert.equal(width(["a model with a name that is much longer than any provider would give it"]), 210);
+  // The filter names a model whatever its provider: it is offered once, with the providers that have it.
+  const models = { rows: rows.map(row => ({ ...row })), efforts: [] } as never;
+  const choices = filterChoices("model", { models, projects: null, spaces: [], word: (_key: string, value: string) => value, provider: name });
+  assert.deepEqual(choices, [{ value: "gpt-5.6-sol", label: "gpt-5.6-sol", detail: "Codex, GitHub Copilot" }, { value: "gpt-6-astra", label: "gpt-6-astra", detail: "Codex" }, { value: "k3", label: "k3", detail: "kimi" }]);
 });
 
 test("who sent a prompt has a name, the senders the plugin folds together too", () => {
