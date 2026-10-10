@@ -445,8 +445,10 @@ the click that ends a drag is swallowed, and Escape or leaving the window cancel
 
 - The session moves with the sessions it started in the same project, at every level; they move first and it
   moves last, so a move stopped half way (`move_partial`) leaves the session where it was.
-- Nothing moves while one of them runs, has queued work, waits for an answer, runs with Remote Control or
-  has background tasks of its provider (`session_in_use`, `interaction_pending`, `requires_recovery`).
+- Nothing moves while one of them runs, has queued work, waits for an answer or has background tasks of its
+  provider (`session_in_use`, `interaction_pending`, `requires_recovery`). A session with Remote Control wanted
+  moves: once the move is done, `OwnedSessionCommandService` attaches it again in its new folder and turns
+  Remote Control on there (the move ended the process that held the link), after its transcript was moved.
 - Each journal is rewritten once, atomically (`SessionViewJournalStore.MoveSessionAsync`, temporary file then
   replace): the header (`project_ref`, `working_directory`), the summary and the local state change together,
   so the lists never see the session half moved. No file moves: journals are kept by date.

@@ -57,6 +57,22 @@ public sealed partial class OwnedSessionCommandService
             lock (_gate) { if (ReferenceEquals(_deleteWork, reservation.Task)) _deleteWork = null; }
             reservation.TrySetResult(completion.Task.IsCompletedSuccessfully ? completion.Task.Result.Status : "move_unconfirmed");
         }
+
+        // A moved session that was controlled remotely is attached again in its new folder, and its remote control
+        // turned on there: the move ended its process, and the link it had. Nobody waits for it; the state of the
+        // session says whether it connected.
+        if (completion.Task.IsCompletedSuccessfully)
+            foreach (var moved in completion.Task.Result.Moved)
+                if (_runtime.RemoteControlWanted(moved.SessionId)) _ = ReconnectRemoteControlAsync(moved.SessionId);
+    }
+
+    private async Task ReconnectRemoteControlAsync(string sessionId)
+    {
+        try { await SetRemoteControlAsync(sessionId, true).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is ObjectDisposedException or OperationCanceledException or InvalidOperationException or NotSupportedException or IOException)
+        {
+            // The session stays where it was moved, with its remote control off: the window shows it off.
+        }
     }
 
     // Whether this owner has work of the session going on. The caller holds the gate.

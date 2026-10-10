@@ -36,7 +36,8 @@ In CodeAlta Desktop, a project session can move to another project: for example 
 
 - Choose **Move to project…** in the menu of the session, then the project. Or drag the row of the session onto the row of the project in the sidebar.
 - The sessions it started in its project, its [sub-agents](#sub-agents), move with it.
-- A session can move only while it is idle: not while it runs, waits for an answer, has queued prompts, runs with Remote Control or has background tasks.
+- A session can move only while it is idle: not while it runs, waits for an answer, has queued prompts or has background tasks.
+- A session with [Remote Control](workspace.md#remote-control-claude-code) on restarts in its new folder with Remote Control on again.
 - From then on the session works in the folder of its new project. When the new project is another checkout of the same repository, a session that worked in its own git worktree keeps working there.
 - Its history moves with it, and its agent is told where it comes from. Messages from before the move still name the old folder.
 - A session of Claude Code goes on with the same conversation: CodeAlta moves the copy Claude Code keeps of it (under `~/.claude/projects/`) to the folder of the new project. If that copy cannot be moved, a message says so, and the session goes on in a new conversation of Claude Code that starts with the history.

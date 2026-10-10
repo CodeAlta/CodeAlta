@@ -122,7 +122,8 @@ public sealed partial class SessionRuntimeService
     // Why a session cannot move now, or null. Runs on the actor of the session.
     private async Task<string?> MoveRefusalAsync(string sessionId, CancellationToken token)
     {
-        if (_transitions.ContainsKey(sessionId) || _remoteControlWanted.ContainsKey(sessionId)) return "session_in_use";
+        // Remote Control does not keep a session where it is: its owner turns it on again in the new folder.
+        if (_transitions.ContainsKey(sessionId)) return "session_in_use";
         if (_entries.TryGetValue(sessionId, out var entry) && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.OwnedQueue is not null
             || entry.Attachment.IsRetiring || !HasOwnedCommandDefaults(entry) || entry.PendingAgentPromptId is not null
             // The tasks of its provider end with its process, which a move stops.
@@ -241,6 +242,10 @@ public sealed partial class SessionRuntimeService
         => $"This session was moved from the project {source.DisplayName} (`{fromDirectory}`) to the project {target.DisplayName} (`{toDirectory}`)"
             + (leftWorktree ? ", and no longer works in its git worktree" : string.Empty)
             + $". What it said and did before names the old folder: work in `{toDirectory}` now, and not in `{fromDirectory}`.";
+
+    // Whether the session is to be controlled remotely: a move keeps that wish, and the process it ends is started
+    // again in the new folder with its remote control.
+    internal bool RemoteControlWanted(string sessionId) => _remoteControlWanted.ContainsKey(sessionId);
 
     // The notice of a move, for the attachment that is being created; the next one no longer has it.
     internal string? TakeMovedNotice(string sessionId) => _movedNotices.TryRemove(sessionId, out var notice) ? notice : null;

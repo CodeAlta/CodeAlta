@@ -102,7 +102,7 @@ export function sessionMoveMessage(code: string): MessageKey {
     case "stale_epoch": return "The host changed. Reload before moving the session.";
     case "closed": return "The host is closing; the session was not moved.";
     case "busy": return "Another change of sessions is in progress. Try again when it ends.";
-    case "session_in_use": return "The session, or a session it started, is running, runs remotely or has background tasks. Move it once it is idle.";
+    case "session_in_use": return "The session, or a session it started, is running or has background tasks. Move it once it is idle.";
     case "interaction_pending": return "The session, or a session it started, waits for an answer. Answer it before moving the session.";
     case "requires_recovery": return "The session has unfinished or queued work. Let it finish before moving the session.";
     case "move_partial": return "Some sessions it started moved, but not the session itself. Check both projects before trying again.";
