@@ -95,6 +95,7 @@ export type PluginScriptState = Readonly<{
  * changes (a reloaded plugin has a new path); the object lives as long as the content is drawn for that path, and its `closed`
  * signal aborts when either ends. A script that fills the fragment (`mount`) lives as long as that fragment: when the plugin writes
  * another one, what the script made is gone with the old one, so its object ends and the script starts on the new fragment with another.
+ * What such a script set of its tab (`alta.host.setTitle`, `setStatus`, `setBadge`) ends with its object: the next run says it again, or not.
  *
  * @param fragment The HTML the content shows, which a `mount` fills; a component takes its place and does not depend on it.
  */
@@ -135,7 +136,12 @@ export function usePluginScript(script: PluginScriptProps | undefined, pluginKey
       visible: initialVisible.current, host: bridge, sanitize, readTheme, subscribeTheme, rpc,
     });
     setHandle(made);
-    return () => made.dispose();
+    return () => {
+      made.dispose();
+      // A script that fills the fragment starts again with the next object: what this run set of its tab is not what the next one says.
+      // A component stays drawn from one object to the next, and what it set stays with it.
+      if (ready.kind === "mount") { bridge.setTitle?.(null); bridge.setStatus?.(null); bridge.setBadge?.(null); }
+    };
   }, [ready, filled, pluginKey, instance?.canvasId, instance?.instanceId, instance?.spaceId, instance?.key, inputKey, projectId, sessionId, bridge, sanitize, rpc]);
   useEffect(() => { handle?.setVisible(visible); }, [handle, visible]);
 

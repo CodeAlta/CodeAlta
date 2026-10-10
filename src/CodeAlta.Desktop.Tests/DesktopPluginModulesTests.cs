@@ -40,6 +40,39 @@ public sealed class DesktopPluginModulesTests
     }
 
     [TestMethod]
+    public void OneRead_LooksAtThePackageFolderOnce_AndTheNextReadSeesWhatChanged()
+    {
+        using var package = new Package();
+        package.Write("ui/board.js", "export default () => null;");
+        package.Write("ui/card.js", "export default () => null;");
+        var owners = new List<PluginModuleOwner> { new(Key, package.Root, new object()) };
+        var modules = new DesktopPluginModules(() => owners);
+        static string Stamp(string? path) => path!.Split('/')[3];
+
+        // A read that names several scripts of a plugin (its regions, the cards of a session) gives them one version of the package.
+        var read = modules.StartRead();
+        var board = read.PublishFor(Key, PluginScript.File("ui/board.js"));
+        package.Write("ui/helper.js", "export const x = 1;");
+        var card = read.PublishFor(Key, PluginScript.File("ui/card.js"));
+        Assert.AreEqual(Stamp(board), Stamp(card), "the folder was looked at once for the read");
+        Assert.AreNotEqual(Stamp(board), Stamp(modules.Publish(owners[0], PluginScript.File("ui/board.js"))), "a call that is no part of the read looks at the folder itself");
+
+        // The next read looks again: a file that changed is a new address from then on, and so is one that changes later.
+        var next = modules.StartRead().PublishFor(Key, PluginScript.File("ui/board.js"));
+        Assert.AreNotEqual(Stamp(board), Stamp(next));
+        package.Write("ui/board.js", "export default () => 1;", touch: TimeSpan.FromSeconds(5));
+        Assert.AreNotEqual(Stamp(next), Stamp(modules.StartRead().PublishFor(Key, PluginScript.File("ui/board.js"))));
+
+        // A read refuses what a single call refuses, and another activation of the plugin is another version within the same read.
+        Assert.IsNull(read.PublishFor(Key, PluginScript.File("ui/missing.js")));
+        Assert.IsNull(read.PublishFor("source:not-there", PluginScript.File("ui/board.js")));
+        var again = modules.StartRead();
+        var before = again.PublishFor(Key, PluginScript.File("ui/board.js"));
+        owners[0] = new(Key, package.Root, new object());
+        Assert.AreNotEqual(Stamp(before), Stamp(again.PublishFor(Key, PluginScript.File("ui/board.js"))), "a reloaded plugin is not given the version of the one before");
+    }
+
+    [TestMethod]
     public void Publish_RefusesWhatIsNotAScriptOfThePackage()
     {
         using var package = new Package();

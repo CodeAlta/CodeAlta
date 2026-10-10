@@ -1,7 +1,7 @@
 // How a canvas is found and opened: the pieces of the Canvases page, of the search, of the menus and of the requests of
 // plugins and agents that need no component. The tab itself is `fileTabs.ts`; what a tab shows is `CanvasPanel`.
 import type { CanvasItem } from "#neoastra";
-import { canvasTab, emptyFileTabs, openFileTab, persistFileTabs, restoreFileTabs, type FileTab, type FileTabs } from "../fileTabs";
+import { canvasTab, closeFileTab, emptyFileTabs, openFileTab, persistFileTabs, restoreFileTabs, sameFileTab, type FileTab, type FileTabs } from "../fileTabs";
 import { spaceShows, type Space } from "../spaces/spaces";
 
 /** What one instance of a canvas is about. */
@@ -106,6 +106,36 @@ export function bringCanvasTab(state: FileTabs, tab: FileTab, focus: boolean, ke
 export function addCanvasTabToSpace(source: Readonly<{ kept: FileTabs | undefined; read: () => string | null; write: (value: string) => void }>,
   tab: FileTab, focus: boolean, keep: (tab: FileTab) => boolean = () => false): FileTabs {
   const next = bringCanvasTab(source.kept ?? restoreFileTabs(source.read) ?? emptyFileTabs(), tab, focus, keep);
+  persistFileTabs(source.write, next);
+  return next;
+}
+
+/**
+ * What becomes of an instance that the host opened for a tab that went away meanwhile, given the tabs its space has now: it is closed when
+ * the tab is no longer one of them (the tab was closed, and nothing else would close the instance), and only hidden when it still is (the
+ * tab left the page with its space).
+ */
+export const abandonedCanvas = (open: readonly FileTab[], tab: FileTab): "close" | "hide" => open.some(value => sameFileTab(value, tab)) ? "hide" : "close";
+
+/**
+ * The tab of an instance that a plugin closed, as the host names the instance. It is the tab the window has for it, whatever the title
+ * and the folder of the project that tab carries: a tab is told from another by the ids alone.
+ */
+export const closedCanvasTab = (closed: Readonly<{ pluginKey: string; canvasId: string; projectId: string | null; sessionId: string | null; key: string | null }>): FileTab =>
+  canvasTab({ pluginKey: closed.pluginKey, canvasId: closed.canvasId, project: closed.projectId ? { id: closed.projectId, path: "" } : null, sessionId: closed.sessionId, key: closed.key });
+
+/**
+ * Takes a canvas tab out of a space that the window does not show, because its plugin closed the instance: the tabs the window kept of
+ * that space in this run, else the ones it stored, lose the tab, and what comes out is stored again, so the tab is not there when the
+ * space is shown. Null when the space has no tabs kept or stored: nothing is written for it.
+ */
+export function removeCanvasTabFromSpace(source: Readonly<{ kept: FileTabs | undefined; read: () => string | null; write: (value: string) => void }>, tab: FileTab): FileTabs | null {
+  const state = source.kept ?? restoreFileTabs(source.read);
+  if (!state) return null;
+  // The tab the space has, with its title and its folder: it is the one that can be opened again.
+  const open = state.open.find(value => sameFileTab(value, tab));
+  if (!open) return state;
+  const next = closeFileTab(state, open);
   persistFileTabs(source.write, next);
   return next;
 }

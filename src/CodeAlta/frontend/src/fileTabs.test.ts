@@ -80,7 +80,7 @@ test("restore reconciles against the catalog: a missing, archived or moved proje
   assert.equal(reconcileFileTabs(kept, catalog), kept);
 });
 
-test("persisted tabs round-trip; malformed, duplicate, oversized or foreign values restore nothing", () => {
+test("persisted tabs round-trip; malformed, oversized or foreign values restore nothing", () => {
   const state = openFileTab(openFileTab(emptyFileTabs(), editor()), changes());
   let stored = "";
   assert.equal(persistFileTabs(value => { stored = value; }, closeFileTab(openFileTab(state, editor("q")), editor("q"))), true);
@@ -92,7 +92,6 @@ test("persisted tabs round-trip; malformed, duplicate, oversized or foreign valu
   const json = (value: unknown) => () => JSON.stringify(value);
   for (const read of [() => null, () => "", () => "{", () => { throw new Error("denied"); }, () => "x".repeat(200000),
     json(null), json({ version: 2, open: [], active: null }), json({ version: 1, open: {}, active: null }),
-    json({ version: 1, open: [editor(), editor()], active: null }), json({ version: 1, open: [changes(), changes()], active: null }),
     json({ version: 1, open: [editor()], active: changes() }),
     json({ version: 1, open: Array.from({ length: fileTabLimit + 1 }, (_value, index) => editor(`f${index}`)), active: null })]) {
     assert.equal(restoreFileTabs(read), null);
@@ -194,8 +193,23 @@ test("canvas tabs are kept for the next start with their look, and a canvas tab 
   }
   // A look that is not as this build stores it is dropped; the tab stays.
   assert.deepEqual(restoreFileTabs(json({ version: 1, open: [{ ...valid, name: "", icon: 4, plugin: "x".repeat(600) }], active: null }))?.open, [canvasTab({ pluginKey: "k", canvasId: "c" })]);
-  // The tab of a canvas is kept in the state of a space that has others of its kind.
-  assert.equal(restoreFileTabs(json({ version: 1, open: [valid, valid], active: null })), null, "the same tab twice is no state this build writes");
+});
+
+test("a stored list that holds the same tab twice restores the first, and every other tab of the space", () => {
+  const json = (value: unknown) => () => JSON.stringify(value);
+  // Before a session named its canvas tab by itself, the same session canvas opened from two projects was two tabs: the lists that were
+  // stored then hold both, and the space must not lose its tabs for it.
+  const fromP = canvasTab({ pluginKey: "k", canvasId: "run", project: { id: "p", path: "/p" }, sessionId: "s1" }, { title: "Run" });
+  const fromQ = canvasTab({ pluginKey: "k", canvasId: "run", project: { id: "q", path: "/q" }, sessionId: "s1" }, { title: "Run again" });
+  assert.equal(fileTabKey(fromP), fileTabKey(fromQ));
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [editor(), fromP, changes(), fromQ, board()], active: null })),
+    { open: [editor(), fromP, changes(), board()], active: null, closed: [] });
+  // The one that was in front was the second: the tab that stays is in front.
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [fromP, editor(), fromQ], active: fromQ })), { open: [fromP, editor()], active: fromP, closed: [] });
+  // Any tab that is there twice is there once.
+  assert.deepEqual(restoreFileTabs(json({ version: 1, open: [editor(), editor(), changes(), changes(), board(), board()], active: changes() })),
+    { open: [editor(), changes(), board()], active: changes(), closed: [] });
+  assert.equal(restoreLegacyFiles(json({ version: 1, open: [editor(), editor()], active: null })).size, 0);
 });
 
 test("a canvas tab is labeled with its title and its project in every language", () => {

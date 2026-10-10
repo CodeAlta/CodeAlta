@@ -16,7 +16,10 @@ import { useCanvasRpc } from "./useCanvasRpc";
 type Phase = "loading" | "ready" | "stopped" | "missing" | "failed" | "unavailable";
 
 type View = Readonly<{
-  phase: Phase; instanceId: string | null; revision: number; html: string; title: string | null; statusText: string | null; actions: boolean;
+  phase: Phase; instanceId: string | null;
+  /** The revision of what the host last said of the instance, and the revision of the fragment: the answer to an action is a fragment the host said nothing else with. */
+  revision: number; htmlRevision: number;
+  html: string; title: string | null; statusText: string | null; actions: boolean;
   /** The module of the plugin that draws the tab, its path on the origin of the application, or null for a fragment alone. */
   script: string | null; scriptProblem: string | null; input: string | null;
 }>;
@@ -29,7 +32,7 @@ type Change =
   | Readonly<{ kind: "event"; event: CanvasInstanceEvent }>
   | Readonly<{ kind: "html"; html: string; revision: number }>;
 
-const initial: View = { phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null };
+const initial: View = { phase: "loading", instanceId: null, revision: 0, htmlRevision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null };
 
 /** The phase that a refusal of the host leaves a tab in. */
 export function refusedPhase(status: string): Exclude<Phase, "loading" | "ready"> {
@@ -37,16 +40,18 @@ export function refusedPhase(status: string): Exclude<Phase, "loading" | "ready"
 }
 
 /**
- * What the state of a tab becomes with a change. An event older than what the tab has is dropped, and so is the answer to an action when a newer
- * push came before it; a state event of the host moves the tab between its content and its placeholder.
+ * What the state of a tab becomes with a change. An event older than what the host said when the tab opened is dropped. A fragment is told
+ * from another by its own revision, whether an event or the answer to an action brings it: the answer is dropped when a newer fragment was
+ * pushed before it came, and kept when what overtook it says nothing of the fragment (a title, a status). A state event of the host moves
+ * the tab between its content and its placeholder.
  */
 export function canvasView(view: View, change: Change): View {
   switch (change.kind) {
     case "opening": return view.phase === "ready" ? view : { ...initial, phase: "loading", title: view.title };
-    case "opened": return { phase: "ready", instanceId: change.instanceId, revision: change.revision, html: change.html, title: change.title, statusText: change.statusText, actions: change.actions,
+    case "opened": return { phase: "ready", instanceId: change.instanceId, revision: change.revision, htmlRevision: change.revision, html: change.html, title: change.title, statusText: change.statusText, actions: change.actions,
       script: change.script, scriptProblem: change.scriptProblem, input: change.input };
     case "refused": return { ...initial, phase: change.phase, title: view.title };
-    case "html": return view.phase === "ready" && change.revision >= view.revision ? { ...view, html: change.html, revision: change.revision } : view;
+    case "html": return view.phase === "ready" && change.revision >= view.htmlRevision ? { ...view, html: change.html, htmlRevision: change.revision } : view;
     case "event": {
       const { event } = change;
       if (event.kind === "closed") return view;
@@ -54,7 +59,9 @@ export function canvasView(view: View, change: Change): View {
       if (event.revision < view.revision) return view;
       const ready = event.state === "ready" || view.phase === "ready";
       if (!ready) return view;
-      return { phase: "ready", instanceId: view.instanceId, revision: event.revision, html: event.html ?? view.html,
+      // The events come in the order of the host: only their fragment can be older than what the tab shows, when an action was answered since.
+      const fragment = event.html !== null && event.revision >= view.htmlRevision;
+      return { phase: "ready", instanceId: view.instanceId, revision: event.revision, htmlRevision: fragment ? event.revision : view.htmlRevision, html: fragment ? event.html : view.html,
         title: event.title ?? view.title, statusText: event.statusText === null ? view.statusText : event.statusText === "" ? null : event.statusText, actions: event.actions ?? view.actions,
         script: event.script === null ? view.script : event.script === "" ? null : event.script,
         scriptProblem: event.scriptProblem === null ? view.scriptProblem : event.scriptProblem === "" ? null : event.scriptProblem, input: view.input };
@@ -70,7 +77,7 @@ export function canvasView(view: View, change: Change): View {
  * A tab that is hidden stays mounted and keeps the latest fragment it was sent without drawing it; it draws it once it
  * is shown. While its plugin is not running, or its canvas is gone, the tab says so, with what can be done about it.
  */
-export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, onLook, onInstance, onClose, onOpenSource, control, loadScript }: {
+export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, onLook, onInstance, onAbandoned, onClose, onOpenSource, control, loadScript }: {
   tab: FileTab;
   /** The space the tab is in. */
   spaceId: string | null;
@@ -82,6 +89,11 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   onLook: (look: Readonly<{ title?: string; status?: string | null; icon?: string; plugin?: string }>) => void;
   /** The instance the tab shows, or null once it does not: the owner of the tab closes it with the tab. */
   onInstance?: (instanceId: string | null) => void;
+  /**
+   * The tab went away, or shows another instance, while the host opened this one in the space named: the owner of the tab says what becomes
+   * of it, closed with a tab that was closed or hidden with a tab that left the page. Without an owner the instance is hidden.
+   */
+  onAbandoned?: (instanceId: string, spaceId: string | null) => void;
   onClose: () => void;
   /** Opens the code editor on the folder of the plugin. */
   onOpenSource: (folder: Readonly<{ id: string; path: string; name: string }>) => void;
@@ -94,8 +106,8 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   const [view, change] = useReducer(canvasView, initial);
   const [retry, setRetry] = useState(0);
   const [shown, setShown] = useState<Readonly<{ html: string; script: string | null; problem: string | null }>>({ html: "", script: null, problem: null });
-  const latest = useRef({ visible, onLook, onClose, onInstance });
-  latest.current = { visible, onLook, onClose, onInstance };
+  const latest = useRef({ visible, onLook, onClose, onInstance, onAbandoned });
+  latest.current = { visible, onLook, onClose, onInstance, onAbandoned };
   // The last run of the effect that asks for the instance, with what it asked for: React runs the effect of a new tab twice.
   const asking = useRef<Readonly<{ identity: string }> | null>(null);
   const pluginKey = tab.pluginKey ?? "", canvasId = tab.canvasId ?? "";
@@ -115,7 +127,10 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
         // The tab went away, or shows another instance, while the host opened this one as shown: nothing else would tell the host that no tab
         // shows it. A later run that asks for the same instance says itself whether it is shown.
         const taken = asking.current !== mine && asking.current?.identity === mine.identity;
-        if (!taken && reply.status === "ok" && reply.instanceId) void hub.setVisible(reply.instanceId, false);
+        if (taken || reply.status !== "ok" || !reply.instanceId) return;
+        // A tab that was closed has no instance yet for its owner to close with it: the owner is given this one.
+        const abandoned = latest.current.onAbandoned;
+        if (abandoned) abandoned(reply.instanceId, spaceId); else void hub.setVisible(reply.instanceId, false);
         return;
       }
       if (reply.status !== "ok" || !reply.instanceId) {
@@ -161,7 +176,8 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   const drawn = visible ? { html: view.html, script: view.script, problem: view.scriptProblem } : shown;
 
   // What the script of the tab sets (`alta.host.setTitle`, `setStatus`, `setBadge`) wins over what the plugin gives, until the script sets null, the script is
-  // replaced (its plugin was reloaded) or the tab shows another instance. A badge takes the place of the status while it is set.
+  // replaced (its plugin was reloaded) or the tab shows another instance. A script that fills the fragment starts again on each fragment the plugin writes, and
+  // what it set ends with each run (see `usePluginScript`). A badge takes the place of the status while it is set.
   const [scripted, setScripted] = useState<Readonly<{ title?: string | null; status?: string | null; badge?: string | null }>>({});
   const scriptTab = useMemo<PluginScriptTab>(() => ({
     setTitle: value => setScripted(current => ({ ...current, title: value })),

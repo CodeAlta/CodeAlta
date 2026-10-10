@@ -858,8 +858,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             if (string.Equals(instance.Html, html, StringComparison.Ordinal)) return instance.Revision;
             instance.Html = html;
             instance.Revision++;
-            // The page that asked for this change has the content in its answer.
-            if (!answered) PostUpdateLocked(instance, full: false, html);
+            // The page that asked for this change has the content in its answer. A fragment that still waits for the page is older than
+            // the answer, and would come after it under the revision of whatever is merged with it: it is let go.
+            if (answered) _outbox?.DropHtml(instance.Id);
+            else PostUpdateLocked(instance, full: false, html);
             return instance.Revision;
         }
     }
@@ -918,7 +920,16 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
                 instance.Closed = true;
                 _instances.Remove(instance.Id);
                 (context, canvas) = (instance.Context, instance.Canvas);
-                if (notifyPage) _outbox?.Add(new CanvasEvent("closed") { InstanceId = instance.Id });
+                // The page is told which tab it was: the tab of a space that is not shown has nothing that listens to its instance.
+                if (notifyPage)
+                {
+                    var named = instance.Identity;
+                    _outbox?.Add(new CanvasEvent("closed")
+                    {
+                        InstanceId = instance.Id, PluginKey = named.PluginKey, CanvasId = named.CanvasId, SpaceId = named.SpaceId, ProjectId = named.ProjectId,
+                        SessionId = named.SessionId, Key = named.Key,
+                    });
+                }
             }
         }
         finally
@@ -1012,10 +1023,12 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     }
 
     // Closes the oldest instance that no tab shows. Its plugin is told as for a tab that was closed. Its tab is not: when it is shown again
-    // the host answers that it does not know the instance, and the tab asks for it again.
+    // the host answers that it does not know the instance, and the tab asks for it again. An instance that a call holds (it is being opened
+    // again, shown, replaced or closed) is left to that call: the caller would be answered with an instance that is gone.
     private bool EvictOldestHiddenLocked()
     {
-        var oldest = _instances.Values.Where(static instance => instance.Initialized && !instance.Visible && !instance.Closed).OrderBy(static instance => instance.Order).FirstOrDefault();
+        var oldest = _instances.Values.Where(static instance => instance.Initialized && !instance.Visible && !instance.Closed && instance.Gate.CurrentCount > 0)
+            .OrderBy(static instance => instance.Order).FirstOrDefault();
         if (oldest is null) return false;
         oldest.Closed = true;
         _instances.Remove(oldest.Id);
@@ -1316,6 +1329,20 @@ internal sealed class CanvasOutbox
 
             _events.Add(value);
             _signal.Writer.TryWrite(true);
+        }
+    }
+
+    /// <summary>
+    /// Takes the fragment out of the update that waits for an instance, and keeps what else the update says: the page was given a newer
+    /// fragment another way, in the answer to its action.
+    /// </summary>
+    /// <param name="instanceId">The instance.</param>
+    public void DropHtml(string instanceId)
+    {
+        lock (_lock)
+        {
+            var index = _events.FindIndex(candidate => candidate.Kind == "update" && string.Equals(candidate.InstanceId, instanceId, StringComparison.Ordinal));
+            if (index >= 0 && _events[index].Html is not null) _events[index] = _events[index] with { Html = null };
         }
     }
 

@@ -4,8 +4,8 @@ import type { CanvasItem } from "#neoastra";
 import { canvasTab, canvasesTab, changesTab, editorTab, emptyFileTabs, fileTabKey, isCanvasesTab, openFileTab, persistFileTabs, reconcileFileTabs, restoreFileTabs, type FileTabs } from "../fileTabs";
 import { defaultSpace, type Space } from "../spaces/spaces";
 import {
-  addCanvasTabToSpace, bringCanvasTab, canvasCommandName, canvasCommands, canvasMenuItems, canvasRef, canvasRequestSpace, canvasScope, canvasTabOf, defaultCanvasTarget,
-  matchesCanvasCommand, newCanvasPrompt, openCanvases, showsCanvas,
+  abandonedCanvas, addCanvasTabToSpace, bringCanvasTab, canvasCommandName, canvasCommands, canvasMenuItems, canvasRef, canvasRequestSpace, canvasScope, canvasTabOf, closedCanvasTab, defaultCanvasTarget,
+  matchesCanvasCommand, newCanvasPrompt, openCanvases, removeCanvasTabFromSpace, showsCanvas,
 } from "./canvasPages";
 
 const item = (id: string, scope: string, fields: Partial<CanvasItem> = {}): CanvasItem => ({ pluginKey: "global:tools", plugin: "Tools", package: "plugin:global:tools", id, title: id[0].toUpperCase() + id.slice(1),
@@ -126,6 +126,69 @@ test("a canvas tab joins the tabs of a space that is not shown, in memory or in 
   // A stored value that cannot be read is replaced by the tab alone.
   stored.set("work", "{not json");
   assert.deepEqual(addCanvasTabToSpace({ kept: undefined, read, write }, board, false).open, [board]);
+});
+
+test("the tab of an instance that a plugin closed leaves the tabs of a space that is not shown, in memory or in storage", () => {
+  const board = canvasTab({ pluginKey: "k", canvasId: "board", key: "x" }, { title: "Board", plugin: "plugin:global:k" });
+  const notes = canvasTab({ pluginKey: "k", canvasId: "notes", project }, { title: "Notes" });
+  const run = canvasTab({ pluginKey: "k", canvasId: "run", project, sessionId: "s1" });
+  const stored = new Map<string, string>();
+  const read = () => stored.get("work") ?? null;
+  const write = (value: string) => { stored.set("work", value); };
+  const closed = (canvasId: string, fields: Partial<Parameters<typeof closedCanvasTab>[0]> = {}) => closedCanvasTab({ pluginKey: "k", canvasId, projectId: null, sessionId: null, key: null, ...fields });
+
+  // The host names the instance by its ids: it is the tab the window has, with its title and the folder of its project.
+  assert.equal(fileTabKey(closed("board", { key: "x" })), fileTabKey(board));
+  assert.equal(fileTabKey(closed("notes", { projectId: "p1" })), fileTabKey(notes));
+  assert.equal(fileTabKey(closed("run", { projectId: "p1", sessionId: "s1" })), fileTabKey(run));
+  assert.equal(fileTabKey(closed("run", { sessionId: "s1" })), fileTabKey(run), "A session names its tab, whether or not the host knows its project.");
+  assert.notEqual(fileTabKey(closed("board")), fileTabKey(board), "Another key is another tab.");
+
+  // The space was not shown in this run: its stored tabs lose the tab, and the others stay with the one that was in front.
+  persistFileTabs(write, { open: [changesTab(project), board, notes, run], active: notes, closed: [] });
+  const first = removeCanvasTabFromSpace({ kept: undefined, read, write }, closed("board", { key: "x" }));
+  assert.deepEqual(first?.open, [changesTab(project), notes, run]);
+  assert.deepEqual(restoreFileTabs(read), { open: [changesTab(project), notes, run], active: notes, closed: [] });
+  // The tab that was in front of its space leaves no canvas in front.
+  assert.equal(removeCanvasTabFromSpace({ kept: undefined, read, write }, closed("notes", { projectId: "p1" }))?.active, null);
+  assert.deepEqual(restoreFileTabs(read), { open: [changesTab(project), run], active: null, closed: [] });
+
+  // What the window kept of the space in this run is what the space will show: it loses the tab, and can open it again as a tab the user closed.
+  const kept: FileTabs = { open: [editorTab(project), run], active: run, closed: [] };
+  const second = removeCanvasTabFromSpace({ kept, read, write }, closed("run", { sessionId: "s1" }));
+  assert.deepEqual(second, { open: [editorTab(project)], active: null, closed: [run] });
+  assert.deepEqual(restoreFileTabs(read)?.open, [editorTab(project)]);
+
+  // A tab that is not there changes nothing, and nothing is written for a space that has no tabs.
+  const before = stored.get("work");
+  assert.equal(removeCanvasTabFromSpace({ kept: second!, read, write }, closed("board", { key: "x" })), second);
+  assert.equal(stored.get("work"), before);
+  stored.clear();
+  assert.equal(removeCanvasTabFromSpace({ kept: undefined, read, write }, closed("board", { key: "x" })), null);
+  assert.equal(stored.size, 0);
+});
+
+test("a tab that a plugin asked for and closed in a space that is not shown is there or not by what came last", () => {
+  const board = canvasTab({ pluginKey: "k", canvasId: "board" });
+  const stored = new Map<string, string>();
+  const source = { kept: undefined, read: () => stored.get("work") ?? null, write: (value: string) => { stored.set("work", value); } };
+  const closed = closedCanvasTab({ pluginKey: "k", canvasId: "board", projectId: null, sessionId: null, key: null });
+
+  addCanvasTabToSpace(source, board, true);
+  removeCanvasTabFromSpace(source, closed);
+  assert.deepEqual(restoreFileTabs(source.read)?.open, [], "asked for, then closed");
+  addCanvasTabToSpace(source, board, true);
+  assert.deepEqual(restoreFileTabs(source.read)?.open, [board], "closed, then asked for again");
+});
+
+test("an instance opened for a tab that went away is closed with a tab that was closed, and hidden with one that is still in its space", () => {
+  const board = canvasTab({ pluginKey: "k", canvasId: "board" }, { title: "Board" });
+  const run = canvasTab({ pluginKey: "k", canvasId: "run", project, sessionId: "s1" });
+  // The tab left the page with its space, or asks again: it is still one of the tabs of the space, whatever its title became.
+  assert.equal(abandonedCanvas([editorTab(project), canvasTab({ pluginKey: "k", canvasId: "board" }, { title: "Renamed" })], board), "hide");
+  // The tab was closed while the host opened its instance: nothing shows the instance, and nothing else would close it.
+  assert.equal(abandonedCanvas([editorTab(project), run], board), "close");
+  assert.equal(abandonedCanvas([], run), "close");
 });
 
 test("the Canvases page is one tab, stored and restored with the others, and it lasts", () => {

@@ -242,8 +242,9 @@ function restore(read: () => string | null): Restored | null {
       if (entry === null) continue;
       // The files that were tabs of their own are now the files of their project's editor.
       if (entry.file !== null) files.set(entry.tab.projectId, [...files.get(entry.tab.projectId) ?? [], entry.file]);
+      // A tab that is there twice is there once, the first: what tells two tabs apart can change from one build to the next (a session
+      // canvas was once a tab for each project it was opened from), and the tabs beside it are not lost for it.
       if (!open.some(tab => sameFileTab(tab, entry.tab))) open.push(entry.tab);
-      else if (entry.file === null) return null;
     }
     const selected = active ? open.find(tab => sameFileTab(tab, active.tab)) : null;
     if (selected === undefined) return null;

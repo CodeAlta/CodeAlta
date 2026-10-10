@@ -234,6 +234,32 @@ test("the signal of one listener ends its own listening, not the one subscriptio
   await assert.rejects(rpc.subscribe("board.changed", () => { }, { signal: controller.signal }), (error: unknown) => error instanceof AltaError && error.code === "operation_canceled");
 });
 
+test("a listener whose signal aborts while it joins the subscription hears nothing, whenever the abort falls", async () => {
+  const fake = host();
+  const { rpc } = controllerOf(fake);
+  // One listener keeps the subscription: the others join one that is made already, and are told so a few steps later.
+  await rpc.subscribe("board", () => { });
+  const outcomes = new Set<string>();
+  for (let steps = 0; steps < 12; steps++) {
+    const controller = new AbortController();
+    const heard: unknown[] = [];
+    const joining = rpc.subscribe("board", value => heard.push(value), { signal: controller.signal });
+    // The signal aborts after that many steps of the page: before the answer, after it, and in between.
+    let step = Promise.resolve();
+    for (let index = 0; index < steps; index++) step = step.then(() => { });
+    void step.then(() => controller.abort());
+    outcomes.add(await joining.then(() => "listening", (error: unknown) => (error as AltaError).code));
+    await wait();
+    assert.ok(controller.signal.aborted);
+
+    fake.event("board", steps);
+    await wait(10);
+    assert.deepEqual(heard, [], `a listener whose signal aborted after ${steps} steps is told nothing`);
+  }
+
+  assert.deepEqual([...outcomes].sort(), ["listening", "operation_canceled"], "the signal fell on both sides of the answer");
+});
+
 test("frames of another connection are dropped, and a stream gives its items in order and ends", async () => {
   const fake = host();
   const { rpc } = controllerOf(fake);

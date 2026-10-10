@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AltaError, type AltaRpc } from "../pluginScript/alta";
+import { retryLimit } from "../pluginScript/retry";
 import { appModules } from "../lent/appModules";
 import type { StatisticsEvent } from "./api";
 import { projectOf, statisticsContext } from "./canvasContext";
@@ -260,6 +261,41 @@ test("a connection that ends while the canvas only listens is made again, with e
   plugin.end();
   await settle(); await settle(); await settle();
   assert.equal(plugin.state.subscriptions, 2);
+});
+
+test("a listening that the plugin keeps refusing stops asking by itself, and asks again when the window reaches the plugin", async () => {
+  // The host closed the instance of a hidden tab to make room: every connection is refused until the tab is shown and asks for its instance again.
+  const plugin = connection({ "statistics.status": () => status({ revision: 9 }) });
+  plugin.state.reachable = false;
+  const api = createRpcApi(plugin.rpc, { retryMilliseconds: 1 });
+  const heard: StatisticsEvent[] = [];
+  const off = api.subscribe(event => heard.push(event));
+  try {
+    await eventually(() => plugin.state.refused >= 1 + retryLimit, "it asks again a few times");
+    for (let index = 0; index < 20; index++) await settle();
+    assert.equal(plugin.state.refused, 1 + retryLimit, "then it waits for a reason to ask: as many tries as a call makes");
+    assert.equal(plugin.listening, 0);
+
+    // A call of the canvas made the connection again (its tab is shown, its queries ask): the listening begins, and reads what it missed.
+    plugin.state.reachable = true;
+    await api.status();
+    await eventually(() => plugin.listening === 1 && heard.length === 2, "it listens once a connection is open");
+    assert.deepEqual(heard[0], { kind: "data", change: everyDay });
+    assert.equal((heard[1] as { status: StatisticsStatus }).status.revision, 9);
+
+    // The count starts again with each reason to ask: the connection ends and the plugin refuses once more.
+    plugin.state.reachable = false;
+    const before = plugin.state.refused;
+    plugin.end();
+    await eventually(() => plugin.state.refused >= before + retryLimit, "it asks again a few times after the connection ended");
+    for (let index = 0; index < 20; index++) await settle();
+    assert.equal(plugin.state.refused, before + retryLimit);
+  } finally {
+    // A listening that asks for ever would keep the test alive.
+    off();
+  }
+
+  assert.equal(plugin.connectedListeners, 0);
 });
 
 // ---- what the canvas is given from the place it is opened at ----

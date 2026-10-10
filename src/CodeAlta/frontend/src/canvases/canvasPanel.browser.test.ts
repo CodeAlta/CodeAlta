@@ -154,6 +154,12 @@ test("a canvas tab draws what its plugin writes, sends the actions back, follows
     assert.equal(await wait(`${content}==='first'`), true);
     assert.equal(await wait("canvasFixture.state.calls.includes('visible:true')"), true);
     assert.deepEqual(await evaluate("canvasFixture.state.calls.filter(call => call === 'visible:false')"), []);
+    // The owner of the tab says what becomes of an instance whose tab went away: only it knows whether the tab was closed, and the instance with it.
+    await evaluate("canvasFixture.clear(); canvasFixture.state.holdOpens = true; canvasFixture.state.calls.length = 0; canvasFixture.render({ owner: true }); canvasFixture.clear(); canvasFixture.release()");
+    assert.equal(await wait("canvasFixture.state.abandoned.length > 0"), true, "the owner is given the instance");
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.deepEqual(await evaluate("canvasFixture.state.abandoned"), ["instance-1:work"], "once, with the space it was opened in");
+    assert.deepEqual(await evaluate("canvasFixture.state.calls.filter(call => call.startsWith('visible'))"), [], "the tab leaves the instance to its owner");
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

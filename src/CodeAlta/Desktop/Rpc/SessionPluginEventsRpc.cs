@@ -115,6 +115,8 @@ internal sealed class SessionPluginEventsService
             var events = await ReadTurnsAsync(_read, sessionId, request.NotBefore, cancellationToken).ConfigureAwait(false);
             if (events.Count == 0) return new("ok", sessionId, []);
             var cards = new List<SessionPluginEvent>();
+            // The cards of a plugin share its package: its folder is looked at once for this read, not once for each card.
+            var modules = _modules?.StartRead();
             PluginSessionEventProjectionContext Context(PluginContributionHandle handle, string? projectPath) => new()
             {
                 Handle = handle,
@@ -132,7 +134,7 @@ internal sealed class SessionPluginEventsService
                 foreach (var contribution in _statistics)
                 {
                     var derived = await contribution.ProjectAsync(Context(StatisticsHandle, null), cancellationToken).ConfigureAwait(false);
-                    cards.AddRange(derived.Where(static item => !item.Remove).Select(item => Project(item, StatisticsPluginId, events[^1].Timestamp, StatisticsHandle.PluginRuntimeKey)));
+                    cards.AddRange(derived.Where(static item => !item.Remove).Select(item => Project(item, StatisticsPluginId, events[^1].Timestamp, StatisticsHandle.PluginRuntimeKey, modules)));
                 }
             }
 
@@ -143,7 +145,7 @@ internal sealed class SessionPluginEventsService
                     var contribution = (PluginSessionEventProjectionContribution)registration.Contribution;
                     var derived = await contribution.ProjectAsync(Context(registration.Handle, projectPath), cancellationToken).ConfigureAwait(false);
                     cards.AddRange(derived.Where(static item => item is not null && !item.Remove)
-                        .Select(item => Project(item, registration.Handle.PluginRuntimeKey, events[^1].Timestamp, registration.Handle.PluginRuntimeKey)));
+                        .Select(item => Project(item, registration.Handle.PluginRuntimeKey, events[^1].Timestamp, registration.Handle.PluginRuntimeKey, modules)));
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
@@ -231,12 +233,12 @@ internal sealed class SessionPluginEventsService
             .Select(registration => (registration, project.Root))];
     }
 
-    private SessionPluginEvent Project(PluginDerivedSessionEvent derived, string pluginId, DateTimeOffset fallback, string runtimeKey)
+    private static SessionPluginEvent Project(PluginDerivedSessionEvent derived, string pluginId, DateTimeOffset fallback, string runtimeKey, DesktopPluginModules.Read? modules)
     {
         string? script = null, scriptProblem = null;
         if ((derived.DynamicContent?.Html ?? derived.Html) is not null && derived.Script is { HasEntry: true } wanted)
         {
-            script = _modules?.PublishFor(runtimeKey, wanted);
+            script = modules?.PublishFor(runtimeKey, wanted);
             if (script is null) scriptProblem = "The script of the card could not be found.";
         }
 

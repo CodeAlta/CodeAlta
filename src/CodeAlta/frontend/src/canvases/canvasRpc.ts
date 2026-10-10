@@ -283,6 +283,8 @@ class EventMux {
       throw toAltaError(error);
     }
 
+    // A signal that aborted once the subscription had answered and before this line ran tells no listener added now: the listening ends here.
+    if (signal?.aborted) { remove(); throw canceled(); }
     signal?.addEventListener("abort", remove, { once: true });
     return remove;
   }

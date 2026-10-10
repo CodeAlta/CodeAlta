@@ -129,7 +129,10 @@ internal sealed class DesktopPluginModules : INeoResourceProvider
     /// <param name="script">The script.</param>
     /// <returns>The path of the entry (<c>/plugin/key/stamp/ui/board.js</c>, or <c>/lib/app/name.js</c> for a module of the application's build), or <see langword="null"/> when the script cannot be served: no entry, a file that is missing, too large or not a script.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    internal string? Publish(PluginModuleOwner plugin, PluginScript script)
+    internal string? Publish(PluginModuleOwner plugin, PluginScript script) => Publish(plugin, script, null);
+
+    // `versions` holds what one read of the page found of the package folders it looked at: the folder of a plugin is walked once for the read.
+    private string? Publish(PluginModuleOwner plugin, PluginScript script, Dictionary<(string Activation, string Directory), string>? versions)
     {
         ArgumentNullException.ThrowIfNull(plugin);
         ArgumentNullException.ThrowIfNull(script);
@@ -140,7 +143,14 @@ internal sealed class DesktopPluginModules : INeoResourceProvider
         if (!string.IsNullOrEmpty(script.Path))
         {
             if (plugin.PackageDirectory is not { } directory || !TryResolve(directory, script.Path.Split('/'), out var file) || !IsScriptFile(file)) return null;
-            return $"{Prefix}{key}/{FileStamp(activation, directory)}/{string.Join('/', script.Path.Split('/').Select(Uri.EscapeDataString))}";
+            string? version = null;
+            if (versions?.TryGetValue((activation, directory), out version) is not true)
+            {
+                version = FileStamp(activation, directory);
+                versions?.Add((activation, directory), version);
+            }
+
+            return $"{Prefix}{key}/{version}/{string.Join('/', script.Path.Split('/').Select(Uri.EscapeDataString))}";
         }
 
         if (string.IsNullOrWhiteSpace(script.Source)) return null;
@@ -169,11 +179,37 @@ internal sealed class DesktopPluginModules : INeoResourceProvider
     /// <param name="pluginKey">The runtime key of the plugin.</param>
     /// <param name="script">The script.</param>
     /// <returns>The path of its entry, or <see langword="null"/> when the plugin is not active or the script cannot be served.</returns>
-    internal string? PublishFor(string pluginKey, PluginScript script)
+    internal string? PublishFor(string pluginKey, PluginScript script) => PublishFor(pluginKey, script, null);
+
+    private string? PublishFor(string pluginKey, PluginScript script, Dictionary<(string Activation, string Directory), string>? versions)
     {
         ArgumentNullException.ThrowIfNull(script);
         var owner = _activePlugins().FirstOrDefault(candidate => string.Equals(candidate.RuntimeKey, pluginKey, StringComparison.Ordinal));
-        return owner is null ? null : Publish(owner, script);
+        return owner is null ? null : Publish(owner, script, versions);
+    }
+
+    /// <summary>
+    /// Starts one read of the page that may name several scripts (the regions of a pane, the cards of a session). The package folder of a
+    /// plugin is looked at once for the read, however many of its scripts the read names; the next read looks again, so a file that
+    /// changed is a new address from then on.
+    /// </summary>
+    /// <returns>What the read publishes with. It serves one read, on one thread at a time.</returns>
+    internal Read StartRead() => new(this);
+
+    /// <summary>One read of the page: see <see cref="StartRead"/>.</summary>
+    internal sealed class Read
+    {
+        private readonly DesktopPluginModules _modules;
+        private readonly Dictionary<(string Activation, string Directory), string> _versions = [];
+
+        internal Read(DesktopPluginModules modules) => _modules = modules;
+
+        /// <summary>Makes the script of an active plugin available, by the runtime key of the plugin.</summary>
+        /// <param name="pluginKey">The runtime key of the plugin.</param>
+        /// <param name="script">The script.</param>
+        /// <returns>The path of its entry, or <see langword="null"/> when the plugin is not active or the script cannot be served.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="script"/> is null.</exception>
+        public string? PublishFor(string pluginKey, PluginScript script) => _modules.PublishFor(pluginKey, script, _versions);
     }
 
     /// <summary>The name an entry given as text has: scripts import their own modules by relative names, and this one is taken.</summary>

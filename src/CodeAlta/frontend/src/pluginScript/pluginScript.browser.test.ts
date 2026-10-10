@@ -105,11 +105,11 @@ test("the script of plugin HTML: a component drawn in the tree, a mount on the f
     assert.deepEqual(log.filter(line => line.startsWith("mount")), ["mount:\"fragment\""], "mounted once, on a clean fragment");
     assert.ok(!log.includes("mount-cleanup"));
     // The plugin writes another fragment: what the script made went with the first one, so the script is ended and started on the new one,
-    // with an alta object that is its own and not a closed one.
+    // with an alta object that is its own and not a closed one. What the first run set of its tab ends with it, before the next one starts.
     await evaluate("scriptFixture.render({ html: '<div class=\"alta-target\">second</div>', path: '/plugin/k/one/mount.js' })");
     assert.equal(await wait("document.querySelector('.alta-target')?.textContent === 'secondmounted'"), true, "the script fills the new fragment");
     log = await evaluate<string[]>("scriptFixture.drain()");
-    assert.deepEqual(log.filter(line => !line.startsWith("load")), ["closed-signal", "mount-cleanup", "mount:\"second\"", "alta-open:true"]);
+    assert.deepEqual(log.filter(line => !line.startsWith("load")), ["closed-signal", "tab-title:null", "tab-status:null", "tab-badge:null", "mount-cleanup", "mount:\"second\"", "alta-open:true"]);
     assert.equal(await evaluate("document.querySelectorAll('.alta-mounted').length"), 1);
     // The same fragment again changes nothing.
     await evaluate("scriptFixture.render({ html: '<div class=\"alta-target\">second</div>', path: '/plugin/k/one/mount.js' })");

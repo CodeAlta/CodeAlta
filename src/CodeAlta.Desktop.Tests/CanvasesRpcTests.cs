@@ -428,6 +428,49 @@ public sealed class CanvasesRpcTests
     }
 
     [TestMethod]
+    public async Task TheAnswerOfAnAction_IsNotUndoneByAFragmentThatWaitedForThePage()
+    {
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        // A page that reads slowly: what the plugin pushes waits for it, and is merged while it waits.
+        await using var page = fixture.Service.WatchAsync(new(Epoch), default).GetAsyncEnumerator();
+        Assert.IsTrue(await page.MoveNextAsync());
+        Assert.AreEqual("plugins", page.Current.Kind);
+        var opened = await fixture.OpenAsync("board", key: "k");
+        var context = fixture.Plugin.Contexts[opened.InstanceId!];
+
+        // A fragment waits for the page; the page raises an action, whose answer carries a newer fragment; then the plugin gives a status.
+        await context.UpdateAsync("<p>pushed</p>");
+        var answer = await fixture.Service.ActionAsync(new(Epoch, opened.InstanceId, "tick", "item-2", null), default);
+        await context.SetStatusAsync("3 of 8");
+
+        Assert.AreEqual(("ok", "<p>ticked item-2 </p>"), (answer.Status, answer.Html));
+        Assert.IsTrue(await page.MoveNextAsync());
+        var update = page.Current;
+        // The page would take the fragment that waited for a newer one than its answer: the event says more than the answer does of the revision.
+        Assert.AreEqual(("update", opened.InstanceId, null, "3 of 8"), (update.Kind, update.InstanceId, update.Html, update.StatusText), "the fragment that the answer replaced is not sent after it");
+        Assert.IsTrue(update.Revision > answer.Revision);
+        Assert.AreEqual("<p>ticked item-2 </p>", (await fixture.OpenAsync("board", key: "k")).Html);
+    }
+
+    [TestMethod]
+    public void TheOutbox_LetsGoOfTheFragmentThatWaits_AndKeepsWhatElseTheUpdateSays()
+    {
+        var outbox = new CanvasOutbox();
+        outbox.Add(new CanvasEvent("update") { InstanceId = "a", Html = "<p>1</p>", Title = "Renamed", Revision = 2 });
+        outbox.Add(new CanvasEvent("update") { InstanceId = "b", Html = "<p>b</p>", Revision = 2 });
+        outbox.DropHtml("a");
+        outbox.DropHtml("missing");
+        outbox.Add(new CanvasEvent("update") { InstanceId = "a", StatusText = "3 of 8", Revision = 4 });
+        outbox.Complete();
+
+        var read = outbox.ReadAllAsync(default).ToBlockingEnumerable().ToArray();
+
+        Assert.AreEqual(2, read.Length);
+        Assert.AreEqual(("a", null, "Renamed", "3 of 8", 4), (read[0].InstanceId, read[0].Html, read[0].Title, read[0].StatusText, read[0].Revision));
+        Assert.AreEqual(("b", "<p>b</p>"), (read[1].InstanceId, read[1].Html), "the fragment of another instance stays");
+    }
+
+    [TestMethod]
     public async Task AnAction_ThatFailsOrIsNotHandled_SaysSoWithoutTheText()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -502,6 +545,26 @@ public sealed class CanvasesRpcTests
 
         Assert.AreEqual(opened.InstanceId, (await fixture.NextAsync("closed")).InstanceId);
         await Assert.ThrowsExactlyAsync<ArgumentException>(async () => await fixture.PluginServices.Canvases.CloseAsync(" "));
+    }
+
+    [TestMethod]
+    public async Task AnInstanceThePluginCloses_IsNamedToThePage_SoThatATabThatIsNotShownGoesToo()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        // The tab of a space that the window does not show has no page that listens to its instance: the page finds the tab by what names it.
+        var board = await fixture.OpenAsync("board", space: "other", key: "k", visible: false);
+        var notes = await fixture.OpenAsync("notes", space: "other", project: "p1", visible: false);
+        var run = await fixture.OpenAsync("run", space: "other", project: "p1", session: "s1", visible: false);
+
+        Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(board.InstanceId!));
+        Assert.AreEqual((board.InstanceId, Plugin, "board", "other", null, null, "k"), Named(await fixture.NextAsync("closed")));
+        Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(notes.InstanceId!));
+        Assert.AreEqual((notes.InstanceId, Plugin, "notes", "other", "p1", null, null), Named(await fixture.NextAsync("closed")));
+        Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(run.InstanceId!));
+        Assert.AreEqual((run.InstanceId, Plugin, "run", "other", "p1", "s1", null), Named(await fixture.NextAsync("closed")));
+
+        static (string?, string?, string?, string?, string?, string?, string?) Named(CanvasEvent value)
+            => (value.InstanceId, value.PluginKey, value.CanvasId, value.SpaceId, value.ProjectId, value.SessionId, value.Key);
     }
 
     [TestMethod]
@@ -839,6 +902,36 @@ public sealed class BoardsPlugin : PluginBase
         Assert.IsFalse(fixture.HasEvent("closed"));
         Assert.AreEqual("unknown", fixture.Service.Visible(new(Epoch, first.InstanceId, true)).Status);
         Assert.AreEqual(first.InstanceId, (await fixture.OpenAsync("board", key: "k0", visible: true)).InstanceId);
+    }
+
+    [TestMethod]
+    public async Task AtTheLimit_AnInstanceThatACallHolds_IsNotTheOneThatMakesRoom()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var first = await fixture.OpenAsync("board", key: "k0", visible: true);
+        for (var index = 1; index < DesktopCanvases.MaximumInstances; index++) await fixture.OpenAsync("board", key: "k" + index, visible: true);
+        // The tab of the oldest instance asks for it again, hidden: its plugin is told while the call holds the instance, and takes its time.
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        fixture.Plugin.Contexts[first.InstanceId!].VisibilityChanged += _ =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(30));
+        };
+        var hiding = Task.Run(() => fixture.OpenAsync("board", key: "k0", visible: false));
+        Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(30)));
+
+        var next = await fixture.OpenAsync("board", key: "extra", visible: false);
+
+        Assert.AreEqual("limit", next.Status, "the only hidden instance is the one a call is answering for: it is not closed under that call");
+        release.Set();
+        var hidden = await hiding;
+        Assert.AreEqual(("ok", first.InstanceId), (hidden.Status, hidden.InstanceId));
+        Assert.IsTrue(fixture.Broker.GetOpen().Any(info => info.InstanceId == first.InstanceId), "the tab that was answered has its instance");
+        Assert.AreEqual(0, fixture.Plugin.Closed.Count);
+        // Once the call has let go of it, it is the oldest hidden one, and makes room.
+        Assert.AreEqual("ok", (await fixture.OpenAsync("board", key: "extra", visible: false)).Status);
+        Assert.IsTrue(SpinWait.SpinUntil(() => fixture.Plugin.Closed.Contains(first.InstanceId!), TimeSpan.FromSeconds(30)));
     }
 
     [TestMethod]

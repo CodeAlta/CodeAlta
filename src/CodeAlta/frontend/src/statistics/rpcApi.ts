@@ -1,4 +1,5 @@
 import type { AltaRpc } from "../pluginScript/alta";
+import { retryLimit } from "../pluginScript/retry";
 import type { StatisticsApi, StatisticsEvent } from "./api";
 import type {
   CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult,
@@ -37,7 +38,10 @@ function canceled(error: unknown, signal: AbortSignal | undefined): boolean {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** How long the canvas waits before it asks to listen again when the plugin could not be reached, and the longest wait: it doubles each time. */
+/**
+ * How long the canvas waits before it asks to listen again when the plugin could not be reached, and the longest wait: it doubles each time.
+ * It asks as many times as a call does (`retryLimit`), then waits for a reason to ask: a connection that was made, or made again.
+ */
 export const listenRetryMilliseconds = 500;
 const listenRetryLimitMilliseconds = 8000;
 
@@ -105,11 +109,14 @@ export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStat
       let generation = rpc.generation.value;
       let latest = 0;
       let failures = 0;
+      let asking = false;
       let timer: ReturnType<typeof setTimeout> | undefined;
 
       // Asks to listen again after a wait that grows: the plugin could not be reached, or the connection that carried the listening ended.
+      // A plugin that keeps refusing is not asked for ever: the host closed the instance of a tab that is hidden, and knows it again
+      // only once the tab is shown.
       const again = () => {
-        if (!alive || timer !== undefined) return;
+        if (!alive || timer !== undefined || failures >= retryLimit) return;
         timer = setTimeout(() => { timer = undefined; void listen(true); }, Math.min(listenRetryLimitMilliseconds, retryMilliseconds * 2 ** Math.min(failures++, 4)));
       };
 
@@ -118,6 +125,7 @@ export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStat
         const ticket = ++latest;
         if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
         let listening = false;
+        asking = true;
         try {
           const off = await rpc.subscribe(eventsName, value => {
             const event = readEvent(value);
@@ -136,6 +144,8 @@ export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStat
         } catch (error) {
           // The window cannot reach the plugin now (it starts, it reconnects): the canvas asks again. Where the window carries no calls, nobody listens.
           if (alive && ticket === latest && !listening && (error as { retryable?: unknown } | null)?.retryable === true) again();
+        } finally {
+          if (ticket === latest) asking = false;
         }
       };
 
@@ -143,13 +153,16 @@ export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStat
       const offGeneration = rpc.generation.subscribe(next => {
         if (next === generation) return;
         generation = next;
+        failures = 0;
         void listen(true);
       });
       // A connection that ends takes the listening with it, and the canvas makes no call of its own that would tell it: it asks to listen again.
+      // A connection that a call of the canvas made while nothing listened, waited or asked is the reason to ask that a listening which gave up waits for.
       const offConnected = rpc.connected?.subscribe(open => {
-        if (open || !stop) return;
+        if (open ? stop !== null || timer !== undefined || asking : !stop) return;
         stop = null;
-        again();
+        failures = 0;
+        if (open) void listen(true); else again();
       });
       return () => {
         alive = false;

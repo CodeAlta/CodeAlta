@@ -29,18 +29,37 @@ export type CanvasInstanceEvent =
   | Readonly<{ kind: "state"; state: string }>
   | Readonly<{ kind: "closed" }>;
 
+/**
+ * A plugin closed an instance that no tab was listening to: the instance, and what names its tab. The tab is in a space that is not
+ * shown, or has not asked for its instance yet.
+ */
+export type CanvasClosedInstance = Readonly<{
+  instanceId: string; pluginKey: string; canvasId: string; spaceId: string | null; projectId: string | null; sessionId: string | null; key: string | null;
+}>;
+
 export type CanvasHub = ReturnType<typeof createCanvasHub>;
 
 const text = (value: unknown, limit: number): value is string => typeof value === "string" && value.length > 0 && value.length <= limit && !/[\u0000-\u001f\u007f]/u.test(value);
+const optional = (value: unknown, limit: number) => value === null || value === undefined || value === "" ? null : text(value, limit) ? value : undefined;
+
+// What names an instance in an event: its plugin and its canvas, where it is and what it is about. Null when it is not well formed.
+function readNamed(event: CanvasEvent) {
+  if (!text(event.pluginKey, 512) || typeof event.canvasId !== "string" || !/^[A-Za-z0-9._-]{1,64}$/u.test(event.canvasId)) return null;
+  const spaceId = optional(event.spaceId, 256), projectId = optional(event.projectId, 256), sessionId = optional(event.sessionId, 128), key = optional(event.key, 128);
+  if (spaceId === undefined || projectId === undefined || sessionId === undefined || key === undefined) return null;
+  return { pluginKey: event.pluginKey, canvasId: event.canvasId, spaceId, projectId, sessionId, key };
+}
 
 /** Reads an `open` event of the host as a request for a tab; anything that is not well formed is null. */
 export function readOpenRequest(event: CanvasEvent): CanvasOpenRequest | null {
-  if (event.kind !== "open" || !text(event.pluginKey, 512) || typeof event.canvasId !== "string" || !/^[A-Za-z0-9._-]{1,64}$/u.test(event.canvasId)) return null;
-  const optional = (value: unknown, limit: number) => value === null || value === undefined || value === "" ? null : text(value, limit) ? value : undefined;
-  const spaceId = optional(event.spaceId, 256), projectId = optional(event.projectId, 256), sessionId = optional(event.sessionId, 128), key = optional(event.key, 128);
-  if (spaceId === undefined || projectId === undefined || sessionId === undefined || key === undefined) return null;
-  return { pluginKey: event.pluginKey, canvasId: event.canvasId, spaceId, projectId, sessionId, key, plugin: optional(event.package, 512) ?? null, focus: event.focus,
-    title: optional(event.title, 200) ?? null, icon: optional(event.icon, 64) ?? null };
+  const named = event.kind === "open" ? readNamed(event) : null;
+  return named && { ...named, plugin: optional(event.package, 512) ?? null, focus: event.focus, title: optional(event.title, 200) ?? null, icon: optional(event.icon, 64) ?? null };
+}
+
+/** Reads from a `closed` event of the host which tab the instance had; null when the event does not name it well. */
+export function readClosedInstance(event: CanvasEvent): CanvasClosedInstance | null {
+  const named = event.kind === "closed" && text(event.instanceId, 256) ? readNamed(event) : null;
+  return named && { instanceId: event.instanceId!, ...named };
 }
 
 /** Reads an event about an instance; null for what is not one or is not well formed. */
@@ -78,7 +97,9 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
   let listing = 0;
   let version = 0;
   let onOpen: ((request: CanvasOpenRequest) => void) | null = null;
-  const waiting: CanvasOpenRequest[] = [];
+  let onClosed: ((closed: CanvasClosedInstance) => void) | null = null;
+  // What the window has not taken yet, in the order it came: a tab that was asked for and then closed is not the same as one closed and then asked for.
+  const waiting: (Readonly<{ open: CanvasOpenRequest }> | Readonly<{ closed: CanvasClosedInstance }>)[] = [];
   const catalogListeners = new Set<() => void>();
   const changeListeners = new Set<() => void>();
   const attached = new Map<string, Set<(event: CanvasInstanceEvent) => void>>();
@@ -111,16 +132,26 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     else retained.set(instanceId, { update, updateAt: update ? known.updateAt : 0, last, lastAt: last ? known.lastAt : 0 });
   }
 
+  // Gives an event to the tabs that listen to its instance, or keeps it for the one that comes late. Whether a tab heard it.
   function deliver(instanceId: string, event: CanvasInstanceEvent) {
     const listeners = attached.get(instanceId);
-    if (listeners && listeners.size > 0) { for (const listener of [...listeners]) listener(event); return; }
+    if (listeners && listeners.size > 0) { for (const listener of [...listeners]) listener(event); return true; }
     retain(instanceId, event);
+    return false;
+  }
+
+  function keep(entry: (typeof waiting)[number]) {
+    if (waiting.length === 16) waiting.shift();
+    waiting.push(entry);
   }
 
   function open(request: CanvasOpenRequest) {
-    if (onOpen) { onOpen(request); return; }
-    if (waiting.length === 16) waiting.shift();
-    waiting.push(request);
+    if (onOpen) onOpen(request); else keep({ open: request });
+  }
+
+  // A close that no tab heard is the window's to follow: only it knows the tabs of the spaces it does not show.
+  function closed(instance: CanvasClosedInstance) {
+    if (onOpen) onClosed?.(instance); else keep({ closed: instance });
   }
 
   async function list() {
@@ -187,10 +218,16 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     subscribeCatalog(listener: () => void) { catalogListeners.add(listener); return () => { catalogListeners.delete(listener); }; },
     /** Calls the listener when plugins started, were replaced or stopped, and when the host is reached again: a tab that waits for its plugin asks again. */
     subscribeChanges(listener: () => void) { changeListeners.add(listener); return () => { changeListeners.delete(listener); }; },
-    /** The window's way to take the requests of plugins for a tab; the ones that came before it was ready are given to it now. */
-    onOpenRequest(handler: ((request: CanvasOpenRequest) => void) | null) {
+    /**
+     * The window's way to take the requests of plugins for a tab, and to hear of the instances a plugin closed that no tab listened to:
+     * the tab of such an instance is in a space the window does not show, or has not asked for its instance yet, and only the window can
+     * take it away. What came before the window was ready is given to it now, in the order it came.
+     */
+    onOpenRequest(handler: ((request: CanvasOpenRequest) => void) | null, closedHandler: ((closed: CanvasClosedInstance) => void) | null = null) {
       onOpen = handler;
-      if (handler) for (const request of waiting.splice(0)) handler(request);
+      onClosed = handler ? closedHandler : null;
+      if (!handler) return;
+      for (const entry of waiting.splice(0)) { if ("open" in entry) handler(entry.open); else closedHandler?.(entry.closed); }
     },
     /** The way the calls of the scripts of canvases reach their plugins. */
     rpc,
@@ -280,7 +317,10 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
             if (event.kind === "open") { const request = readOpenRequest(event); if (request) open(request); }
             else if (event.kind === "plugins") { void list(); changed(); }
             else if (event.kind === "rpc" || event.kind === "rpcClosed") deliverRpc(event);
-            else { const read = readInstanceEvent(event); if (read) deliver(read.instanceId, read.event); }
+            else {
+              const read = readInstanceEvent(event);
+              if (read && !deliver(read.instanceId, read.event) && read.event.kind === "closed") { const named = readClosedInstance(event); if (named) closed(named); }
+            }
           }
         } catch { /* The channel ended: watch again below, unless the window is going away. */ }
         endRpc("watch_ended");

@@ -15,6 +15,8 @@ const root = createRoot(document.getElementById("root")!);
 const state = {
   calls: [] as string[], actions: [] as { action: string; value: string | null; values: Record<string, string> }[], looks: [] as unknown[], instances: [] as (string | null)[],
   closed: 0, activated: 0, rebuilt: 0, rebuildFails: false, probeUnknown: false, sources: [] as string[], opened: 0, scripts: [] as string[],
+  /** The instances the owner of the tab was given because their tab went away while the host opened them, each with its space. */
+  abandoned: [] as string[],
   /** The host closed the instance to make room for others: it does not know it until the tab asks for it again. */
   evicted: false,
   /** The host takes its time to open an instance: each open waits to be released. */
@@ -59,9 +61,16 @@ const board = (version: string) => ({ default: function Board() {
   }, [alta]);
   return createElement("p", { className: "scripted", "data-instance": alta.context.instanceId ?? "", "data-input": JSON.stringify(alta.context.input) }, `board ${version}`);
 } });
+// A script that fills the fragment: it names its tab after the fragment when the fragment asks for it, and says nothing otherwise.
+const fill = { mount(rootElement: HTMLElement, alta: { host: { setTitle(title: string | null): void; setBadge(badge: number | null): void } }) {
+  const named = rootElement.querySelector<HTMLElement>(".alta-titled");
+  state.scripts.push(`fill:${rootElement.textContent}`);
+  if (named) { alta.host.setTitle(named.textContent); alta.host.setBadge(3); }
+} };
 const loadScript: ScriptLoader = async path => {
   if (path.endsWith("/one/board.js")) return board("one");
   if (path.endsWith("/two/board.js")) return board("two");
+  if (path.endsWith("/one/fill.js")) return fill;
   throw new Error("no such script");
 };
 const hub = createCanvasHub(api);
@@ -85,11 +94,12 @@ const fixture = {
     if (next) next({ done: false, value: full }); else queued.push(full);
   },
   /** Under StrictMode, as in the application: React then runs each effect of a new component twice. */
-  render(options: { visible?: boolean; control?: boolean; space?: string | null } = {}) {
+  render(options: { visible?: boolean; control?: boolean; space?: string | null; owner?: boolean } = {}) {
     flushSync(() => root.render(createElement(StrictMode, null, createElement(CanvasPanel, {
       tab, spaceId: options.space === undefined ? "work" : options.space, hub, visible: options.visible ?? true, active: true,
       onActivate: () => { state.activated++; }, onLook: look => { state.looks.push(look); }, onInstance: instance => { state.instances.push(instance); },
       onClose: () => { state.closed++; }, onOpenSource: folder => { state.sources.push(folder.id); }, control: options.control ? control : null, loadScript,
+      ...options.owner ? { onAbandoned: (instance: string, space: string | null) => { state.abandoned.push(`${instance}:${space}`); } } : {},
     }))));
   },
   clear() { flushSync(() => root.render(null)); },

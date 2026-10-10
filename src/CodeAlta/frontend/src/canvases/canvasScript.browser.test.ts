@@ -77,6 +77,16 @@ test("a canvas tab with a script: the module draws it, a reload replaces it, a h
     // And a script that comes back replaces the failure.
     await evaluate("canvasFixture.push({ kind: 'update', revision: 4, script: '/plugin/k/one/board.js', scriptProblem: '' })");
     assert.equal(await wait("document.querySelector('.canvas-panel .scripted')?.textContent === 'board one'"), true);
+
+    // A script that fills the fragment starts again on each fragment the plugin writes: what it set of its tab for one is not said of the next.
+    await evaluate("canvasFixture.push({ kind: 'update', revision: 5, html: '<p class=\"alta-titled\">From the script</p>', script: '/plugin/k/one/fill.js', scriptProblem: '' })");
+    assert.equal(await wait("canvasFixture.state.looks.at(-1).title === 'From the script' && canvasFixture.state.looks.at(-1).status === '3'"), true);
+    await evaluate("canvasFixture.push({ kind: 'update', revision: 6, html: '<p>plain</p>' })");
+    assert.equal(await wait("canvasFixture.state.scripts.at(-1) === 'fill:plain'"), true, "the script fills the new fragment");
+    assert.equal(await wait("canvasFixture.state.looks.at(-1).title === 'Board' && canvasFixture.state.looks.at(-1).status === null"), true, "the strip shows what the plugin gives again");
+    // And says it again on a fragment that asks for it.
+    await evaluate("canvasFixture.push({ kind: 'update', revision: 7, html: '<p class=\"alta-titled\">Again</p>' })");
+    assert.equal(await wait("canvasFixture.state.looks.at(-1).title === 'Again' && canvasFixture.state.looks.at(-1).status === '3'"), true);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();

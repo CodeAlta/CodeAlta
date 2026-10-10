@@ -334,7 +334,7 @@ internal sealed record CanvasWatchRequest(string? ExpectedEpoch);
 /// <c>open</c> (a plugin asks for a tab: its canvas, its space and context, and whether to bring it to the front),
 /// <c>update</c> (an instance shows another fragment, title or status: only what changed is set),
 /// <c>state</c> (the plugin of an instance stopped, or its canvas is gone: <c>plugin_stopped</c>, <c>unknown_canvas</c>, <c>failed</c>),
-/// <c>closed</c> (the plugin closed an instance: close its tab),
+/// <c>closed</c> (the plugin closed an instance: close its tab, which the event names as an <c>open</c> does),
 /// <c>rpc</c> (frames that the plugin of an instance sends to the script of its tab, see <c>rpcOpen</c>),
 /// <c>rpcClosed</c> (the connection of an instance ended: the plugin was replaced, the instance closed, or the session failed) or
 /// <c>plugins</c> (plugins were started, replaced or stopped: read the canvases again).
@@ -344,22 +344,22 @@ internal sealed record CanvasEvent(string Kind)
     /// <summary>The instance an <c>update</c>, <c>state</c> or <c>closed</c> is about; for an <c>open</c>, the one the tab will have.</summary>
     public string? InstanceId { get; init; }
 
-    /// <summary>For <c>open</c>: the runtime key of the plugin.</summary>
+    /// <summary>For <c>open</c> and <c>closed</c>: the runtime key of the plugin.</summary>
     public string? PluginKey { get; init; }
 
-    /// <summary>For <c>open</c>: the canvas.</summary>
+    /// <summary>For <c>open</c> and <c>closed</c>: the canvas.</summary>
     public string? CanvasId { get; init; }
 
-    /// <summary>For <c>open</c>: the space to open the tab in.</summary>
+    /// <summary>For <c>open</c>: the space to open the tab in. For <c>closed</c>: the space of the tab.</summary>
     public string? SpaceId { get; init; }
 
-    /// <summary>For <c>open</c>: the project of the instance.</summary>
+    /// <summary>For <c>open</c> and <c>closed</c>: the project of the instance.</summary>
     public string? ProjectId { get; init; }
 
-    /// <summary>For <c>open</c>: the session of the instance.</summary>
+    /// <summary>For <c>open</c> and <c>closed</c>: the session of the instance.</summary>
     public string? SessionId { get; init; }
 
-    /// <summary>For <c>open</c>: the key of the instance.</summary>
+    /// <summary>For <c>open</c> and <c>closed</c>: the key of the instance.</summary>
     public string? Key { get; init; }
 
     /// <summary>For <c>open</c>: the id of the folder of the plugin package, or null.</summary>

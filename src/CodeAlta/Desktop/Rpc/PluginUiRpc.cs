@@ -235,6 +235,8 @@ internal sealed class PluginUiService
             var active = _plugins!.ActivePlugins;
             var options = scope.Options! with { SessionId = request.SessionId };
             var items = new List<PluginUiContent>();
+            // The regions of a plugin often share its package: its folder is looked at once for this read.
+            var modules = _modules?.StartRead();
             foreach (var region in new[] { PluginUiRegion.SessionFooter, PluginUiRegion.CommandBar, PluginUiRegion.SessionStatus })
             {
                 foreach (var entry in _plugins.Adapter.CreateContentEntries(active, region, options))
@@ -246,7 +248,7 @@ internal sealed class PluginUiService
                     string? script = null, scriptProblem = null;
                     if (content.Html is not null && content.Script is { HasEntry: true } wanted)
                     {
-                        script = _modules?.PublishFor(entry.Registration.Handle.PluginRuntimeKey, wanted);
+                        script = modules?.PublishFor(entry.Registration.Handle.PluginRuntimeKey, wanted);
                         if (script is null) scriptProblem = "The script of the content could not be found.";
                     }
 

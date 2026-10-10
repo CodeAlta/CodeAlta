@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { CanvasEvent, PluginsEntry } from "#neoastra";
 import { canvasView, refusedPhase } from "./CanvasPanel";
-import { createCanvasHub, readInstanceEvent, readOpenRequest, retainedLimit, type CanvasApi, type CanvasInstanceEvent, type CanvasOpenRequest } from "./canvasHub";
+import { createCanvasHub, readClosedInstance, readInstanceEvent, readOpenRequest, retainedLimit, type CanvasApi, type CanvasInstanceEvent, type CanvasOpenRequest } from "./canvasHub";
 import { createCanvasPluginControl, readPluginFolder, type CanvasPluginApi } from "./canvasPlugin";
 
 const event = (kind: string, fields: Partial<CanvasEvent> = {}): CanvasEvent => ({ kind, actions: null, canvasId: null, focus: false, html: null, icon: null, instanceId: null, key: null,
@@ -81,7 +81,7 @@ test("an event about an instance is read for what it says, and an oversized or m
 });
 
 test("the script of a tab follows its plugin: set when it opens, replaced when the plugin is reloaded, and held back by the tab until it is shown", () => {
-  const opened = canvasView(canvasView({ phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null }, { kind: "opening" }),
+  const opened = canvasView(canvasView({ phase: "loading", instanceId: null, revision: 0, htmlRevision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null }, { kind: "opening" }),
     { kind: "opened", instanceId: "i", revision: 1, html: "<p>a</p>", title: "Board", statusText: null, actions: false, script: "/plugin/k/one/ui/board.js", scriptProblem: null, input: "{\"a\":1}" });
   assert.deepEqual([opened.script, opened.scriptProblem, opened.input], ["/plugin/k/one/ui/board.js", null, "{\"a\":1}"]);
   const update = (fields: Partial<Extract<CanvasInstanceEvent, { kind: "update" }>>): CanvasInstanceEvent =>
@@ -95,23 +95,33 @@ test("the script of a tab follows its plugin: set when it opens, replaced when t
 });
 
 test("a tab follows what the plugin sends: its content, its title and status, and where it is not running", () => {
-  const opened = canvasView(canvasView({ phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null }, { kind: "opening" }),
+  const opened = canvasView(canvasView({ phase: "loading", instanceId: null, revision: 0, htmlRevision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null }, { kind: "opening" }),
     { kind: "opened", instanceId: "i", revision: 2, html: "<p>a</p>", title: "Board", statusText: null, actions: true, script: null, scriptProblem: null, input: null });
-  assert.deepEqual(opened, { phase: "ready", instanceId: "i", revision: 2, html: "<p>a</p>", title: "Board", statusText: null, actions: true, script: null, scriptProblem: null, input: null });
+  assert.deepEqual(opened, { phase: "ready", instanceId: "i", revision: 2, htmlRevision: 2, html: "<p>a</p>", title: "Board", statusText: null, actions: true, script: null, scriptProblem: null, input: null });
   const update = (fields: Partial<Extract<CanvasInstanceEvent, { kind: "update" }>>): CanvasInstanceEvent =>
     ({ kind: "update", revision: 3, html: null, title: null, statusText: null, actions: null, state: null, script: null, scriptProblem: null, ...fields });
   // Only what the event says changes; an event that is not newer is dropped.
   const pushed = canvasView(opened, { kind: "event", event: update({ html: "<p>b</p>", statusText: "3 of 8" }) });
-  assert.deepEqual(pushed, { ...opened, revision: 3, html: "<p>b</p>", statusText: "3 of 8" });
+  assert.deepEqual(pushed, { ...opened, revision: 3, htmlRevision: 3, html: "<p>b</p>", statusText: "3 of 8" });
   assert.equal(canvasView(pushed, { kind: "event", event: update({ revision: 2, html: "<p>old</p>" }) }), pushed);
   assert.equal(canvasView(pushed, { kind: "event", event: update({ revision: 4, statusText: "" }) }).statusText, null, "a blank status clears it");
-  // The answer to an action replaces the content and says which revision it is: a push the plugin made before the action and that arrives after is dropped.
+  // The answer to an action replaces the content and says which revision it is: the fragment of a push the plugin made before the action and that arrives after is dropped.
   const answered = canvasView(pushed, { kind: "html", html: "<p>answer</p>", revision: 5 });
-  assert.deepEqual([answered.html, answered.revision], ["<p>answer</p>", 5]);
-  assert.equal(canvasView(answered, { kind: "event", event: update({ revision: 4, html: "<p>before the action</p>" }) }), answered);
-  // An answer that arrives after a newer push is the one that is dropped.
+  assert.deepEqual([answered.html, answered.htmlRevision], ["<p>answer</p>", 5]);
+  assert.equal(canvasView(answered, { kind: "event", event: update({ revision: 4, html: "<p>before the action</p>" }) }).html, "<p>answer</p>");
+  // What such a push says besides its fragment is not older than what the tab has: the answer says nothing of the title or the status.
+  assert.deepEqual(((late: ReturnType<typeof canvasView>) => [late.html, late.title, late.statusText])(canvasView(answered, { kind: "event", event: update({ revision: 4, html: "<p>before the action</p>", title: "Renamed", statusText: "4 of 8" }) })),
+    ["<p>answer</p>", "Renamed", "4 of 8"]);
+  // An answer that arrives after a newer push of a fragment is the one that is dropped.
   const newer = canvasView(pushed, { kind: "event", event: update({ revision: 6, html: "<p>after the action</p>" }) });
   assert.equal(canvasView(newer, { kind: "html", html: "<p>answer</p>", revision: 5 }), newer);
+  // A push that says nothing of the fragment (a title, a status) is no newer content: the answer it overtook is still shown.
+  const renamed = canvasView(pushed, { kind: "event", event: update({ revision: 6, title: "Renamed" }) });
+  const afterRename = canvasView(renamed, { kind: "html", html: "<p>answer</p>", revision: 5 });
+  assert.deepEqual([afterRename.html, afterRename.title, afterRename.htmlRevision], ["<p>answer</p>", "Renamed", 5]);
+  assert.equal(canvasView(afterRename, { kind: "event", event: update({ revision: 7, html: "<p>later</p>" }) }).html, "<p>later</p>", "and a later push of a fragment replaces it");
+  // The answer of the action before that one, which comes last, is the older content.
+  assert.equal(canvasView(afterRename, { kind: "html", html: "<p>the action before</p>", revision: 4 }), afterRename);
   // The plugin stops: the tab keeps what identifies it and shows the placeholder; its next version brings the content back.
   const stopped = canvasView(pushed, { kind: "event", event: { kind: "state", state: "plugin_stopped" } });
   assert.deepEqual([stopped.phase, stopped.instanceId, stopped.html, stopped.title], ["stopped", "i", "", "Board"]);
@@ -224,6 +234,94 @@ test("a tab is told what came after it asked for its instance, in the order it c
   await wait(40);
   answer!();
   assert.deepEqual(told((await opening).revision), [{ kind: "state", state: "plugin_stopped" }]);
+  disconnect();
+});
+
+test("a closed event names the tab of its instance when it is well formed", () => {
+  const closed = event("closed", { instanceId: "i", pluginKey: "builtin:board", canvasId: "board", spaceId: "work", projectId: "p", sessionId: "s", key: "k" });
+  assert.deepEqual(readClosedInstance(closed), { instanceId: "i", pluginKey: "builtin:board", canvasId: "board", spaceId: "work", projectId: "p", sessionId: "s", key: "k" });
+  assert.deepEqual(readClosedInstance(event("closed", { instanceId: "i", pluginKey: "k", canvasId: "c" })),
+    { instanceId: "i", pluginKey: "k", canvasId: "c", spaceId: null, projectId: null, sessionId: null, key: null });
+  for (const bad of [{ kind: "open" }, { instanceId: null }, { pluginKey: null }, { canvasId: "bad id" }, { spaceId: "x".repeat(257) }, { sessionId: "a\u0000" }, { key: "x".repeat(129) }]) {
+    assert.equal(readClosedInstance({ ...closed, ...bad }), null, JSON.stringify(bad));
+  }
+});
+
+test("an instance that a plugin closes takes its tab away, whether the tab listens, is asking for it, or is in a space that is not shown", async () => {
+  const played = host();
+  let answer: (() => void) | null = null;
+  const open = played.api.open;
+  const api: CanvasApi = { ...played.api, open: async (request, options) => { await new Promise<void>(resolve => { answer = resolve; }); return open(request, options); } };
+  const hub = createCanvasHub(api, timers());
+  const disconnect = hub.connect("epoch");
+  const seen: string[] = [];
+  hub.onOpenRequest(request => seen.push(`open:${request.spaceId}`), closed => seen.push(`closed:${closed.instanceId}:${closed.spaceId}`));
+  const closed = (instanceId: string, spaceId: string) => event("closed", { instanceId, pluginKey: "k", canvasId: "board", spaceId });
+  const ask = () => hub.open({ pluginKey: "k", canvasId: "board", spaceId: "shown", projectId: null, sessionId: null, key: null, visible: true });
+  const told = (since: number) => { const received: CanvasInstanceEvent[] = []; hub.attach("i1", since, value => received.push(value))(); return received; };
+
+  // The tab is in a space that the window does not show: nothing listens to its instance, and the window is told which tab it was.
+  played.push(closed("i1", "other"));
+  await wait(40);
+  assert.deepEqual(seen, ["closed:i1:other"]);
+  // The tab the user opens afterwards is a new one: what closed before it asked is not said to it.
+  let opening = ask();
+  await wait(10);
+  answer!();
+  assert.deepEqual(told((await opening).revision), [], "a tab that asks after the close keeps the instance the host just gave it");
+
+  // The tab listens: it is told, and the window is not, so that the tab is closed once.
+  const heard: CanvasInstanceEvent[] = [];
+  const detach = hub.attach("i1", 1, value => heard.push(value));
+  played.push(closed("i1", "shown"));
+  await wait(40);
+  assert.deepEqual(heard, [{ kind: "closed" }]);
+  assert.deepEqual(seen, ["closed:i1:other"]);
+  detach();
+
+  // The tab asked for its instance and the host has not answered: the window is told at once, and so is the tab if it is still there when the answer comes.
+  opening = ask();
+  await wait(10);
+  played.push(closed("i1", "shown"));
+  await wait(40);
+  assert.deepEqual(seen, ["closed:i1:other", "closed:i1:shown"]);
+  answer!();
+  assert.deepEqual(told((await opening).revision), [{ kind: "closed" }]);
+
+  // A close that does not name its tab is kept for the tab alone.
+  played.push(event("closed", { instanceId: "i2" }));
+  await wait(40);
+  assert.equal(seen.length, 2);
+  const late: CanvasInstanceEvent[] = [];
+  hub.attach("i2", 0, value => late.push(value));
+  assert.deepEqual(late, [{ kind: "closed" }]);
+  disconnect();
+});
+
+test("what plugins asked and closed before the window was ready is given to it in the order it came", async () => {
+  const played = host();
+  const hub = createCanvasHub(played.api, timers());
+  const disconnect = hub.connect("epoch");
+  const request = (key: string) => event("open", { pluginKey: "k", canvasId: "board", spaceId: "other", key, focus: true });
+  const closed = (key: string) => event("closed", { instanceId: `i-${key}`, pluginKey: "k", canvasId: "board", spaceId: "other", key });
+  // Asked for then closed, and closed then asked for again: the window ends with the second tab and without the first.
+  for (const value of [request("a"), closed("a"), closed("b"), request("b")]) played.push(value);
+  await wait(40);
+
+  const taken: string[] = [];
+  hub.onOpenRequest(value => taken.push(`open:${value.key}`), value => taken.push(`closed:${value.key}`));
+
+  assert.deepEqual(taken, ["open:a", "closed:a", "closed:b", "open:b"]);
+  // A window that does not follow the closes takes the requests alone.
+  hub.onOpenRequest(null);
+  for (const value of [closed("c"), request("c")]) played.push(value);
+  await wait(40);
+  const requests: string[] = [];
+  hub.onOpenRequest(value => requests.push(value.key!));
+  assert.deepEqual(requests, ["c"]);
+  played.push(closed("d"));
+  await wait(40);
+  assert.deepEqual(requests, ["c"]);
   disconnect();
 });
 
