@@ -85,10 +85,15 @@ test("a repository without a stale worktree shows one group, and a catalog that 
   assert.match(render(createElement(WorktreeTable, { inventory: { rows: [project, orphan], sessionsKnown: true, truncated: true }, projectName: "Alpha", selected: new Set<string>(), busy: false,
     onToggle: never, onToggleAll: never, onRemove: never, onOpenEditor: never, onShowChanges: never })), /<tfoot><tr><td colSpan="5" class="worktree-more">Git lists more worktrees than this window shows\.<\/td>/);
   assert.match(lines(html)["amber-denali"], /title="The sessions could not be read\.">Unknown</);
-  // The main checkout of a repository whose project lives in a worktree is protected, and is not what the changes tab shows.
+  // The main checkout of a repository whose project lives in a worktree is protected, and its changes are shown like those of any checkout.
   const main = lines(table([row("repository", { main: true, protection: "main", branch: "main" }), { ...project, path: "C:\\trees\\alpha\\home", name: "home" }]));
   assert.match(main.repository, /data-state="main"[^>]*>Main checkout</);
-  assert.match(button(main.repository, "Show the changes of repository"), /disabled=""/);
+  assert.doesNotMatch(button(main.repository, "Show the changes of repository"), /disabled/);
+  assert.doesNotMatch(button(main.repository, "Open repository in the code editor"), /disabled/);
+  assert.match(main.repository, /<td class="worktree-cell-select" title="The checkout the repository lives in is not removed\."><label[^>]*><input[^>]*disabled=""/);
+  // The checkout of the project beside it stays the folder of the project, and is not removed either.
+  assert.match(main.home, /data-state="main"[^>]*>Project folder</);
+  assert.match(button(main.home, "Remove the worktree home"), /disabled=""/);
   assert.match(button(main.repository, "Remove the worktree repository"), /disabled=""/);
 });
 

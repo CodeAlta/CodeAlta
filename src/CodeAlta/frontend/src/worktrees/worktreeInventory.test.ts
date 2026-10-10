@@ -51,8 +51,8 @@ test("only a worktree that nothing protects can be asked to go", () => {
   assert.equal(showsChanges(project), true);
   assert.equal(showsChanges(row()), true);
   assert.equal(showsChanges(row({ missing: true })), false);
-  // The main checkout of a repository whose project lives in a worktree is not what the changes tab shows.
-  assert.equal(showsChanges(row({ main: true, protection: "main" })), false);
+  // The main checkout of a repository whose project lives in a worktree has changes to show like any other, and is not one to remove.
+  assert.equal(showsChanges(row({ main: true, protection: "main" })), true);
 });
 
 test("the selection holds what can go, and loses what the list no longer offers", () => {

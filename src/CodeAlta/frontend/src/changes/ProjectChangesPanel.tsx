@@ -19,7 +19,7 @@ import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { BranchSwitcher } from "../worktrees/BranchSwitcher";
 import { WorktreeList } from "../worktrees/WorktreeList";
-import { sameFolder, worktreeSessions, worktreesReply, type Worktree } from "../worktrees/worktrees";
+import { checkoutFolder, sameFolder, shownCheckout, worktreeSessions, worktreesReply, type Worktree } from "../worktrees/worktrees";
 import { modalDialogOpen } from "../modalDialogs";
 
 const autoRefreshMilliseconds = 5000;
@@ -87,8 +87,9 @@ const CommitRow = memo(function CommitRow({ commit, selected, onSelect }: { comm
  * view that scrolls, where the file at the top is the selected one of the list.
  *
  * A repository that has git worktrees lists its checkouts above the files: the folder of the project and each
- * worktree. The tab shows the changes and the commits of the one that is selected, a worktree is removed from
- * its row, and the branch in the header moves the checkout to another branch.
+ * worktree, and the main checkout of the repository when the project itself lives in a worktree. The tab shows
+ * the changes and the commits of the one that is selected, a worktree is removed from its row, and the branch
+ * in the header moves the checkout to another branch.
  */
 export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, onActivate, onOpenFile, request, sessions, onWorktreesChanged, api = projectGit,
   trees = worktreesApi }: {
@@ -185,9 +186,9 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
           if (abort.signal.aborted) return;
           const next = typeof value === "string" ? null : value.worktrees;
           setCheckouts(current => sameCheckouts(current, next) ? current : next);
-          // The worktree that was shown is gone: the folder of the project is shown again.
-          if (next && latest.current.checkout !== null && !next.some(worktree => !worktree.main && !worktree.missing && sameFolder(worktree.folder, latest.current.checkout)))
-            showCheckoutLatest.current(null);
+          // The checkout that was shown is gone: the folder of the project is shown again. The main checkout of
+          // a repository is one that can be shown, when the project lives in a worktree.
+          if (next && latest.current.checkout !== null && !shownCheckout(next, latest.current.checkout)) showCheckoutLatest.current(null);
         });
       void api.commits({ expectedEpoch: epoch, projectId: tab.projectId, limit, knownRevision: knownHistory, worktree: checkout }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
         .then(reply => changeCommitsReply(reply, tab.projectId, knownHistory), () => null)
@@ -366,12 +367,12 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const allCollapsed = folders.length > 0 && folders.every(row => row.kind === "folder" && row.collapsed);
 
   // The checkouts of the repository, once it has a worktree: a repository without one shows nothing more than before.
-  const shownWorktree = checkout === null ? null : checkouts?.find(worktree => !worktree.main && sameFolder(worktree.folder, checkout)) ?? null;
+  const shownWorktree = checkouts ? shownCheckout(checkouts, checkout) : null;
   const projectSessions = useMemo(() => (sessions ?? []).filter(session => session.projectId === tab.projectId), [sessions, tab.projectId]);
   const worktreeRows = epoch && checkouts && checkouts.length > 1 && <WorktreeList epoch={epoch} projectId={tab.projectId} projectName={projectName ?? tab.projectPath}
     worktrees={checkouts} selected={checkout} api={trees}
-    sessions={worktree => worktree.main ? 0 : worktreeSessions(projectSessions, worktree).length}
-    onSelect={worktree => showCheckout(worktree.main ? null : worktree.folder)}
+    sessions={worktree => worktree.project ? 0 : worktreeSessions(projectSessions, worktree).length}
+    onSelect={worktree => showCheckout(checkoutFolder(worktree))}
     onRemoved={worktree => {
       if (sameFolder(worktree.folder, checkout)) showCheckout(null);
       refresh.current(true);

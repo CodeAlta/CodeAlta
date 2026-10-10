@@ -4,14 +4,15 @@ import { worktrees as worktreesApi } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
-import { sameFolder, worktreeFailure, type Worktree } from "./worktrees";
+import { checkoutShown, worktreeFailure, type Worktree } from "./worktrees";
 
 export type WorktreeApi = Pick<typeof worktreesApi, "remove">;
 
 /**
  * The checkouts of a project's repository in the changes of the project: the folder of the project, then its
  * worktrees. A row shows the changes and the commits of its checkout; a worktree is removed from its row,
- * unless a session is working in it.
+ * unless a session is working in it. For a project that lives in a worktree, the main checkout of its
+ * repository is a row of its own, under its own name: like the folder of the project it is not removed.
  */
 export function WorktreeList({ epoch, projectId, projectName, worktrees, selected, sessions, onSelect, onRemoved, api = worktreesApi }: {
   epoch: string; projectId: string; projectName: string;
@@ -50,13 +51,13 @@ export function WorktreeList({ epoch, projectId, projectName, worktrees, selecte
     <div className="worktree-rows" role="listbox" aria-label={t("Worktrees")}>
       {worktrees.map(worktree => {
         const count = sessions(worktree);
-        const shown = worktree.main ? selected === null : sameFolder(selected, worktree.folder);
+        const shown = checkoutShown(worktree, selected);
         return <div className="worktree-row" key={worktree.path} data-main={worktree.main || undefined} data-missing={worktree.missing || undefined}>
           <button type="button" role="option" aria-selected={shown} disabled={worktree.missing} onClick={() => onSelect(worktree)}
             title={`${worktree.path}${worktree.branch ? `\n${t("Branch {branch}", { branch: worktree.branch })}` : ""}${worktree.missing ? `\n${t("The folder is gone.")}` : ""}`}>
             <span className="worktree-row-icon"><AppIcon name={worktree.main ? "folder" : "worktree"} size={14} /></span>
             <span className="worktree-row-text">
-              <strong>{worktree.main ? projectName : worktree.name}</strong>
+              <strong>{worktree.project ? projectName : worktree.name}</strong>
               <small>
                 {worktree.missing ? <span>{t("Folder gone")}</span>
                   : <span className="worktree-row-branch"><AppIcon name="branch" size={11} />{worktree.branch ?? worktree.head ?? ""}</span>}

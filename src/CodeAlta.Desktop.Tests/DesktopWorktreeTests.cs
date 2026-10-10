@@ -115,7 +115,7 @@ public sealed class DesktopWorktreeTests
         Assert.AreEqual(("ok", project.Id, Path.Combine(repository.Options.WorktreesRoot, project.Slug)), (list.Status, list.ProjectId, list.NewFolder));
         Assert.AreEqual(list.Worktrees.Length, JsonSerializer.Deserialize(JsonSerializer.Serialize(list, DesktopJsonContext.Default.WorktreesListResponse), DesktopJsonContext.Default.WorktreesListResponse)!.Worktrees.Length);
         // The folder of the project first: it is the one that is not removed.
-        Assert.AreEqual(new WorktreeItem(repository.Root, Path.GetFileName(repository.Root), "main", list.Worktrees[0].Head, true, false, false, repository.Root, false), list.Worktrees[0]);
+        Assert.AreEqual(new WorktreeItem(repository.Root, Path.GetFileName(repository.Root), "main", list.Worktrees[0].Head, true, false, false, repository.Root, false, Project: true), list.Worktrees[0]);
         Assert.AreEqual(7, list.Worktrees[0].Head!.Length);
         // The worktrees follow, in the order of git: by their folders.
         Assert.AreEqual(new WorktreeItem(first.Root!, first.Name!, first.Branch, list.Worktrees[0].Head, false, false, false, first.Root!, false),
@@ -488,13 +488,38 @@ public sealed class DesktopWorktreeTests
         Assert.AreEqual((true, false, "main"), (Item(repository.Root).Main, Item(repository.Root).Project, Item(repository.Root).Protection));
         Assert.AreEqual((true, true, "main"), (Item(home.Root!).Main, Item(home.Root!).Project, Item(home.Root!).Protection));
         Assert.AreEqual((false, false, null), (Item(other.Root!).Main, Item(other.Root!).Project, Item(other.Root!).Protection));
-        // The changes of the main checkout can be read: the folder the inventory names for it is one of the
-        // project's repository. The list of the Changes tab does not tell it from the checkout of the project
-        // (both are `Main` there), which is why that tab cannot be asked to show it.
-        var changes = await new ProjectGitService(repository.Projects, Epoch).ChangesAsync(new(Epoch, project.Id, "head", null, Worktree: Item(repository.Root).Folder), default);
-        Assert.AreEqual(("ok", repository.Root), (changes.Status, changes.Root));
-        var listed = (await service.ListAsync(new(Epoch, project.Id), default)).Worktrees;
-        CollectionAssert.AreEquivalent(new[] { repository.Root, home.Root }, listed.Where(static worktree => worktree.Main).Select(static worktree => worktree.Path).ToArray());
+        // The list of the Changes tab tells the three apart: neither the main checkout nor the one of the project is
+        // removed (`Main`), and only one of them is where the project lives (`Project`).
+        var list = await service.ListAsync(new(Epoch, project.Id), default);
+        WorktreeItem Listed(string path) => list.Worktrees.Single(worktree => worktree.Path == path);
+        Assert.AreEqual((true, false), (Listed(repository.Root).Main, Listed(repository.Root).Project));
+        Assert.AreEqual((true, true), (Listed(home.Root!).Main, Listed(home.Root!).Project));
+        Assert.AreEqual((false, false), (Listed(other.Root!).Main, Listed(other.Root!).Project));
+        var wire = JsonSerializer.Deserialize(JsonSerializer.Serialize(list, DesktopJsonContext.Default.WorktreesListResponse), DesktopJsonContext.Default.WorktreesListResponse)!;
+        CollectionAssert.AreEqual(list.Worktrees, wire.Worktrees);
+        // Each has a folder of its own, and the changes that are read for it are those of that checkout: the main
+        // checkout of the repository is read like any other one, and no folder is read as another.
+        var changes = new ProjectGitService(repository.Projects, Epoch);
+        foreach (var checkout in new[] { repository.Root, home.Root!, other.Root! })
+        {
+            var read = await changes.ChangesAsync(new(Epoch, project.Id, "head", null, Worktree: Listed(checkout).Folder), default);
+            Assert.AreEqual(("ok", checkout), (read.Status, read.Root));
+            Assert.AreEqual(Item(checkout).Folder, Listed(checkout).Folder);
+        }
+
+        Assert.AreEqual(home.Root, (await changes.ChangesAsync(new(Epoch, project.Id, "head", null), default)).Root);
+        // Both protected checkouts stay, however they are asked to go: from the row of the Changes tab, with or
+        // without their changes, and from the window of the worktrees.
+        foreach (var kept in new[] { repository.Root, home.Root! })
+        {
+            Assert.AreEqual(new WorktreeChangeResponse("main"), await service.RemoveAsync(new(Epoch, project.Id, kept), default));
+            Assert.AreEqual(new WorktreeChangeResponse("main"), await service.RemoveAsync(new(Epoch, project.Id, kept, Force: true), default));
+        }
+
+        var forced = await service.RemoveManyAsync(new(Epoch, project.Id, [repository.Root, home.Root!], [repository.Root, home.Root!], DeleteMergedBranches: true), default);
+        CollectionAssert.AreEqual(new[] { "main", "main" }, forced.Results.Select(static result => result.Status).ToArray());
+        Assert.IsTrue(Directory.Exists(repository.Root) && Directory.Exists(home.Root));
+        StringAssert.Contains(repository.Git("branch", "--list", home.Branch!), home.Name!);
         var removed = await service.RemoveManyAsync(new(Epoch, project.Id, [repository.Root, home.Root!, other.Root!]), default);
         CollectionAssert.AreEqual(new[] { "main", "main", "ok" }, removed.Results.Select(static result => result.Status).ToArray());
         Assert.IsTrue(Directory.Exists(repository.Root) && Directory.Exists(home.Root) && !Directory.Exists(other.Root));

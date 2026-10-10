@@ -84,8 +84,8 @@ export function removalReply(reply: unknown, asked: readonly string[]): readonly
  */
 export const removable = (row: InventoryRow) => row.protection === null && !row.main && !row.project && !row.busy && !row.locked;
 
-/** Whether the changes of a checkout can be shown: the one of the project, or a worktree whose folder is there. */
-export const showsChanges = (row: InventoryRow) => row.project || !row.main && !row.missing;
+/** Whether the changes of a checkout can be shown: every one whose folder is there, the main one of the repository included. */
+export const showsChanges = (row: InventoryRow) => !row.missing;
 
 /** The checkouts whose folder is there, then the ones git still lists without their folder. */
 export function inventoryGroups(rows: readonly InventoryRow[]): Readonly<{ present: readonly InventoryRow[]; gone: readonly InventoryRow[] }> {

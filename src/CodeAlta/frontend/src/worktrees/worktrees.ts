@@ -7,8 +7,12 @@ export const projectFolder: WorkPlace = Object.freeze({ worktree: false, base: n
 export const workPlacesKey = "codealta.desktop.workPlaces.v1";
 const workPlaceLimit = 256;
 
-/** A checkout of a project's repository: the one the project lives in, or a worktree. */
-export type Worktree = Readonly<{ path: string; name: string; branch: string | null; head: string | null; main: boolean; locked: boolean; missing: boolean;
+/**
+ * A checkout of a project's repository. `main` is one that is not removed: the checkout the project lives in, and the
+ * main one of the repository. `project` is the checkout the project lives in alone; for a project that was registered
+ * in a linked worktree the main checkout of the repository is another row.
+ */
+export type Worktree = Readonly<{ path: string; name: string; branch: string | null; head: string | null; main: boolean; project: boolean; locked: boolean; missing: boolean;
   folder: string; busy: boolean }>;
 export type WorktreeList = Readonly<{ worktrees: readonly Worktree[]; newFolder: string | null }>;
 export type Branch = Readonly<{ name: string; current: boolean; remote: boolean; worktree: string | null; worktreeName: string | null }>;
@@ -76,9 +80,26 @@ export function sameFolder(a: string | null | undefined, b: string | null | unde
   return clean(a) === clean(b);
 }
 
+/**
+ * What the Changes tab is asked to show for a checkout: nothing for the one the project lives in, which is what it
+ * shows by itself, and the folder of the project in any other checkout.
+ */
+export const checkoutFolder = (worktree: Worktree): string | null => worktree.project ? null : worktree.folder;
+
+/** Whether a checkout is the one that is shown; `shown` is null for the folder of the project. */
+export const checkoutShown = (worktree: Worktree, shown: string | null): boolean => worktree.project ? shown === null : sameFolder(shown, worktree.folder);
+
+/**
+ * The checkout that is shown, when it is another one than the project's and the list still has it with its folder.
+ * Null for the folder of the project, and for a checkout that is gone.
+ */
+export function shownCheckout(worktrees: readonly Worktree[], shown: string | null): Worktree | null {
+  return shown === null ? null : worktrees.find(worktree => !worktree.project && !worktree.missing && sameFolder(worktree.folder, shown)) ?? null;
+}
+
 /** The sessions that work in a checkout: the ones of its worktree, or for the checkout of the project, the ones that have none. */
 export function worktreeSessions<T extends Pick<WorkspaceSession, "worktreePath" | "worktreeRoot" | "worktreeMissing">>(sessions: readonly T[], worktree: Worktree): readonly T[] {
-  return sessions.filter(session => worktree.main ? !session.worktreePath || session.worktreeMissing
+  return sessions.filter(session => worktree.project ? !session.worktreePath || session.worktreeMissing
     : !!session.worktreePath && !session.worktreeMissing && sameFolder(session.worktreeRoot ?? session.worktreePath, worktree.path));
 }
 
@@ -93,9 +114,14 @@ export function worktreesReply(reply: unknown, projectId: string): WorktreeList 
     if (!item || typeof item !== "object") return "read_failed";
     const row = item as Record<string, unknown>;
     if (!text(row.path, 4096) || !text(row.name, 4096) || !optional(row.branch, 256) || !optional(row.head, 64) || !text(row.folder, 4096)
-      || typeof row.main !== "boolean" || typeof row.locked !== "boolean" || typeof row.missing !== "boolean" || typeof row.busy !== "boolean") return "read_failed";
-    worktrees.push({ path: row.path, name: row.name, branch: row.branch, head: row.head, main: row.main, locked: row.locked, missing: row.missing, folder: row.folder, busy: row.busy });
+      || typeof row.main !== "boolean" || typeof row.project !== "boolean" || typeof row.locked !== "boolean" || typeof row.missing !== "boolean" || typeof row.busy !== "boolean"
+      // The checkout the project lives in is one that is not removed.
+      || row.project && !row.main) return "read_failed";
+    worktrees.push({ path: row.path, name: row.name, branch: row.branch, head: row.head, main: row.main, project: row.project, locked: row.locked, missing: row.missing,
+      folder: row.folder, busy: row.busy });
   }
+  // One checkout at most is where the project lives.
+  if (worktrees.filter(worktree => worktree.project).length > 1) return "read_failed";
   return { worktrees, newFolder: value.newFolder };
 }
 

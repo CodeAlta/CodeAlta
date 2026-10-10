@@ -2738,7 +2738,13 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   from that folder once the worktree is gone.
 - **Changes tab.** A repository with more than one checkout lists them above the files, under
   **Worktrees**: the folder of the project first, then each worktree with its branch and the number of
-  sessions that work in it. A row shows the changes and the commits of its checkout. The changes button
+  sessions that work in it. A row shows the changes and the commits of its checkout. A project can be
+  registered in a linked worktree: the list then has three kinds of rows, in the order of git. The main
+  checkout of the repository comes first, under the name of its folder; the checkout the project lives
+  in is the row with the name of the project, and is what the tab shows when nothing was chosen; the
+  other worktrees follow. Each row shows its own checkout, one row at a time is the one chosen, and what
+  was asked for stays shown when the list is read again. Neither the main checkout nor the one of the
+  project has a trash button (`main` in the list), and the host refuses to remove either. The changes button
   and the worktree chip of a session open the tab on its worktree, and so does `alta diff show` called
   by a session that works in one. The trash button of a row removes the worktree
   (`git worktree remove`), after a confirmation that names its folder. A worktree with changes that are
@@ -2806,8 +2812,8 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
     a worktree opens the code editor on its own folder (the folder of the project inside it), in a tab
     named after the worktree. That tab is one of a folder of the disk (`DiskFolders`): it is not
     restored at the next start. The changes button opens the Changes tab of the project on that
-    checkout. The main checkout of a repository whose project lives in a worktree can be opened in the
-    editor, and its changes are not offered: the Changes tab shows the checkout of the project for it.
+    checkout. Both work for every checkout whose folder is there, the main checkout of a repository
+    whose project lives in a worktree included.
   - *Reading again.* When the window opens, when the application comes back to the front, on
     **Refresh**, after a removal, and every ten seconds while the list is shown. An answer to a question
     that was asked before a newer one is dropped. What is ticked and can no longer go (a session
@@ -2833,7 +2839,9 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
 - **Host API.** `workspace.createSession` takes `worktree` and `baseBranch`, and answers
   `worktree_failed` with a `reason` (`not_repository`, `no_commit`, `invalid`, `git_unavailable`,
   `timeout`, `failed`) and the message of git. A session of `workspace.snapshot` has `worktreePath`,
-  `worktreeRoot`, `worktreeName` and `worktreeMissing`. The `worktrees` service has `list`, `remove`,
+  `worktreeRoot`, `worktreeName` and `worktreeMissing`. The `worktrees` service has `list` (each
+  checkout says whether it is one that is not removed, `main`, and whether it is the one the project
+  lives in, `project`: a request of `projectGit` without a `worktree` reads that one), `remove`,
   `branches`, `switch`, `settings` and `saveSettings`, and for the Worktrees window `inventory`,
   `removeMany` (256 folders at most; one result for each, in the order they were asked: `ok`, `dirty`,
   `in_use`, `locked`, `main`, `not_worktree`, what git refused with its message, or `canceled` for a

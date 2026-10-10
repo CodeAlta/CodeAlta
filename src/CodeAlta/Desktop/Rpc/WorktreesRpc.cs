@@ -118,7 +118,9 @@ internal sealed class WorktreesService
                 worktree.Head is { Length: >= AbbreviatedCommitLength } head ? head[..AbbreviatedCommitLength] : worktree.Head,
                 // The checkout the project lives in is the one that is not removed here, also when the project is itself a worktree.
                 worktree.Main || worktree.Path.Equals(checkout, PathComparison), worktree.Locked, worktree.Missing,
-                below == "." ? worktree.Path : Path.Combine(worktree.Path, below), busy.Contains(worktree.Path)))],
+                below == "." ? worktree.Path : Path.Combine(worktree.Path, below), busy.Contains(worktree.Path),
+                // The two are told apart: a project that lives in a worktree has the main checkout of its repository beside it.
+                worktree.Path.Equals(checkout, PathComparison)))],
             parent);
     }
 
@@ -490,12 +492,16 @@ internal sealed record WorktreesListResponse(string Status, string? ProjectId, W
 /// <param name="Name">The name of that folder.</param>
 /// <param name="Branch">The branch it is on; null on a commit without a branch.</param>
 /// <param name="Head">The first digits of the commit it is on.</param>
-/// <param name="Main">Whether it is the checkout the project lives in, which is not removed.</param>
+/// <param name="Main">Whether it is the checkout the project lives in or the main one of the repository: neither is removed.</param>
 /// <param name="Locked">Whether git keeps it from being removed.</param>
 /// <param name="Missing">Whether its folder is gone.</param>
 /// <param name="Folder">The folder of the project inside this checkout: what a request names to read it.</param>
 /// <param name="Busy">Whether a session is at work in it.</param>
-internal sealed record WorktreeItem(string Path, string Name, string? Branch, string? Head, bool Main, bool Locked, bool Missing, string Folder, bool Busy);
+/// <param name="Project">
+/// Whether it is the checkout the project lives in: the one a request reads when it names no worktree. For a
+/// project that lives in a linked worktree it is not the main checkout of the repository, which is listed too.
+/// </param>
+internal sealed record WorktreeItem(string Path, string Name, string? Branch, string? Head, bool Main, bool Locked, bool Missing, string Folder, bool Busy, bool Project = false);
 
 /// <summary>Asks to remove a worktree.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>

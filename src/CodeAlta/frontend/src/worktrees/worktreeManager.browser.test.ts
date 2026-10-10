@@ -202,6 +202,21 @@ test("the window of the worktrees selects, asks, removes in part and says what b
     await press(".worktree-results footer button.bp6-intent-primary");
     assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 8"), true);
 
+    // A project that lives in a worktree has the main checkout of its repository in the list: it is not one to remove,
+    // and its changes are asked for by its own folder, like those of any checkout.
+    await evaluate("worktreesFixture.state.rows = [worktreesFixture.row('repository', { path: 'C:\\\\code\\\\repository', folder: 'C:\\\\code\\\\repository', branch: 'main', main: true, protection: 'main' }), ...worktreesFixture.repository()]");
+    await press('.worktree-manager-bar button[aria-label="Refresh"]');
+    assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 9"), true);
+    assert.match(await evaluate<string>(`${line("repository")}.querySelector('.worktree-cell-states').textContent`), /Main checkout/u);
+    assert.equal(await evaluate(`${line("repository")}.querySelector('.worktree-cell-select input').disabled`), true);
+    assert.equal(await evaluate(`${line("repository")}.querySelector('button[aria-label="Remove the worktree repository"]').disabled`), true);
+    assert.equal(await evaluate(`${line("repository")}.querySelector('button[aria-label="Show the changes of repository"]').disabled`), false);
+    await evaluate(`${line("repository")}.querySelector('button[aria-label="Show the changes of repository"]').click()`);
+    assert.deepEqual(await evaluate("worktreesFixture.state.shown"), ["C:\\code\\repository"]);
+    await evaluate("worktreesFixture.state.shown = []; worktreesFixture.state.rows = worktreesFixture.repository()");
+    await press('.worktree-manager-bar button[aria-label="Refresh"]');
+    assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 8"), true);
+
     // The changes of a checkout are those of its own folder, and the editor is asked for the checkout that was pressed.
     await evaluate(`${line("quiet-heron")}.querySelector('button[aria-label="Show the changes of quiet-heron"]').click()`);
     assert.deepEqual(await evaluate("worktreesFixture.state.shown"), ["C:\\trees\\alpha\\quiet-heron"]);

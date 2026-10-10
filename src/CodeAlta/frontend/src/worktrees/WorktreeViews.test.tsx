@@ -11,8 +11,8 @@ import type { Worktree } from "./worktrees";
 const never = () => assert.fail("rendering must not act");
 const project = { id: "p", name: "Alpha", path: "C:\\code\\alpha" };
 const worktree = (change: Partial<Worktree> = {}): Worktree => ({ path: "C:\\trees\\alpha\\quiet-heron", name: "quiet-heron", branch: "alta/quiet-heron", head: "1234567",
-  main: false, locked: false, missing: false, folder: "C:\\trees\\alpha\\quiet-heron", busy: false, ...change });
-const main = worktree({ path: project.path, folder: project.path, name: "alpha", branch: "main", main: true });
+  main: false, project: false, locked: false, missing: false, folder: "C:\\trees\\alpha\\quiet-heron", busy: false, ...change });
+const main = worktree({ path: project.path, folder: project.path, name: "alpha", branch: "main", main: true, project: true });
 const render = (element: ReactElement) =>
   renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } }, element));
 // The host is asked nothing while a view is drawn.
@@ -77,6 +77,30 @@ test("the checkouts of a repository list the folder of the project first, then i
     worktrees: [main, worktree()], sessions: () => 0 }));
   assert.match(selected.split('<div class="worktree-row"')[2], /aria-selected="true"/);
   assert.match(selected.split('<div class="worktree-row"')[1], /aria-selected="false"/);
+});
+
+test("a project that lives in a worktree lists the main checkout of its repository as a row of its own", () => {
+  const repository = worktree({ path: "C:\\code\\repository", folder: "C:\\code\\repository", name: "repository", branch: "main", main: true });
+  const home = worktree({ path: project.path, folder: project.path, name: "home", branch: "alta/home", main: true, project: true });
+  const list = (selected: string | null) => render(createElement(WorktreeList, { epoch: "e", projectId: "p", projectName: "Alpha", selected, onSelect: never, onRemoved: never,
+    worktrees: [repository, home, worktree()], sessions: () => 0 })).split('<div class="worktree-row"').slice(1);
+  const chosen = (rows: readonly string[]) => rows.map(row => /aria-selected="(true|false)"/.exec(row)![1]);
+
+  // The folder of the project is what is shown when nothing was chosen: its row alone, under the name of the project.
+  const shown = list(null);
+  assert.deepEqual(chosen(shown), ["false", "true", "false"]);
+  assert.match(shown[0], /<strong>repository<\/strong>/);
+  assert.match(shown[1], /<strong>Alpha<\/strong>/);
+  assert.match(shown[2], /<strong>quiet-heron<\/strong>/);
+  // The main checkout can be chosen like any other, and is then the only row shown as chosen.
+  assert.equal(/<button type="button" role="option"[^>]*disabled=""/.test(shown[0]), false);
+  assert.deepEqual(chosen(list("c:/code/repository/")), ["true", "false", "false"]);
+  assert.deepEqual(chosen(list("C:\\trees\\alpha\\quiet-heron")), ["false", "false", "true"]);
+  // Neither of the two is removed from its row; the other worktree is.
+  assert.match(shown[0], /^ data-main="true">/);
+  assert.match(shown[1], /^ data-main="true">/);
+  assert.equal(shown[0].includes("worktree-row-remove") || shown[1].includes("worktree-row-remove"), false);
+  assert.equal(shown[2].includes("worktree-row-remove"), true);
 });
 
 test("the settings of the worktrees are read before they are shown", () => {
