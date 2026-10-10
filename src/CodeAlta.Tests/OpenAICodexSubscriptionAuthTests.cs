@@ -121,6 +121,7 @@ public sealed class OpenAICodexSubscriptionAuthTests
         var browserResponse = await browser.GetAsync(login.RedirectUri + $"?code=auth-code&state={login.State}&client_id={IssuedClientId}");
         Assert.AreEqual(HttpStatusCode.OK, browserResponse.StatusCode);
         var credential = await wait;
+        Assert.ThrowsExactly<ObjectDisposedException>(login.Listener.Start);
         Assert.AreEqual("subject", credential.Subject);
         Assert.AreEqual("user@example.test", credential.AccountLabel);
         Assert.AreEqual(HostId, credential.AgentHostId);

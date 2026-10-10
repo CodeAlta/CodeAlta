@@ -97,12 +97,32 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(10));
-        using var registration = timeout.Token.Register(static listener => ((HttpListener)listener!).Stop(), login.Listener);
+        return await WaitForBrowserCallbackAsync(login.Listener.GetContextAsync, login.Listener.Stop, login.Dispose,
+            (uri, token) => CompleteBrowserLoginAsync(login, uri, token), timeout.Token, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async ValueTask<OpenAICodexSubscriptionCredential> WaitForBrowserCallbackAsync(
+        Func<Task<HttpListenerContext>> getContext,
+        Action stopListener,
+        Action disposeLogin,
+        Func<Uri, CancellationToken, ValueTask<OpenAICodexSubscriptionCredential>> completeLogin,
+        CancellationToken timeoutToken,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(getContext);
+        ArgumentNullException.ThrowIfNull(stopListener);
+        ArgumentNullException.ThrowIfNull(disposeLogin);
+        ArgumentNullException.ThrowIfNull(completeLogin);
         try
         {
             while (true)
             {
-                var context = await login.Listener.GetContextAsync().WaitAsync(timeout.Token).ConfigureAwait(false);
+                timeoutToken.ThrowIfCancellationRequested();
+                var contextTask = getContext();
+                // Stop cancels the accept itself; WaitAsync would abandon its later fault.
+                // Start the accept before registering Stop, and join both before disposal.
+                await using var registration = timeoutToken.Register(stopListener).ConfigureAwait(false);
+                var context = await contextTask.ConfigureAwait(false);
                 if (context.Request.HttpMethod != "GET" || context.Request.Url?.AbsolutePath != "/auth/callback")
                 {
                     context.Response.StatusCode = 404;
@@ -112,7 +132,7 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
 
                 try
                 {
-                    var credential = await CompleteBrowserLoginAsync(login, context.Request.Url, timeout.Token).ConfigureAwait(false);
+                    var credential = await completeLogin(context.Request.Url, timeoutToken).ConfigureAwait(false);
                     await WriteResponseAsync(context.Response, "CodeAlta login complete. You may close this browser tab.", 200).ConfigureAwait(false);
                     return credential;
                 }
@@ -123,7 +143,7 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
                 }
             }
         }
-        catch (Exception ex) when (timeout.IsCancellationRequested && ex is HttpListenerException or ObjectDisposedException or OperationCanceledException)
+        catch (Exception ex) when (timeoutToken.IsCancellationRequested && ex is HttpListenerException or ObjectDisposedException or OperationCanceledException)
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -134,7 +154,7 @@ internal sealed class OpenAICodexSubscriptionLoginManager(
         }
         finally
         {
-            login.Dispose();
+            disposeLogin();
         }
     }
 
