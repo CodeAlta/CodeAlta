@@ -80,7 +80,7 @@ internal static class StatisticsCommands
 
             return await Run(plugin, context, async queries => Write(context, "alta.statistics.series", await queries.SeriesAsync(options.ToRequest(), metric, group, context.CancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
         });
-        Help(command, "At most 5,000 buckets and, with the limit, 20 groups by default: `--by` chooses a coarser frequency for a long period.");
+        Help(command, "At most 5,000 buckets and, with the limit, 20 groups by default: `--by` chooses a coarser frequency for a long period. The total of a line is the sum of its values, except `sessions-at-once` (the most sessions with a run going at the same moment: the total is the most of the period) and `context-fill` (the average fill of the context window, from 0 to 1: the total is the average of the period, and a bucket without a request that reported a window is 0, which `context-samples` tells apart).");
         return command;
     }
 
@@ -121,7 +121,7 @@ internal static class StatisticsCommands
 
             return await Run(plugin, context, async queries => Write(context, "alta.statistics.details", await queries.DetailsAsync(options.ToRequest(), list, context.CancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
         });
-        Help(command, "Only a program (`git`, `dotnet`) or the first two words of an alta command (`session create`) are kept, never the rest of a command. Example: `alta statistics details shell-program --period 30d --limit 10`.");
+        Help(command, "Only a program (`git`, `dotnet`) or the first two words of an alta command (`session create`) are kept, never the rest of a command. `sub-agent-depth` lists, in the order of the depth, the sub-agent sessions that started in the period: 1 is a sub-agent of a session of its own, 2 a sub-agent of a sub-agent. Example: `alta statistics details shell-program --period 30d --limit 10`.");
         return command;
     }
 

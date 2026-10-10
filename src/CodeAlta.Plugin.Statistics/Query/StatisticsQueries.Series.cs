@@ -26,6 +26,9 @@ public sealed partial class StatisticsQueries
         new("cache-write-tokens", FactTables.Usage, "SUM(f.cache_write_tokens)", "tokens"),
         new("output-tokens", FactTables.Usage, "SUM(f.output_tokens)", "tokens"),
         new("reasoning-tokens", FactTables.Usage, "SUM(f.reasoning_tokens)", "tokens"),
+
+        // The requests that reported a context window: what the average of `context-fill` is an average of.
+        new("context-samples", FactTables.Usage, "SUM(f.context_samples)", "count"),
         new("tool-calls", FactTables.Tools, "SUM(f.calls)", "count"),
         new("tool-failures", FactTables.Tools, "SUM(f.failures)", "count"),
         new("tool-calls-canceled", FactTables.Tools, "SUM(f.canceled)", "count"),
@@ -57,8 +60,12 @@ public sealed partial class StatisticsQueries
         new("cost", FactTables.Cost, "SUM(f.total_micro)", "cost", Scale: 1e-6, PerUnit: true),
     }.ToFrozenDictionary(static metric => metric.Name, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Gets the names of the metrics <see cref="SeriesAsync"/> knows, with <c>sessions-active</c> and <c>sessions-started</c>.</summary>
-    public static IReadOnlyList<string> MetricNames { get; } = [.. Metrics.Keys.Order(StringComparer.Ordinal), "sessions-active", "sessions-started"];
+    /// <summary>
+    /// Gets the names of the metrics <see cref="SeriesAsync"/> knows: the sums of the facts, and those that are computed from the
+    /// sessions and the runs: <c>sessions-active</c>, <c>sessions-started</c>, <c>sessions-at-once</c> (the most sessions with a run
+    /// going at the same moment) and <c>context-fill</c> (the average fill of the context window).
+    /// </summary>
+    public static IReadOnlyList<string> MetricNames { get; } = [.. Metrics.Keys.Order(StringComparer.Ordinal), ContextFillMetric, "sessions-active", SessionsAtOnceMetric, "sessions-started"];
 
     /// <summary>Gets the ways a series can be grouped.</summary>
     public static IReadOnlyList<string> GroupNames { get; } = ["provider", "model", "effort", "project", "delegated", "tool", "kind", "origin", "purpose", "unit", "prompt-kind"];
@@ -68,7 +75,11 @@ public sealed partial class StatisticsQueries
     /// <param name="metric">The metric: one of <see cref="MetricNames"/>.</param>
     /// <param name="group">The group of the lines: one of <see cref="GroupNames"/> the metric supports; null for one line. A cost is always cut by its unit.</param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
-    /// <returns>The lines, the largest first, at most <see cref="StatisticsRequest.Limit"/> with the rest added up as <c>other</c>.</returns>
+    /// <returns>
+    /// The lines, the largest first, at most <see cref="StatisticsRequest.Limit"/> with the rest added up as <c>other</c>. The total
+    /// of a line is the sum of its values, except for <c>sessions-at-once</c> (the most of the period) and <c>context-fill</c> (the
+    /// average of the period).
+    /// </returns>
     /// <exception cref="ArgumentException">The metric, the group, the period or the frequency is not valid.</exception>
     public async ValueTask<SeriesResult> SeriesAsync(StatisticsRequest request, string metric, string? group = null, CancellationToken cancellationToken = default)
     {
@@ -81,6 +92,16 @@ public sealed partial class StatisticsQueries
     private SeriesResult BuildSeries(SqlSession sql, ResolvedQuery query, string metric, string? group)
     {
         var limit = LimitOf(query.Request, 20);
+        if (string.Equals(metric, SessionsAtOnceMetric, StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildSessionsAtOnce(sql, query, group);
+        }
+
+        if (string.Equals(metric, ContextFillMetric, StringComparison.OrdinalIgnoreCase))
+        {
+            return BuildContextFill(sql, query, group, limit);
+        }
+
         if (metric is "sessions-active" or "sessions-started")
         {
             if (group is not null && group is not ("project" or "delegated"))
@@ -331,11 +352,18 @@ public sealed partial class StatisticsQueries
 
     private SeriesLine ToLine(ResolvedQuery query, string? group, string key, double[] values, double[]? previous)
     {
+        var (name, label) = LineName(query, group, key);
+        return new(name, label, values, previous, values.Sum(), previous?.Sum());
+    }
+
+    // The key and the label of a line of a group.
+    private (string Key, string Label) LineName(ResolvedQuery query, string? group, string key)
+    {
         var label = group is null ? "total" : GroupLabel(query, group, key);
 
         // A group of a fixed list is kept as a number in the facts: its line is keyed by its name, which is the value a filter takes.
         var named = group is "kind" or "origin" or "prompt-kind" or "content-kind" or "purpose";
-        return new(named ? label : key, label, values, previous, values.Sum(), previous?.Sum());
+        return (named ? label : key, label);
     }
 
     /// <summary>The numbers of the Overview: tiles with their change against the compared period and a line over the period.</summary>

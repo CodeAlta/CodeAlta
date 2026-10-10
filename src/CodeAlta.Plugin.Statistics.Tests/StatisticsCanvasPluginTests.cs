@@ -226,6 +226,9 @@ public sealed class StatisticsCanvasPluginTests
             ("summary", Wrap(), async () => StatisticsJson.Serialize(await queries.SummaryAsync(request))),
             ("series", Wrap("\"metric\":\"tokens\",\"group\":\"provider\""), async () => StatisticsJson.Serialize(await queries.SeriesAsync(request, "tokens", "provider"))),
             ("series", Wrap("\"metric\":\"runs\",\"group\":null"), async () => StatisticsJson.Serialize(await queries.SeriesAsync(request, "runs", null))),
+            ("series", Wrap("\"metric\":\"sessions-at-once\",\"group\":null"), async () => StatisticsJson.Serialize(await queries.SeriesAsync(request, "sessions-at-once", null))),
+            ("series", Wrap("\"metric\":\"context-fill\",\"group\":\"model\""), async () => StatisticsJson.Serialize(await queries.SeriesAsync(request, "context-fill", "model"))),
+            ("series", Wrap("\"metric\":\"context-samples\",\"group\":\"model\""), async () => StatisticsJson.Serialize(await queries.SeriesAsync(request, "context-samples", "model"))),
             ("top", Wrap("\"kind\":\"models\",\"by\":\"calls\""), async () => StatisticsJson.Serialize(await queries.TopAsync(request, "models", "calls"))),
             ("tools", Wrap(), async () => StatisticsJson.Serialize(await queries.ToolsAsync(request))),
             ("models", Wrap(), async () => StatisticsJson.Serialize(await queries.ModelsAsync(request))),
@@ -238,6 +241,7 @@ public sealed class StatisticsCanvasPluginTests
             ("records", Wrap(), async () => StatisticsJson.Serialize(await queries.RecordsAsync(request))),
             ("health", Wrap(), async () => StatisticsJson.Serialize(await queries.HealthAsync(request))),
             ("details", Wrap("\"list\":\"skill\""), async () => StatisticsJson.Serialize(await queries.DetailsAsync(request, "skill"))),
+            ("details", Wrap("\"list\":\"sub-agent-depth\""), async () => StatisticsJson.Serialize(await queries.DetailsAsync(request, "sub-agent-depth"))),
             ("runs", Wrap("\"sort\":\"longest\""), async () => StatisticsJson.Serialize(await queries.RunsAsync(request, "longest"))),
         };
 

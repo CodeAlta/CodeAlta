@@ -114,10 +114,11 @@ dotnet test src -c Release --filter "FullyQualifiedName~RealProfile" --logger "c
 $env:CODEALTA_STATS_SESSION_IDS = "<id>,<id>"   # RealSessionSummaryHarness: the totals of some sessions
 ```
 
-`RealProfileHarness` (the reader), `RealProfileFactsHarness` (totals and diagnostics of the reducer), `RealProfileCrossCheck` (the facts against a second, naive reading with a JSON DOM; requests, every kind of token, prompts, answers, reasonings, errors, compactions and instructions must be equal) `RealProfileSplitHarness` (recorded journals cut at record boundaries: 32 sessions, 2,009 cuts, all equal), `RealProfileCoverageHarness` (parsed records whose fields came out empty, to find shapes the parser does not read) and `RealSessionSummaryHarness`.
+`RealProfileHarness` (the reader), `RealProfileFactsHarness` (totals and diagnostics of the reducer), `RealProfileCrossCheck` (the facts against a second, naive reading with a JSON DOM; requests, every kind of token, prompts, answers, reasonings, errors, compactions and instructions must be equal) `RealProfileSplitHarness` (recorded journals cut at record boundaries: 32 sessions, 2,009 cuts, all equal), `RealProfileCoverageHarness` (parsed records whose fields came out empty, to find shapes the parser does not read), `RealProfileRunsHarness` (what the runs say about the sessions at once: on the author's profile 4,792 runs of 941 sessions, none with records more than seven days apart, 21 longer than an hour and none longer than a day, at most 9 sessions with a run going at the same moment; 223 sessions have a parent, and every parent has its journal) and `RealSessionSummaryHarness`.
 
 ## Limits
 
 - The facts count what is in the journals. What a session does not record (the time a run waits for the user, retries, the application, a cost for most providers) cannot be counted.
+- The sessions at once are counted from the first and the last time of each run (`doc/statistics.md`, "Numbers computed from the rows"): a run that waits is going, and nothing in the store says when, inside a run, the session worked.
 - A run is only known to be interrupted when the next one starts. When the caller says the session is dead, the run is counted as interrupted until one of its records says otherwise.
 - The kind of an MCP tool that CodeAlta exposes under its bare name (`take_snapshot`) is `other`; only `mcp__<server>__<tool>` names are MCP.

@@ -17,6 +17,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     private const string CacheCompleteValue = "1";
     private const string CacheIncompleteValue = "0";
 
+    // Which copy the file was when the rows were last known to be those of this file (ApplicationDatabase.ReadCopyNumberAsync).
+    private const string CopySeenMetadataKey = "session_projection_cache_copy";
+
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _schemaGate = new(initialCount: 1, maxCount: 1);
     // The generation of the file whose tables are known to exist; -1 when they have to be made or checked.
@@ -363,11 +366,19 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 // from an older copy, or deleted and made again), say nothing about the sessions that exist: they
                 // are listed from the journals again. The mark is written, not left out: a session that is saved
                 // before the next list adds a row, and rows without a mark read as a complete list.
+                // A file that is a copy the rows have not seen is such a file too, whoever put it there: the service in a
+                // process that ended before the list was used, or somebody by hand while the application was closed. The
+                // generation, which lives in memory, knows neither.
                 var generation = _database.Generation;
-                if (cleared || generation != _rowsGeneration)
+                var copy = await ReadCopyAsync(cancellationToken).ConfigureAwait(false);
+                if (cleared || generation != _rowsGeneration || copy.Number != copy.Seen)
                 {
                     await WriteCoreAsync(
-                            (connection, token) => SetCacheCompleteCoreAsync(connection, complete: false, token),
+                            async (connection, token) =>
+                            {
+                                await SetCacheCompleteCoreAsync(connection, complete: false, token).ConfigureAwait(false);
+                                await SetCopySeenCoreAsync(connection, token).ConfigureAwait(false);
+                            },
                             schemaOwned: true,
                             cancellationToken)
                         .ConfigureAwait(false);
@@ -858,6 +869,39 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM session_projection_cache;";
         return Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    // Which copy the file is, and which copy it was when the rows were last known to be its own. Runs with the schema gate
+    // held, as a part of making the schema: a damage it meets is handled there.
+    private async Task<(int Number, int Seen)> ReadCopyAsync(CancellationToken cancellationToken)
+        => await _database.ReadAsync(
+                Owner,
+                async (connection, token) =>
+                {
+                    var number = await ApplicationDatabase.ReadCopyNumberAsync(connection, token).ConfigureAwait(false);
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT value FROM session_projection_cache_metadata WHERE key = $key LIMIT 1;";
+                    AddParameter(command, "$key", CopySeenMetadataKey);
+                    var seen = await command.ExecuteScalarAsync(token).ConfigureAwait(false) as string;
+                    return (number, int.TryParse(seen, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : 0);
+                },
+                recoverDamagedFile: false,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    // Records, in the write that marks the list incomplete, which copy the file is: the rows are those of this file from now on.
+    private static async Task SetCopySeenCoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var number = await ApplicationDatabase.ReadCopyNumberAsync(connection, cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO session_projection_cache_metadata (key, value)
+            VALUES ($key, $value)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+            """;
+        AddParameter(command, "$key", CopySeenMetadataKey);
+        AddParameter(command, "$value", number.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task SetCacheCompleteCoreAsync(

@@ -22,6 +22,7 @@ export function ActivityPage() {
   const failed = useSeries("runs-failed", null);
   const interrupted = useSeries("runs-interrupted", null);
   const time = useSeries("active-time", null);
+  const atOnce = useSeries("sessions-at-once", null);
   const week = useWeekHour();
   const duration = useDistribution("run-duration", null);
   const sessions = useSessions("runs", { extra: { limit: 500, comparison: "none" } });
@@ -53,6 +54,9 @@ export function ActivityPage() {
       {week.data && <div className="stats-calendar"><WeekdayHourHeatmap matrix={matrix} weekStart={weekStart} ariaLabel={t("Active time by day of the week and hour")}
         describe={(row, hour, value) => `${week.data!.weekdays[row] ?? ""} ${String(hour).padStart(2, "0")}:00: ${value ? fmt.duration(value) : t("no activity")}`}
  /></div>}
+    </Block>
+    <Block title={t("Sessions at once")} span={12} minHeight={220} query={atOnce} empty={atOnce.data !== undefined && atOnce.data.series.every(line => line.total === 0)}>
+      {atOnce.data && <SeriesChart result={atOnce.data} kind="line" stacked={false} height={200} ariaLabel={t("Most sessions running at the same time")} name={() => t("Sessions at once")} colorOf={() => colors.at(4)} />}
     </Block>
     <Block title={t("How long a run takes")} span={12} minHeight={260} query={duration} empty={duration.data !== undefined && duration.data.count === 0}>
       {duration.data && <DistributionChart result={duration.data} name={t("Runs")} ariaLabel={t("How long a run takes, on a logarithmic scale")} height={240} />}

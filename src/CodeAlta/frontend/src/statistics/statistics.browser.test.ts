@@ -353,6 +353,26 @@ test("one tool is one row whatever keys it has, a model of two providers is told
   });
 });
 
+test("the sessions at once, the average fill of the context and the depth of the sub-agents each have their block", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3, .stats-block-title')?.textContent.trim() === ${JSON.stringify(title)})`;
+    await render(page, { scenario: "ready" });
+    await page.until(settled, "the overview");
+    await page.evaluate(`statsFixture.clearCalls()`);
+    await openPage(page, "Activity");
+    await page.until(`${block("Sessions at once")}?.querySelector('svg, canvas')`, "the line of the sessions at once");
+    assert.ok(await page.evaluate<boolean>(`statsFixture.calls().some(call => call.method === 'series' && call.args[0] === 'sessions-at-once' && call.args[1] === null)`));
+    await openPage(page, "Models");
+    await page.until(`${block("Context fill")}?.querySelector('svg, canvas')`, "the line of the context fill");
+    assert.ok(await page.evaluate<number>(`${block("Context fill")}.querySelectorAll('.chart-legend-item').length`) >= 2, "one line for each model");
+    assert.ok(await page.evaluate<boolean>(`['context-fill', 'context-samples'].every(metric => statsFixture.calls().some(call => call.method === 'series' && call.args[0] === metric && call.args[1] === 'model'))`));
+    await openPage(page, "Agents");
+    await page.until(`${block("Depth of the sub-agents")}?.querySelector('.stats-ranked-row')`, "the depths");
+    assert.equal(await page.evaluate(`${block("Depth of the sub-agents")}.querySelector('.stats-ranked-name').textContent.trim()`), "Sub-agents of your sessions");
+    assert.ok(await page.evaluate<boolean>(`statsFixture.calls().some(call => call.method === 'details' && call.args[0] === 'sub-agent-depth')`));
+  });
+});
+
 test("the first time asks how much history to read, then shows the progress, the pause and the end", { skip: !edge, timeout: 300_000 }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });

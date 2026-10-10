@@ -127,6 +127,43 @@ public sealed class StatisticsPluginTests
     }
 
     [TestMethod]
+    public async Task TheCommands_GiveTheNumbersComputedFromTheRunsAndTheSessions()
+    {
+        await using var harness = await QueryHarness.CreateAsync(LocalZone, now: new DateTimeOffset(2026, 10, 9, 12, 0, 0, TimeSpan.Zero));
+        var plugin = new StatisticsPlugin();
+        var services = new TestServices(harness.Store.Database, new FakeAlta());
+        var request = new StatisticsRequest { Period = "2026-04-01..2026-09-30", Frequency = StatisticsFrequency.Month };
+
+        var atOnce = await RunAsync(plugin, services, "series", "sessions-at-once", "--period", "2026-04-01..2026-09-30", "--by", "month");
+        var fill = await RunAsync(plugin, services, "series", "context-fill", "--period", "2026-04-01..2026-09-30", "--by", "month", "--group", "model");
+        var depth = await RunAsync(plugin, services, "details", "sub-agent-depth", "--period", "2026-03-01..2026-09-30");
+        var help = await RunAsync(plugin, services, "series", "--help");
+
+        Assert.AreEqual(0, atOnce.ExitCode, atOnce.Stderr);
+        var expectedAtOnce = await harness.Queries.SeriesAsync(request, "sessions-at-once");
+        var line = Single(atOnce.Stdout).GetProperty("series").EnumerateArray().Single();
+        CollectionAssert.AreEqual(expectedAtOnce.Series.Single().Values.ToArray(), line.GetProperty("values").EnumerateArray().Select(static value => value.GetDouble()).ToArray());
+        Assert.AreEqual(expectedAtOnce.Series.Single().Total, line.GetProperty("total").GetDouble());
+
+        Assert.AreEqual(0, fill.ExitCode, fill.Stderr);
+        var expectedFill = await harness.Queries.SeriesAsync(request, "context-fill", "model");
+        var fillRecord = Single(fill.Stdout);
+        Assert.AreEqual("ratio", fillRecord.GetProperty("unit").GetString());
+        CollectionAssert.AreEqual(expectedFill.Series.Select(static item => item.Total).ToArray(), fillRecord.GetProperty("series").EnumerateArray().Select(static item => item.GetProperty("total").GetDouble()).ToArray());
+
+        Assert.AreEqual(0, depth.ExitCode, depth.Stderr);
+        var expectedDepth = await harness.Queries.DetailsAsync(new StatisticsRequest { Period = "2026-03-01..2026-09-30" }, "sub-agent-depth");
+        var depthRecord = Single(depth.Stdout);
+        Assert.AreEqual("sub-agent-depth", depthRecord.GetProperty("list").GetString());
+        Assert.IsTrue(expectedDepth.Total > 0);
+        Assert.AreEqual(expectedDepth.Total, depthRecord.GetProperty("total").GetInt64());
+        Assert.AreEqual("1", depthRecord.GetProperty("rows")[0].GetProperty("name").GetString());
+
+        StringAssert.Contains(help.Stdout + help.Stderr, "sessions-at-once");
+        StringAssert.Contains(help.Stdout + help.Stderr, "context-fill");
+    }
+
+    [TestMethod]
     public async Task AProjectFilter_IsResolvedThroughTheProjectsOfTheHost()
     {
         await using var harness = await QueryHarness.CreateAsync(LocalZone);

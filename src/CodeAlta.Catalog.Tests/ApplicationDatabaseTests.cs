@@ -607,6 +607,42 @@ public sealed class ApplicationDatabaseTests
     }
 
     [TestMethod]
+    public async Task ACopy_SaysThatItIsOne_AndTheFileItTakesThePlaceOfKeepsSayingSo()
+    {
+        using var temp = TempFolder.Create();
+        var path = Path.Combine(temp.Path, "data", "alta.sqlite3");
+        var clock = new ManualClock(new DateTimeOffset(2026, 10, 1, 8, 0, 0, TimeSpan.Zero));
+        string copy;
+        await using (var database = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = path, TimeProvider = clock }))
+        {
+            await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token));
+            copy = (await database.BackupAsync())!;
+
+            Assert.AreEqual(0, await database.ReadAsync("test", (connection, token) => ApplicationDatabase.ReadCopyNumberAsync(connection, token)), "The file itself is no copy.");
+        }
+
+        Assert.AreEqual(1, await CopyNumberOfAsync(copy));
+
+        // The copy takes the place of the file, here by hand while the application is closed: the file says that it is a copy,
+        // and the copies made of it say that they are copies of a copy.
+        File.Copy(copy, path, overwrite: true);
+        await using (var database = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = path, TimeProvider = clock }))
+        {
+            Assert.AreEqual(1, await database.ReadAsync("test", (connection, token) => ApplicationDatabase.ReadCopyNumberAsync(connection, token)));
+            Assert.AreEqual(0, database.Generation, "Nothing told the service: the generation does not know.");
+            clock.Advance(TimeSpan.FromDays(1));
+            Assert.AreEqual(2, await CopyNumberOfAsync((await database.BackupAsync())!));
+        }
+
+        static async Task<int> CopyNumberOfAsync(string file)
+        {
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = file, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+            await connection.OpenAsync();
+            return await ApplicationDatabase.ReadCopyNumberAsync(connection);
+        }
+    }
+
+    [TestMethod]
     public async Task AFileDeletedWhileInUse_ComesBackFromItsCopyWhenThereIsOne()
     {
         using var temp = TempFolder.Create();

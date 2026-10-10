@@ -57,6 +57,9 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     private const int SqliteCannotOpen = 14;
     private const int SqliteNotADatabase = 26;
     private const string MetaTable = "app_meta";
+
+    // The name under which a copy records, in the table of the versions, which copy it is (see ReadCopyNumberAsync).
+    private const string CopyOwner = "database:copy";
     private const string BackupFilePrefix = "alta-";
     private const string BackupTimestampFormat = "yyyyMMdd'T'HHmmss'Z'";
     private const int CorruptFilesToKeep = 3;
@@ -484,6 +487,19 @@ public sealed class ApplicationDatabase : IApplicationDatabase
                     using var destination = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = temporary, Pooling = false }.ToString());
                     destination.Open();
                     source.BackupDatabase(destination);
+
+                    // The copy says that it is one: it carries one more than the file it is a copy of (see ReadCopyNumberAsync).
+                    using (var mark = destination.CreateCommand())
+                    {
+                        mark.CommandText = $"""
+                            INSERT INTO {MetaTable} (owner, version, updated_utc_ticks) VALUES ($owner, 1, $ticks)
+                            ON CONFLICT(owner) DO UPDATE SET version = version + 1, updated_utc_ticks = excluded.updated_utc_ticks;
+                            """;
+                        mark.Parameters.AddWithValue("$owner", CopyOwner);
+                        mark.Parameters.AddWithValue("$ticks", now.UtcTicks);
+                        mark.ExecuteNonQuery();
+                    }
+
                     // One file, without a log of its own.
                     using var command = destination.CreateCommand();
                     command.CommandText = "PRAGMA journal_mode = DELETE;";
@@ -508,6 +524,26 @@ public sealed class ApplicationDatabase : IApplicationDatabase
 
         PruneBackups();
         return path;
+    }
+
+    /// <summary>
+    /// Reads which copy the file of a connection is: 0 for a file that never was a copy.
+    /// </summary>
+    /// <param name="connection">The connection of a read or of a write of this database.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The number of the copy.</returns>
+    /// <remarks>
+    /// Every copy the service makes carries one more than the file it is a copy of. A file that took the place of another one,
+    /// restored by the service or put in place by hand from the folder of the copies, therefore has a number its owners have not
+    /// seen. An owner of rows that go stale (the list of sessions) keeps the number it last saw beside its rows and compares: it
+    /// learns that the file is a copy also after a restart, which <see cref="Generation"/>, kept in memory, cannot tell.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="connection"/> is <see langword="null"/>.</exception>
+    /// <exception cref="SqliteException">SQLite failed.</exception>
+    public static ValueTask<int> ReadCopyNumberAsync(SqliteConnection connection, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        return ReadVersionAsync(connection, CopyOwner, transaction: null, cancellationToken);
     }
 
     /// <summary>

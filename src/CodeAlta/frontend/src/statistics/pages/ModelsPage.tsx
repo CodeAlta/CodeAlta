@@ -4,7 +4,7 @@ import { Block, Choice, DataTable, type Column } from "../blocks";
 import { usePageColors } from "../colors";
 import { SeriesChart, useDrill } from "../pageKit";
 import { StatChart } from "../StatChart";
-import { partsOption, ratioSeries } from "../options";
+import { maskSeries, partsOption, ratioSeries } from "../options";
 import { useDistribution, useModels, useSeries } from "../queries";
 import { useStatistics } from "../runtime";
 import { useText } from "../text";
@@ -29,6 +29,9 @@ export function ModelsPage() {
   const cacheRead = useSeries("cache-read-tokens", "model", { extra: { limit: 6, comparison: "none" } });
   const input = useSeries("input-tokens", "model", { extra: { limit: 6, comparison: "none" } });
   const request = useDistribution("request-input", null);
+  const fill = useSeries("context-fill", "model", { extra: { limit: 6, comparison: "none" } });
+  const fillSamples = useSeries("context-samples", "model", { extra: { limit: 6, comparison: "none" } });
+  const contextFill = useMemo(() => fill.data && fillSamples.data ? maskSeries(fill.data, fillSamples.data) : null, [fill.data, fillSamples.data]);
   const cache = useMemo(() => cacheRead.data && input.data ? ratioSeries(cacheRead.data, input.data) : null, [cacheRead.data, input.data]);
   // A row is a model of a provider: a model two of the bars have is written with its provider, or the two would read the same. A model
   // whose other provider is not among the bars keeps its name alone.
@@ -76,6 +79,9 @@ export function ModelsPage() {
     </Block>
     <Block title={t("Reasoning effort")} span={6} minHeight={260} query={models} empty={models.data !== undefined && models.data.efforts.length === 0}>
       {models.data && <DataTable label={t("Models by reasoning effort")} columns={effortColumns} rows={models.data.efforts} rowKey={row => `${row.provider}/${row.model}/${row.effort}`} initialSort={{ column: "tokens", descending: true }} limit={8} />}
+    </Block>
+    <Block title={t("Context fill")} span={12} minHeight={260} query={firstQuery(fill, fillSamples)} empty={contextFill !== null && contextFill.series.every(line => line.total === 0)}>
+      {contextFill && <SeriesChart result={contextFill} kind="line" stacked={false} height={240} ariaLabel={t("Average fill of the context window, by model")} />}
     </Block>
     <Block title={t("The models")} span={12} minHeight={200} query={models} empty={models.data !== undefined && models.data.rows.length === 0}>
       {models.data && <DataTable label={t("Models")} columns={columns} rows={models.data.rows} rowKey={row => `${row.provider}/${row.model}`} initialSort={{ column: "input", descending: true }} />}

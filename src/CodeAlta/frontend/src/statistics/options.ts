@@ -280,5 +280,17 @@ export function ratioSeries(numerator: SeriesResult, denominator: SeriesResult):
   return { ...numerator, metric: `${numerator.metric}/${denominator.metric}`, unit: "ratio", series };
 }
 
+/**
+ * A series with holes: a value is kept where the same line of `counts` has something in that bucket, and left out elsewhere. An
+ * average of no request is not a point at zero: the line stops, and goes on at the next bucket that has one.
+ */
+export function maskSeries(result: SeriesResult, counts: SeriesResult): SeriesResult {
+  const known = new Map(counts.series.map(line => [line.key, line]));
+  return { ...result, series: result.series.map(line => {
+    const count = known.get(line.key);
+    return count ? { ...line, values: line.values.map((value, at) => count.values[at] ? value : Number.NaN) } : line;
+  }) };
+}
+
 /** The days between two dates, for the length of a custom period. */
 export const daysBetween = (from: string, to: string) => dayDistance(from, to) + 1;

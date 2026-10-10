@@ -300,6 +300,47 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
+    [DataRow("the list")]
+    [DataRow("another owner, in a process that ends before the list is used")]
+    [DataRow("nobody: the copy was put in place by hand")]
+    public async Task ListSessionsAsync_AfterACopyTookThePlaceOfTheFile_ListsTheSessionsMadeSinceTheCopy(string restoredBy)
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        string copy;
+        await using (var database = ApplicationDatabase.Create(options))
+        {
+            var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+            await store.UpsertSessionAsync(CreateSummary("session-in-the-copy", updatedAt: "2026-06-18T19:00:00+00:00")).ConfigureAwait(false);
+            Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+            copy = (await database.BackupAsync().ConfigureAwait(false))!;
+            await store.UpsertSessionAsync(CreateSummary("session-since-the-copy", updatedAt: "2026-06-18T19:30:00+00:00")).ConfigureAwait(false);
+        }
+
+        // The copy holds a list that was complete when it was made: one session. The journals hold two.
+        if (restoredBy.StartsWith("nobody", StringComparison.Ordinal))
+        {
+            File.Copy(copy, options.ApplicationDatabasePath, overwrite: true);
+        }
+        else
+        {
+            File.Delete(options.ApplicationDatabasePath);
+        }
+
+        if (restoredBy.StartsWith("another owner", StringComparison.Ordinal))
+        {
+            await using var first = ApplicationDatabase.Create(options);
+            Assert.AreEqual(0, await first.GetVersionAsync("plugin:other").ConfigureAwait(false));
+            Assert.IsNotNull(first.LastRecovery?.RestoredFromCopy, "The copy was restored when the other owner opened the database.");
+        }
+
+        await using var restarted = ApplicationDatabase.Create(options);
+        var sessions = await new SessionViewJournalStore(options, restarted).CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        CollectionAssert.AreEquivalent(new[] { "session-in-the-copy", "session-since-the-copy" }, sessions.Select(static item => item.SessionId).ToArray());
+    }
+
+    [TestMethod]
     public async Task ReadsAndWritesThatMeetTheSameDamageTogether_AllSucceed()
     {
         using var temp = TestTempDirectory.Create();

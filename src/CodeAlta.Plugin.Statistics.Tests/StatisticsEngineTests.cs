@@ -951,6 +951,49 @@ public sealed class StatisticsEngineTests
     }
 
     [TestMethod]
+    public async Task TheSessionsAtOnce_TheDepthOfTheSubAgents_AndTheFillOfTheContext_ComeFromWhatTheJournalsGave()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        // A session and its sub-agent, whose own sub-agent runs while both wait: three sessions at once, a tree two deep.
+        var start = EngineHarness.Now.AddHours(-2);
+        var parent = new JournalBuilder("parent", "codex");
+        parent.Header(start).State(start)
+            .User(start.AddSeconds(1), "p-run", "a prompt")
+            .Usage(start.AddSeconds(5), "p-run", model: "m", window: 10_000, limit: 100_000)
+            .Usage(start.AddMinutes(9), "p-run", model: "m", window: 30_000, limit: 100_000)
+            .Idle(start.AddMinutes(10), "p-run");
+        var child = new JournalBuilder("child", "codex");
+        child.Header(start.AddMinutes(1), parent: "parent").State(start.AddMinutes(1))
+            .User(start.AddMinutes(1).AddSeconds(1), "c-run", "a prompt")
+            .Usage(start.AddMinutes(2), "c-run", model: "m", window: 80_000, limit: 100_000)
+            .Idle(start.AddMinutes(8), "c-run");
+        var grandchild = new JournalBuilder("grandchild", "codex");
+        grandchild.Header(start.AddMinutes(3), parent: "child").State(start.AddMinutes(3))
+            .User(start.AddMinutes(3).AddSeconds(1), "g-run", "a prompt")
+            .Idle(start.AddMinutes(4), "g-run");
+        // A session of its own, later: alone.
+        var later = new JournalBuilder("later", "codex");
+        later.Header(start.AddMinutes(30)).State(start.AddMinutes(30)).User(start.AddMinutes(30).AddSeconds(1), "l-run", "a prompt").Idle(start.AddMinutes(31), "l-run");
+        harness.Journals.Set(parent, start.AddMinutes(10));
+        harness.Journals.Set(child, start.AddMinutes(8));
+        harness.Journals.Set(grandchild, start.AddMinutes(4));
+        harness.Journals.Set(later, start.AddMinutes(31));
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        var request = new CodeAlta.Plugin.Statistics.Query.StatisticsRequest { Period = "today", Frequency = CodeAlta.Plugin.Statistics.Query.StatisticsFrequency.Day };
+
+        var atOnce = await harness.Engine.Queries.SeriesAsync(request, "sessions-at-once");
+        var fill = await harness.Engine.Queries.SeriesAsync(request, "context-fill");
+        var depth = await harness.Engine.Queries.DetailsAsync(request, "sub-agent-depth");
+
+        Assert.AreEqual(3d, atOnce.Series.Single().Values.Single());
+        Assert.AreEqual((0.1 + 0.3 + 0.8) / 3, fill.Series.Single().Values.Single(), 1e-6);
+        CollectionAssert.AreEqual(new[] { "1", "2" }, depth.Rows.Select(static row => row.Name).ToArray());
+        CollectionAssert.AreEqual(new[] { 1L, 1L }, depth.Rows.Select(static row => row.Count).ToArray());
+        Assert.AreEqual(0, depth.Query.Notes.Count);
+    }
+
+    [TestMethod]
     public async Task ARunWithATimeFarFromTheOthers_IsListedWithTheTimeItLasted()
     {
         await using var harness = await EngineHarness.CreateAsync();

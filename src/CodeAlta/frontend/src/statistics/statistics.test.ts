@@ -10,12 +10,12 @@ import {
 } from "./frame";
 import { statisticsContext } from "./canvasContext";
 import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, skippedToRetry, timeLeft } from "./history";
-import { distributionOption, hatchFraction, partsOption, periodOfBrush, ratioSeries, scatterOption, timeAxis, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
+import { distributionOption, hatchFraction, maskSeries, partsOption, periodOfBrush, ratioSeries, scatterOption, timeAxis, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
 import { providerNamer, senderLabel } from "./labels";
 import { QueryStore, joinRanges } from "./queryStore";
 import { binSteps, boxStatsOfSteps, mergeSteps, percentileOfSteps, stepsCount } from "./steps";
 import type { DistributionStep, SeriesResult, StatisticsStatus } from "./types";
-import { mcpParts, combineSeries, mergeRankedTools, mergeToolRows, modelNames, toolName, toolParts } from "./pages/shared";
+import { mcpParts, combineSeries, depthLabel, mergeRankedTools, mergeToolRows, modelNames, toolName, toolParts } from "./pages/shared";
 
 const today = "2026-10-09";
 const fmt = createFormatter("en", { credits: amount => `${amount} AI credits`, none: "–" });
@@ -594,6 +594,50 @@ test("a model two providers have is told apart by its provider, where a row woul
 test("who sent a prompt has a name, the senders the plugin folds together too", () => {
   const t = (key: string) => translate("en", key as never);
   assert.deepEqual(["you", "agent", "automation", "reminder", "other"].map(sender => senderLabel(t, sender)), ["You", "An agent", "An automation", "A reminder", "Other"]);
+});
+
+test("an average of no request is a hole in its line, not a point at zero", () => {
+  const line = (key: string, values: number[]) => ({ key, label: key, values, total: values.reduce((sum, value) => sum + value, 0) });
+  const base = { query: { period: "7d", from: "2026-10-03", to: "2026-10-09", frequency: "day" as const, timeZone: "UTC", coverage: { complete: true, historyState: "done" }, ignoredFilters: [], notes: [] },
+    buckets: [0, 1, 2].map(index => ({ index, start: `2026-10-0${index + 3}T00:00`, label: `10-0${index + 3}` })) };
+  const fill: SeriesResult = { ...base, metric: "context-fill", unit: "ratio", group: "model", series: [line("opus", [0.4, 0, 0.6]), line("sol", [0, 0.2, 0])] };
+  const samples: SeriesResult = { ...base, metric: "context-samples", unit: "count", group: "model", series: [line("opus", [3, 0, 5])] };
+  const masked = maskSeries(fill, samples);
+  assert.equal(masked.series[0].values[0], 0.4);
+  assert.ok(Number.isNaN(masked.series[0].values[1]), "no request that day: no average");
+  assert.equal(masked.series[0].values[2], 0.6);
+  assert.deepEqual([...masked.series[1].values], [0, 0.2, 0], "a line the samples do not have is left as it is");
+  assert.equal(masked.unit, "ratio");
+  assert.equal(masked.series[0].total, fill.series[0].total, "the average of the period is the plugin's");
+  const drawn = timeSeriesOption({ result: masked, kind: "line", fmt, color: () => "#111", previousName: "p", otherName: "o", muted: "#888" });
+  assert.equal((drawn.option.series as { data: (number | null)[] }[])[0].data[1], null);
+});
+
+test("the sessions at once, the fill of the context and the depth of the sub-agents are answered as the plugin answers them", async () => {
+  const api = createFixtureApi({ sessionCount: 300 });
+  const atOnce = await api.series({ period: "30d", frequency: "day" }, "sessions-at-once", null);
+  assert.equal(atOnce.unit, "count");
+  assert.equal(atOnce.series.length, 1);
+  assert.ok(atOnce.series[0].total >= 2, "sessions of the fixture do run in the same hour");
+  assert.equal(atOnce.series[0].total, Math.max(...atOnce.series[0].values), "the total of the line is the most of the period, not a sum");
+  const fill = await api.series({ period: "30d", frequency: "day", limit: 6 }, "context-fill", "model");
+  const samples = await api.series({ period: "30d", frequency: "day", limit: 6 }, "context-samples", "model");
+  assert.equal(fill.unit, "ratio");
+  assert.ok(fill.series.length >= 2);
+  for (const line of fill.series) {
+    assert.ok(line.total > 0 && line.total < 1, `${line.key}: an average fill is a share of the window`);
+    assert.ok(samples.series.some(other => other.key === line.key), `${line.key} has its samples`);
+    assert.ok(line.values.every(value => value >= 0 && value <= 1));
+  }
+  const depth = await api.details({ period: "all" }, "sub-agent-depth");
+  assert.equal(depth.list, "sub-agent-depth");
+  assert.deepEqual(depth.rows.map(row => Number(row.name)), [...depth.rows.map(row => Number(row.name))].sort((a, b) => a - b), "the rows are in the order of the depth");
+  assert.equal(depth.rows[0].name, "1");
+  assert.equal(depth.rows.reduce((sum, row) => sum + row.count, 0), depth.total);
+  const t = (key: string, values?: Record<string, string | number>) => key.replace("{count}", String(values?.count ?? ""));
+  assert.equal(depthLabel(t as never, 1), "Sub-agents of your sessions");
+  assert.equal(depthLabel(t as never, 2), "Sub-agents of sub-agents");
+  assert.equal(depthLabel(t as never, 4), "4 levels down");
 });
 
 test("every sentence of the canvas is translated in all the languages, with the same placeholders", async () => {

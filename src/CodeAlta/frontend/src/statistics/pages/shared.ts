@@ -1,3 +1,4 @@
+import type { Translate } from "../labels";
 import type { QueryState } from "../useQuery";
 import type { CostAmount, RankedRow, SeriesLine, SeriesResult, ToolRow } from "../types";
 
@@ -15,6 +16,11 @@ export function combineSeries(results: readonly Readonly<{ result: SeriesResult;
     return { key, label, values, ...(previous ? { previous } : {}), total: (line?.total ?? 0) * sign, ...(line?.previousTotal !== undefined ? { previousTotal: line.previousTotal * sign } : {}) };
   });
   return { ...base, metric, unit: base.unit, group: undefined, series };
+}
+
+/** The words for a depth of the tree of sub-agents: 1 is a sub-agent of a session of yours, 2 a sub-agent of a sub-agent. */
+export function depthLabel(t: Translate, depth: number): string {
+  return depth <= 1 ? t("Sub-agents of your sessions") : depth === 2 ? t("Sub-agents of sub-agents") : t("{count} levels down", { count: depth });
 }
 
 /** The first result among the states that has data, for the header of a block made of several questions. */

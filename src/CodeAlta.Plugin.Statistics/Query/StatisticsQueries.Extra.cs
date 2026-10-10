@@ -20,8 +20,11 @@ public sealed partial class StatisticsQueries
         ["session-origin"] = DetailList.SessionOrigin,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Gets the lists of names <see cref="DetailsAsync"/> counts.</summary>
-    public static IReadOnlyList<string> DetailNames { get; } = [.. DetailLists.Keys.Order(StringComparer.Ordinal)];
+    /// <summary>
+    /// Gets the lists of names <see cref="DetailsAsync"/> counts: those of the facts, and <c>sub-agent-depth</c>, which is computed
+    /// from the parents of the sessions.
+    /// </summary>
+    public static IReadOnlyList<string> DetailNames { get; } = [.. DetailLists.Keys.Append(SubAgentDepthList).Order(StringComparer.Ordinal)];
 
     /// <summary>Gets the ways <see cref="RunsAsync"/> sorts.</summary>
     public static IReadOnlyList<string> RunSorts { get; } = ["recent", "longest", "tokens", "tools"];
@@ -29,6 +32,10 @@ public sealed partial class StatisticsQueries
     /// <summary>
     /// The names the facts count, ranked: the programs of shell commands (<c>git</c>, <c>dotnet</c>), the first two words of <c>alta</c> commands, the
     /// extensions of the files that tools changed, the skills, the permission modes runs started in, the triggers of compactions.
+    /// The list <c>sub-agent-depth</c> is of another kind: its names are depths (<c>1</c> for a sub-agent of a session of its own,
+    /// <c>2</c> for a sub-agent of a sub-agent), in that order, each with the sessions that started in the period at that depth. The
+    /// depth is the part of the line of parents the statistics know: the result has the note <c>some-parents-unknown</c> when a
+    /// parent was never read or was forgotten.
     /// </summary>
     /// <param name="request">The period and the filters (only the project and the space apply); the limit is the most names returned.</param>
     /// <param name="list">The list: one of <see cref="DetailNames"/>.</param>
@@ -39,6 +46,12 @@ public sealed partial class StatisticsQueries
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(list);
+        if (string.Equals(list.Trim(), SubAgentDepthList, StringComparison.OrdinalIgnoreCase))
+        {
+            var resolved = await ResolveAsync(request, cancellationToken).ConfigureAwait(false);
+            return await _store.ReadAsync(sql => BuildSubAgentDepth(sql, resolved), cancellationToken).ConfigureAwait(false);
+        }
+
         if (!DetailLists.TryGetValue(list.Trim(), out var detail))
         {
             throw new ArgumentException($"'{list}' is not a list of names: use one of {string.Join(", ", DetailNames)}.");
@@ -139,7 +152,8 @@ public sealed partial class StatisticsQueries
     private string RunJoin(ResolvedQuery query)
         => query.ProjectRefs is not null ? $" LEFT JOIN {P}session s ON s.session_id = r.session_id" : string.Empty;
 
-    private string RunWhere(ResolvedQuery query, DayRange range, List<object?> args)
+    // overlapping: the runs that were going at some moment of the period, not only those that started in it.
+    private string RunWhere(ResolvedQuery query, DayRange range, List<object?> args, bool overlapping = false)
     {
         string Arg(object? value)
         {
@@ -148,7 +162,7 @@ public sealed partial class StatisticsQueries
         }
 
         var (lower, upper) = Days.QuarterRangeOfDays(LocalDays.ToDay(range.From), LocalDays.ToDay(range.To));
-        var where = new StringBuilder(" WHERE r.start_ms >= ").Append(Arg(lower * QuarterHour.Milliseconds)).Append(" AND r.start_ms < ").Append(Arg(upper * QuarterHour.Milliseconds));
+        var where = new StringBuilder(overlapping ? " WHERE r.end_ms >= " : " WHERE r.start_ms >= ").Append(Arg(lower * QuarterHour.Milliseconds)).Append(" AND r.start_ms < ").Append(Arg(upper * QuarterHour.Milliseconds));
         var filter = query.Filter;
         if (filter.Provider is { Length: > 0 } provider)
         {

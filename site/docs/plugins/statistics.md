@@ -76,12 +76,12 @@ The page shows the numbers of your sessions as dashboards, one tab for each ques
 | Page | The question it answers |
 | --- | --- |
 | Overview | How much did I use CodeAlta, and on what? |
-| Activity | When do I work with it, and how long do runs take? |
-| Models | Which providers, models and efforts do I use, for how many tokens and how long? |
+| Activity | When do I work with it, how long do runs take, and how many sessions run at once? |
+| Models | Which providers, models and efforts do I use, for how many tokens, how long, and how full does their context get? |
 | Cost | What did it cost, where a cost is known? |
 | Tools | Which tools do agents use, how often, how long, and how often do they fail? |
 | Prompts | How much do I write, and how much do agents write to each other? |
-| Agents | How much work is given to sub-agents, automations and reminders? |
+| Agents | How much work is given to sub-agents, how deep do they go, and what do automations and reminders start? |
 | Code | How many files and lines changed? |
 | Projects | Which projects and spaces take the work? |
 | Sessions | The sessions of the period, in a table that sorts on any number and opens the session |
@@ -162,15 +162,17 @@ Show my tokens per week for the last 90 days, by model.
 | Command | What it answers |
 | --- | --- |
 | `alta statistics summary` | The numbers of a period at a glance, with the change against the period before |
-| `alta statistics series <metric>` | One metric over time, by hour, day, week, month or year, optionally by provider, model, project or tool |
+| `alta statistics series <metric>` | One metric over time, by hour, day, week, month or year, optionally by provider, model, project or tool. Among them `sessions-at-once`, the most sessions with a run going at the same moment, and `context-fill`, the average fill of the context window |
 | `alta statistics top <tools\|models\|projects\|sessions>` | A ranking by tokens, time or calls |
-| `alta statistics details <list>` | The programs of the shell commands agents ran, the commands of `alta` they called, the kinds of files they changed |
+| `alta statistics details <list>` | The programs of the shell commands agents ran, the commands of `alta` they called, the kinds of files they changed, and how deep the sub-agents go (`sub-agent-depth`) |
 | `alta statistics session <session>` | The numbers of one session, with its sub-agents when asked |
 | `alta statistics status` | Whether the history is read, how far, and what is left |
 | `alta statistics history ...` | Choose how much history to read, pause, resume, stop, or forget the sessions that were deleted |
 | `alta statistics estimate <text>` | The size of a text in bytes and approximate tokens |
 
 A period is `today`, `yesterday`, any number of days such as `7d`, `30d` or `90d` (the last days, today included), `week`, `month`, `last-month`, `year`, `all`, or two dates. Days are your local days, in your time zone, and a week starts on the first day of the week of your computer's regional settings, on the page and in the commands. A cost is given for each unit, dollars or AI credits, and is never added across units: only some providers report a cost. A space filter uses the projects the space has today.
+
+Three of these numbers are read from what your sessions recorded, and say what was seen. A run counts as going from its first to its last record, which includes the time it waits for you, so the sessions at once are the sessions that had a run open at the same moment. The fill of the context is an average over the requests whose provider reports the size of the window. The depth of a sub-agent follows its parent sessions as far as CodeAlta has read them.
 
 Every answer says whether the history is read for the period, so an agent can tell you that the numbers before a day are not complete yet. For the broader model of agent commands, see [Advanced Agent Workflows](../advanced-agent-workflows.md).
 

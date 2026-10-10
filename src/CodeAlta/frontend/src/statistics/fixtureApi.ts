@@ -266,6 +266,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     "cache-write-tokens": { family: "usage", unit: "tokens", value: cell => cell.cacheWrite },
     "output-tokens": { family: "usage", unit: "tokens", value: cell => cell.output },
     "reasoning-tokens": { family: "usage", unit: "tokens", value: cell => cell.reasoning },
+    "context-samples": { family: "usage", unit: "count", value: cell => cell.requests },
     "tool-calls": { family: "tools", unit: "count", perTool: true, value: (_, tool) => tool?.calls ?? 0 },
     "tool-failures": { family: "tools", unit: "count", perTool: true, value: (_, tool) => tool?.failures ?? 0 },
     "tool-time": { family: "tools", unit: "ms", perTool: true, value: (_, tool) => tool?.timeMs ?? 0 },
@@ -335,6 +336,67 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     run(resolved.plan, false);
     if (resolved.compare) run(resolved.compare, true);
     return { query: header(resolved, ["activity"]), metric: started ? "sessions-started" : "sessions-active", unit: "count", ...(group ? { group } : {}), buckets: resolved.plan.buckets, series: toLines(lines, resolved.limit ?? 20) };
+  }
+
+  // The most sessions at work in the same hour, in each bucket, as the plugin gives the most sessions with a run going at the same
+  // moment: one line, whose total is the most of the period.
+  function sessionsAtOnce(resolved: Resolved): SeriesResult {
+    const count = resolved.plan.buckets.length;
+    const most = (plan: Plan) => {
+      const hours = new Map<string, Set<string>>();
+      const values = new Array<number>(count).fill(0);
+      for (const cell of cellsOf(resolved, "activity", plan)) {
+        const at = plan.indexOf(cell.day, cell.hour);
+        if (at < 0 || at >= count) continue;
+        const key = `${cell.day}T${cell.hour}`;
+        let sessions = hours.get(key);
+        if (!sessions) { sessions = new Set(); hours.set(key, sessions); }
+        sessions.add(cell.session);
+        values[at] = Math.max(values[at], sessions.size);
+      }
+      return values;
+    };
+    const values = most(resolved.plan), previous = resolved.compare ? most(resolved.compare) : undefined;
+    return { query: header(resolved, ["activity"]), metric: "sessions-at-once", unit: "count", buckets: resolved.plan.buckets,
+      series: [{ key: "", label: "total", values, total: Math.max(0, ...values), ...(previous ? { previous, previousTotal: Math.max(0, ...previous) } : {}) }] };
+  }
+
+  // The average fill of the context window: the sum of the fills of the requests over their number, in each bucket and over the
+  // period, as the plugin computes it. A bucket without a request is 0, and the metric of the samples says which.
+  function contextFill(resolved: Resolved, group: string | null): SeriesResult {
+    const count = resolved.plan.buckets.length;
+    const lines = new Map<string, { label: string; sums: number[]; samples: number[] }>();
+    for (const cell of cellsOf(resolved, "usage")) {
+      const at = resolved.plan.indexOf(cell.day, cell.hour);
+      if (at < 0 || at >= count) continue;
+      const [key, label] = groupOf(cell, group);
+      let line = lines.get(key);
+      if (!line) { line = { label: group ? label : "total", sums: new Array(count).fill(0), samples: new Array(count).fill(0) }; lines.set(key, line); }
+      line.sums[at] += cell.contextFill * cell.requests;
+      line.samples[at] += cell.requests;
+    }
+    const all = [...lines.entries()].map(([key, line]) => ({ key, ...line })).sort((a, b) => sum(b.samples) - sum(a.samples) || a.key.localeCompare(b.key));
+    const limit = resolved.limit ?? 20;
+    const kept = all.slice(0, limit), rest = all.slice(limit);
+    if (rest.length > 0) kept.push({ key: "other", label: "other", sums: kept[0].sums.map((_, at) => sum(rest.map(line => line.sums[at]))), samples: kept[0].samples.map((_, at) => sum(rest.map(line => line.samples[at]))) });
+    const average = (total: number, samples: number) => samples > 0 ? total / samples : 0;
+    return { query: header(resolved, ["usage"]), metric: "context-fill", unit: "ratio", ...(group ? { group } : {}), buckets: resolved.plan.buckets,
+      series: kept.map(line => ({ key: line.key, label: line.label, values: line.sums.map((value, at) => average(value, line.samples[at])), total: average(sum(line.sums), sum(line.samples)) })) };
+  }
+
+  // How far below a session of its own each sub-agent that started in the period is, following the parents.
+  function subAgentDepth(resolved: Resolved): DetailsResult {
+    const byId = new Map(data.sessions.map(session => [session.id, session]));
+    const counts = new Map<number, number>();
+    for (const session of data.sessions) {
+      if (!session.parent || session.first < resolved.plan.range.from || session.first > resolved.plan.range.to) continue;
+      let depth = 0;
+      for (let current: typeof session | undefined = session; current?.parent && depth < 64; current = byId.get(current.parent)) depth++;
+      counts.set(depth, (counts.get(depth) ?? 0) + 1);
+    }
+    const total = sum([...counts.values()]);
+    const rows = [...counts.entries()].sort((a, b) => a[0] - b[0]).map(([depth, count]) => ({ name: String(depth), count, share: total ? count / total : 0 }));
+    return { query: header(resolved, ["activity"]), list: "sub-agent-depth", rows, total, totalRows: rows.length, truncated: false };
   }
 
   // The tiles of the summary.
@@ -545,6 +607,8 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     series: (request, metric, group, signal) => guard("series", signal, (): SeriesResult => {
       const resolved = resolve(request);
       if (metric === "sessions-active" || metric === "sessions-started") return sessionsActive(resolved, metric === "sessions-started", group);
+      if (metric === "sessions-at-once") return sessionsAtOnce(resolved);
+      if (metric === "context-fill") return contextFill(resolved, group);
       const definition = metrics[metric];
       if (!definition) throw new Error(`'${metric}' is not a metric.`);
       if (group === "origin" && definition.family !== "content" && metric !== "runs") throw new Error("Only prompts can be cut by origin.");
@@ -701,6 +765,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     }),
     details: (request, list, signal) => guard("details", signal, (): DetailsResult => {
       const resolved = resolve(request);
+      if (list === "sub-agent-depth") return subAgentDepth(resolved);
       const toolCalls = (name: string) => sum(cellsOf(resolved, "tools").flatMap(cell => cell.tools.filter(tool => tool.tool === name).map(tool => tool.calls)));
       const shares: Record<string, [number, readonly (readonly [string, number])[]]> = {
         "shell-program": [toolCalls("shell"), [["git", 0.34], ["dotnet", 0.22], ["npm", 0.12], ["node", 0.08], ["rg", 0.07], ["ls", 0.05], ["curl", 0.04], ["pwsh", 0.03], ["cat", 0.03], ["gh", 0.02]]],
