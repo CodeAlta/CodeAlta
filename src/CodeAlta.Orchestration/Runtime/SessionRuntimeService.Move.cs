@@ -4,6 +4,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Worktrees;
+using CodeAlta.Orchestration.Runtime.Actors;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -71,10 +72,26 @@ public sealed partial class SessionRuntimeService
             {
                 status = await MoveOneSessionAsync(members[index], projectId, workspacePath, source, target, ownerBusy, moved, warnings).ConfigureAwait(false);
             }
-            catch (InvalidOperationException exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                warnings.Add($"The session {members[index]} cannot be moved: {exception.Message}");
-                status = "requires_recovery";
+                if (moved.Any(value => string.Equals(value.SessionId, members[index], StringComparison.OrdinalIgnoreCase)))
+                {
+                    // Its journal was rewritten before what failed: it moved, and the move goes on.
+                    warnings.Add($"The session {members[index]} moved, but: {exception.Message}");
+                    status = "ok";
+                }
+                else if (exception is InvalidOperationException)
+                {
+                    warnings.Add($"The session {members[index]} cannot be moved: {exception.Message}");
+                    status = "requires_recovery";
+                }
+                else
+                {
+                    // The journal of this one is replaced at once or not at all; those moved before it stay moved, and
+                    // the answer names them so that their tabs and their remote control follow them.
+                    warnings.Add($"The session {members[index]} was not moved: {exception.Message}");
+                    status = "move_unconfirmed";
+                }
             }
 
             if (status != "ok") return new(moved.Count == 0 ? status : "move_partial", moved, warnings);
@@ -142,6 +159,7 @@ public sealed partial class SessionRuntimeService
         AgentSessionState? providerState = null;
         string? fromDirectory = null, toDirectory = null;
         OwnedSessionMove? done = null;
+        MovedSummaryFields? written = null;
         var status = await actor.QueryAsync(async token =>
         {
             if (await MoveRefusalAsync(sessionId, token).ConfigureAwait(false) is { } refusal) return refusal;
@@ -163,6 +181,7 @@ public sealed partial class SessionRuntimeService
             providerState = await store.GetStateAsync(sessionId, token).ConfigureAwait(false);
             await _sessionViewCatalog.JournalStore.MoveSessionAsync(session,
                 new SessionViewMove(target.Id, target.ProjectPath, worktree, title, preview), token).ConfigureAwait(false);
+            written = new MovedSummaryFields(summary.Title, string.IsNullOrWhiteSpace(title) ? null : title.Trim(), summary.Summary, preview);
             if (_entries.TryGetValue(sessionId, out var entry))
             {
                 // Its next summary would write the old folder back: the next send attaches the session again.
@@ -180,23 +199,40 @@ public sealed partial class SessionRuntimeService
         if (status != "ok" || done is null) return status;
         moved.Add(done);
 
-        PublishSessionLifecycleEvent(sessionId);
-        if (await ResolveOwnedSessionBodyAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is { } changed)
-            PublishSessionCatalogEvent(changed);
-        await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
-        if (retirement is not null)
+        // The move is committed: its journal says where the session is. What follows never undoes it, and the
+        // transition of the retired attachment is always removed, or the session could never be attached again.
+        var stopped = true;
+        try
         {
             try
             {
-                await retirement.ConfigureAwait(false);
+                PublishSessionLifecycleEvent(sessionId);
+                if (await ResolveOwnedSessionBodyAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is { } changed)
+                    PublishSessionCatalogEvent(changed);
+                await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // The move is committed: its journal says where the session is. Only what its provider keeps stays.
-                warnings.Add($"The session {sessionId} moved, but its provider did not stop cleanly: {exception.Message}");
-                return "ok";
+                warnings.Add($"The session {sessionId} moved, but the lists may show it in its old project until they are read again: {exception.Message}");
             }
-            finally
+
+            if (retirement is not null)
+            {
+                try
+                {
+                    await retirement.ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    // Only what its provider keeps stays where it was.
+                    warnings.Add($"The session {sessionId} moved, but its provider did not stop cleanly: {exception.Message}");
+                    stopped = false;
+                }
+            }
+        }
+        finally
+        {
+            if (retirement is not null)
             {
                 await actor.QueryAsync(_ =>
                 {
@@ -204,10 +240,15 @@ public sealed partial class SessionRuntimeService
                         _transitions.TryRemove(sessionId, out var removed);
                     return ValueTask.FromResult(true);
                 }, CancellationToken.None).ConfigureAwait(false);
+                PublishSessionLifecycleEvent(sessionId);
             }
-
-            PublishSessionLifecycleEvent(sessionId);
         }
+
+        // A turn the retirement ended (one started from the phone, with Remote Control on) writes the summary its
+        // session held, with the old folder, title and preview: what the move wrote is written again over it. Also
+        // when its provider did not stop cleanly: the turn wrote before the provider was asked to stop.
+        if (retirement is not null) await RestoreMovedSummaryAsync(actor, done, written!, warnings).ConfigureAwait(false);
+        if (!stopped) return "ok";
 
         if (providerState is not null && fromDirectory is not null && toDirectory is not null
             && !string.Equals(Path.TrimEndingDirectorySeparator(fromDirectory), Path.TrimEndingDirectorySeparator(toDirectory), FolderComparison))
@@ -224,6 +265,38 @@ public sealed partial class SessionRuntimeService
         }
 
         return "ok";
+    }
+
+    // What the move wrote in the summary of a session, and what it replaced: the title and the preview of a session
+    // that was never named (null when the move kept them).
+    private sealed record MovedSummaryFields(string? FromTitle, string? ToTitle, string? FromPreview, string? ToPreview);
+
+    private async Task RestoreMovedSummaryAsync(SessionActor actor, OwnedSessionMove done, MovedSummaryFields written, List<string> warnings)
+    {
+        try
+        {
+            var changed = await actor.QueryAsync(async token =>
+            {
+                var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+                if (await store.GetSessionSummaryAsync(done.SessionId, token).ConfigureAwait(false) is not { } summary) return false;
+                var restored = summary with { WorkingDirectory = done.WorkspacePath, WorktreeDirectory = done.WorktreePath };
+                // Only what still is what the move replaced: a rename, or a preview of a later turn, stays.
+                if (written.ToTitle is not null && summary.Title == written.FromTitle) restored = restored with { Title = written.ToTitle };
+                if (written.ToPreview is not null && summary.Summary == written.FromPreview) restored = restored with { Summary = written.ToPreview };
+                if (restored == summary) return false;
+                await store.UpsertSessionAsync(restored with { UpdatedAt = DateTimeOffset.UtcNow }, token).ConfigureAwait(false);
+                return true;
+            }, CancellationToken.None).ConfigureAwait(false);
+            if (!changed) return;
+            // Whoever read the sessions meanwhile has what the ended turn wrote.
+            await _agentSessionCatalog.NotifySessionUpdatedAsync(done.SessionId, CancellationToken.None).ConfigureAwait(false);
+            if (await ResolveOwnedSessionBodyAsync(done.SessionId, CancellationToken.None).ConfigureAwait(false) is { } session)
+                PublishSessionCatalogEvent(session);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            warnings.Add($"The session {done.SessionId} moved, but its last turn may have written its old folder back: {exception.Message}");
+        }
     }
 
     // The worktree a moved session keeps working in: the one it works in, when that folder still exists, belongs to

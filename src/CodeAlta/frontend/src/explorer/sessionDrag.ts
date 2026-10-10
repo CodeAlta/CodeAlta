@@ -68,8 +68,17 @@ export function useSessionRowDrag(projectOf: (id: string) => WorkspaceProject | 
     const key = (pressed: KeyboardEvent) => {
       if (pressed.key !== "Escape" || !gesture.current?.dragging) return;
       pressed.preventDefault(); pressed.stopPropagation();
-      swallowClick();
       stop();
+      // The button is still held: the click comes when it is released, and is swallowed then. A release outside the
+      // window leaves no click: the next press forgets it.
+      const release = (ended: globalThis.PointerEvent) => {
+        if (ended.type === "pointerup" && ended.pointerId !== pointerId) return;
+        owner.removeEventListener("pointerup", release, true);
+        owner.removeEventListener("pointerdown", release, true);
+        if (ended.type === "pointerup") swallowClick();
+      };
+      owner.addEventListener("pointerup", release, true);
+      owner.addEventListener("pointerdown", release, true);
     };
     const blur = () => stop();
     // The click that ends a drag would open the session that was dragged: the next one is dropped.

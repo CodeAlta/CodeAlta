@@ -3,7 +3,7 @@ import test from "node:test";
 import type { WorkspaceMoveSessionRequest, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { moveTargets } from "./MoveSessionDialog";
 import { createMutationCapability } from "./sessionOperations";
-import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage } from "./sessionMove";
+import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage, splitPendingTabMoves } from "./sessionMove";
 import { reconcileSessionTabs, tabKey } from "./sessionTabs";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
@@ -73,6 +73,17 @@ test("the tabs of moved sessions follow them, keep their place, and survive the 
   assert.deepEqual(reconcileSessionTabs(state, fresh).open.map(tab => tab.sessionId), ["a"], "Without the retarget, the moved tabs are dropped.");
   assert.equal(movedSessionsVisible(fresh, [moved("s1"), moved("child")]), true);
   assert.equal(movedSessionsVisible(snapshot([session("s1", "p1", from.projectPath)]), [moved("s1")]), false);
+});
+
+test("the tabs of a move whose fresh list could not be read follow it with the first list that shows it", () => {
+  const pending = [moved("child"), moved("s1")];
+  // A list read before the move, or of a space without the session, shows neither: both wait.
+  const before = splitPendingTabMoves(snapshot([session("s1", "p1", from.projectPath)]), pending);
+  assert.deepEqual(before, { shown: [], waiting: pending });
+  // The next list shows one of them in its project, the other not yet: the one shown follows now.
+  const half = splitPendingTabMoves(snapshot([session("s1", "p2", target.projectPath)]), pending);
+  assert.deepEqual(half, { shown: [moved("s1")], waiting: [moved("child")] });
+  assert.deepEqual(splitPendingTabMoves({ ...snapshot([]), configured: false }, pending), { shown: [], waiting: pending });
 });
 
 test("the move window offers the other projects that are not archived, filtered by name or folder", () => {

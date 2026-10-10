@@ -68,6 +68,27 @@ public sealed class SessionRuntimeMoveTests
     }
 
     [TestMethod]
+    public async Task MoveOwnedSessionAsync_ThatFailsPartWay_SaysWhatMoved()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Only Windows refuses to replace a file that is open elsewhere.");
+        await using var f = await Fixture.CreateAsync();
+        await f.CreateSessionAsync("root", f.Source, title: "Root");
+        await f.CreateSessionAsync("child", f.Source, title: "Child", parent: "root");
+        var journal = Directory.EnumerateFiles(f.Root, "root.jsonl", SearchOption.AllDirectories).Single();
+
+        OwnedSessionMoveResult result;
+        using (new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.Read))
+            result = await f.Runtime.MoveOwnedSessionAsync("root", f.Source.Id, f.Source.ProjectPath, f.Target.Id, f.Target.ProjectPath, static _ => false);
+
+        // What moved before the failure stays moved, and is named, so that its tabs and its remote control follow it.
+        Assert.AreEqual("move_partial", result.Status);
+        CollectionAssert.AreEqual(new[] { "child" }, result.Moved.Select(static moved => moved.SessionId).ToArray());
+        Assert.IsTrue(result.Warnings.Any(static warning => warning.Contains("root", StringComparison.Ordinal)));
+        Assert.AreEqual(f.Target.Id, (await f.Journal.ReadHeaderAsync("child", CreatedAt))!.ProjectRef);
+        Assert.AreEqual(f.Source.Id, (await f.Journal.ReadHeaderAsync("root", CreatedAt))!.ProjectRef, "The journal that could not be replaced is as it was.");
+    }
+
+    [TestMethod]
     public async Task MoveOwnedSessionAsync_AsksTheProviderToMoveWhatItKeeps()
     {
         var relocations = new List<(string From, string To)>();
@@ -119,6 +140,8 @@ public sealed class SessionRuntimeMoveTests
         }
 
         public SessionRuntimeService Runtime { get; }
+
+        public string Root => _temp.Path;
 
         public SessionViewJournalStore Journal { get; }
 

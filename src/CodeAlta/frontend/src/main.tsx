@@ -23,7 +23,7 @@ import {
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
-  type ConfigurationSnapshot, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
+  type ConfigurationSnapshot, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
@@ -111,7 +111,8 @@ import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
-import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage } from "./sessionMove";
+import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage, splitPendingTabMoves } from "./sessionMove";
+import { createCoalescedRead } from "./coalescedRead";
 import { useSessionRowDrag, type SessionDrag, type SessionRowDrag } from "./explorer/sessionDrag";
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
@@ -324,7 +325,15 @@ function App() {
     projectInspection.current = { version: projectInspection.current.version + 1, ready };
     setProjectInspectionVersion(projectInspection.current.version);
   }
+  // The moves whose tabs have not followed them yet: each is retargeted with the first list that shows it moved.
+  const pendingTabMoves = useRef<readonly WorkspaceMovedSession[]>([]);
   function publishWorkspaceState(value: WorkspaceState) {
+    if (value.kind === "ready" && pendingTabMoves.current.length > 0) {
+      const { shown, waiting } = splitPendingTabMoves(value.snapshot, pendingTabMoves.current);
+      pendingTabMoves.current = waiting;
+      // In the same update as the list: published alone, the list drops the tab of a moved session.
+      retargetMovedTabs(shown);
+    }
     advanceBrowserRevision();
     invalidateCreation();
     currentSnapshot.current = value.kind === "ready" ? value.snapshot : undefined;
@@ -334,19 +343,22 @@ function App() {
   // Sessions also appear without the window asking: an agent creates sub-sessions through the alta tool.
   // While a run is live, and when it ends, the session list is read again and shown only if it differs.
   const liveRuns = useRef(new Set<string>());
-  const sessionListRead = useRef(false);
-  const readSessionList = useRef(() => {});
-  readSessionList.current = () => {
-    if (sessionListRead.current || !currentSnapshot.current || document.visibilityState !== "visible") return;
-    sessionListRead.current = true;
+  const sessionListBody = useRef(async () => {});
+  sessionListBody.current = async () => {
+    if (!creationAlive.current || !currentSnapshot.current || document.visibilityState !== "visible") return;
     const revision = browserRevision.current;
-    void workspace.snapshot({}, { timeoutMilliseconds: 30_000 }).then(fresh => {
-      const shown = currentSnapshot.current;
-      if (!creationAlive.current || !shown || !fresh.configured || revision !== browserRevision.current
-        || sessionListSignature(shown) === sessionListSignature(fresh)) return;
-      publishWorkspaceState({ kind: "ready", snapshot: fresh });
-    }).catch(() => {}).finally(() => { sessionListRead.current = false; });
+    const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+    const shown = currentSnapshot.current;
+    if (movingPending.current) { sessionLists.defer(); return; }
+    if (!creationAlive.current || !shown || !fresh.configured || revision !== browserRevision.current
+      || sessionListSignature(shown) === sessionListSignature(fresh)) return;
+    publishWorkspaceState({ kind: "ready", snapshot: fresh });
   };
+  // A move publishes its own list, with the tabs of the moved sessions pointed at their new project: read during it,
+  // a list would drop those tabs. What is asked for then is read once the move ends.
+  const [sessionLists] = useState(() => createCoalescedRead(() => movingPending.current, () => sessionListBody.current()));
+  const readSessionList = useRef(() => {});
+  readSessionList.current = () => sessionLists.run();
   // A run that ends may have written a plan or proposed a task: the work items are read again too.
   const refreshWorkItems = useRef(() => {});
   const noteRunActivity = (id: string, running: boolean | null) => {
@@ -2114,8 +2126,12 @@ function App() {
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
-      // The session of a project, as its menu moves it.
-      case "moveSession": return ownedSession && !!selectedProject && !selectedProject.archived && selectedSession?.projectId === selectedProject.id;
+      // The session of a project, as its menu moves it, under the same locks.
+      case "moveSession": return ownedSession && !!selectedSession && sessionActionAccess(selectedSession,
+        { id: selectedSession.id, projectId, hostEpoch: status?.hostEpoch ?? null }, selectedSessionId.current, selectedScope.current, selectedProject,
+        currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
+        batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
+        renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current).move;
       default: return true;
     }
   }
@@ -2583,7 +2599,8 @@ function App() {
   }
 
   // The tabs of moved sessions follow them, in every space: the one shown, those kept in memory, and those only stored.
-  function retargetMovedTabs(moved: Parameters<typeof retargetSessionTabs>[1]) {
+  function retargetMovedTabs(moved: readonly WorkspaceMovedSession[]) {
+    if (moved.length === 0) return;
     writeTabs(current => retargetSessionTabs(current, moved));
     for (const [id, kept] of spaceTabs.current) spaceTabs.current.set(id, { ...kept, tabs: retargetSessionTabs(kept.tabs, moved) });
     try {
@@ -2600,11 +2617,22 @@ function App() {
   async function moveSessionTo(moving: SessionDrag, target: WorkspaceProject) {
     const capability = mutation?.capability;
     if (movingPending.current || !owned || !capability?.canMutate() || target.archived || target.id === moving.from.projectId) return;
+    // The locks of the menu, again: a rename or a delete may have become pending or unconfirmed while the window was open.
+    if (batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current
+      || renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current) {
+      setMovingSession(null);
+      showToast({ message: t(sessionMoveMessage("busy")), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
     movingPending.current = true;
     setMovingBusy(true);
+    // Sessions moved, but the list after the move could not be read: it is read again once the move ends.
+    let readAgain = false;
     try {
       const result = await moveSession(status?.hostEpoch, moving.from, { projectId: target.id, projectPath: target.path }, moving.id, capability);
       if (!creationAlive.current) return;
+      // Their tabs follow them with the list published next, this fresh one or, if it cannot be read, a later one.
+      pendingTabMoves.current = [...pendingTabMoves.current, ...result.moved];
       let fresh: WorkspaceSnapshot | undefined;
       if (result.moved.length > 0 || result.kind === "error" && result.code === "move_unconfirmed") {
         markProjectInspection(false);
@@ -2612,9 +2640,8 @@ function App() {
         catch { fresh = undefined; }
         if (!creationAlive.current) return;
       }
+      readAgain = result.moved.length > 0 && !fresh?.configured;
       if (fresh?.configured) {
-        // Published with the tabs pointed at the new project: published alone, the list drops the tab of a moved session.
-        retargetMovedTabs(result.moved);
         publishWorkspaceState({ kind: "ready", snapshot: fresh });
         const selected = selectedSessionId.current;
         if (selected && result.moved.some(value => value.sessionId === selected)) selectProject(target.id, selected);
@@ -2629,7 +2656,14 @@ function App() {
         if (result.warnings.length > 0)
           showToast({ message: `${t("The session moved, but:")} ${result.warnings[0]}`, intent: "warning", icon: "warning-sign", timeout: 12000 });
       } else showToast({ message: t(sessionMoveMessage(result.code)), intent: "danger", icon: "error", timeout: 8000 });
-    } finally { movingPending.current = false; if (creationAlive.current) setMovingBusy(false); }
+    } finally {
+      movingPending.current = false;
+      if (creationAlive.current) {
+        setMovingBusy(false);
+        // What happened meanwhile (a run that ended, a session an agent created) is not lost with the reads skipped.
+        sessionLists.resume(readAgain);
+      }
+    }
   }
 
   async function beginProjectRename() {

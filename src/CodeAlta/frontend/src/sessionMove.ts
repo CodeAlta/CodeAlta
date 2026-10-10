@@ -65,11 +65,24 @@ export function createSessionMove(invoke: Invoke) {
   };
 }
 
+const shownMoved = (snapshot: WorkspaceSnapshot, value: WorkspaceMovedSession) => snapshot.sessions.some(session =>
+  session.id === value.sessionId && session.scopeKind === "project" && session.projectId === value.projectId && session.workspacePath === value.projectPath);
+
 /** Whether a fresh snapshot lists every moved session in the project it went to. */
 export function movedSessionsVisible(snapshot: WorkspaceSnapshot, moved: readonly WorkspaceMovedSession[]): boolean {
-  if (!snapshot.configured) return false;
-  return moved.every(value => snapshot.sessions.some(session => session.id === value.sessionId && session.scopeKind === "project"
-    && session.projectId === value.projectId && session.workspacePath === value.projectPath));
+  return snapshot.configured && moved.every(value => shownMoved(snapshot, value));
+}
+
+/**
+ * The moves whose tabs are still to follow them, split by a list about to be published: those it shows in the
+ * project they went to are retargeted with it; the others wait for a list that shows them. Retargeted earlier, the
+ * reconciliation with the list shown then would drop their tabs.
+ */
+export function splitPendingTabMoves(snapshot: WorkspaceSnapshot, pending: readonly WorkspaceMovedSession[]):
+  { shown: readonly WorkspaceMovedSession[]; waiting: readonly WorkspaceMovedSession[] } {
+  if (!snapshot.configured) return { shown: [], waiting: pending };
+  const shown = pending.filter(value => shownMoved(snapshot, value));
+  return { shown, waiting: shown.length === 0 ? pending : pending.filter(value => !shown.includes(value)) };
 }
 
 /**
