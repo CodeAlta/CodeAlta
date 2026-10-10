@@ -98,14 +98,14 @@ public sealed partial class StatisticsQueries
         var total = (int)sql.ScalarLong($"SELECT COUNT(*) FROM {P}run r{RunJoin(query)}{where}", [.. args]);
         var order = sort switch
         {
-            "longest" => "(r.end_ms - r.start_ms) DESC",
+            "longest" => "(r.end_ms - r.start_ms - r.skipped_ms) DESC",
             "tokens" => "(r.input_tokens + r.output_tokens) DESC",
             "tools" => "r.tool_calls DESC",
             _ => "r.start_ms DESC",
         };
         var limit = LimitOf(query.Request);
         var runs = sql.Query(
-            $"SELECT r.session_id, r.run_id, r.start_ms, r.end_ms, r.outcome, r.sender, r.prompt_kind, r.prompt_chars, r.prompt_words, r.requests, r.tool_calls, r.tool_failures, r.input_tokens, r.output_tokens, r.answer_chars, r.answer_words, r.provider, r.model, r.effort FROM {P}run r{RunJoin(query)}{where} ORDER BY {order}, r.run_id LIMIT {limit.ToString(CultureInfo.InvariantCulture)}",
+            $"SELECT r.session_id, r.run_id, r.start_ms, r.end_ms - r.skipped_ms, r.outcome, r.sender, r.prompt_kind, r.prompt_chars, r.prompt_words, r.requests, r.tool_calls, r.tool_failures, r.input_tokens, r.output_tokens, r.answer_chars, r.answer_words, r.provider, r.model, r.effort FROM {P}run r{RunJoin(query)}{where} ORDER BY {order}, r.run_id LIMIT {limit.ToString(CultureInfo.InvariantCulture)}",
             static reader => new RunSample(
                 reader.GetString(0),
                 reader.GetString(1),

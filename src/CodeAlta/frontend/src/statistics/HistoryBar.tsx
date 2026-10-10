@@ -4,7 +4,7 @@ import { AppIcon } from "../AppIcon";
 import { showToast } from "../appToaster";
 import { useText } from "./text";
 import { sentenceCase } from "./format";
-import { doneSummary, historyView, progressOf, readingSeconds, reachedDay, timeLeft } from "./history";
+import { doneSummary, historyView, progressOf, readingSeconds, reachedDay, skippedToRetry, timeLeft } from "./history";
 import { useStatistics } from "./runtime";
 import type { StatisticsStatus } from "./types";
 
@@ -49,6 +49,18 @@ export function FirstTimeCard({ status }: Readonly<{ status: StatisticsStatus }>
     </div>
     {history.error && <p className="stats-first-error" role="alert">{history.error}</p>}
   </section>;
+}
+
+/** The sessions that could not be read: how many, and in a popover which ones, why, and "Try again". */
+function SkippedSessions({ status }: Readonly<{ status: StatisticsStatus }>) {
+  const { t } = useText();
+  const { history } = useStatistics();
+  return <PopoverNext placement="bottom-start" content={<div className="stats-popover stats-skipped">
+    <ul>{status.skipped.map(item => <li key={item.sessionId}><code>{item.sessionId.slice(0, 8)}</code><span>{item.reason}</span></li>)}</ul>
+    <Button size="small" onClick={() => void history.resume()} disabled={history.busy}>{t("Try again")}</Button>
+  </div>}>
+    <Button size="small" variant="minimal" icon={<AppIcon name="warning" size={13} />}>{status.skippedCount === 1 ? t("1 session could not be read") : t("{count} sessions could not be read", { count: status.skippedCount })}</Button>
+  </PopoverNext>;
 }
 
 /** The bar under the frame while the history is read, paused, stopped, skipped or failed; nothing when everything is read. */
@@ -104,14 +116,10 @@ export function HistoryBar() {
     </div>}
     {view === "stopped" && <div className="stats-history-line">
       <span role="status">{reached ? t("The charts start on {date}.", { date: fmt.dayLong(reached) }) : t("The charts start where the reading stopped.")}</span>
+      {skippedToRetry(status) > 0 && <SkippedSessions status={status} />}
     </div>}
     {view === "skipped" && <div className="stats-history-line" role="status">
-      <PopoverNext placement="bottom-start" content={<div className="stats-popover stats-skipped">
-        <ul>{status.skipped.map(item => <li key={item.sessionId}><code>{item.sessionId.slice(0, 8)}</code><span>{item.reason}</span></li>)}</ul>
-        <Button size="small" onClick={() => void history.resume()} disabled={history.busy}>{t("Try again")}</Button>
-      </div>}>
-        <Button size="small" variant="minimal" icon={<AppIcon name="warning" size={13} />}>{status.skippedCount === 1 ? t("1 session could not be read") : t("{count} sessions could not be read", { count: status.skippedCount })}</Button>
-      </PopoverNext>
+      <SkippedSessions status={status} />
     </div>}
     {view === "failed" && <Callout className="stats-failed" intent="danger" icon={<AppIcon name="error" size={16} />} title={t("The statistics could not start")}>
       <p role="status">{status.error ?? t("Something went wrong.")}</p><Button size="small" onClick={() => void history.resume()} disabled={history.busy}>{t("Try again")}</Button></Callout>}

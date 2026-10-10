@@ -140,6 +140,34 @@ public sealed class PluginDatabaseTests
     }
 
     [TestMethod]
+    public async Task AReadInsideAWriteOfThePlugin_WhenTheFileWasReplaced_DoesNotStopTheWrite()
+    {
+        using var temp = new TestTempDirectory();
+        await using var application = CreateApplicationDatabase(temp);
+        var database = new PluginDatabase(application, "builtin:statistics");
+        var migrations = new List<int>();
+        await database.MigrateAsync(1, (connection, from, to, token) =>
+        {
+            migrations.Add(from);
+            return ExecuteAsync(connection, "CREATE TABLE statistics_day (n INTEGER);", token);
+        });
+        await database.WriteAsync((connection, token) => ExecuteAsync(connection, "INSERT INTO statistics_day VALUES (1);", token));
+
+        // The file goes while the plugin runs. Its next write finds a new file, and reads before it writes: the read
+        // cannot make the tables again, because it runs inside the write.
+        File.Delete(application.DatabasePath);
+        await database.WriteAsync(async (connection, token) =>
+        {
+            var rows = await database.ReadAsync((reader, readToken) => ScalarAsync(reader, "SELECT COUNT(*) FROM statistics_day;", readToken), token);
+            await ExecuteAsync(connection, $"INSERT INTO statistics_day VALUES ({rows + 10});", token);
+        });
+
+        Assert.AreEqual(10L, await database.ReadAsync((connection, token) => ScalarAsync(connection, "SELECT SUM(n) FROM statistics_day;", token)));
+        Assert.AreEqual(1, application.Generation);
+        CollectionAssert.AreEqual(new[] { 0, 0 }, migrations, "The write made the tables again, then ran once more.");
+    }
+
+    [TestMethod]
     public async Task WhenTheFileIsRestoredFromACopyWhileThePluginRuns_ItsRowsComeBackAndItDoesNotMigrateAgain()
     {
         using var temp = new TestTempDirectory();

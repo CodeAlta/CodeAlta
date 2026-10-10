@@ -658,15 +658,28 @@ public sealed class ApplicationDatabase : IApplicationDatabase
             }
 
             // The file was deleted under the service: whatever is made again is a new file, and the owners say so
-            // by comparing the generation they saw.
+            // by comparing the generation they saw. It is counted now: what follows can fail, and the next call
+            // no longer knows that there was a file.
             var deleted = Volatile.Read(ref _ready);
             Volatile.Write(ref _ready, false);
-            Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
-            TakeOverLegacyFile();
-            var restored = !File.Exists(DatabasePath) && RestoreMissingFile();
-            if (deleted || restored)
+            if (deleted)
             {
                 Interlocked.Increment(ref _generation);
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
+
+            // The copies come before the file of the old location: they hold the tables of the plugins, and that
+            // file holds a list of sessions that can be built again.
+            var restored = !File.Exists(DatabasePath) && RestoreMissingFile();
+            if (restored && !deleted)
+            {
+                Interlocked.Increment(ref _generation);
+            }
+
+            if (!restored)
+            {
+                TakeOverLegacyFile();
             }
 
             try
@@ -860,11 +873,13 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         return null;
     }
 
+    // Nothing is overwritten: a file that is there after all (it was not seen, or it was made in the meantime) is
+    // the database, and the copy is dropped.
     private bool TryPutInPlace((string Candidate, string Source) copy)
     {
         try
         {
-            File.Move(copy.Candidate, DatabasePath, overwrite: true);
+            File.Move(copy.Candidate, DatabasePath, overwrite: false);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -876,18 +891,19 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     }
 
     // A connection that is finding the damage has the file open for a moment more, and on Windows an open file
-    // cannot be moved: the move waits for it, as long as a lock is waited for.
+    // cannot be moved: the move waits for it, as long as a lock is waited for. The wait is a number of tries: the
+    // delay between two of them is real time, whatever the clock of the options says.
     private async Task MoveWhenReleasedAsync(string source, string destination, CancellationToken cancellationToken)
     {
-        var started = _options.TimeProvider.GetTimestamp();
-        while (true)
+        var tries = (int)Math.Clamp(Math.Ceiling(_options.BusyTimeout / MoveRetryDelay), 1, int.MaxValue);
+        for (var attempt = 1; ; attempt++)
         {
             try
             {
                 File.Move(source, destination, overwrite: true);
                 return;
             }
-            catch (IOException) when (File.Exists(source) && _options.TimeProvider.GetElapsedTime(started) < _options.BusyTimeout)
+            catch (IOException) when (attempt < tries && File.Exists(source))
             {
                 await Task.Delay(MoveRetryDelay, cancellationToken).ConfigureAwait(false);
             }

@@ -42,12 +42,19 @@ public interface IStatisticsService
     /// <returns>The status after the pause.</returns>
     ValueTask<StatisticsStatus> PauseAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Resumes a paused reading.</summary>
+    /// <summary>
+    /// Resumes a paused reading. On a history that is done or stopped with sessions that could not be read, tries them again;
+    /// on an engine that could not start, tries the start again.
+    /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The status after the resume.</returns>
     ValueTask<StatisticsStatus> ResumeAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Stops the reading where it is: the statistics start at the date reached, and "read more history" goes further back.</summary>
+    /// <summary>
+    /// Stops the reading where it is: the statistics start at the date reached, and "read more history" goes further back.
+    /// A catch-up of what changed, or the new reading of a new version of the facts, only ends where it is: the floor and the
+    /// choice stay, and the next look at the journals reads what is left.
+    /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The status after the stop.</returns>
     ValueTask<StatisticsStatus> StopHereAsync(CancellationToken cancellationToken = default);

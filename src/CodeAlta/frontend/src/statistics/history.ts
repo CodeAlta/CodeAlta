@@ -20,6 +20,13 @@ export function historyView(status: StatisticsStatus | null): HistoryView {
   }
 }
 
+/**
+ * How many sessions could not be read and can be tried again: those of a history that is read to its end, or that the user
+ * stopped. While it reads or is paused the list is still being made, and nothing is offered.
+ */
+export const skippedToRetry = (status: StatisticsStatus | null): number =>
+  status && (status.state === "done" || status.state === "stoppedHere") ? status.skippedCount : 0;
+
 /** The speed assumed before the reading has measured its own: the plugin reads between 430 and 660 MiB/s on a fast disk. */
 export const assumedBytesPerSecond = 400 * 1024 * 1024;
 

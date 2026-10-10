@@ -63,7 +63,10 @@ export type QueryHeader = Readonly<{
 /** One bucket of a series. */
 export type BucketInfo = Readonly<{ index: number; start: string; label: string }>;
 
-/** One line of a chart. */
+/**
+ * One line of a chart. `key` is the value the line stands for, which a filter takes, and `label` its name: the same for a provider,
+ * a model, a tool and the groups of a fixed list (`shell`, `you`, `newturn`), and the id and the name for a project.
+ */
 export type SeriesLine = Readonly<{
   key: string;
   label: string;

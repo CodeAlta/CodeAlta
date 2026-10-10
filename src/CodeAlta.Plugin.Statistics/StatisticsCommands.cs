@@ -184,7 +184,7 @@ internal static class StatisticsCommands
         var command = Group("history", "Choose how much history to read, and pause, resume or stop the reading. Only when the user asks for it.");
         command.Add(HistoryRead(plugin, context));
         command.Add(HistoryControl(plugin, context, "pause", "Pause the reading of the history; the numbers of today keep up to date. The pause is kept across restarts.", static (service, token) => service.PauseAsync(token)));
-        command.Add(HistoryControl(plugin, context, "resume", "Resume a paused reading.", static (service, token) => service.ResumeAsync(token)));
+        command.Add(HistoryControl(plugin, context, "resume", "Resume a paused reading; try again the sessions that could not be read, or a start that failed.", static (service, token) => service.ResumeAsync(token)));
         command.Add(HistoryControl(plugin, context, "stop", "Stop the reading where it is: the statistics start at the date reached. `history read` goes further back later.", static (service, token) => service.StopHereAsync(token)));
         command.Add(ForgetDeleted(plugin, context));
         Help(command, "The history is read by CodeAlta Desktop, one session at a time, the most recent first. Examples: `alta statistics history read --days 90`; `alta statistics history pause`; `alta statistics history resume`.");

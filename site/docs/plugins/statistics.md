@@ -40,7 +40,7 @@ Each space has its own Statistics tab, which starts on the space it shows; a spa
 
 ## The statistics of all your sessions
 
-CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: how many runs, how long they took, which models and tools were used, how many tokens, and what was changed in files. It keeps **numbers only**. The text of your prompts, the answers and the tool results are never copied, a file is only counted by its extension, and of a command an agent ran only the name of its program is kept, never its arguments or a variable set before it. The numbers stay on your computer, in the database of CodeAlta, and are kept after a session is deleted unless you ask for them to be forgotten.
+CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: how many runs, how long they took, which models and tools were used, how many tokens, and what was changed in files. It keeps **numbers, and a few names** to tell them apart: providers, models, tools, and the title of each session. The text of your prompts, the answers and the tool results are never copied, a file is only counted by its extension, and of a command an agent ran only the name of its program is kept, never its arguments or a variable set before it. A session's title comes from the first sentence of its first prompt: it is kept at most 80 characters long, and a word that holds a `/` or a `\`, such as a path or an address, is left out of it. The numbers stay on your computer, in the database of CodeAlta, and are kept, with the title, after a session is deleted unless you ask for them to be forgotten.
 
 The first time, nothing is read until you choose how much of your history to use. The page says how many sessions can be read and since when, and offers:
 
@@ -57,7 +57,7 @@ The first time, nothing is read until you choose how much of your history to use
 
 The most recent sessions are read first, so today and this week are right within seconds, and the older days follow. The reading runs on one thread at a low priority and never slows a session. You can pause it, resume it, stop it where it is, and later read more history; a history you stopped still follows the sessions that change from the day it starts at. If CodeAlta closes meanwhile, nothing is lost: each session that was read is kept, and the reading goes on at the next start. Sessions written by CodeAlta TUI are caught up by CodeAlta Desktop, at its next start and every few minutes while it runs.
 
-When a new version of CodeAlta computes more from your sessions, they are read again, one by one, and what you see stays until each session's new numbers are ready.
+When a new version of CodeAlta computes more from your sessions, or keeps less of them, they are read again, one by one, and what you see stays until each session's new numbers are ready. A session you deleted cannot be read again: what was kept of it stays as it was, until you choose **Forget deleted sessions** in the menu of the page, which removes it.
 
 The page asks you the first time and has the buttons to pause, resume and stop. You can also choose, pause or read more from a prompt, for example:
 

@@ -12,7 +12,7 @@ import type {
 // the history in each of its states; `control` moves it along, fails a question or sends a change, for tests and for the demo.
 
 /** The state the history starts in. */
-export type FixtureScenario = "ready" | "first-time" | "reading" | "paused" | "stopped" | "failed" | "skipped";
+export type FixtureScenario = "ready" | "first-time" | "reading" | "paused" | "stopped" | "stopped-skipped" | "failed" | "skipped";
 
 /** What `createFixtureApi` takes. */
 export type FixtureOptions = Readonly<{
@@ -119,6 +119,9 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     state: "done", sessionsTotal: total.sessions, sessionsDone: total.sessions, bytesTotal: total.bytes, bytesDone: total.bytes, skippedCount: 0, skipped: [], pendingFlow: 0, revision,
     choice: "all", oldestDateReached: firstDayNumber, isComplete: true, ...patch,
   });
+  // Made when a scenario asks for it: a fixture of one session has no fourth one.
+  const skippedSessions = () => [{ sessionId: data.sessions[3].id, reason: "The journal is damaged at its line 1204." }, { sessionId: data.sessions[9].id, reason: "The file is locked by another program." },
+    { sessionId: data.sessions[17].id, reason: "A record is larger than 256 MB." }];
   const scenarios: Record<FixtureScenario, () => StatisticsStatus> = {
     ready: () => baseStatus({}),
     "first-time": () => ({ state: "needsChoice", sessionsTotal: total.sessions, sessionsDone: 0, bytesTotal: total.bytes, bytesDone: 0, oldestDateReached: firstDayNumber, skippedCount: 0, skipped: [], pendingFlow: 0, revision, isComplete: false }),
@@ -127,8 +130,8 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     paused: () => baseStatus({ state: "paused", reason: "first-read", sessionsDone: 312, bytesDone: Math.round(total.bytes * 0.34), oldestDateReached: dayNumber("2026-07-14"), completeFromDay: dayNumber("2026-07-14"), isComplete: false }),
     stopped: () => baseStatus({ state: "stoppedHere", sessionsDone: 312, bytesDone: Math.round(total.bytes * 0.34), oldestDateReached: dayNumber("2026-07-14"), completeFromDay: dayNumber("2026-07-14"), floorDay: dayNumber("2026-07-14"), isComplete: false }),
     failed: () => ({ state: "failed", sessionsTotal: 0, sessionsDone: 0, bytesTotal: 0, bytesDone: 0, skippedCount: 0, skipped: [], pendingFlow: 0, revision, error: "The statistics database could not be opened.", isComplete: false }),
-    skipped: () => baseStatus({ skippedCount: 3, skipped: [{ sessionId: data.sessions[3].id, reason: "The journal is damaged at its line 1204." }, { sessionId: data.sessions[9].id, reason: "The file is locked by another program." },
-      { sessionId: data.sessions[17].id, reason: "A record is larger than 256 MB." }] }),
+    skipped: () => baseStatus({ skippedCount: 3, skipped: skippedSessions() }),
+    "stopped-skipped": () => ({ ...scenarios.stopped(), skippedCount: 3, skipped: skippedSessions() }),
   };
   let status = scenarios[options.scenario ?? "ready"]();
 
@@ -227,7 +230,8 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     return data.cells.filter(cell => within(cell, plan.range) && accepts(cell, resolved.request, family));
   }
 
-  // The label and key of a group.
+  // The key and the label of a group, as the plugin gives them: a group of a fixed list (who sent a prompt, how it came, the kind of
+  // a tool) is keyed by its name, which is the value a filter takes.
   const groupOf = (cell: Cell, group: string | null, tool?: ToolCell): [string, string] => {
     switch (group) {
       case "provider": return [cell.provider, cell.provider];
@@ -236,6 +240,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       case "project": return [cell.project, projectName(cell.project)];
       case "delegated": return cell.delegated ? ["sub-agent", "Sub-agents"] : ["direct", "Direct"];
       case "origin": return [cell.origin, cell.origin];
+      case "prompt-kind": return cell.origin === "you" ? ["newturn", "newturn"] : ["queued", "queued"];
       case "tool": return [tool?.tool ?? "", tool?.tool ?? ""];
       case "kind": return [tool?.kind ?? "", tool?.kind ?? ""];
       case "unit": return [cell.costUnit ?? "none", cell.costUnit ?? "none"];
@@ -736,7 +741,14 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       return status;
     },
     pause: async () => { setStatus({ state: "paused" }); return status; },
-    resume: async () => { setStatus({ state: "reading" }); return status; },
+    // As the plugin does: a start that failed is tried again (and works), the sessions that could not be read are tried again
+    // (and are read), and a paused reading goes on.
+    resume: async () => {
+      if (status.state === "failed") { status = { ...scenarios["first-time"](), revision }; emit({ kind: "status", status }); }
+      else if ((status.state === "done" || status.state === "stoppedHere") && status.skippedCount > 0) setStatus({ skippedCount: 0, skipped: [] });
+      else if (status.state === "paused") setStatus({ state: "reading" });
+      return status;
+    },
     stopHere: async () => { setStatus({ state: "stoppedHere", floorDay: status.completeFromDay, isComplete: false }); return status; },
     forgetDeleted: async () => { const count = data.sessions.filter(session => session.deleted).length; emit({ kind: "data", change: { revision: ++revision, fromDay: firstDayNumber, toDay: dayNumber(today), sessionIds: [] } }); return count; },
     resetStatistics: async () => { status = { ...scenarios["first-time"](), revision }; emit({ kind: "status", status }); emit({ kind: "data", change: { revision: ++revision, fromDay: firstDayNumber, toDay: dayNumber(today), sessionIds: [] } }); return status; },

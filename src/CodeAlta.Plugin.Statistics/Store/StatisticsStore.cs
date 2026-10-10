@@ -18,12 +18,12 @@ namespace CodeAlta.Plugin.Statistics.Store;
 /// it touched are added up again from the quarter hours of every session, because a largest value cannot be taken away. When the
 /// version of the roll-ups or the time zone changes, every roll-up is added up again from the facts alone.
 /// </para>
-/// <para>No row holds text of a session but its title and the name of its project.</para>
+/// <para>No row holds text of a session but its title, in the form <see cref="SessionTitles.Clean"/> gives it, and the name of its project.</para>
 /// </remarks>
 internal sealed partial class StatisticsStore
 {
     /// <summary>The version of the tables, kept by the host for the plugin.</summary>
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
 
     /// <summary>The version of the roll-ups: when it changes, they are added up again from the facts.</summary>
     public const int RollupVersion = 1;
@@ -77,6 +77,13 @@ internal sealed partial class StatisticsStore
             {
                 using var sql = new SqlSession(connection);
                 sql.ExecuteScript(SchemaV1());
+            }
+
+            if (from < 2)
+            {
+                // The time between the start and the end of a run that is not time of the run (see RunRow.SkippedMs).
+                using var sql = new SqlSession(connection);
+                sql.Execute($"ALTER TABLE {Table("run")} ADD COLUMN skipped_ms INTEGER NOT NULL DEFAULT 0");
             }
 
             return ValueTask.CompletedTask;
@@ -369,8 +376,8 @@ internal sealed partial class StatisticsStore
             return;
         }
 
-        var insert = $"INSERT OR REPLACE INTO {Table("run")} (session_id, run_id, start_ms, end_ms, outcome, sender, prompt_kind, prompt_chars, prompt_words, requests, tool_calls, tool_failures, input_tokens, output_tokens, compactions, answer_chars, answer_words, cost_usd_micro, cost_credits_micro, provider, model, effort, permission_mode) "
-            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22)";
+        var insert = $"INSERT OR REPLACE INTO {Table("run")} (session_id, run_id, start_ms, end_ms, outcome, sender, prompt_kind, prompt_chars, prompt_words, requests, tool_calls, tool_failures, input_tokens, output_tokens, compactions, answer_chars, answer_words, cost_usd_micro, cost_credits_micro, provider, model, effort, permission_mode, skipped_ms) "
+            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, @p12, @p13, @p14, @p15, @p16, @p17, @p18, @p19, @p20, @p21, @p22, @p23)";
         foreach (var run in batch.Runs.Values)
         {
             if (floor != int.MinValue && QuarterHour.Of(run.Start).Index < floor)
@@ -402,7 +409,8 @@ internal sealed partial class StatisticsStore
                 run.Provider,
                 run.Model,
                 run.Effort,
-                run.PermissionMode);
+                run.PermissionMode,
+                run.SkippedMs);
         }
     }
 

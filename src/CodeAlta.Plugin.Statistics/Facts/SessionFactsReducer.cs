@@ -285,7 +285,9 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         if (to - run.AccountedTo > MaxRunGap)
         {
             // No run stays a week without a record: the time is one of a damaged line or of a clock that was wrong. It is not time
-            // the run was active, and it is not walked through one quarter hour at a time.
+            // the run was active, and it is not walked through one quarter hour at a time. It is not time the run lasted either:
+            // the run remembers how much was left out.
+            run.SkippedTicks += (to - run.AccountedTo).Ticks;
             run.AccountedTo = to;
             return;
         }
@@ -353,7 +355,8 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     private long ObserveRun(OpenRunState run, DateTimeOffset end, int sign)
     {
         var startQuarter = QuarterHour.Of(run.Start);
-        var durationMs = Math.Max(0, (long)Math.Round((end - run.Start).TotalMilliseconds));
+        // How long the run lasted, without the time that was left out of it (see Account).
+        var durationMs = Math.Max(0, (long)Math.Round(new TimeSpan((end - run.Start).Ticks - run.SkippedTicks).TotalMilliseconds));
         ObserveSigned(startQuarter, HistogramMeasure.RunDurationMs, string.Empty, durationMs, sign);
         ObserveSigned(startQuarter, HistogramMeasure.RunToolCalls, string.Empty, run.ToolCalls, sign);
         if (run.CostUsd > 0)
@@ -390,6 +393,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             RunId = run.RunId,
             Start = run.Start,
             End = end,
+            SkippedMs = run.SkippedTicks / TimeSpan.TicksPerMillisecond,
             Outcome = outcome,
             Sender = run.Sender,
             PromptKind = run.PromptKind,
@@ -438,7 +442,8 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         _state.ProjectRef = header.ProjectRef ?? _state.ProjectRef;
         _state.ParentSessionId = header.ParentSessionId ?? _state.ParentSessionId;
         ApplyCreatedBy(header.CreatedBy);
-        _state.Title = string.IsNullOrWhiteSpace(header.Title) ? _state.Title : header.Title;
+        // The title is the start of the first prompt of the session: it is kept short and without the paths it names.
+        _state.Title = SessionTitles.Clean(header.Title) ?? _state.Title;
         _state.InitialProvider = StatisticsProviders.Fold(header.ProviderKey ?? header.Provider);
         if (_state.Provider.Length == 0)
         {

@@ -9,7 +9,7 @@ import {
   localToday, periodText, requestOf, resolveFrequency, resolvePeriod, weekDayIndex, type Frame,
 } from "./frame";
 import { statisticsContext } from "./canvasContext";
-import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, timeLeft } from "./history";
+import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, skippedToRetry, timeLeft } from "./history";
 import { distributionOption, hatchFraction, periodOfBrush, ratioSeries, timeSeriesOption, unreadBuckets } from "./options";
 import { QueryStore, joinRanges } from "./queryStore";
 import { binSteps, boxStatsOfSteps, percentileOfSteps, stepsCount } from "./steps";
@@ -284,6 +284,13 @@ test("the history bar and the first-time card follow the status", () => {
   assert.equal(historyView(status({ state: "failed", error: "x" })), "failed");
   assert.equal(historyView(status({ state: "done" })), "none");
   assert.equal(historyView(status({ state: "done", skippedCount: 3 })), "skipped");
+  // A stopped history keeps its sentence, and offers its skipped sessions beside it.
+  assert.equal(historyView(status({ state: "stoppedHere", skippedCount: 3 })), "stopped");
+  assert.equal(skippedToRetry(status({ state: "stoppedHere", skippedCount: 3 })), 3);
+  assert.equal(skippedToRetry(status({ state: "done", skippedCount: 2 })), 2);
+  assert.equal(skippedToRetry(status({ state: "stoppedHere" })), 0);
+  assert.equal(skippedToRetry(status({ state: "reading", skippedCount: 3 })), 0, "the list is still being made");
+  assert.equal(skippedToRetry(null), 0);
   assert.equal(progressOf(status({ sessionsTotal: 906, sessionsDone: 312 })).toFixed(3), "0.344");
   assert.equal(progressOf(status({ state: "reading", sessionsTotal: 0 })), 0);
   assert.equal(progressOf(status({ state: "done", sessionsTotal: 0 })), 1);

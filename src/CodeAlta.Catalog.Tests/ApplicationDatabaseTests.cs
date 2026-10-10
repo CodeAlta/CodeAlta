@@ -798,6 +798,91 @@ public sealed class ApplicationDatabaseTests
     }
 
     [TestMethod]
+    public async Task AFileDeletedWhileInUse_IsANewGenerationEvenWhenMakingItAgainFailsFirst()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token));
+        var folder = Path.GetDirectoryName(database.DatabasePath)!;
+
+        // The folder of the database goes, and something is in the way of making it again.
+        Directory.Delete(folder, recursive: true);
+        await File.WriteAllTextAsync(folder, "in the way");
+        await Assert.ThrowsAsync<IOException>(async () =>
+            await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_other (id INTEGER);", token)));
+
+        File.Delete(folder);
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_other (id INTEGER);", token));
+
+        Assert.AreEqual(1, database.Generation, "The file is a new one, whatever happened before it could be made.");
+        Assert.AreEqual(0, (await database.ListTablesAsync("t_data")).Count);
+    }
+
+    [TestMethod]
+    public async Task AMissingFile_IsRestoredFromItsCopyBeforeTheOldSessionCacheFileIsLookedAt()
+    {
+        using var temp = TempFolder.Create();
+        var options = new CatalogOptions { GlobalRoot = temp.Path };
+        await using (var database = ApplicationDatabase.Create(options))
+        {
+            await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) => ExecuteAsync(
+                connection, "CREATE TABLE stats_day (id INTEGER, tokens INTEGER); INSERT INTO stats_day VALUES (1, 4200);", token));
+            Assert.IsNotNull(await database.BackupAsync());
+        }
+
+        // The file is gone, and a build from before the application database ran in between: it left its session
+        // cache, which holds nothing of the plugins and can be built again.
+        File.Delete(options.ApplicationDatabasePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(options.LegacySessionCacheDatabasePath)!);
+        await using (var old = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = options.LegacySessionCacheDatabasePath, Pooling = false }.ToString()))
+        {
+            await old.OpenAsync();
+            await ExecuteAsync(old, "CREATE TABLE session_projection_cache (session_id TEXT);", CancellationToken.None);
+        }
+
+        await using (var database = ApplicationDatabase.Create(options))
+        {
+            var tokens = await database.ReadAsync("plugin:stats", (connection, token) => ScalarAsync<long>(connection, "SELECT tokens FROM stats_day;", token));
+
+            Assert.AreEqual(4200L, tokens, "The copy holds the data of the plugins: it comes first.");
+            Assert.IsNotNull(database.LastRecovery?.RestoredFromCopy);
+            Assert.IsTrue(File.Exists(options.LegacySessionCacheDatabasePath), "The old file is left where it is.");
+        }
+    }
+
+    [TestMethod]
+    public async Task ADamagedFileThatStaysHeld_IsGivenUpAfterANumberOfTries_WhateverTheClockSays()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("A file that another process holds open can be moved on this system.");
+        }
+
+        using var temp = TempFolder.Create();
+        var path = Path.Combine(temp.Path, "data", "alta.sqlite3");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, new byte[8192].Select(static (_, index) => (byte)(index % 241)).ToArray());
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = path,
+            BusyTimeout = TimeSpan.FromMilliseconds(200),
+            TimeProvider = new StoppedClock(),
+        });
+
+        // The time of the service does not pass (a test clock, a clock that is set back): the wait for the file is
+        // counted in tries.
+        await using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            await Assert.ThrowsAsync<IOException>(async () =>
+                    await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token)))
+                .WaitAsync(TimeSpan.FromSeconds(30));
+        }
+
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token));
+        Assert.AreEqual(1, database.Generation);
+    }
+
+    [TestMethod]
     public async Task AFileThatGoesJustBeforeAWriteOpensIt_IsMadeAgainByTheServiceNotByTheConnection()
     {
         using var temp = TempFolder.Create();
@@ -883,6 +968,12 @@ public sealed class ApplicationDatabaseTests
         public void Advance(TimeSpan time) => _now += time;
 
         public override DateTimeOffset GetUtcNow() => _now;
+    }
+
+    // A clock whose time never passes.
+    private sealed class StoppedClock : TimeProvider
+    {
+        public override long GetTimestamp() => 0;
     }
 
     // A clock that runs an action once, the next time the service asks it something: the place of a test in the

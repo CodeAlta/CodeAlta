@@ -182,6 +182,26 @@ test("a click on a bar, a row, a day or a session drills down", { skip: !edge, t
   });
 });
 
+test("the lines of a chart cut by a kind of tool, by who sent a prompt or by how it came are named", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    const legend = `[...document.querySelectorAll('.chart-legend-item')].map(item => item.textContent.trim())`;
+    const named = async (title: string, expected: readonly string[]) => {
+      await page.until(`${JSON.stringify(expected)}.every(name => ${legend}.includes(name))`, `${title}: ${expected.join(", ")} in a legend`);
+      assert.deepEqual((await page.evaluate<string[]>(legend)).filter(name => /^\d*$/.test(name)), [], `${title}: no line is named by a number`);
+    };
+    await render(page, { scenario: "ready" });
+    await page.until(settled, "the overview");
+    await openPage(page, "Tools");
+    await named("Tools", ["Shell", "Files", "Search"]);
+    await openPage(page, "Agents");
+    await named("Agents", ["You", "An agent"]);
+    await openPage(page, "Prompts");
+    await named("Prompts by sender", ["You", "An agent"]);
+    await page.clickText('.stats-choice button', "Kind");
+    await named("Prompts by kind", ["New turn", "Queued"]);
+  });
+});
+
 test("the first time asks how much history to read, then shows the progress, the pause and the end", { skip: !edge, timeout: 300_000 }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });
@@ -292,9 +312,26 @@ test("the states of the history: the sessions that could not be read, a reading 
     assert.equal(await page.evaluate(`document.querySelectorAll('.stats-skipped li').length`), 3);
     assert.match(await page.evaluate<string>(`document.querySelector('.stats-skipped li').textContent`), /damaged/);
     await page.shot("skipped-dark");
+    await page.clickText('.stats-skipped button', "Try again");
+    await page.until(`!document.querySelector('.stats-history')`, "the sessions read at the second try");
+
+    // A history the user stopped says where the charts start, and offers the same list beside it.
+    await render(page, { scenario: "stopped-skipped" });
+    await page.until(`document.querySelector('.stats-history[data-view="stopped"] button')`, "the skipped sessions of a stopped history");
+    assert.match(await page.evaluate<string>(`document.querySelector('.stats-history [role="status"]').textContent`), /^The charts start on /);
+    assert.equal(await page.evaluate(`document.querySelector('.stats-history button').textContent.trim()`), "3 sessions could not be read");
+    await page.click('.stats-history button');
+    await page.until(`document.querySelectorAll('.stats-skipped li').length === 3`, "the list of a stopped history");
+    await page.clickText('.stats-skipped button', "Try again");
+    await page.until(`document.querySelector('.stats-history[data-view="stopped"]') && !document.querySelector('.stats-history button')`, "the stopped history without skipped sessions");
+    assert.equal(await page.evaluate(`statsFixture.calls().filter(call => call.method === 'resume').length`), 2);
+
     await render(page, { scenario: "failed" });
     await page.until(`document.querySelector('.stats-failed')`, "the failure");
     assert.match(await page.evaluate<string>(`document.querySelector('.stats-failed').textContent`), /The statistics could not start.*The statistics database could not be opened\./);
+    // "Try again" starts the statistics again: here the start works, and the first choice is asked.
+    await page.clickText('.stats-failed button', "Try again");
+    await page.until(`document.querySelector('.stats-first') && !document.querySelector('.stats-failed')`, "the choice after a start that works");
     await render(page, { scenario: "first-time" });
     await page.until(`document.querySelector('.stats-first')`, "the choice");
     await page.clickText('.stats-first button', "Start from today");

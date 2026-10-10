@@ -1683,30 +1683,68 @@ internal sealed class JournalPayloadParser
     // The program a shell command runs: its first word, without quotes, without its directory or its .exe, in lower case.
     private string? ShellProgramOf(ReadOnlySpan<byte> raw, bool isEscaped)
     {
-        // Only the start of the command is read; an escape in it is a quote, which is dropped, or a separator.
+        // Only the start of the command is read, as the shell reads it: the escapes of JSON are undone first. The journals write a
+        // quote, an ampersand and every character that is not ASCII as \uXXXX, and a backslash of the command as two: a backslash
+        // that stays is one of the command (a path of Windows, or an escape of the shell).
         Span<byte> start = stackalloc byte[160];
         var length = 0;
-        for (var index = 0; index < raw.Length && length < start.Length; index++)
+        var read = 0;
+        for (; read < raw.Length && length < start.Length; read++)
         {
-            var value = raw[index];
-            if (isEscaped && value == (byte)'\\' && index + 1 < raw.Length)
+            var value = raw[read];
+            if (isEscaped && value == (byte)'\\' && read + 1 < raw.Length)
             {
-                var next = raw[++index];
-                value = next switch
+                var next = raw[++read];
+                if (next == (byte)'u')
                 {
-                    (byte)'n' or (byte)'t' or (byte)'r' => (byte)' ',
-                    (byte)'\\' => (byte)'/',
-                    _ => next,
-                };
+                    if (!TryReadHex4(raw, read + 1, out var code))
+                    {
+                        return null;
+                    }
+
+                    read += 4;
+                    if (code >= 0x80)
+                    {
+                        // Half of a pair is no character by itself: it is kept as one that no program name holds.
+                        if (code is >= 0xD800 and <= 0xDFFF)
+                        {
+                            value = (byte)'?';
+                        }
+                        else if (new Rune(code).TryEncodeToUtf8(start[length..], out var written))
+                        {
+                            length += written;
+                            continue;
+                        }
+                        else
+                        {
+                            // The character does not fit in what is read: the command is cut before it.
+                            read -= 5;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        value = (byte)code;
+                    }
+                }
+                else
+                {
+                    value = next switch
+                    {
+                        (byte)'n' or (byte)'t' or (byte)'r' or (byte)'b' or (byte)'f' => (byte)' ',
+                        _ => next,
+                    };
+                }
             }
 
-            start[length++] = value;
+            // A line end or a tab separates words as a space does.
+            start[length++] = value < (byte)' ' ? (byte)' ' : value;
         }
 
         var text = start[..length];
 
         // Whether the command goes on beyond what was read: a word or a value that reaches the end is then not known to be whole.
-        var cut = length == start.Length;
+        var cut = read < raw.Length || length == start.Length;
         var begin = 0;
         scoped ReadOnlySpan<byte> word;
         while (true)
@@ -1792,8 +1830,12 @@ internal sealed class JournalPayloadParser
         return _strings.Get(lower[..word.Length]);
     }
 
-    // Steps over the value of a NAME=value word: a quoted text, or a plain word. False when the value has no end that can be told
-    // (a quote that does not close, a command substitution, a value that goes beyond what was read).
+    // Steps over the value of a NAME=value word: a quoted text, or a plain word. False when the value has no end that can be told:
+    // a quote that does not close, an escape (the backslash of a POSIX shell, the backtick of PowerShell, a doubled quote: the quote
+    // or the space after it is part of the value), a command substitution, a text that goes on after the closing quote, another
+    // operator of the shell, a value that goes beyond what was read. An empty value followed by a space is one too: PowerShell
+    // allows the space, and the next word is then the value. What follows a value that was not stepped over whole may be a word of
+    // it, so the command is then left without a program.
     private static bool TrySkipAssignedValue(ReadOnlySpan<byte> text, int valueStart, bool cut, out int next)
     {
         next = valueStart;
@@ -1802,6 +1844,11 @@ internal sealed class JournalPayloadParser
             var quote = text[next++];
             while (next < text.Length && text[next] != quote)
             {
+                if (quote == (byte)'"' && (text[next] is (byte)'\\' or (byte)'`' || (text[next] == (byte)'$' && next + 1 < text.Length && text[next + 1] == (byte)'(')))
+                {
+                    return false;
+                }
+
                 next++;
             }
 
@@ -1811,12 +1858,12 @@ internal sealed class JournalPayloadParser
             }
 
             next++;
-            return true;
+            return next == text.Length ? !cut : text[next] is (byte)' ' or (byte)';';
         }
 
         while (next < text.Length && text[next] is not ((byte)' ' or (byte)';'))
         {
-            if (text[next] is (byte)'$' or (byte)'`' or (byte)'(' or (byte)'{' or (byte)'"' or (byte)'\'')
+            if (text[next] is (byte)'$' or (byte)'`' or (byte)'(' or (byte)')' or (byte)'{' or (byte)'"' or (byte)'\'' or (byte)'\\' or (byte)'|' or (byte)'&' or (byte)'<' or (byte)'>')
             {
                 return false;
             }
@@ -1824,7 +1871,38 @@ internal sealed class JournalPayloadParser
             next++;
         }
 
-        return next < text.Length || !cut;
+        if (next == text.Length)
+        {
+            return !cut;
+        }
+
+        return next > valueStart || text[next] != (byte)' ';
+    }
+
+    private static bool TryReadHex4(ReadOnlySpan<byte> raw, int start, out int code)
+    {
+        code = 0;
+        if (start + 4 > raw.Length)
+        {
+            return false;
+        }
+
+        for (var index = start; index < start + 4; index++)
+        {
+            var value = raw[index];
+            var digit = value is >= (byte)'0' and <= (byte)'9' ? value - '0'
+                : value is >= (byte)'a' and <= (byte)'f' ? value - 'a' + 10
+                : value is >= (byte)'A' and <= (byte)'F' ? value - 'A' + 10
+                : -1;
+            if (digit < 0)
+            {
+                return false;
+            }
+
+            code = (code << 4) | digit;
+        }
+
+        return true;
     }
 
     private static bool IsProgramNameByte(byte value)

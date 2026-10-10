@@ -275,6 +275,31 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
+    public async Task ListSessionsAsync_WhenTheFileCannotBeMade_ReportsWhatTheSystemSaidAndListsOnceItCan()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using var database = ApplicationDatabase.Create(options);
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        await new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path))
+            .UpsertSessionAsync(CreateSummary("session-no-folder", updatedAt: "2026-06-18T16:30:00+00:00")).ConfigureAwait(false);
+
+        // Something is in the way of the folder of the database: no file is damaged, and no process holds one.
+        var folder = Path.GetDirectoryName(options.ApplicationDatabasePath)!;
+        await File.WriteAllTextAsync(folder, "in the way").ConfigureAwait(false);
+        var failure = await Assert.ThrowsExactlyAsync<AgentSessionCacheLockedException>(async () =>
+            await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).ConfigureAwait(false);
+
+        Assert.IsInstanceOfType<IOException>(failure.InnerException);
+        Assert.IsFalse(failure.Message.Contains("damaged", StringComparison.OrdinalIgnoreCase), failure.Message);
+        Assert.IsTrue(failure.Message.Contains(failure.InnerException.Message, StringComparison.Ordinal), failure.Message);
+
+        File.Delete(folder);
+        var sessions = await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        Assert.AreEqual(1, sessions.Length);
+    }
+
+    [TestMethod]
     public async Task ReadsAndWritesThatMeetTheSameDamageTogether_AllSucceed()
     {
         using var temp = TestTempDirectory.Create();
@@ -521,6 +546,54 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
+    public async Task ReconcileCacheAsync_WhenTheFileIsReplacedWhileItRuns_DoesNotCallTheListComplete()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var clock = new HookClock();
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = options.ApplicationDatabasePath,
+            BackupDirectory = options.ApplicationDatabaseBackupRoot,
+            TimeProvider = clock,
+        });
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        await store.UpsertSessionAsync(CreateSummary("session-listed-1", updatedAt: "2026-06-18T13:00:00+00:00")).ConfigureAwait(false);
+        await store.UpsertSessionAsync(CreateSummary("session-listed-2", updatedAt: "2026-06-18T13:01:00+00:00")).ConfigureAwait(false);
+        Assert.AreEqual(2, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        var externalStore = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path));
+        await externalStore.UpsertSessionAsync(CreateSummary("session-external-1", updatedAt: "2026-06-18T13:05:00+00:00")).ConfigureAwait(false);
+        await externalStore.UpsertSessionAsync(CreateSummary("session-external-2", updatedAt: "2026-06-18T13:06:00+00:00")).ConfigureAwait(false);
+
+        // The file goes once the first of the two new sessions is written, before the second one is: the rows that
+        // were there, and that the reconciliation found up to date, are gone with it.
+        var asked = 0;
+        void DeleteOnceARowIsAdded()
+        {
+            // The clock is asked twice for a write: as it starts, before its connection opens, and as it ends.
+            var starting = ++asked % 2 == 1;
+            if (starting && CountSessionRows(options.ApplicationDatabasePath) == 3)
+            {
+                File.Delete(options.ApplicationDatabasePath);
+                return;
+            }
+
+            clock.OnTimestamp = DeleteOnceARowIsAdded;
+        }
+
+        clock.OnTimestamp = DeleteOnceARowIsAdded;
+        await store.ReconcileCacheAsync().ConfigureAwait(false);
+        clock.OnTimestamp = null;
+        var sessions = await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, database.Generation, "The file was replaced under the reconciliation.");
+        CollectionAssert.AreEquivalent(
+            new[] { "session-listed-1", "session-listed-2", "session-external-1", "session-external-2" },
+            sessions.Select(static item => item.SessionId).ToArray(),
+            "A list that lost rows on the way is not complete: it is made again from the journals.");
+    }
+
+    [TestMethod]
     public async Task WriteThrough_ProjectsLocalStateLineageModelReasoningAndDelete()
     {
         using var temp = TestTempDirectory.Create();
@@ -671,6 +744,20 @@ public sealed class SessionJournalSqliteCacheTests
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name = 'session_projection_cache';";
         return (long)command.ExecuteScalar()! > 0;
+    }
+
+    private static long CountSessionRows(string databasePath)
+    {
+        if (!HasSessionTable(databasePath))
+        {
+            return 0;
+        }
+
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM session_projection_cache;";
+        return (long)command.ExecuteScalar()!;
     }
 
     // A clock that runs an action once, the next time the database starts the time of a write: the place of a test

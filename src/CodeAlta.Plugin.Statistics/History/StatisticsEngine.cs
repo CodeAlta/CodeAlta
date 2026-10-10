@@ -193,6 +193,8 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 _completeFromDay = meta.TryGetValue(CompleteFromKey, out var complete) && int.TryParse(complete, NumberStyles.None, CultureInfo.InvariantCulture, out var from) && from > 0 ? from : null;
                 // A pause made while a stopped history caught up comes first: the reading it paused ends back in the stop.
                 _phase = _choice is null ? HistoryPhase.NeedsChoice : _paused ? HistoryPhase.Paused : _stopped ? HistoryPhase.Stopped : meta.GetValueOrDefault(DoneKey) == "1" ? HistoryPhase.Done : HistoryPhase.Reading;
+                // A start that failed before is over.
+                _error = null;
                 _initialized = true;
             }
 
@@ -204,6 +206,9 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             // The first step compares the journals with what was read: sessions that changed while the application was closed.
             _lastRescan = DateTimeOffset.MinValue;
             Publish();
+
+            // The loop that waits for a start that works (see RunAsync) goes on.
+            Wake();
         }
         finally
         {
@@ -286,22 +291,26 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         try
         {
             await Task.Delay(_options.StartDelay, _time, cancellationToken).ConfigureAwait(false);
-            await InitializeAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await InitializeAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                FailStart(exception);
+                _options.Logger?.Error($"Statistics could not start: {exception.Message}");
+
+                // The loop does not end: it waits for a start that works. The engine does not try by itself (the cause does not
+                // go away by itself, and a try at every signal of a session would fill the log): the user asks with "Try again"
+                // (ResumeAsync), and a question of a page or of a command that prepares the tables counts too.
+                while (!IsInitialized())
+                {
+                    await _wake.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return;
-        }
-        catch (Exception exception)
-        {
-            lock (_gate)
-            {
-                _phase = HistoryPhase.Failed;
-                _error = exception.Message;
-            }
-
-            _options.Logger?.Error($"Statistics could not start: {exception.Message}");
-            Publish();
             return;
         }
 
@@ -425,6 +434,22 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask<StatisticsStatus> ResumeAsync(CancellationToken cancellationToken = default)
     {
+        if (IsFailed())
+        {
+            // "Try again" of a start that failed: the tables are prepared again, and the loop, which waits for that, goes on. A
+            // reading that was paused before stays paused. When it fails again the status says why, and the next try is the user's.
+            try
+            {
+                await InitializeAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                FailStart(exception);
+            }
+
+            return Status;
+        }
+
         await InitializeAsync(cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
@@ -463,19 +488,32 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 return _status;
             }
 
-            // The statistics start where the reading is: what is older is not read, and "read more history" goes on from there. A first
-            // reading that listed no journal yet reached nothing: the statistics start today, as if nothing of the past had been asked.
-            _floorDay = _reason == "first-read" && _todo is null && _completeFromDay is null
-                ? LocalDays.ToDay(Today())
-                : _completeFromDay ?? _floorDay;
-            _floorQuarter = ComputeFloorQuarter(_floorDay);
-            _completeFromDay = _floorDay;
-            _stopped = true;
+            if (_reason is "first-read" or "extended")
+            {
+                // The statistics start where the reading is: what is older is not read, and "read more history" goes on from there. A first
+                // reading that listed no journal yet reached nothing: the statistics start today, as if nothing of the past had been asked.
+                _floorDay = _reason == "first-read" && _todo is null && _completeFromDay is null
+                    ? LocalDays.ToDay(Today())
+                    : _completeFromDay ?? _floorDay;
+                _floorQuarter = ComputeFloorQuarter(_floorDay);
+                _completeFromDay = _floorDay;
+                _stopped = true;
+            }
+            else
+            {
+                // A catch-up of what changed, or a new reading for a new version of the facts, is not the reading the user chose:
+                // stopping it says nothing about where the statistics start. It ends where it is, the history is what it was
+                // before it (read to its end, or stopped where the user stopped it), and the next look at the journals goes on
+                // with what is left.
+                _lastRescan = _time.GetUtcNow();
+            }
+
             _paused = false;
-            _phase = HistoryPhase.Stopped;
+            _phase = _stopped ? HistoryPhase.Stopped : HistoryPhase.Done;
             // What is read from now on is a catch-up of what changed, never the rest of the reading that was stopped.
             _reason = null;
             _todo = null;
+            _currentSession = null;
             CancelHistoryReading();
         }
 
@@ -956,6 +994,13 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             }
 
             var done = result.ReachedEnd || cancellationToken.IsCancellationRequested;
+            if (done && !result.ReachedEnd && replace)
+            {
+                // A session that is read again from its start was paused or stopped on the way: a part of it does not take the
+                // place of all of it. Nothing is saved, the old numbers stay, and the next reading starts again from the start.
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
             if (accumulated is null || result.Restarted)
             {
                 // The file was not the one of the cursor: the batch holds the facts of the session from its start, and what was kept
@@ -1024,6 +1069,33 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
                 await ProcessDueFlowAsync(sessionId, _lifetime).ConfigureAwait(false);
             }
         }
+    }
+
+    private bool IsInitialized()
+    {
+        lock (_gate)
+        {
+            return _initialized;
+        }
+    }
+
+    private bool IsFailed()
+    {
+        lock (_gate)
+        {
+            return _phase == HistoryPhase.Failed;
+        }
+    }
+
+    private void FailStart(Exception exception)
+    {
+        lock (_gate)
+        {
+            _phase = HistoryPhase.Failed;
+            _error = exception.Message;
+        }
+
+        Publish();
     }
 
     private bool IsDead(SessionJournalFile file, SessionFactsState state)

@@ -398,7 +398,7 @@ public sealed partial class StatisticsQueries
             : [];
         var summary = BuildSummary(sql, query);
         var runs = sql.Query(
-            $"SELECT run_id, start_ms, end_ms, outcome, sender, requests, tool_calls, input_tokens, output_tokens, model FROM {P}run WHERE session_id = @p0 ORDER BY start_ms DESC LIMIT 50",
+            $"SELECT run_id, start_ms, end_ms - skipped_ms, outcome, sender, requests, tool_calls, input_tokens, output_tokens, model FROM {P}run WHERE session_id = @p0 ORDER BY start_ms DESC LIMIT 50",
             static reader => new RunEntry(
                 reader.GetString(0),
                 DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(1)).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),

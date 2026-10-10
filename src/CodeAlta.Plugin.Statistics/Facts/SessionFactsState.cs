@@ -12,9 +12,12 @@ internal sealed class SessionFactsState
 {
     /// <summary>
     /// The version of the facts: a state of another version is not used, and the session is read again. Version 2 keeps no variable
-    /// of a shell command as its program and no working directory, and counts every cost that has no duration.
+    /// of a shell command as its program and no working directory, and counts every cost that has no duration. Version 3 reads a
+    /// shell command as the shell does (the escapes of JSON undone, no program when the value of a variable has no end that can be
+    /// told), keeps the title of a session short and without the paths it names, and leaves a time far from the others out of the
+    /// duration of a run.
     /// </summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -58,7 +61,7 @@ internal sealed class SessionFactsState
     /// <summary>Gets or sets the automation that created the session.</summary>
     public string? AutomationId { get; set; }
 
-    /// <summary>Gets or sets the title.</summary>
+    /// <summary>Gets or sets the title, in the form it is kept in (<see cref="SessionTitles.Clean"/>).</summary>
     public string? Title { get; set; }
 
     /// <summary>Gets or sets the provider the session was created with.</summary>
@@ -176,6 +179,12 @@ internal sealed class OpenRunState
 
     /// <summary>Gets or sets the ticks of active time that have not made a whole millisecond yet.</summary>
     public long RemainderTicks { get; set; }
+
+    /// <summary>
+    /// Gets or sets the ticks between two records of the run that were left out of it: a time far from the others (a damaged line,
+    /// a clock that was wrong) is neither time the run was active nor time it lasted.
+    /// </summary>
+    public long SkippedTicks { get; set; }
 
     /// <summary>Gets or sets the provider at the start of the run.</summary>
     public string Provider { get; set; } = string.Empty;

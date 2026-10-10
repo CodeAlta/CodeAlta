@@ -582,6 +582,12 @@ internal sealed class RunRow
     /// <summary>Gets or sets the end of the run: its terminal record, or its last record while it has none.</summary>
     public DateTimeOffset End { get; set; }
 
+    /// <summary>
+    /// Gets or sets the milliseconds between <see cref="Start"/> and <see cref="End"/> that are not time of the run: the gap before
+    /// a record whose time is far from the others.
+    /// </summary>
+    public long SkippedMs { get; set; }
+
     /// <summary>Gets or sets how the run ended.</summary>
     public RunOutcome Outcome { get; set; }
 
@@ -640,7 +646,7 @@ internal sealed class RunRow
     public string PermissionMode { get; set; } = string.Empty;
 
     /// <summary>Gets the duration of the run.</summary>
-    public TimeSpan Duration => End > Start ? End - Start : TimeSpan.Zero;
+    public TimeSpan Duration => End - Start - TimeSpan.FromMilliseconds(SkippedMs) is var duration && duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
 }
 
 /// <summary>A session as the table of sessions holds it: one row, replaced each time the session changes.</summary>
@@ -667,7 +673,7 @@ internal sealed class SessionRow
     /// <summary>Gets or sets the automation that created the session.</summary>
     public string? AutomationId { get; set; }
 
-    /// <summary>Gets or sets the title the header gave.</summary>
+    /// <summary>Gets or sets the title the header gave, in the form it is kept in (<see cref="SessionTitles.Clean"/>).</summary>
     public string? Title { get; set; }
 
     /// <summary>Gets or sets the provider the session was created with, its old name folded.</summary>

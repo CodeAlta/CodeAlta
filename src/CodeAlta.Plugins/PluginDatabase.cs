@@ -37,6 +37,9 @@ public sealed class PluginDatabase : IPluginDatabase
     // is activated, and a file that is replaced while it runs (damage) has none of its tables, or older ones.
     private Migration? _migration;
 
+    // The write of this plugin the calling flow runs in, if any: a read it starts cannot migrate, which is a write.
+    private readonly AsyncLocal<OwnWrite?> _currentWrite = new();
+
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginDatabase"/> class.
     /// </summary>
@@ -135,6 +138,14 @@ public sealed class PluginDatabase : IPluginDatabase
     {
         ArgumentNullException.ThrowIfNull(read);
         using var linked = Link(cancellationToken);
+        if (_currentWrite.Value is { IsRunning: true })
+        {
+            // A read inside a write of the plugin. When the file was replaced under that write, the tables cannot be
+            // made again from here: the read fails on the file that has none, the write fails with it and is rolled
+            // back, and WriteAsync makes the tables and runs the write once more.
+            return await _database.ReadAsync(Owner, read, linked.Token).ConfigureAwait(false);
+        }
+
         for (var attempt = 0; ; attempt++)
         {
             await MigrateAgainIfReplacedAsync(linked.Token).ConfigureAwait(false);
@@ -159,7 +170,25 @@ public sealed class PluginDatabase : IPluginDatabase
             await MigrateAgainIfReplacedAsync(linked.Token).ConfigureAwait(false);
             try
             {
-                await _database.WriteAsync(Owner, write, linked.Token).ConfigureAwait(false);
+                await _database.WriteAsync(
+                        Owner,
+                        async (connection, token) =>
+                        {
+                            var scope = new OwnWrite();
+                            _currentWrite.Value = scope;
+                            try
+                            {
+                                await write(connection, token).ConfigureAwait(false);
+                            }
+                            finally
+                            {
+                                // What the write started and left running holds the scope still: it is told that the write is over.
+                                scope.End();
+                                _currentWrite.Value = null;
+                            }
+                        },
+                        linked.Token)
+                    .ConfigureAwait(false);
                 return;
             }
             catch (SqliteException) when (attempt == 0 && IsReplacedSinceMigration())
@@ -199,6 +228,15 @@ public sealed class PluginDatabase : IPluginDatabase
         => CancellationTokenSource.CreateLinkedTokenSource(_lifetime, cancellationToken);
 
     private sealed record Migration(int Version, PluginDatabaseMigration Migrate, int Generation);
+
+    private sealed class OwnWrite
+    {
+        private int _ended;
+
+        public bool IsRunning => Volatile.Read(ref _ended) == 0;
+
+        public void End() => Volatile.Write(ref _ended, 1);
+    }
 
     private static bool IsPlainWord(string id)
     {

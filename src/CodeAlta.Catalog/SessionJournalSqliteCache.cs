@@ -147,16 +147,29 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
 
+        // The rows are read from tables that are whole, and the tables are remembered: when they are made again
+        // while the journals are compared with these rows, the rows that were found up to date are gone, and the
+        // list is not called complete at the end.
+        int epoch;
+        IReadOnlyList<SqliteSessionProjectionRow>? existingRows;
+        var attempt = 0;
+        do
+        {
+            await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+            epoch = Volatile.Read(ref _schemaEpoch);
+            existingRows = await TryQuerySessionRowsAsync(sessionId: null, cancellationToken).ConfigureAwait(false);
+        }
+        while (existingRows is null && ++attempt < 3);
+
+        existingRows ??= [];
         if (!Directory.Exists(context.SessionsRootPath))
         {
             var removed = await PruneRowsMissingFromDiskAsync([], cancellationToken).ConfigureAwait(false);
-            await MarkCacheCompleteAsync(cancellationToken).ConfigureAwait(false);
+            await MarkCacheCompleteAsync(epoch, cancellationToken).ConfigureAwait(false);
             return new AgentSessionCacheReconciliationResult(removed > 0, 0, removed);
         }
 
-        var existingRows = await QuerySessionRowsAsync(sessionId: null, cancellationToken).ConfigureAwait(false);
         var existingByPath = existingRows.ToDictionary(static row => NormalizePathKey(row.JournalPath), StringComparer.OrdinalIgnoreCase);
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var upserted = 0;
@@ -196,7 +209,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         pruned += await PruneRowsMissingFromDiskAsync(seenPaths, cancellationToken).ConfigureAwait(false);
         changed |= pruned > 0;
-        await MarkCacheCompleteAsync(cancellationToken).ConfigureAwait(false);
+        await MarkCacheCompleteAsync(epoch, cancellationToken).ConfigureAwait(false);
         return new AgentSessionCacheReconciliationResult(changed, upserted, pruned);
     }
 
@@ -402,9 +415,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         {
             throw CreateLockedException(exception);
         }
-        catch (Exception exception) when (IsFileHeld(exception))
+        catch (Exception exception) when (IsFileError(exception))
         {
-            throw CreateHeldException(exception);
+            throw CreateFileException(exception);
         }
     }
 
@@ -427,9 +440,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         {
             throw CreateLockedException(locked);
         }
-        catch (Exception held) when (IsFileHeld(held))
+        catch (Exception failure) when (IsFileError(failure))
         {
-            throw CreateHeldException(held);
+            throw CreateFileException(failure);
         }
 
         Volatile.Write(ref _schemaGeneration, -1);
@@ -479,9 +492,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 // write ran on a file that has none of these tables. They are made, and the write runs once more.
                 await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (Exception exception) when (IsFileHeld(exception))
+            catch (Exception exception) when (IsFileError(exception))
             {
-                throw CreateHeldException(exception);
+                throw CreateFileException(exception);
             }
         }
     }
@@ -510,9 +523,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             // The file was replaced while the read ran: it read a file that has none of these tables.
             return default;
         }
-        catch (Exception exception) when (IsFileHeld(exception))
+        catch (Exception exception) when (IsFileError(exception))
         {
-            throw CreateHeldException(exception);
+            throw CreateFileException(exception);
         }
     }
 
@@ -521,9 +534,12 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await PrepareProgressiveRebuildAsync(cancellationToken).ConfigureAwait(false);
+
+        // The rows are added from here on: tables that are made again before the end lost some of them.
+        var epoch = Volatile.Read(ref _schemaEpoch);
         if (!Directory.Exists(context.SessionsRootPath))
         {
-            await MarkCacheCompleteAsync(cancellationToken).ConfigureAwait(false);
+            await MarkCacheCompleteAsync(epoch, cancellationToken).ConfigureAwait(false);
             yield break;
         }
 
@@ -541,7 +557,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             yield return hydrated.ToProjection();
         }
 
-        await MarkCacheCompleteAsync(cancellationToken).ConfigureAwait(false);
+        await MarkCacheCompleteAsync(epoch, cancellationToken).ConfigureAwait(false);
     }
 
     private Task PrepareProgressiveRebuildAsync(CancellationToken cancellationToken)
@@ -560,10 +576,46 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             (connection, token) => UpsertSessionCoreAsync(connection, transaction: null, projection, token),
             cancellationToken);
 
-    private Task MarkCacheCompleteAsync(CancellationToken cancellationToken)
-        => WriteAsync(
-            (connection, token) => SetCacheCompleteCoreAsync(connection, complete: true, token),
-            cancellationToken);
+    // epoch: the tables the caller listed the sessions in. The list is called complete only when they are still
+    // those tables, in the file they were in: tables that were made again since (a repair, a file that was
+    // replaced) lost rows the caller wrote or counted on, and the next listing reads the journals again. The schema
+    // gate is held, so no repair runs between the check and the mark.
+    private async Task MarkCacheCompleteAsync(int epoch, CancellationToken cancellationToken)
+    {
+        var generation = _database.Generation;
+        var damaged = false;
+        await _schemaGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_schemaEpoch != epoch || _schemaGeneration != generation || !File.Exists(_database.DatabasePath))
+            {
+                return;
+            }
+
+            await WriteCoreAsync(
+                    (connection, token) => SetCacheCompleteCoreAsync(connection, complete: true, token),
+                    schemaOwned: true,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (SqliteException exception) when (ApplicationDatabase.IsDamaged(exception))
+        {
+            damaged = true;
+        }
+        catch (SqliteException) when (_database.Generation != generation)
+        {
+            // The file was replaced under the mark: the new one has no mark, or the mark of its copy.
+        }
+        finally
+        {
+            _schemaGate.Release();
+        }
+
+        if (damaged)
+        {
+            await RepairSchemaAsync(generation, epoch, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     private async Task<bool> IsCacheCompleteAsync(CancellationToken cancellationToken)
         => await TryReadAsync(
@@ -1139,13 +1191,15 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     private AgentSessionCacheLockedException CreateLockedException(SqliteException exception)
         => new($"The CodeAlta application database is locked: {_database.DatabasePath}", exception);
 
-    // The database could not move its damaged file aside: another process holds it. For the callers of the list it
-    // is the same as a lock that outlasts the timeout: the database cannot be used now, and can be later.
-    private static bool IsFileHeld(Exception exception)
+    // The file of the database could not be made, moved or replaced: a damaged file that another process holds
+    // and that cannot be moved aside, a folder that cannot be written. For the callers of the list it is the same
+    // as a lock that outlasts the timeout: the database cannot be used now, and can be later. The message says what
+    // the system said, not what the cause may be.
+    private static bool IsFileError(Exception exception)
         => exception is IOException or UnauthorizedAccessException;
 
-    private AgentSessionCacheLockedException CreateHeldException(Exception exception)
-        => new($"The CodeAlta application database is damaged and its file is held by another process, so it cannot be replaced: {_database.DatabasePath}", exception);
+    private AgentSessionCacheLockedException CreateFileException(Exception exception)
+        => new($"The file of the CodeAlta application database cannot be used now: {_database.DatabasePath}. {exception.Message}", exception);
 
     private static string? GetString(SqliteDataReader reader, string name)
     {

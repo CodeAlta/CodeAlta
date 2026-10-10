@@ -437,6 +437,32 @@ public sealed class SessionFactsReducerTests
         Assert.AreEqual(10_000 + 5_000, Sum(batch.Activity, static m => m.ActiveMs), "The year between the two records is not time the run was active.");
         Assert.IsTrue(batch.Activity.Count <= 4, $"{batch.Activity.Count} rows of activity");
         Assert.AreEqual(RunOutcome.Completed, batch.Runs["r1"].Outcome);
+
+        // And it is not how long the run lasted: the run keeps its first and its last time, and its duration leaves the year out.
+        var run = batch.Runs["r1"];
+        Assert.AreEqual(T0, run.Start);
+        Assert.AreEqual(T0.AddYears(1).AddSeconds(5), run.End);
+        Assert.AreEqual(TimeSpan.FromSeconds(15), run.Duration);
+        Assert.AreEqual(1, batch.Histograms[new HistogramKey(QuarterHour.Of(T0), HistogramMeasure.RunDurationMs, string.Empty, HistogramSteps.StepOf(15_000))]);
+        Assert.AreEqual(1, batch.Histograms.Where(static pair => pair.Key.Measure == HistogramMeasure.RunDurationMs).Sum(static pair => pair.Value));
+        Assert.AreEqual(15_000, batch.Extremes[new ExtremeKey(QuarterHour.Of(T0), ExtremeMeasure.LongestRunMs, string.Empty)].Value);
+    }
+
+    [TestMethod]
+    public void Run_ATimeFarFromTheOthers_IsLeftOutOfTheDuration_AlsoWhenTheRunIsReadInTwoParts()
+    {
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low")
+            .Usage(T0.AddSeconds(10), "r1", model: "m")
+            .Usage(T0.AddYears(1), "r1", model: "m");
+        var first = CatchUp(b);
+        b.Idle(T0.AddYears(1).AddSeconds(5), "r1");
+
+        var second = CatchUp(b, first.Cursor);
+
+        // The part that was left out is carried by the state of the run, from one reading to the next.
+        Assert.AreEqual(TimeSpan.FromSeconds(15), second.Batch.Runs["r1"].Duration);
+        Assert.AreEqual(15_000, second.Batch.Extremes[new ExtremeKey(QuarterHour.Of(T0), ExtremeMeasure.LongestRunMs, string.Empty)].Value);
     }
 
     [TestMethod]
@@ -466,6 +492,49 @@ public sealed class SessionFactsReducerTests
         Assert.IsTrue(b.Lines[0].Contains("placeholder", StringComparison.Ordinal));
         Assert.IsFalse(result.Cursor.State.ToJson().Contains("placeholder", StringComparison.Ordinal), result.Cursor.State.ToJson());
         Assert.IsTrue(result.Cursor.State.ToJson().Contains("A title", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    [DataRow("Fix the parser", "Fix the parser")]
+    [DataRow("  Fix   the\tparser\n", "Fix the parser")]
+    // The title of a session is the start of its first prompt: a word that holds a path or an address is left out.
+    [DataRow(@"Read C:\Users\someone\notes\plan.md and summarize", "Read … and summarize")]
+    [DataRow("Compare /home/someone/a.txt with ~/b.txt", "Compare … with …")]
+    [DataRow(@"Open \\server\share\file", "Open …")]
+    [DataRow("See https://example.org/issues/12?token=abc now", "See … now")]
+    [DataRow("Look at src/CodeAlta/Program.cs (line 3)", "Look at … (line 3)")]
+    [DataRow("C:\\a /b ./c", null)]
+    [DataRow("/only/a/path", null)]
+    [DataRow("   ", null)]
+    [DataRow(null, null)]
+    public void TheTitleOfASession_IsKeptWithoutThePathsItNames(string? title, string? expected)
+    {
+        Assert.AreEqual(expected, SessionTitles.Clean(title));
+    }
+
+    [TestMethod]
+    public void TheTitleOfASession_IsCutToItsLimit()
+    {
+        var cleaned = SessionTitles.Clean(string.Join(' ', Enumerable.Repeat("word", 60)))!;
+
+        Assert.AreEqual(SessionTitles.MaxLength, cleaned.Length);
+        Assert.IsTrue(cleaned.EndsWith('…'));
+        Assert.AreEqual(SessionTitles.MaxLength, SessionTitles.Clean(new string('a', 300))!.Length);
+    }
+
+    [TestMethod]
+    public void TheState_AndTheRowOfTheSession_KeepTheTitleWithoutThePathsItNames()
+    {
+        var b = new JournalBuilder();
+        b.Header(T0, title: @"Read C:\Users\someone\secret\plan.md and summarize it").State(T0.AddSeconds(1))
+            .ModelChanged(T0.AddSeconds(2), "r1", "codex", "m", "Low").User(T0.AddSeconds(3), "r1").Idle(T0.AddSeconds(4), "r1");
+
+        var result = CatchUp(b);
+
+        Assert.IsTrue(b.Lines[0].Contains("someone", StringComparison.Ordinal));
+        Assert.AreEqual("Read … and summarize it", result.Batch.Session!.Title);
+        Assert.AreEqual("Read … and summarize it", result.Cursor.State.Title);
+        Assert.IsFalse(result.Cursor.State.ToJson().Contains("someone", StringComparison.Ordinal), result.Cursor.State.ToJson());
     }
 
     [TestMethod]
