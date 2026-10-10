@@ -208,6 +208,79 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_UnreadableAncestorInstructions_AreReportedWithoutBlockingComposition()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("This regression uses Windows file sharing, not Unix permissions.");
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var parent = Directory.CreateDirectory(Path.Combine(temp.Path, "parent")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(parent, "project")).FullName;
+        var blocked = Path.Combine(parent, "AGENTS.md");
+        var accessible = Path.Combine(project, "AGENTS.md");
+        File.WriteAllText(blocked, "Unavailable ancestor instructions.");
+        File.WriteAllText(accessible, "Accessible project instructions.");
+        WriteSystem(appBase, "default", "Built-in system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in prompt.");
+        using var inaccessible = new FileStream(blocked, FileMode.Open, FileAccess.Read, FileShare.None);
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+        var request = new SystemPromptBuildRequest
+        {
+            ProviderKey = "inert", ProviderType = "inert", ProtocolFamily = "inert",
+            Session = new SessionViewDescriptor { SessionId = "inert", ProviderId = "inert", WorkingDirectory = project },
+            DiscoveryScope = new(Path.Combine(temp.Path, "home"), temp.Path),
+            UserCodeAltaRoot = Path.Combine(temp.Path, "global"),
+            ProjectRoots = [project],
+            PartOptionsOverride = new(Skills: false, ProjectContext: true, RuntimeContext: false, ToolGuidance: false),
+        };
+
+        var bundle = builder.Build(request);
+
+        StringAssert.Contains(bundle.DeveloperInstructions!, "Accessible project instructions.");
+        Assert.IsFalse(bundle.DeveloperInstructions!.Contains("Unavailable ancestor instructions.", StringComparison.Ordinal));
+        var warning = bundle.Diagnostics.Single(item => item.Path == blocked);
+        Assert.AreEqual(SystemPromptDiagnosticSeverity.Warning, warning.Severity);
+        Assert.AreEqual("unreadable_project_context_file", warning.Code);
+        StringAssert.Contains(warning.Message, "could not be read");
+        Assert.IsTrue(bundle.Manifest.Diagnostics.Contains(warning));
+        CollectionAssert.AreEqual(new[] { accessible }, bundle.Manifest.Parts.Single(item => item.Key == "project.context").SourcePaths!.ToArray());
+        Assert.AreEqual(bundle.DeveloperInstructions, builder.Build(request).DeveloperInstructions);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void SystemPromptBuilder_UnreadableCopilotInstructions_ReportWarningAndKeepAccessibleFiles(bool scoped)
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("This regression uses Windows file sharing, not Unix permissions.");
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var home = Directory.CreateDirectory(Path.Combine(temp.Path, "home")).FullName;
+        var folder = Directory.CreateDirectory(scoped ? Path.Combine(project, ".github", "instructions") : Path.Combine(home, ".copilot")).FullName;
+        var blocked = Path.Combine(folder, scoped ? "blocked.instructions.md" : "copilot-instructions.md");
+        File.WriteAllText(blocked, "---\napplyTo: '**/*.cs'\n---\nUnavailable guidance.");
+        File.WriteAllText(Path.Combine(project, "AGENTS.md"), "Accessible guidance.");
+        if (scoped) File.WriteAllText(Path.Combine(folder, "accessible.instructions.md"), "---\napplyTo: '**/*.ts'\n---\nAccessible scoped guidance.");
+        WriteSystem(appBase, "default", "Fixture system.");
+        WritePrompt(appBase, "default", "Default", "default", "Fixture prompt.");
+        using var inaccessible = new FileStream(blocked, FileMode.Open, FileAccess.Read, FileShare.None);
+        var bundle = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase)).Build(new()
+        {
+            ProviderKey = "inert", ProviderType = "inert", ProtocolFamily = "inert",
+            Session = new() { SessionId = "inert", ProviderId = "inert", WorkingDirectory = project },
+            DiscoveryScope = new(home, temp.Path), UserCodeAltaRoot = Path.Combine(temp.Path, "global"), ProjectRoots = [project],
+            PartOptionsOverride = new(Skills: false, ProjectContext: true, RuntimeContext: false, ToolGuidance: false),
+        });
+        var warning = bundle.Diagnostics.Single();
+        Assert.AreEqual(blocked, warning.Path);
+        Assert.AreEqual("unreadable_project_context_file", warning.Code);
+        StringAssert.Contains(bundle.DeveloperInstructions!, "Accessible guidance.");
+        Assert.IsFalse(bundle.DeveloperInstructions!.Contains("Unavailable guidance.", StringComparison.Ordinal));
+        if (scoped) StringAssert.Contains(bundle.DeveloperInstructions!, "accessible.instructions.md");
+        Assert.IsFalse(bundle.Manifest.Parts.Single(part => part.Key == "project.context").SourcePaths!.Contains(blocked));
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_ReadsTheInstructionsOfTheCopilotLayout()
     {
         using var temp = TempDirectory.Create();

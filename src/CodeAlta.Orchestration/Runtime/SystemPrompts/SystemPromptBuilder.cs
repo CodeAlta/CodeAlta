@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
@@ -34,8 +35,12 @@ public sealed class SystemPromptBuilder
     /// <exception cref="InvalidOperationException">Thrown when required prompt content is missing or invalid.</exception>
     /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     public SystemPromptBundle Build(SystemPromptBuildRequest request)
+        => Build(request, new AgentInstructionFileReader());
+
+    internal SystemPromptBundle Build(SystemPromptBuildRequest request, AgentInstructionFileReader instructionFiles)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(instructionFiles);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ProviderKey);
         ArgumentNullException.ThrowIfNull(request.Session);
         ValidateDiscoveryPaths(request);
@@ -142,7 +147,7 @@ public sealed class SystemPromptBuilder
 
         if (composition.PartOptions.ProjectContext)
         {
-            var projectContext = BuildProjectContext(request, projectRoot, diagnostics, out var projectContextFiles);
+            var projectContext = BuildProjectContext(request, projectRoot, diagnostics, instructionFiles, out var projectContextFiles);
             if (!string.IsNullOrWhiteSpace(projectContext))
             {
                 var projectPart = AddGeneratedPart(developerParts, parts, "project.context", "project_context", "Project Context", 600, projectContext);
@@ -150,6 +155,9 @@ public sealed class SystemPromptBuilder
                 parts[^1] = projectPart;
             }
         }
+
+        diagnostics.AddRange(instructionFiles.Diagnostics.Select(static diagnostic =>
+            SystemPromptDiagnostic.Warning("unreadable_project_context_file", diagnostic.Message, diagnostic.Path)));
 
         var developerInstructions = developerParts.Count == 0
             ? null
@@ -721,21 +729,22 @@ public sealed class SystemPromptBuilder
         }
     }
 
-    private static string? BuildProjectContext(SystemPromptBuildRequest request, string? projectRoot, List<SystemPromptDiagnostic> diagnostics, out IReadOnlyList<string> files)
+    private static string? BuildProjectContext(SystemPromptBuildRequest request, string? projectRoot, List<SystemPromptDiagnostic> diagnostics, AgentInstructionFileReader instructionFiles, out IReadOnlyList<string> files)
     {
         var projectRoots = request.ProjectRoots.Count > 0 ? request.ProjectRoots : projectRoot is null ? [] : [projectRoot];
         var selectedFiles = InWorktree(
-            EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, projectRoots, request.DiscoveryScope),
+            EnumerateProjectInstructionFiles(request.Session.WorkingDirectory ?? request.WorkingDirectory, projectRoots, request.DiscoveryScope, instructionFiles),
             request.Session).ToList();
         // The layout of GitHub Copilot beside CodeAlta's own: the instructions of the user for every project, and the
         // instructions of a project that are for some of its files only.
-        if (CopilotUserInstructions(request) is { } personal && !selectedFiles.Contains(personal, StringComparer.OrdinalIgnoreCase))
+        if (CopilotUserInstructions(request, instructionFiles) is { } personal && !selectedFiles.Contains(personal, StringComparer.OrdinalIgnoreCase))
         {
             selectedFiles.Insert(0, personal);
         }
 
-        var scoped = CopilotPathInstructions(ExistingWorktree(request.Session) is { } worktree ? [worktree] : projectRoots);
-        files = [.. selectedFiles, .. scoped.Select(static item => item.Path)];
+        var scoped = CopilotPathInstructions(ExistingWorktree(request.Session) is { } worktree ? [worktree] : projectRoots, instructionFiles);
+        var includedFiles = new List<string>();
+        files = includedFiles;
         if (selectedFiles.Count == 0 && scoped.Count == 0)
         {
             return null;
@@ -744,13 +753,24 @@ public sealed class SystemPromptBuilder
         var builder = new StringBuilder();
         foreach (var path in selectedFiles)
         {
-            var fileInfo = new FileInfo(path);
-            if (fileInfo.Length > 64 * 1024)
+            var length = instructionFiles.GetLength(path, required: true);
+            if (length is null)
+            {
+                continue;
+            }
+
+            var content = instructionFiles.ReadAllText(path);
+            if (content is null)
+            {
+                continue;
+            }
+
+            includedFiles.Add(path);
+            if (length > 64 * 1024)
             {
                 diagnostics.Add(SystemPromptDiagnostic.Warning("large_project_context_file", $"Project instruction/context file '{path}' is unusually large.", path));
             }
 
-            var content = File.ReadAllText(path).Trim();
             if (content.Length == 0)
             {
                 continue;
@@ -772,6 +792,7 @@ public sealed class SystemPromptBuilder
 
         if (scoped.Count > 0)
         {
+            includedFiles.AddRange(scoped.Select(static item => item.Path));
             if (builder.Length > 0)
             {
                 builder.AppendLine().AppendLine();
@@ -791,19 +812,19 @@ public sealed class SystemPromptBuilder
     }
 
     // What the user wrote for GitHub Copilot in every project: `~/.copilot/copilot-instructions.md`.
-    private static string? CopilotUserInstructions(SystemPromptBuildRequest request)
+    private static string? CopilotUserInstructions(SystemPromptBuildRequest request, AgentInstructionFileReader instructionFiles)
     {
         // The profile the host names: a request that names none is given no file of the real one.
         if (NormalizeOptionalRoot(request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot) is not { } profile) return null;
         var path = Path.Combine(profile, ".copilot", "copilot-instructions.md");
-        return File.Exists(path) ? path : null;
+        return instructionFiles.GetLength(path) is not null ? path : null;
     }
 
     private const int MaximumPathInstructions = 50;
 
     // The `*.instructions.md` files of `.github/instructions` that say which files they are for (`applyTo`), as GitHub
     // Copilot reads them. One that is not for a coding agent (`excludeAgent: coding-agent`) is left out.
-    private static IReadOnlyList<(string Path, string ApplyTo)> CopilotPathInstructions(IReadOnlyList<string> roots)
+    private static IReadOnlyList<(string Path, string ApplyTo)> CopilotPathInstructions(IReadOnlyList<string> roots, AgentInstructionFileReader instructionFiles)
     {
         var found = new List<(string Path, string ApplyTo)>();
         foreach (var root in roots)
@@ -818,6 +839,7 @@ public sealed class SystemPromptBuilder
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
+                instructionFiles.ReportFailure(folder, "inspected", exception);
                 continue;
             }
 
@@ -836,6 +858,7 @@ public sealed class SystemPromptBuilder
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
+                    instructionFiles.ReportFailure(file, "read", exception);
                 }
             }
         }
@@ -887,7 +910,7 @@ public sealed class SystemPromptBuilder
     private static string? ExistingWorktree(SessionViewDescriptor session)
         => NormalizeOptionalRoot(session.WorktreeDirectory) is { } worktree && Directory.Exists(worktree) ? worktree : null;
 
-    private static IReadOnlyList<string> EnumerateProjectInstructionFiles(string? workingDirectory, IReadOnlyList<string> projectRoots, SessionDiscoveryScope? discoveryScope)
+    private static IReadOnlyList<string> EnumerateProjectInstructionFiles(string? workingDirectory, IReadOnlyList<string> projectRoots, SessionDiscoveryScope? discoveryScope, AgentInstructionFileReader instructionFiles)
     {
         if (discoveryScope is not null)
         {
@@ -903,13 +926,7 @@ public sealed class SystemPromptBuilder
         }
 
         var files = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var candidateRelativePaths = new[]
-        {
-            "AGENTS.md",
-            "CLAUDE.md",
-            Path.Combine(".github", "copilot-instructions.md"),
-        };
+        var seenDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         void AddWalk(string? root)
         {
@@ -920,16 +937,11 @@ public sealed class SystemPromptBuilder
 
             foreach (var directory in SessionDiscoveryScope.GetInstructionAncestors(root, discoveryScope))
             {
-                var selectedFile = candidateRelativePaths
-                    .Select(relativePath => Path.Combine(directory, relativePath))
-                    .Where(File.Exists)
-                    .Select(path => new FileInfo(path))
-                    .OrderByDescending(static file => file.Length)
-                    .ThenBy(static file => file.FullName, StringComparer.OrdinalIgnoreCase)
-                    .FirstOrDefault();
-                if (selectedFile is not null && seen.Add(selectedFile.FullName))
+                if (!seenDirectories.Add(directory)) continue;
+                var selectedFile = instructionFiles.SelectLargestFile(directory);
+                if (selectedFile is not null)
                 {
-                    files.Add(selectedFile.FullName);
+                    files.Add(selectedFile);
                 }
             }
         }

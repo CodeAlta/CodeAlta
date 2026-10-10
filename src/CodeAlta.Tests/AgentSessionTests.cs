@@ -73,6 +73,57 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_UnreadableInstructions_DoNotBlockPromptsAndReportWarning()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("This regression uses Windows file sharing, not Unix permissions.");
+        using var temp = TestTempDirectory.Create();
+        var parent = Directory.CreateDirectory(Path.Combine(temp.Path, "parent")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(parent, "project")).FullName;
+        var blocked = Path.Combine(parent, "AGENTS.md");
+        File.WriteAllText(blocked, "Unavailable ancestor instructions.");
+        File.WriteAllText(Path.Combine(project, "AGENTS.md"), "Accessible project instructions.");
+        using var inaccessible = new FileStream(blocked, FileMode.Open, FileAccess.Read, FileShare.None);
+        var provider = CreateProvider();
+        var summary = CreateSummary("unreadable-instructions") with { WorkingDirectory = project };
+        var state = CreateState(summary.SessionId);
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        var expectAncestor = false;
+        Task<AgentTurnResponse> Respond(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> _, CancellationToken __)
+        {
+            StringAssert.Contains(request.DeveloperInstructions!, "Accessible project instructions.");
+            Assert.AreEqual(expectAncestor, request.DeveloperInstructions!.Contains("Unavailable ancestor instructions.", StringComparison.Ordinal));
+            return Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+            });
+        }
+
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor(Respond, Respond, Respond), CreateOptions(provider, project));
+        var observed = new List<AgentEvent>();
+        using var subscription = session.Subscribe(observed.Add);
+        _ = await session.GetHistoryAsync();
+        _ = await session.SendAsync(new() { Input = AgentInput.Text("First") });
+        _ = await session.SendAsync(new() { Input = AgentInput.Text("Second") });
+        var history = await session.GetHistoryAsync();
+        var warning = history.OfType<AgentSessionUpdateEvent>().FirstOrDefault(item => item.Kind == AgentSessionUpdateKind.Warning);
+        Assert.IsNotNull(warning);
+        Assert.AreEqual(2, history.OfType<AgentSessionUpdateEvent>().Count(item => item.Kind == AgentSessionUpdateKind.Warning));
+        StringAssert.Contains(warning.Message!, blocked);
+        StringAssert.Contains(warning.Message!, "could not be read");
+        Assert.IsTrue(observed.Contains(warning));
+        Assert.IsFalse(history.OfType<AgentErrorEvent>().Any());
+        var persisted = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId);
+        Assert.IsTrue(persisted.OfType<AgentSessionUpdateEvent>().Any(item => item.Kind == AgentSessionUpdateKind.Warning && item.Message == warning.Message));
+        inaccessible.Dispose();
+        expectAncestor = true;
+        _ = await session.SendAsync(new() { Input = AgentInput.Text("After access is restored") });
+        Assert.AreEqual(2, (await session.GetHistoryAsync()).OfType<AgentSessionUpdateEvent>().Count(item => item.Kind == AgentSessionUpdateKind.Warning));
+    }
+
+    [TestMethod]
     public void AgentInstructionComposer_ComposesDeveloperInstructionsAndLargestContextFilesPerDirectory()
     {
         using var temp = TestTempDirectory.Create();

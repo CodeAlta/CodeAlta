@@ -11,8 +11,15 @@ internal static class AgentInstructionComposer
     public static AgentInstructionBundle Compose(
         AgentSessionCreateOptions options,
         IReadOnlyList<AgentLoadedSkillState>? loadedSkills = null)
+        => Compose(options, loadedSkills, new AgentInstructionFileReader());
+
+    internal static AgentInstructionBundle Compose(
+        AgentSessionCreateOptions options,
+        IReadOnlyList<AgentLoadedSkillState>? loadedSkills,
+        AgentInstructionFileReader instructionFiles)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(instructionFiles);
 
         var systemMessage = Normalize(options.SystemMessage);
         var developerInstructionsInput = Normalize(options.DeveloperInstructions);
@@ -29,10 +36,10 @@ internal static class AgentInstructionComposer
         {
             // The folders above a worktree are not the project's: the files are looked for from the folder the session
             // belongs to, as for a session that works there.
-            foreach (var path in EnumerateAgentInstructionFiles(options.WorkingDirectory, options.ProjectRoots))
+            foreach (var path in EnumerateAgentInstructionFiles(options.WorkingDirectory, options.ProjectRoots, instructionFiles))
             {
-                var content = File.ReadAllText(path).Trim();
-                if (content.Length == 0)
+                var content = instructionFiles.ReadAllText(path);
+                if (string.IsNullOrEmpty(content))
                 {
                     continue;
                 }
@@ -59,7 +66,7 @@ internal static class AgentInstructionComposer
             ? null
             : string.Join(Environment.NewLine + Environment.NewLine, developerSections);
         var hash = ComputeHash(systemMessage, developerInstructions, runtimeContext);
-        return new AgentInstructionBundle(systemMessage, developerInstructions, runtimeContext, hash);
+        return new AgentInstructionBundle(systemMessage, developerInstructions, runtimeContext, hash, instructionFiles.Diagnostics);
     }
 
     private static string? Normalize(string? value)
@@ -104,16 +111,10 @@ internal static class AgentInstructionComposer
         return string.Join(Environment.NewLine, lines);
     }
 
-    private static IReadOnlyList<string> EnumerateAgentInstructionFiles(string? workingDirectory, IReadOnlyList<string> projectRoots)
+    private static IReadOnlyList<string> EnumerateAgentInstructionFiles(string? workingDirectory, IReadOnlyList<string> projectRoots, AgentInstructionFileReader instructionFiles)
     {
         var files = new List<string>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var candidateRelativePaths = new[]
-        {
-            "AGENTS.md",
-            "CLAUDE.md",
-            Path.Combine(".github", "copilot-instructions.md"),
-        };
+        var seenDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         void AddWalk(string? root)
         {
@@ -139,16 +140,11 @@ internal static class AgentInstructionComposer
             while (stack.Count > 0)
             {
                 var directory = stack.Pop();
-                var selectedFile = candidateRelativePaths
-                    .Select(relativePath => Path.Combine(directory, relativePath))
-                    .Where(File.Exists)
-                    .Select(path => new FileInfo(path))
-                    .OrderByDescending(static file => file.Length)
-                    .ThenBy(static file => file.FullName, StringComparer.OrdinalIgnoreCase)
-                    .FirstOrDefault();
-                if (selectedFile is not null && seen.Add(selectedFile.FullName))
+                if (!seenDirectories.Add(directory)) continue;
+                var selectedFile = instructionFiles.SelectLargestFile(directory);
+                if (selectedFile is not null)
                 {
-                    files.Add(selectedFile.FullName);
+                    files.Add(selectedFile);
                 }
             }
         }
@@ -261,4 +257,5 @@ internal sealed record AgentInstructionBundle(
     string? SystemMessage,
     string? DeveloperInstructions,
     string RuntimeContext,
-    string InstructionHash);
+    string InstructionHash,
+    IReadOnlyList<AgentInstructionFileDiagnostic> Diagnostics);

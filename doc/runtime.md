@@ -415,6 +415,33 @@ selection and deduplication rules remain. Callers without a scope retain the pre
 defaults and full ancestor walk. The runtime constructor and the template provider's original
 constructor remain available.
 
+Project instruction files are optional context, not a prerequisite for loading history or
+sending a prompt. Both the raw-agent composer and `SystemPromptBuilder` use
+`AgentInstructionFileReader` to isolate filesystem I/O, access-denial and security exceptions
+per candidate/file. Metadata is queried directly rather than using `File.Exists`, which hides
+access errors as absence. Ordinary absent candidate names are quiet; a selected file that
+disappears before it can be inspected/read is reported. Other failures, including cancellation
+and invalid inputs, are not suppressed, and filesystem permissions are never changed.
+
+Ancestor order, one-largest-file-per-directory selection, ordinal-ignore-case path tie-breaking,
+deduplication and worktree mapping remain unchanged. A candidate whose metadata is unavailable
+is excluded from selection, leaving accessible siblings eligible. If the selected file cannot
+be read, it is omitted without promoting a smaller sibling; accessible ancestors, descendants
+and other project roots still contribute normally. Successful content, formatting and prompt
+hash inputs are unchanged. Omitted files are not listed as included manifest sources.
+
+Each failed path produces one warning per composition pass, with the path, failing operation
+and error message, explicitly stating that its guidance is unavailable. Orchestration records
+`unreadable_project_context_file` in the prompt bundle/manifest diagnostics and publishes the
+existing `SessionHostEvent` warning during attachment (including history attachment). This is
+host status feedback, not a new durable journal record. Raw-agent composition emits the
+existing persisted `AgentSessionUpdateEvent` warning before a send or manual compaction; remote
+control uses live warning feedback, like its status events, without writing run-owned history.
+A later composition retries normal reads; no permission elevation, persistent
+failure cache or new UI flow is introduced. Windows locked-file regressions exercise real I/O;
+synthetic access/metadata failures exercise the shared policy without changing ACLs and do not
+qualify Linux sandbox behavior.
+
 This is a **lexical discovery policy, not a filesystem sandbox or ownership grant**. It does
 not resolve links/reparse points, bound builtin-skill source lookup or Git configuration
 discovery, isolate plugins/providers/authentication, or authorize tools. A scoped host is not

@@ -234,6 +234,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+            // Remote control may be changed during a run: like its status, warnings are live feedback,
+            // not concurrent writes to the run-owned history.
+            foreach (var diagnostic in instructionBundle.Diagnostics)
+            {
+                Publish(new AgentSessionUpdateEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, null,
+                    AgentSessionUpdateKind.Warning, diagnostic.Message));
+            }
             var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
             request = CreateTurnRequest(
                 new AgentRunId($"provider-remote-control:{Guid.CreateVersion7()}"),
@@ -366,6 +373,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 throw new InvalidOperationException($"The git worktree this session works in, '{_summary.WorktreeDirectory}', no longer exists.");
             var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
             var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills());
+            await AppendInstructionWarningsAsync(instructionBundle, runId, linkedCts.Token).ConfigureAwait(false);
             var requestDeveloperInstructions = CombineDeveloperInstructions(
                 instructionBundle.DeveloperInstructions,
                 instructionBundle.RuntimeContext);
@@ -914,6 +922,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private async Task<AgentCompactionOutcome> CompactGateHeldAsync(CancellationToken cancellationToken)
     {
         var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+        await AppendInstructionWarningsAsync(instructionBundle, null, cancellationToken).ConfigureAwait(false);
         var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
         if (_turnExecutor is IAgentProviderCompaction providerCompaction)
         {
@@ -941,6 +950,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             PreCompactionTokens: outcome.PreCompactionTokens,
             PostCompactionTokens: outcome.PostCompactionTokens);
     }
+
+    private Task AppendInstructionWarningsAsync(AgentInstructionBundle instructions, AgentRunId? runId, CancellationToken cancellationToken)
+        => instructions.Diagnostics.Count == 0 ? Task.CompletedTask : AppendEventsAsync(
+            instructions.Diagnostics.Select(diagnostic => (AgentEvent)new AgentSessionUpdateEvent(
+                ProviderId, SessionId, DateTimeOffset.UtcNow, runId, AgentSessionUpdateKind.Warning, diagnostic.Message)).ToArray(),
+            cancellationToken);
 
     // The provider keeps the context of the session: it compacts it, and the journal keeps every message.
     private async Task<AgentCompactionOutcome> CompactProviderContextAsync(

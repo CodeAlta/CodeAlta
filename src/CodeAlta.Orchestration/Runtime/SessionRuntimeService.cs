@@ -1344,6 +1344,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var effectiveAgentPromptId = selectedPrompt;
         session.AgentPromptId = effectiveAgentPromptId;
         var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, session.AgentPromptId);
+        foreach (var diagnostic in instructions.PromptBundle?.Diagnostics ?? [])
+        {
+            if (diagnostic.Code == "unreadable_project_context_file")
+            {
+                _events.TryPublish(new SessionHostEvent(session.SessionId, DateTimeOffset.UtcNow, AgentSessionUpdateKind.Warning, diagnostic.Message));
+            }
+        }
         var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
         var providerProviderId = new ModelProviderId(options.ProviderId.Value);
         var developerInstructions = instructions.DeveloperInstructions;

@@ -4,13 +4,63 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 namespace CodeAlta.Orchestration.Tests;
 
 [TestClass]
 public sealed class SessionRuntimeServiceTests
 {
+    [TestMethod]
+    public async Task GetOrResumeHistoryAsync_UnreadableInstructionsPublishHostWarningAndKeepHistoryAvailable()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("This regression uses Windows file sharing, not Unix permissions.");
+        using var temp = new TempDirectory();
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "parent", "project")).FullName;
+        var blocked = Path.Combine(temp.Path, "parent", "AGENTS.md");
+        File.WriteAllText(blocked, "Unavailable ancestor guidance.");
+        File.WriteAllText(Path.Combine(project, "AGENTS.md"), "Accessible project guidance.");
+        var app = Path.Combine(temp.Path, "app");
+        var prompts = Path.Combine(app, "content", "prompts");
+        Directory.CreateDirectory(Path.Combine(prompts, "agents"));
+        Directory.CreateDirectory(Path.Combine(prompts, "system"));
+        File.WriteAllText(Path.Combine(prompts, "agents", "default.prompt.md"), "---\nname: Fixture\nskills: false\nruntime_context: false\ntool_guidance: false\n---\nFixture prompt.");
+        File.WriteAllText(Path.Combine(prompts, "system", "default.system-prompt.md"), "Fixture system.");
+        using var inaccessible = new FileStream(blocked, FileMode.Open, FileAccess.Read, FileShare.None);
+        var providerId = new ModelProviderId("unreadable-instructions");
+        await using var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(new(providerId, "Inert instructions fixture") { DefaultModelId = "test-model" },
+            () => new MinimalProviderRuntime(providerId));
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "global") };
+        await using var hub = new AgentHub(registry, options.GlobalRoot);
+        var catalog = new SessionViewCatalog(options);
+        var locator = new FileSystemPromptContentLocator(app);
+        var skills = new SkillCatalog([new NoInstructionTestSkillRoots()]);
+        var template = new AgentInstructionTemplateProvider(skills, options, locator, null, new(Path.Combine(temp.Path, "home"), temp.Path));
+        await using var runtime = new SessionRuntimeService(hub, new AgentSessionCatalog(catalog.JournalStore.CreateSessionStore()),
+            new ProjectCatalog(options), catalog, template, options, skills)
+        { PromptCatalog = new AgentPromptCatalog(locator) };
+        var session = CreateSession("instruction-history", providerId, project);
+
+        var history = await runtime.GetOrResumeHistoryAsync(session, CreateOptions(providerId, project));
+        Assert.IsNotNull(history);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var events = await CollectUntilRuntimeEventAsync(runtime, session.SessionId,
+            static item => item is SessionHostEvent { Kind: AgentSessionUpdateKind.Warning }, timeout.Token);
+        var warning = events.OfType<SessionHostEvent>().Single(item => item.Kind == AgentSessionUpdateKind.Warning);
+        StringAssert.Contains(warning.Message, blocked);
+        StringAssert.Contains(warning.Message, "guidance is unavailable");
+        Assert.IsNotNull(await runtime.GetOrResumeHistoryAsync(session, CreateOptions(providerId, project)));
+    }
+
+    private sealed class NoInstructionTestSkillRoots : ISkillRootProvider
+    {
+        public ValueTask<IReadOnlyList<SkillRootRegistration>> GetRootsAsync(SkillDiscoveryContext context, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<IReadOnlyList<SkillRootRegistration>>([]);
+    }
+
     [TestMethod]
     public async Task IdleProviderSelection_PersistsCoherentStateWithoutExecutingProviders_AndRejectsStaleRequests()
     {
