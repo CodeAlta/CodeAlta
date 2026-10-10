@@ -63,16 +63,30 @@ public sealed class SessionRuntimeFileSearchInvalidationTests
     public Task Provider_StreamPressureDropsOriginalButNotCacheEffect() => Fixture.Run(async f =>
     {
         await f.Keep(() => f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options()));
-        // 1,024 appends necessarily fill the capacity even if preparation also published events.
-        for (var i = 0; i < 1024; i++)
-            await f.Keep(() => f.Runtime.AppendSessionEventAsync(f.Session, f.Update(AgentSessionUpdateKind.Warning)));
+        var fillers = new AgentEvent[BoundedRuntimeEventStream<SessionRuntimeEvent>.DefaultCapacity];
+        // Fill the real stream through provider publication, not 1,024 durable journal appends.
+        // Fence each callback's actor projection before the next; a burst exceeding mailbox capacity
+        // could resume its waiting writers out of order. This query does not join independent effects.
+        for (var i = 0; i < fillers.Length; i++)
+        {
+            fillers[i] = f.Update(AgentSessionUpdateKind.Warning);
+            f.Provider.Latest.Emit(fillers[i]);
+            await f.Keep(() => f.Runtime.GetCurrentStateAsync(f.Session.SessionId));
+        }
         var droppedBefore = f.Runtime.DroppedRuntimeEventCount;
+        await f.AssertDirty(f.Work, false);
         var original = f.Update(AgentSessionUpdateKind.DiffUpdated);
         f.Provider.Latest.Emit(original);
-        await f.CloseRuntime();
-        Assert.IsTrue(f.Runtime.DroppedRuntimeEventCount > droppedBefore);
+        await f.CloseRuntime(); // Join the retained cache effect, not just the actor projection.
+        Assert.AreEqual(droppedBefore + 1, f.Runtime.DroppedRuntimeEventCount);
         await f.AssertDirty(f.Work, true);
-        Assert.IsFalse((await f.ReadClosedOriginals()).OfType<SessionAgentEvent>().Any(e => ReferenceEquals(original, e.Event)));
+        var retained = await f.ReadClosedOriginals();
+        Assert.HasCount(fillers.Length, retained);
+        var warnings = retained.OfType<SessionAgentEvent>()
+            .Where(e => e.Event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Warning }).ToArray();
+        Assert.IsNotEmpty(warnings);
+        for (var i = 0; i < warnings.Length; i++) Assert.AreSame(fillers[i], warnings[i].Event);
+        Assert.IsFalse(retained.OfType<SessionAgentEvent>().Any(e => ReferenceEquals(original, e.Event)));
     });
 
     [TestMethod]
