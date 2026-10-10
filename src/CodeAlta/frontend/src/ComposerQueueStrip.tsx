@@ -89,7 +89,8 @@ function QueueRow({ item, owner, disabled, running, retry, position, edit }: {
       {!steer && <Button size="small" variant="minimal" icon={<AppIcon name="edit" size={14} />} aria-label={t("Edit queued prompt")}
         title={t("Edit queued prompt")} disabled={!editable} onClick={edit} />}
       {!steer && <Button size="small" variant="minimal" icon={<AppIcon name="steer" size={14} />} aria-label={t("Steer now")}
-        title={t(running ? "Send now to the running turn as steering" : "Steering needs a running turn")}
+        title={t(images > 0 ? "Prompts with images wait for the next turn; steering accepts text only"
+          : running ? "Send now to the running turn as steering" : "Steering needs a running turn")}
         disabled={!editable || item.state !== "waiting" || !running || images > 0 || !item.text.trim()} onClick={() => owner.steerNow(item)} />}
       {(item.state === "uncertain" || item.state === "failed") && <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />}
         aria-label={t("Try again")} title={t("Try again")} disabled={disabled} onClick={() => retry(item)} />}

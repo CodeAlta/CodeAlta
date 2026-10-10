@@ -855,7 +855,9 @@ refuses because the session started working puts the prompt in the queue instead
 steering row reads **Steer pending** until its message appears in the timeline or its turn ends;
 deleting it then only removes the row, since the agent may already hold it. Steering that cannot
 reach the turn becomes the first queued prompt, and a prompt with images is queued rather than
-steered. The Send button is a split button: its caret chooses **Send now** or **Enqueue until
+steered. An image-bearing queued row's disabled **Steer now** tooltip explains that steering
+accepts text only and its prompt waits for the next turn, even while a turn is running.
+The Send button is a split button: its caret chooses **Send now** or **Enqueue until
 idle**, which queues every prompt. A request the host did not confirm keeps its key and offers
 **Try again**; nothing is sent twice or retried by itself. The rows are app memory only, not kept
 across reloads. A Send that is not accepted for another reason leaves the prompt in the composer

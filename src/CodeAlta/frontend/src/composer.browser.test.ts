@@ -117,6 +117,24 @@ test("a prompt sent while the session works is queued or steers, and is never re
     assert.deepEqual(JSON.parse(await evaluate("JSON.stringify([...document.querySelectorAll('.composer-queue-position')].map(mark=>mark.textContent))")), ["1", "2"]);
     assert.equal(await evaluate(`!!document.querySelector('.composer-toolbar [aria-label="Steer the running turn"]') && !!document.querySelector('.composer-toolbar [aria-label="Enqueue for the next turn"]')`), true);
 
+    // Images explain a disabled Steer now even while text-only prompts can steer the same running turn.
+    for (const text of ["look at this image", ""]) {
+      await evaluate(`fixture.enqueueWithImage(${JSON.stringify(text)})`);
+      const imageRow = row(text || "Prompt");
+      const imageSteer = `${imageRow}.querySelector('[aria-label="Steer now"]')`;
+      assert.equal(await wait(`!!${imageRow} && ${imageSteer}.disabled`), true);
+      assert.equal(await evaluate(`${imageSteer}.title`), "Prompts with images wait for the next turn; steering accepts text only");
+      assert.equal(await evaluate(`${imageRow}.querySelector('.composer-queue-images').textContent`), "1");
+      await evaluate(`${imageSteer}.click()`);
+      assert.deepEqual(await steers(), [], "a disabled action must not send text without its image");
+      assert.deepEqual(await sends(), ["first"]);
+      await evaluate(`${imageRow}.querySelector('.composer-queue-delete').click()`);
+      assert.equal(await wait("fixture.rows().length===2"), true);
+    }
+    const textSteer = `${row("second")}.querySelector('[aria-label="Steer now"]')`;
+    assert.equal(await evaluate(`${textSteer}.disabled`), false);
+    assert.equal(await evaluate(`${textSteer}.title`), "Send now to the running turn as steering");
+
     // The repeat count, by its stepper and by a typed number.
     await evaluate(`${row("second")}.querySelector('[aria-label="Increase repeat count"]').click()`);
     assert.equal(await wait(`fixture.rows()[0]==='Queue:waiting:2:second'`), true);

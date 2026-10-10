@@ -45,6 +45,7 @@ export const messages = dictionary({
   "Steer now": ["Orientar ahora", "Orienter maintenant", "Jetzt steuern", "今すぐ誘導", "立即引导"],
   "Send now to the running turn as steering": ["Enviar ahora al turno en curso como orientación", "Envoyer maintenant au tour en cours comme guidage", "Jetzt als Steuerung an den laufenden Durchgang senden", "実行中のターンへ誘導として今すぐ送信", "立即作为引导发送到正在运行的回合"],
   "Steering needs a running turn": ["La orientación necesita un turno en curso", "Le guidage nécessite un tour en cours", "Steuerung benötigt einen laufenden Durchgang", "誘導には実行中のターンが必要です", "引导需要正在运行的回合"],
+  "Prompts with images wait for the next turn; steering accepts text only": ["Los prompts con imágenes esperan al siguiente turno; la orientación solo acepta texto", "Les prompts avec des images attendent le prochain tour ; le guidage accepte uniquement du texte", "Prompts mit Bildern warten auf den nächsten Durchgang; Steuerung unterstützt nur Text", "画像付きプロンプトは次のターンを待ちます。誘導はテキストのみ対応しています", "带图片的提示词会等待下一回合；引导仅接受文本"],
   "Try again": ["Reintentar", "Réessayer", "Erneut versuchen", "再試行", "重试"],
   "Delete steering prompt": ["Eliminar prompt de orientación", "Supprimer le prompt de guidage", "Steuerungs-Prompt löschen", "誘導プロンプトを削除", "删除引导提示词"],
   "Delete queued prompt": ["Eliminar prompt en cola", "Supprimer le prompt en file", "Eingereihten Prompt löschen", "キューのプロンプトを削除", "删除排队的提示词"],

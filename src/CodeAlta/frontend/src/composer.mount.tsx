@@ -64,6 +64,9 @@ const fixture = {
   /** What the timeline would echo for the prompts sent from this window. */
   echoes: () => submissions.outgoing(epoch, sessionId).map(echo => `${echo.state}:${echo.text}`),
   rows: () => queue.composer.list(epoch, sessionId).map(item => `${item.kind}:${item.state}:${item.count}:${item.text}`),
+  enqueueWithImage(text: string) {
+    queue.composer.add("Queue", epoch, sessionId, text, [{ title: "Image 1", mediaType: "image/png", base64: "AAAA" }]);
+  },
 };
 Object.assign(window, { fixture });
 

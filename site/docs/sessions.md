@@ -44,6 +44,8 @@ Queued prompts can be:
 
 Use `Ctrl+Enter` with an empty draft to steer the first queued prompt immediately when queued work exists.
 
+In Desktop, steering accepts text only. Prompts with pasted images stay in the queue for the next turn, with their attachments intact. Their **Steer now** button is disabled; its tooltip explains why. To adjust the running turn now, send a separate text-only steering prompt.
+
 ## Steering
 
 Steering lets you adjust a running turn without waiting for completion.
