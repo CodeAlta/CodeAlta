@@ -186,6 +186,7 @@ test("alta.host checks what a script passes and does what the window serves, and
     openFile: (path, line, scope) => calls.push(["file", path, line, scope]), openDiff: id => calls.push(["diff", id]), openSession: id => calls.push(["session", id]),
     openCanvas: request => calls.push(["canvas", request]), openLink: url => calls.push(["link", url]), notify: (message, tone) => calls.push(["notify", message, tone]),
     runCommand: name => calls.push(["command", name]), setTitle: title => calls.push(["title", title]), setStatus: status => calls.push(["status", status]), setBadge: badge => calls.push(["badge", badge]),
+    openDocumentation: (page, anchor) => calls.push(["documentation", page, anchor]),
   };
   const { alta } = make(bridge);
   alta.host.openFile("src/a.cs", { line: 12 }); alta.host.openFile("src/b.cs"); alta.host.openFile(""); alta.host.openFile("x", { line: -3 });
@@ -196,6 +197,9 @@ test("alta.host checks what a script passes and does what the window serves, and
   alta.host.notify("hello"); alta.host.notify("careful", { tone: "warning" }); alta.host.notify("x", { tone: "bad" as never }); alta.host.notify("");
   alta.host.runCommand("refresh"); alta.host.runCommand("");
   alta.host.setTitle("Board"); alta.host.setTitle(null); alta.host.setStatus("3 left"); alta.host.setBadge(7); alta.host.setBadge("new"); alta.host.setBadge(null); alta.host.setBadge(Number.NaN);
+  // The user guide: a page is named as the guide lists it, and what is no such name opens the guide where the reader was.
+  alta.host.openDocumentation(); alta.host.openDocumentation("plugins/statistics.md", { anchor: "open-the-statistics" }); alta.host.openDocumentation("sessions.md", { anchor: "a b" });
+  alta.host.openDocumentation("../secret.md", { anchor: "x" }); alta.host.openDocumentation("C:/guide/sessions.md"); alta.host.openDocumentation("file:///sessions.md"); alta.host.openDocumentation(7 as never);
   assert.deepEqual(calls, [
     ["file", "src/a.cs", 12, { projectId: "p1", sessionId: "s1" }], ["file", "src/b.cs", null, { projectId: "p1", sessionId: "s1" }], ["file", "x", null, { projectId: "p1", sessionId: "s1" }],
     ["diff", "p1"], ["diff", "p2"], ["session", "s9"],
@@ -203,10 +207,12 @@ test("alta.host checks what a script passes and does what the window serves, and
     ["canvas", { pluginKey: "plugin:x", canvasId: "other", projectId: "p3", sessionId: "s1", key: "k2" }],
     ["link", "https://example.com/x"], ["notify", "hello", "info"], ["notify", "careful", "warning"], ["notify", "x", "info"], ["command", "refresh"],
     ["title", "Board"], ["title", null], ["status", "3 left"], ["badge", "7"], ["badge", "new"], ["badge", null],
+    ["documentation", null, null], ["documentation", "plugins/statistics.md", "open-the-statistics"], ["documentation", "sessions.md", null],
+    ["documentation", null, null], ["documentation", null, null], ["documentation", null, null], ["documentation", null, null],
   ]);
   // A window that serves nothing: every request does nothing and nothing throws.
   const { alta: bare } = make({});
-  assert.doesNotThrow(() => { bare.host.openFile("a"); bare.host.openSession("s"); bare.host.notify("m"); bare.host.setBadge(1); bare.host.openCanvas("board"); });
+  assert.doesNotThrow(() => { bare.host.openFile("a"); bare.host.openSession("s"); bare.host.notify("m"); bare.host.setBadge(1); bare.host.openCanvas("board"); bare.host.openDocumentation("sessions.md"); });
 });
 
 test("alta.html cleans a string through the sanitizer of the window, and alta.rpc says it is not available outside a canvas", async () => {

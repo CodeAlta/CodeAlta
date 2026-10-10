@@ -83,7 +83,8 @@ test("the script of plugin HTML: a component drawn in the tree, a mount on the f
     assert.deepEqual(await evaluate<string[]>("scriptFixture.drain()"), [
       "link:{\"address\":\"src/a.cs:12\",\"scope\":{\"projectId\":\"p1\",\"sessionId\":\"s1\"}}", "open-session:\"s-1\"", "run-named:{\"name\":\"refresh\",\"pluginKey\":\"plugin:k\"}",
       "bridge-canvas:{\"pluginKey\":\"plugin:k\",\"canvasId\":\"other\",\"projectId\":\"p1\",\"sessionId\":\"s1\",\"key\":null}", "bridge-changes:\"p1\"",
-      "link:{\"address\":\"https://example.com/x\",\"scope\":null}", "tab-badge:\"3\"", "tab-title:\"Mine\""]);
+      "link:{\"address\":\"https://example.com/x\",\"scope\":null}", "tab-badge:\"3\"", "tab-title:\"Mine\"",
+      "bridge-documentation:{\"page\":\"sessions.md\",\"anchor\":\"queue\"}"]);
     await evaluate("document.querySelector('.board-html').click()");
     assert.equal(await evaluate("!!document.querySelector('.alta-injected')"), true);
     assert.equal(await evaluate("document.querySelector('.board img, .board script')"), null, "an image with a handler and a script are not inserted");

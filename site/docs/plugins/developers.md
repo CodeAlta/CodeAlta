@@ -320,7 +320,7 @@ or `export async function mount(root, alta)`, which fills the element that holds
 | `alta.context` | The plugin, the canvas, the project, the session, the key, and the `input` the canvas was opened with |
 | `alta.visible` | Whether the content is shown, with an event. A script pauses its timers and reads while it is not |
 | `alta.closed` | An `AbortSignal` that aborts when the content goes away: the tab closed, the plugin reloaded |
-| `alta.host` | Opens a file in the code editor at a line, the changes of a project, a session, another canvas or a web page; shows a notice; runs a command of the plugin; sets the title, the status and the mark of the tab |
+| `alta.host` | Opens a file in the code editor at a line, the changes of a project, a session, another canvas, this guide or a web page; shows a notice; runs a command of the plugin; sets the title, the status and the mark of the tab |
 | `alta.theme` | The colors of the window as values, with an event, for what a script paints itself |
 | `alta.html(text)` | Cleans a string of HTML as fragments are cleaned. Use it to put a string in the page, never `innerHTML` alone |
 | `alta.rpc` | Calls, streams and events of your own C# handlers (below). Only the script of a canvas has it |

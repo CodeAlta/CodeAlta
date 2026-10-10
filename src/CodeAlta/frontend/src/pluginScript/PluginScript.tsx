@@ -73,6 +73,7 @@ function useHostBridge(pluginKey: string | null, pane: Partial<PluginPane> | und
     openSession: sessionId => latest.current.sessions?.open(sessionId),
     openDiff: projectId => latest.current.shell?.showChanges(projectId),
     openCanvas: request => latest.current.shell?.openCanvas(request),
+    openDocumentation: (page, anchor) => latest.current.shell?.openDocumentation(page, anchor),
     notify: (message, tone) => showToast({ message, intent: tone === "info" ? "primary" : tone, timeout: 6000 }),
     runCommand: name => latest.current.ui.runNamed(name, latest.current.pluginKey, latest.current.pane),
     setTitle: title => latest.current.tab?.setTitle(title),

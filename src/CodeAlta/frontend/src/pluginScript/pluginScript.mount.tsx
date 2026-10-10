@@ -36,7 +36,7 @@ const modules: Record<string, () => unknown> = {
     }, [visible]);
     return html`<div class="board" data-visible=${String(visible)} data-count=${String(count > 3)}>
       <b class="board-title">Board ${alta.context.canvasId}</b>
-      <button class="board-open" onClick=${() => { alta.host.openFile("src/a.cs", { line: 12 }); alta.host.openSession("s-1"); alta.host.runCommand("refresh"); alta.host.openCanvas("other"); alta.host.openDiff(); alta.host.openLink("https://example.com/x"); alta.host.setBadge(3); alta.host.setTitle("Mine"); }}>Go</button>
+      <button class="board-open" onClick=${() => { alta.host.openFile("src/a.cs", { line: 12 }); alta.host.openSession("s-1"); alta.host.runCommand("refresh"); alta.host.openCanvas("other"); alta.host.openDiff(); alta.host.openLink("https://example.com/x"); alta.host.setBadge(3); alta.host.setTitle("Mine"); alta.host.openDocumentation("sessions.md", { anchor: "queue" }); }}>Go</button>
       <button class="board-html" onClick=${(event: { currentTarget: HTMLElement }) => { event.currentTarget.parentElement!.insertAdjacentHTML("beforeend", alta.html("<i class=\"alta-injected\">x</i><img src=x onerror=\"window.__pwned = 1\"><script>window.__pwned = 2</script>")); }}>Html</button>
     </div>`;
   } }),
@@ -68,7 +68,8 @@ const load: ScriptLoader = async path => {
   return make();
 };
 
-const bridge = { openCanvas: (request: unknown) => note("bridge-canvas", request), showChanges: (projectId: string | null) => note("bridge-changes", projectId) };
+const bridge = { openCanvas: (request: unknown) => note("bridge-canvas", request), showChanges: (projectId: string | null) => note("bridge-changes", projectId),
+  openDocumentation: (page: string | null, anchor: string | null) => note("bridge-documentation", { page, anchor }) };
 const ui = { epoch: null, projectId: null, contributions: noPluginContributions, run: () => { }, runNamed: (name: string, pluginKey: string | null) => note("run-named", { name, pluginKey }) };
 const sessions = { title: (id: string) => `Session ${id}`, open: (id: string) => note("open-session", id) };
 

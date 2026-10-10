@@ -32,6 +32,11 @@ export type AltaHost = Readonly<{
   openSession(sessionId: string): void;
   /** Opens a canvas, of this plugin unless `pluginKey` names another one. */
   openCanvas(canvasId: string, options?: Readonly<{ pluginKey?: string; projectId?: string; sessionId?: string; key?: string }>): void;
+  /**
+   * Opens the user guide of CodeAlta in its tab: at a page (its path below the guide, such as `getting-started.md` or
+   * `plugins/statistics.md`) and a heading of it, or where the reader was when no page is named.
+   */
+  openDocumentation(page?: string, options?: Readonly<{ anchor?: string }>): void;
   /** Opens a page of the web (http or https) in the system browser. */
   openLink(url: string): void;
   /** Shows a message of the window. */
@@ -89,6 +94,7 @@ export type AltaHostBridge = Readonly<Partial<{
   openDiff: (projectId: string | null) => void;
   openSession: (sessionId: string) => void;
   openCanvas: (request: Readonly<{ pluginKey: string; canvasId: string; projectId: string | null; sessionId: string | null; key: string | null }>) => void;
+  openDocumentation: (page: string | null, anchor: string | null) => void;
   openLink: (url: string) => void;
   notify: (message: string, tone: "info" | "success" | "warning" | "danger") => void;
   runCommand: (name: string) => void;
@@ -197,6 +203,12 @@ export function createAlta(options: AltaOptions): AltaHandle {
       if (!id || !/^[A-Za-z0-9._-]{1,64}$/u.test(id)) return;
       host.openCanvas?.({ pluginKey: textOf(place?.pluginKey, 512) ?? context.pluginKey, canvasId: id,
         projectId: textOf(place?.projectId, 256) ?? context.projectId, sessionId: textOf(place?.sessionId, 128) ?? context.sessionId, key: textOf(place?.key, 128) });
+    },
+    openDocumentation(page, place) {
+      // A page is named as the guide lists it; what is no such name opens the guide where the reader was. The window looks the page up among the pages of the guide.
+      const path = textOf(page, 200), anchor = textOf(place?.anchor, 200);
+      const named = path && /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*\.md$/u.test(path) ? path : null;
+      host.openDocumentation?.(named, named && anchor && /^[\p{L}\p{N}_-]+$/u.test(anchor) ? anchor : null);
     },
     openLink(url) { if (typeof url === "string" && safeMarkdownHref(url)) host.openLink?.(url); },
     notify(message, place) {

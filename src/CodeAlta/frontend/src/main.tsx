@@ -1145,6 +1145,7 @@ function App() {
       const project = projectId ? (catalog.current ?? currentSnapshot.current)?.projects.find(candidate => candidate.id === projectId && !candidate.archived) : undefined;
       if (project) showChangesLatest.current({ id: project.id, path: project.path });
     },
+    openDocumentation: (page, anchor) => openDocumentationLatest.current(page, anchor),
   }), [canvasHub]);
   useEffect(() => {
     if (!tabsReady) return;

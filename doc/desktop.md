@@ -1496,7 +1496,7 @@ The landing page is the start page of the window: a tab titled **Welcome**. It i
 
 ## Documentation
 
-The window shows the user guide that ships beside the application (`content/user-guide/`, the pages of `site/docs`) in a tab: `view: "documentation"` in `fileTabs`, one tab of no project, kept and restored with the other tabs. It opens from the book icon of the title bar (`.window-actions`), from the command **Documentation** (`/documentation`), from `alta documentation open`, and from a link of a message to a page of the guide.
+The window shows the user guide that ships beside the application (`content/user-guide/`, the pages of `site/docs`) in a tab: `view: "documentation"` in `fileTabs`, one tab of no project, kept and restored with the other tabs. It opens from the book icon of the title bar (`.window-actions`), from the command **Documentation** (`/documentation`), from `alta documentation open`, from a link of a message to a page of the guide, and from the script of a plugin (`alta.host.openDocumentation(page, { anchor })`, served by `PluginHostBridge.openDocumentation`: the command is one of the window, which the commands of plugins do not list).
 
 **The guide.** `ShippedDocumentation` (`CodeAlta.Catalog/Documentation`) is the only reader of the folder.
 
