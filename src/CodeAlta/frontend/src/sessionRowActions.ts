@@ -1,7 +1,7 @@
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 
 export type SessionMenuTarget = { id: string; projectId: string | null; hostEpoch: string | null };
-export type SessionAction = "open" | "rename" | "delete";
+export type SessionAction = "open" | "rename" | "delete" | "remote-control";
 
 export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTarget, selectedId: string | null,
   selectedProjectId: string | null, project: WorkspaceProject | undefined, hostEpoch: string | null,
@@ -14,7 +14,8 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
     : row.scopeKind === "project" && row.projectId === selectedProjectId && !!project && !project.archived
       && project.id === selectedProjectId && row.workspacePath === project.path;
   const mutate = open && exactScope && owned && !!hostEpoch && canMutate && !busy && !uncertain;
-  return { open, rename: mutate, delete: mutate };
+  // Remote Control acts on the session's provider: the same authority as a change of the session.
+  return { open, rename: mutate, delete: mutate, "remote-control": mutate };
 }
 
 export function isSessionContextKey(key: string, shiftKey: boolean, composing: boolean, editing: boolean) {
