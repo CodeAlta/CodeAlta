@@ -607,6 +607,25 @@ alta landing open [--space <space>]
 
 The group exists where `alta canvas` does (a host that registers `IAltaCanvasView`); the terminal UI and the standalone tool do not have it. `landing` is a reserved root on every host.
 
+## Documentation commands
+
+`alta documentation` reads the user guide that ships with the application (`content/user-guide/`, see "Documentation" in `doc/desktop.md`), and shows a page of it to the user.
+
+```text
+alta documentation list
+alta documentation read [<page>] [--offset <characters>] [--limit <characters>]
+alta documentation search <text>
+alta documentation open [<page>] [--anchor <heading>]
+```
+
+- **Pages.** `<page>` is the path of a page below the folder of the guide, with forward slashes, as `list` prints it: `getting-started.md`, `plugins/statistics.md`. Its case does not matter, a backslash is read as a slash, and the full path of a file of the guide names its page too. Anything else is `documentation.notFound`: only what the folder of the guide lists is read (`ShippedDocumentation`), never a path that leaves it, a link of the file system or an address.
+- **`list`** prints one `alta.documentation.page` per page (`page`, `title`, `depth`, `parent`, `menu`), in the order of the `menu.yml` of the guide, then the pages the menu does not name (`menu: false`), and an `alta.documentation.summary` with `count`, `root` (the folder of the guide) and `home`.
+- **`read`** prints an `alta.documentation.content` with the page as Markdown: the templates of the site are replaced, a picture is an image below `root` followed by its caption, and a link to another page names it from the folder of the guide. `file` is the full path of the page. A page comes in parts of 24,000 characters (`--limit`, 48,000 at most), each ending with a line: `truncated` and `nextOffset` say when to read on with `--offset`. Without `<page>` it reads the first page.
+- **`search`** prints one `alta.documentation.hit` per place (`page`, `title`, `heading`, `text`) and an `alta.documentation.hitSummary`. The text is two to a hundred characters, whatever its case.
+- **`open`** asks the window for the Documentation tab at the page, and at the heading `--anchor` names (its address as a link writes it after `#`: letters, digits, dashes and underscores). Without `<page>` the tab opens where it was. It prints an `alta.documentation.opened`; without a window the answer is `view.unavailable`.
+
+The commands change nothing: all four are read commands, and `list`, `read` and `search` need neither the runtime nor a window. The group exists where a host registers the guide (`ShippedDocumentation`), and `open` where it also registers a view (`IAltaDocumentationView`): both are the desktop host's. A host that registers a folder without a guide answers `documentation.unavailable`.
+
 ## Appearance commands
 
 `alta appearance` reads how a session is shown in the CodeAlta Desktop window, and changes the view of one
@@ -889,7 +908,7 @@ Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPl
 
 Plugins add live-tool commands by returning `PluginAltaCommandContribution` records from `PluginBase.GetAltaCommands()`. Each contribution declares a root/path, policy flags, ordering, and a factory that creates a fresh unattached `XenoAtom.CommandLine.CommandNode`.
 
-The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas` and `landing`. A root is reserved on every host, also where the host has no such command (`alta canvas` and `alta landing` are commands of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
+The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas`, `landing` and `documentation`. A root is reserved on every host, also where the host has no such command (`alta canvas`, `alta landing` and `alta documentation` are commands of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
 
 Plugin command policy flags describe whether a command mutates state, is disruptive, requires the in-process runtime, or supports catalog-only context. Mutating plugin-originated commands include plugin provenance for audit and timeline reconstruction.
 

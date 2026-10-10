@@ -156,6 +156,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateLandingCommand(context.Invocation);
         }
 
+        // The user guide, in a host that ships it.
+        if (context.Invocation.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null)
+        {
+            yield return CreateDocumentationCommand(context.Invocation);
+        }
+
         // And for the terminals.
         if (context.Invocation.Services.Get<IAltaTerminals>() is not null)
         {
@@ -208,7 +214,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var appearance = context.Services.Get<IAltaAppearance>() is not null;
         var spaces = context.Services.Get<SpaceCatalog>() is not null;
         var canvases = context.Services.Get<IAltaCanvasView>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && !spaces && !canvases && workshop is null) return Policies;
+        var documentation = context.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && !spaces && !canvases && !documentation && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
@@ -221,6 +228,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (editor) policies.Add(EditorOpenPolicy);
         if (canvases) policies.AddRange(CanvasPolicies);
         if (canvases) policies.AddRange(LandingPolicies);
+        if (documentation) policies.AddRange(DocumentationPolicies);
+        if (documentation && context.Services.Get<IAltaDocumentationView>() is not null) policies.Add(DocumentationOpenPolicy);
         if (terminals) policies.AddRange(TerminalPolicies);
         if (automations) policies.AddRange(AutomationPolicies);
         return policies;

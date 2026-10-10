@@ -9,7 +9,7 @@ import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { SessionWaitingBadge } from "./WaitingBadge";
 import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isCanvasTab, isCanvasesTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
@@ -67,6 +67,7 @@ export function FileTabLabel({ tab, project, dirty, terminal, status }: {
   if (isWorkItemsTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Work items")}>{t("Work items")}</span></span>;
   if (isIssuesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Issues")}>{t("Issues")}</span></span>;
   if (isCanvasesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Canvases")}>{t("Canvases")}</span></span>;
+  if (isDocumentationTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Documentation")}>{t("Documentation")}</span></span>;
   if (isCanvasTab(tab)) {
     // The title the plugin gave, with the project when the canvas is about one; the status beside it.
     const title = tab.name ?? t("Canvas"), about = tab.projectId ? project : "";
@@ -152,6 +153,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     if (isWorkItemsTab(file)) return t("Work items");
     if (isIssuesTab(file)) return t("Issues");
     if (isCanvasesTab(file)) return t("Canvases");
+    if (isDocumentationTab(file)) return t("Documentation");
     if (isCanvasTab(file)) return `${file.name ?? t("Canvas")}${file.projectId ? ` · ${projectName(file)}` : ""}`;
     if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : isPluginTab(file) ? "Plugin" : isSkillTab(file) ? "Skill" : "Editor")} · ${projectName(file)}`;
     const shown = shownTerminal(file);
@@ -267,6 +269,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
             : isWorkItemsTab(file) ? { icon: "task" as const, tone: "teal" }
             : isIssuesTab(file) ? { icon: "issueOpen" as const, tone: "green" }
             : isCanvasesTab(file) ? { icon: "canvases" as const, tone: "purple" }
+            : isDocumentationTab(file) ? { icon: "documentation" as const, tone: "azure" }
             : isPluginTab(file) ? { icon: "plugin" as const, tone: "purple" }
             : isSkillTab(file) ? { icon: "skill" as const, tone: "teal" } : { icon: "code" as const, tone: "azure" };
           // A terminal whose shell runs a command shows it where its icon is.

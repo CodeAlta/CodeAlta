@@ -4,7 +4,7 @@ import type { WorkspaceDirectoryCompletionRequest, WorkspaceDirectoryCompletionR
 import { workspace as fixtureWorkspace } from "./settingsShell.neoastra.mount";
 export * from "./settingsShell.neoastra.mount";
 // Optional shell/settings services remain unavailable, as in the browser demo.
-export { neoRpcContractHash, startupConfig, gitIssues, pluginUi, canvases, agentPrompts, mcpServers, plugins, skills,
+export { neoRpcContractHash, startupConfig, gitIssues, pluginUi, canvases, documentation, agentPrompts, mcpServers, plugins, skills,
   globalConfig, providerLogin, providerUsage, appUpdate, reminder, colorSchemes, terminals, automations, workItems, issues, pullRequestPrompts, worktrees, mcpHost, markdownLinks, settingsFiles, spaces } from "./demo-api";
 import { desktopShell as demoShell } from "./demo-api";
 

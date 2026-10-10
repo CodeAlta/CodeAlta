@@ -363,3 +363,4 @@ artifact-lifetime limitations, not a sandbox or cross-process transaction bounda
 - Update public docs, internal docs, and website pages when behavior changes.
 - Internal docs must describe current implementation. Move completed plans or superseded drafts out of tracked docs rather than leaving them as active references.
 - Keep `doc/readme.md` as the top-down navigation entry point and link detailed implementation docs from it.
+- The pages of `site/docs` ship with the applications and are shown by CodeAlta Desktop (see "Documentation" in `doc/desktop.md`). A page that is added goes in the `menu.yml` of its folder, and what a page uses of the site beyond Markdown (a template, a layout) must be read by `ShippedDocumentationMarkup`: `ShippedUserGuideTests` reads every shipped page and fails on a template that is left, a link to a page that does not ship, or a page the menu does not name.

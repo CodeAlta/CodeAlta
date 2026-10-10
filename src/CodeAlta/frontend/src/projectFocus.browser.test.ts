@@ -258,7 +258,7 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     };
     await search("/help");
     assert.equal(await wait(`document.querySelector('.global-search-row[aria-selected="true"] .global-search-slash')?.textContent==='/help'`), true);
-    assert.equal(await evaluate(`[...document.querySelectorAll('.global-search-categories button')].filter(button=>!button.disabled).map(button=>button.textContent).join()`), "Commands1");
+    assert.equal(await evaluate(`[...document.querySelectorAll('.global-search-categories button')].filter(button=>!button.disabled).map(button=>button.textContent).join()`), "Commands2", "/help first, then the user guide, which is found by the same word");
     await key("Enter", "Enter", 13);
     assert.equal(await wait("!document.querySelector('dialog.global-search') && !!document.querySelector('dialog.command-help-dialog[open]')"), true, "a command runs once the search has closed");
     await key("Escape", "Escape", 27);

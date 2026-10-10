@@ -184,6 +184,9 @@ export const pluginUi = Object.freeze({ contributions: unavailable, buttons: asy
 // The canvases are tabs of plugins, which a browser without the host does not run.
 export const canvases = Object.freeze({ list: async () => ({ status: "unavailable", canvases: [] }), open: unavailable, visible: unavailable, close: unavailable, closeSpace: unavailable,
   action: unavailable, describe: unavailable, watch: unavailable });
+// The user guide ships beside the application: a browser without the host has none to show.
+export const documentation = Object.freeze({ menu: async () => ({ status: "unavailable", home: null, items: [], pages: [], canAsk: false }), page: unavailable, image: unavailable,
+  search: unavailable, ask: unavailable, watch: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
 
 // The demo has no host configuration file: the editor reports itself unavailable.

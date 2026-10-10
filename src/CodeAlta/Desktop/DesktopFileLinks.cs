@@ -28,6 +28,12 @@ internal readonly partial record struct DesktopFileLink(string Path, int? Line, 
     /// <summary>The longest target that is read.</summary>
     internal const int MaximumLength = 2048;
 
+    /// <summary>
+    /// The fragment of the target when it names no place in the file: the heading of a document, as a link of
+    /// Markdown writes it (<c>#getting-started</c>). Null for none.
+    /// </summary>
+    internal string? Anchor { get; init; }
+
     /// <summary>Reads the target of a link; false for anything that is not a link to a file of this computer.</summary>
     internal static bool TryParse(string? target, out DesktopFileLink link)
     {
@@ -44,8 +50,9 @@ internal readonly partial record struct DesktopFileLink(string Path, int? Line, 
         var path = uri.LocalPath;
         if (path.Any(char.IsControl) || !System.IO.Path.IsPathFullyQualified(path) || NamesAnotherComputer(path)) return false;
         var (line, column) = uri.Fragment.Length > 1 ? Place(uri.Fragment.AsSpan(1)) : (null, null);
+        var anchor = line is null && uri.Fragment.Length > 1 ? HeadingAnchor(Uri.UnescapeDataString(uri.Fragment[1..])) : null;
         if (line is null) (path, line, column) = PlaceAfter(path);
-        link = new(path.Replace('/', System.IO.Path.DirectorySeparatorChar), line, column, IsAddress: true);
+        link = new(path.Replace('/', System.IO.Path.DirectorySeparatorChar), line, column, IsAddress: true) { Anchor = anchor };
         return true;
     }
 
@@ -57,6 +64,7 @@ internal readonly partial record struct DesktopFileLink(string Path, int? Line, 
         var path = Uri.UnescapeDataString(fragment < 0 ? target : target[..fragment]).Replace('\\', '/');
         if (path.Length == 0 || path.Any(char.IsControl) || NamesAnotherComputer(path)) return false;
         var (line, column) = fragment >= 0 ? Place(target.AsSpan(fragment + 1)) : (null, null);
+        var anchor = line is null && fragment >= 0 ? HeadingAnchor(target[(fragment + 1)..]) : null;
         if (line is null) (path, line, column) = PlaceAfter(path);
         // "/C:/folder/file", as an address without its scheme writes a path of Windows.
         if (OperatingSystem.IsWindows() && path.Length >= 3 && path[0] == '/' && char.IsAsciiLetter(path[1]) && path[2] == ':') path = path[1..];
@@ -71,9 +79,12 @@ internal readonly partial record struct DesktopFileLink(string Path, int? Line, 
         }
 
         if (path.Length == 0) return false;
-        link = new(path.Replace('/', System.IO.Path.DirectorySeparatorChar), line, column, IsAddress: false);
+        link = new(path.Replace('/', System.IO.Path.DirectorySeparatorChar), line, column, IsAddress: false) { Anchor = anchor };
         return true;
     }
+
+    // The address of a heading: letters, digits, dashes and underscores. Anything else names no heading.
+    private static string? HeadingAnchor(string fragment) => HeadingName().IsMatch(fragment) ? fragment : null;
 
     // "//server/share", "//?/C:/" and "//./device": the first names another computer, the others leave the rules of a path.
     private static bool NamesAnotherComputer(string path) => path.Length >= 2 && path[0] is '/' or '\\' && path[1] is '/' or '\\';
@@ -103,6 +114,9 @@ internal readonly partial record struct DesktopFileLink(string Path, int? Line, 
 
     [GeneratedRegex(@":(\d{1,7})(?::(\d{1,7}))?(?:-\d{1,7}(?::\d{1,7})?)?$", RegexOptions.CultureInvariant)]
     private static partial Regex PathPlace();
+
+    [GeneratedRegex(@"^[\p{L}\p{N}_-]{1,200}$", RegexOptions.CultureInvariant)]
+    private static partial Regex HeadingName();
 }
 
 /// <summary>
@@ -158,6 +172,12 @@ internal sealed class DesktopFileLinks
         (_projects, _folders, _view, _sessionFolder, _folder, _openDocument, _home) = (projects, folders, view, sessionFolder, folder, openDocument, home);
     }
 
+    /// <summary>
+    /// Shows a file that is a page of the user guide of the application in the Documentation tab, at a heading of
+    /// it: true when the file is such a page and the window was asked. Null where the guide is not shown.
+    /// </summary>
+    internal Func<string, string?, bool>? GuidePage { get; init; }
+
     /// <summary>Whether the system shows a file in a browser, by its name: an HTML page or a PDF.</summary>
     internal static bool IsDocument(string path)
         => Path.GetExtension(path).ToLowerInvariant() is ".html" or ".htm" or ".xhtml" or ".pdf";
@@ -194,6 +214,8 @@ internal sealed class DesktopFileLinks
 
         if (!isDirectory)
         {
+            // A page of the user guide is read in the Documentation tab, where its pictures and its links work.
+            if (GuidePage is { } guide && guide(full, link.Anchor)) return "ok";
             if (link.IsAddress && IsDocument(full)) return _openDocument(full) ? "ok" : "failed";
             if (!IsPicture(full) && await IsBinaryAsync(full, cancellationToken).ConfigureAwait(false)) return "binary";
         }

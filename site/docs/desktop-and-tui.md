@@ -64,6 +64,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Tool call details</th><td>{{ alta_yes }} <small>Live terminal, highlighted files and diffs</small></td><td>{{ alta_yes }} <small>Live text output</small></td></tr>
     <tr><th scope="row">Images pasted in a prompt or read by an agent</th><td>{{ alta_yes }} <small>Thumbnails and previews</small></td><td>{{ alta_part }} <small>In terminals that show images</small></td></tr>
     <tr><th scope="row">Statistics: the numbers of all your sessions as dashboards, with the <a href="{{site.basepath}}/docs/plugins/statistics/">Statistics plugin</a></th><td>{{ alta_yes }} <small>A page in a tab</small></td><td>{{ alta_part }} <small>The card of each turn</small></td></tr>
+    <tr><th scope="row">This guide in the app, with a search and a question for an agent</th><td>{{ alta_yes }} <small>A tab</small></td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">Notes of a session</th><td>{{ alta_yes }} <small>Movable window</small></td><td>{{ alta_yes }} <small>Sidebar panel</small></td></tr>
   </tbody>
   <tbody>

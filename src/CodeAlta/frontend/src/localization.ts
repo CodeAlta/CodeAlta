@@ -1,6 +1,7 @@
 import { landingMessages } from "./landing/messages";
 import { statisticsMessages } from "./statistics/messages";
 import { worktreeMessages } from "./worktrees/messages";
+import { documentationMessages } from "./documentation/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2290,6 +2291,7 @@ export const messages = dictionary({
   ...landingMessages,
   ...statisticsMessages,
   ...worktreeMessages,
+  ...documentationMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

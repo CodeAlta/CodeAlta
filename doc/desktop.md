@@ -1491,6 +1491,27 @@ The landing page is the start page of the window: a tab titled **Welcome**. It i
 
 `alta landing` is described in `doc/live-tool.md`.
 
+## Documentation
+
+The window shows the user guide that ships beside the application (`content/user-guide/`, the pages of `site/docs`) in a tab: `view: "documentation"` in `fileTabs`, one tab of no project, kept and restored with the other tabs. It opens from the book icon of the title bar (`.window-actions`), from the command **Documentation** (`/documentation`), from `alta documentation open`, and from a link of a message to a page of the guide.
+
+**The guide.** `ShippedDocumentation` (`CodeAlta.Catalog/Documentation`) is the only reader of the folder.
+
+- It lists the pages (`*.md`), the menus (`menu.yml`) and the pictures (`img/`) once, without following a link of the file system. A caller names a page by its path below the folder and a picture by its file name; a name that is not in the list is answered with nothing, whatever it is (a full path, `..`, a backslash, an address). A file that became a link, left the folder or grew past its limit after it was listed is not read either.
+- The navigation is the `menu.yml` of the site: each entry has a `path` and a `title` (the HTML of the site, whose words are the title and whose `bi-` class names the icon). `folder: true` on an entry says that the folder of its page has a `menu.yml` of its own, whose entries are its children. An entry without a shipped page is left out; a guide without a menu lists its pages by name.
+- A page is read as plain Markdown (`ShippedDocumentationMarkup`): the site runs templates over its pages, and the reader replaces the ones the pages use. `{{ alta_shot … }}` and a `<figure>` become a picture of their own, with the picture of this application, what it shows, its caption and its size (read from the header of the file); a figure whose picture the application does not ship is left out with its caption. `{{ alta_yes }}`, `{{ alta_part }}` and `{{ alta_no }}` become a mark. `{{site.basepath}}/docs/…` becomes the page it names. Every link to another page is written from the folder of the guide (`plugins/git.md#sign-in`), whatever the page that links to it, and a link to a heading of the same page names its page. The styles and the layout of the site are left out.
+
+**The page.** `documentation` (`DocumentationService`) serves `menu`, `page`, `image`, `search`, `ask` and `watch`. No path of the disk crosses the bridge.
+
+- `DocumentationPanel` draws a page as its parts: each text through `MarkdownContent`, the sanitizing boundary of the window, which is not changed for the guide; each picture as an `<img>` the panel writes, whose `data:` URL comes from `image` when the figure comes near the screen. A drawing of a page (an inline SVG of the site) is an image too, never markup.
+- A link is followed by the panel, not by the opener of the window: a target that is a page of the guide (looked up among the pages, never resolved against a folder) opens it; an address of the web goes to the system browser; any other target is not followed.
+- The headings get their addresses from their text once the page is drawn, as the site names them (lower case, a dash for each space), in a `data-doc-anchor` attribute: no `id` of the document is written. The outline lists the `h2` and `h3`.
+- `createDocumentationHub` is the window's: the tab keeps its page, its history and how far each page was read while it is closed. It reads the navigation once for a host and a page when the tab goes to it; an answer that comes after the tab moved on, or after the host changed, is dropped. A hidden tab reads nothing.
+
+**Ask an agent.** `ask` takes a question and, when it is about a page, the page. `DocumentationAsker` creates a chat (a session of no project) with the default provider of the user's configuration (`DesktopDefaultProvider`, as a new chat does) and no model, so the chat starts with the model its provider is configured with, and sends one prompt: the question, then where the guide is and how to answer (from the guide, shortly, with links to the pages). Nothing of the window decides the provider or the model, and nothing is saved. Everything is checked before the chat is created; the answers are `ok`, `no_provider`, `busy`, `closing`, `not_sent` and `failed`. One question is asked at a time, and none without the user sending it. The page then shows the chat.
+
+**Links of messages.** `DesktopFileLinks.GuidePage` shows a link to a file that is a page of the guide in the Documentation tab instead of the code editor, at the heading its fragment names (`DesktopFileLink.Anchor`, a fragment that is no place in the file).
+
 ## Buttons of plugins
 
 A plugin can put buttons in the window (see "Buttons" in [Plugins](plugins.md)). The page draws them with one `PluginButtons` component and reads them with `pluginUi.buttons`, which takes a place (or none for every place), the space the window shows, and the project and session to ask about, and answers with each button, its icon, what it does and the state the plugin gave it.

@@ -554,6 +554,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var pluginWorkshop = pluginAlta is null || options.ReviewOwnedCommandPermissions ? null : DesktopPlugins.Workshop(host.PluginRuntime, editorView);
                 // The tasks and the plans of the projects: files of each project, and the sessions of this instance that proposed or run them.
                 var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(worktreeConfig, host.CatalogOptions.StateRoot);
+                // The user guide that ships beside the application: the Documentation tab shows it, and agents read it.
+                var documentation = new CodeAlta.Catalog.Documentation.ShippedDocumentation(
+                    new CodeAlta.Orchestration.Runtime.SystemPrompts.FileSystemPromptContentLocator().GetRoots(new()).ShippedUserGuideRoot);
+                var documentationView = new DesktopDocumentationView();
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
@@ -566,7 +570,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
-                    canvases is null ? null : new DesktopAltaCanvases(canvases));
+                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView);
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
@@ -659,7 +663,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // file for the code editor. A relative path starts from the folder the session works in.
                     builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open, new DesktopFileLinks(host.ProjectCatalog, diskFolders, editorView,
                         (sessionId, token) => SessionFolderAsync(host, sessionId, token), projectFiles.RootAsync, DesktopLinks.Open,
-                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))));
+                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+                    {
+                        GuidePage = (file, anchor) => documentation.FindPage(file) is { } page && documentationView.Show(page, anchor),
+                    }));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     // The window of the worktrees also names the sessions that record each checkout, and opens the code editor on one.
                     builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch,
@@ -675,6 +682,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch, canvases);
                     builder.AddPluginUiService(pluginCommands);
                     builder.AddCanvasesService(canvases is null ? new CanvasesService() : new CanvasesService(canvases, epoch));
+                    builder.AddDocumentationService(new DocumentationService(documentation, epoch, documentationView, new DocumentationAsker(host, documentation), shell.NotifySessionsChanged));
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
@@ -838,6 +846,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSessionPluginEventsService(new SessionPluginEventsService());
             builder.AddPluginUiService(new PluginUiService());
             builder.AddCanvasesService(new CanvasesService());
+            builder.AddDocumentationService(new DocumentationService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddSettingsFilesService(new SettingsFilesService());
             builder.AddProjectGitService(new ProjectGitService());

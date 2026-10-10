@@ -723,6 +723,27 @@ Open it with `/mcp`, or `Ctrl+G Ctrl+Y` in the desktop app. See the [MCP plugin]
 
 {{ alta_shot "alta-desktop-mcp.webp" "alta-plugin-mcp.png" "MCP server configuration" "MCP servers are defined globally or per project, with a local command or an HTTP endpoint." }}
 
+## Documentation (desktop)
+
+CodeAlta Desktop ships this guide and shows it in a tab, so you can read it without a connection. Open it with the book icon at the top right of the window, or with `/documentation`.
+
+- The pages are listed on the left, in the order of the guide. **Plugins** opens with the pages of its folder.
+- The headings of the page are listed on the right. Click one to go to it.
+- **Search the guide** finds a text in every page and opens the page at the heading the text is under. Press `/` to go to the search.
+- A link to another page of the guide opens in the tab. A link to a website opens in your browser.
+- Click a picture to enlarge it, and press `Esc` to close it.
+- The arrows above the page, or `Alt+Left` and `Alt+Right`, go back and forward through the pages you read.
+
+The tab keeps its page when you close it. Like any other tab, it can be placed beside a session.
+
+### Ask an agent
+
+**Ask an agent**, above the page, sends a question about the page you read, or about the whole guide, to an agent. CodeAlta creates a chat with your default provider and its model, and shows it. The agent reads the guide and ends its answer with links to the pages it used. A link to a page of the guide opens that page in the Documentation tab.
+
+Nothing is sent to a model until you send a question.
+
+An agent can read the guide in any session with `alta documentation list`, `alta documentation search <text>` and `alta documentation read <page>`, and show you a page with `alta documentation open <page>`.
+
 ## Logs viewer
 
 {{ alta_shot "alta-desktop-logs.webp" "alta-logs.png" "Logs viewer with diagnostic output and search controls" "The logs viewer keeps startup, provider, credential, and plugin diagnostics available inside CodeAlta." }}

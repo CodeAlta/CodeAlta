@@ -19,7 +19,7 @@ import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, UpdateNotice } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
-  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus, type CanvasItem, canvases as canvasesApi, plugins as pluginsApi,
+  sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
@@ -46,7 +46,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, canvasTab, canvasesTab, isCanvasTab, isCanvasesTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, canvasTab, canvasesTab, documentationTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -212,6 +212,9 @@ import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
+import "./documentation/documentation.css";
+import { DocumentationPanel } from "./documentation/DocumentationPanel";
+import { createDocumentationHub } from "./documentation/documentationHub";
 import "./pluginButtons/pluginButtons.css";
 import { CanvasPanel } from "./canvases/CanvasPanel";
 import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/hostBridge";
@@ -1616,6 +1619,28 @@ function App() {
   // The automations belong to the application too: this window lists them and is told when they change.
   const [automationsHub] = useState(() => createAutomationsHub(automations));
   useEffect(() => terminalEpoch ? automationsHub.connect(terminalEpoch) : undefined, [automationsHub, terminalEpoch]);
+  // The user guide that ships with the application: its tab keeps its page while it is closed, and opens at the page
+  // a command, a link of a message or `alta documentation open` names.
+  const [documentationHub] = useState(() => createDocumentationHub(documentationApi));
+  useEffect(() => terminalEpoch ? documentationHub.connect(terminalEpoch) : undefined, [documentationHub, terminalEpoch]);
+  function openDocumentation(page: string | null = null, anchor: string | null = null) {
+    documentationHub.show(page, anchor);
+    openFile(documentationTab);
+  }
+  const openDocumentationLatest = useRef(openDocumentation); openDocumentationLatest.current = openDocumentation;
+  useEffect(() => {
+    if (!terminalEpoch) return;
+    const abort = new AbortController();
+    void (async () => {
+      try {
+        for await (const request of await documentationApi.watch({ expectedEpoch: terminalEpoch }, { signal: abort.signal })) {
+          if (abort.signal.aborted) return;
+          openDocumentationLatest.current(request.page, request.anchor);
+        }
+      } catch { /* The bridge is gone: the guide still opens from its icon. */ }
+    })();
+    return () => abort.abort();
+  }, [terminalEpoch]);
   const automationState = useSyncExternalStore(automationsHub.subscribe, automationsHub.getSnapshot);
   // An automation starts a session without the window asking: the sessions are read again when its runs change.
   const automationRuns = automationState.runs.map(run => `${run.id}:${run.status}:${run.sessionId ?? ""}`).join("|");
@@ -1939,7 +1964,7 @@ function App() {
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
-      case "automations": case "workItems": case "issues": case "canvases": return owned;
+      case "automations": case "workItems": case "issues": case "canvases": case "documentation": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
@@ -1983,6 +2008,7 @@ function App() {
       case "workItems": openWorkItems(); break;
       case "issues": openFile(issuesTab); break;
       case "canvases": openFile(canvasesTab); break;
+      case "documentation": openDocumentation(); break;
       case "newSpace": setSpaceDialog(true); break;
       case "goToSpace": setSpaceMenuRequest(value => value + 1); break;
       case "previousSpace": case "nextSpace":
@@ -2870,6 +2896,8 @@ function App() {
           <PluginButtons place="TitleBar" context={pluginButtonContext} />
           {spacesState.available && <SpaceSwitch spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} canEdit={owned} request={spaceMenuRequest}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onCreate={() => setSpaceDialog(true)} onOrganize={() => navigate("spaces")} />}
+          <Button variant="minimal" size="small" className="documentation-open" icon={<AppIcon name="documentation" size={16} />} disabled={!owned}
+            active={!!fileTabs.active && isDocumentationTab(fileTabs.active)} aria-label={t("Documentation")} title={t("Documentation")} onClick={() => openDocumentation()} />
           {shellPreferences && <WindowZoom zoom={shellPreferences.zoom} run={runCommand} />}
           <Button variant="minimal" size="small" className="theme-switch" icon={<AppIcon name={themeIcons[theme]} size={16} />}
             aria-label={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} title={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} onClick={() => setTheme(nextTheme(theme))} />
@@ -3112,6 +3140,10 @@ function App() {
               : isCanvasesTab(tab)
               ? <CanvasesPanel key={fileTabKey(tab)} hub={canvasHub} tabs={fileTabs.open} projects={canvasProjects} sessions={canvasSessions} selection={canvasSelection}
                 visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)} onOpen={openCanvas} onNew={owned && canvasSelection.project ? newCanvas : null} />
+              : isDocumentationTab(tab)
+              ? <DocumentationPanel key={fileTabKey(tab)} hub={documentationHub} visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)}
+                onOpenSession={id => void openAutomationSession(id)} onProviders={() => navigate("providers")}
+                onNotice={message => showToast({ message, intent: "warning", icon: "info-sign", timeout: 5000 })} />
               : isIssuesTab(tab)
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
