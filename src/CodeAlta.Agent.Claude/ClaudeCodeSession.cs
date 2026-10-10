@@ -1004,9 +1004,11 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
 {
     private const string Kind = "claude-code";
 
-    public static ClaudeCodeProviderState? Read(AgentSessionState state)
+    public static ClaudeCodeProviderState? Read(AgentSessionState state) => Read(state.ProviderState);
+
+    public static ClaudeCodeProviderState? Read(JsonElement? providerState)
     {
-        if (state.ProviderState is not { ValueKind: JsonValueKind.Object } element ||
+        if (providerState is not { ValueKind: JsonValueKind.Object } element ||
             !string.Equals(ClaudeCodeJson.GetString(element, "kind"), Kind, StringComparison.Ordinal) ||
             ClaudeCodeJson.GetString(element, "sessionId") is not { Length: > 0 } sessionId)
         {
