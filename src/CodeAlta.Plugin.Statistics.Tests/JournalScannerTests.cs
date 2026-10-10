@@ -251,6 +251,40 @@ public sealed class JournalScannerTests
     }
 
     [TestMethod]
+    [DataRow("\"src/source.c\\u002B\\u002B\"", "c++")]
+    [DataRow("\"C:\\\\code\\\\source.C\\u002B\\u002B\"", "c++")]
+    [DataRow("\"src/source\\u002E\\u0063\\u0073\"", "cs")]
+    [DataRow("\"src/no.ext\\u005Csource.CS\"", "cs")]
+    [DataRow("\"src/no.ext\\u002Fsource\"", "")]
+    [DataRow("\"src/\\u002Egitignore\"", "")]
+    [DataRow("\"src/source.abcdefghijklm\"", "")]
+    [DataRow("\"src/source.\\u00E9\"", "")]
+    [DataRow("\"src/source.\\uD800\"", "")]
+    [DataRow("\"src/source.\\uDC00\"", "")]
+    public void Scan_FileExtensionsUseDecodedJsonCharacters(string jsonPath, string expected)
+    {
+        var b = new JournalBuilder();
+        b.Add($"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Completed\",\"activityId\":\"t1\",\"name\":\"apply_patch\",\"details\":{{\"modifiedFiles\":[{jsonPath}]}},{b.Envelope(T0, "r")}");
+
+        var (result, sink) = Scan(b);
+
+        Assert.AreEqual(0, result.MalformedLines);
+        var tool = (ToolRecord)sink.Records.Single();
+        CollectionAssert.AreEqual(new[] { expected }, tool.ModifiedExtensions);
+    }
+
+    [TestMethod]
+    public void Scan_FileExtensionsDecodeLongPathsWithoutKeepingThePath()
+    {
+        var b = new JournalBuilder();
+        b.ToolDone(T0, "r", "t1", "apply_patch", modifiedFiles: ["C:\\" + new string('x', 600) + "\\source.c++"]);
+
+        var (_, sink) = Scan(b);
+
+        CollectionAssert.AreEqual(new[] { "c++" }, ((ToolRecord)sink.Records.Single()).ModifiedExtensions);
+    }
+
+    [TestMethod]
     public void Scan_ReadsPromptContent_AttachmentsAnswersAndSenders()
     {
         var b = new JournalBuilder();

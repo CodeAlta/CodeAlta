@@ -17,9 +17,9 @@ internal sealed class SessionFactsState
     /// told), keeps the title of a session short and without the paths it names, and leaves a time far from the others out of the
     /// duration of a run. Version 4 keeps no quoted text at the start of a shell command as its program unless it is called or
     /// written as a path, no number and no word longer than 32, no word with a digit as a command of alta, and a skill name only
-    /// when it is written as one.
+    /// when it is written as one. Version 5 decodes JSON escapes before counting changed-file extensions.
     /// </summary>
-    public const int CurrentVersion = 4;
+    public const int CurrentVersion = 5;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;

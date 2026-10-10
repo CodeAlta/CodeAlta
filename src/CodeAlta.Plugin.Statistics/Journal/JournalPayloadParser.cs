@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
@@ -190,7 +191,7 @@ internal sealed class JournalPayloadParser
                     {
                         if (reader.TokenType == JsonTokenType.String)
                         {
-                            (record.ModifiedExtensions ??= []).Add(ExtensionOf(reader.ValueSpan));
+                            (record.ModifiedExtensions ??= []).Add(ExtensionOf(ref reader));
                         }
                         else if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray && !reader.TrySkip())
                         {
@@ -1655,11 +1656,41 @@ internal sealed class JournalPayloadParser
         return AgentActivityKind.ToolCall;
     }
 
-    // The extension of a path as it is written in a JSON string (separators may be escaped), lower case, without the dot.
-    private string ExtensionOf(ReadOnlySpan<byte> rawPath)
+    // Decode JSON before looking for separators and the extension: an escaped '+' is part of .c++, not a separator.
+    // No string of the path is created or interned, and a pooled buffer is cleared before it is returned.
+    private string ExtensionOf(ref Utf8JsonReader reader)
     {
-        var lastSeparator = Math.Max(rawPath.LastIndexOf((byte)'/'), rawPath.LastIndexOf((byte)'\\'));
-        var name = rawPath[(lastSeparator + 1)..];
+        if (!reader.ValueIsEscaped) return ExtensionOf(reader.ValueSpan);
+
+        byte[]? rented = null;
+        var size = reader.ValueSpan.Length;
+        Span<byte> decoded = size <= 512 ? stackalloc byte[size] : (rented = ArrayPool<byte>.Shared.Rent(size));
+        try
+        {
+            int length;
+            try
+            {
+                length = reader.CopyString(decoded);
+            }
+            catch (InvalidOperationException)
+            {
+                // An unmatched escaped surrogate is no usable path, but the rest of the tool record can still be counted.
+                return string.Empty;
+            }
+
+            return ExtensionOf(decoded[..length]);
+        }
+        finally
+        {
+            if (rented is not null) ArrayPool<byte>.Shared.Return(rented, clearArray: true);
+        }
+    }
+
+    // The extension of a decoded path, lower case, without the dot.
+    private string ExtensionOf(ReadOnlySpan<byte> path)
+    {
+        var lastSeparator = Math.Max(path.LastIndexOf((byte)'/'), path.LastIndexOf((byte)'\\'));
+        var name = path[(lastSeparator + 1)..];
         var dot = name.LastIndexOf((byte)'.');
         if (dot <= 0 || dot == name.Length - 1 || name.Length - dot - 1 > 12)
         {
