@@ -330,6 +330,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var pluginUi = new DesktopPluginUi();
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
+            pluginUi.Modules = canvases?.Modules;
             // A configuration file that cannot be loaded is repaired in the window before anything reads it: the
             // host would fail on it. A missing file is created with the defaults.
             var configRecovery = new ConfigRecoveryService(options.CatalogRoot!, new TextFileCodec());
@@ -391,7 +392,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
             {
                 UserDataRoot = Path.Combine(options.DataRoot, "webview"),
-                CustomSchemes = [NeoCustomScheme.Application("app", new DesktopStartupResources(new NeoManifestResourceProvider(assets, manifest), startupStatus))],
+                CustomSchemes = [NeoCustomScheme.Application("app", new DesktopStartupResources(new NeoManifestResourceProvider(assets, manifest), startupStatus, canvases?.Modules))],
             });
             var environment = await creatingEnvironment;
             Mark("environment created");
@@ -646,7 +647,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);
                     builder.AddSessionNotesService(new SessionNotesService(host.WorkspaceReads, host.RuntimeService, epoch));
-                    builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime));
+                    builder.AddSessionPluginEventsService(new SessionPluginEventsService(host.WorkspaceReads, host.ProjectCatalog, epoch, host.PluginRuntime, canvases?.Modules));
                     // The code editor also opens on the folder of a skill that the Skills page names, and on the
                     // folder of a file that a link names when no project has it.
                     var diskFolders = new DiskFolders();

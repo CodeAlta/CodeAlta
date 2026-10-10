@@ -28,6 +28,9 @@ export type TimelineItem = Readonly<{
   copyMarkdown: string | null;
   /** An HTML fragment a plugin gave for its card: shown instead of the summary, after sanitizing. */
   html?: string | null;
+  /** The module of the plugin that draws the HTML of a card, as a path of the application's origin, and why it is not served when it is not. */
+  script?: string | null;
+  scriptProblem?: string | null;
   /** The detail sections of a card that has an HTML section, in order: each is an HTML fragment or Markdown. */
   detailSections?: ReadonlyArray<Readonly<{ header: string; html: string | null; markdown: string | null }>>;
   /** The plugin a card comes from, for the commands its fragments name. */

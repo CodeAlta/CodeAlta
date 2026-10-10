@@ -219,7 +219,7 @@ A fragment is plain HTML that CodeAlta inserts in its window. Before that, CodeA
 | `PluginHtml.Code(code, "csharp")` | Source code with the colors of its language |
 | `PluginHtml.Diagram(text)` | A [Mermaid](https://mermaid.js.org/) diagram |
 
-A plugin has no JavaScript in the window, and creates no component of the app: its code is C#. Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed, and a link only opens a web page (`http` or `https`) in the browser of the user. A fragment asks the window to act with attributes, and the plugin answers in C#:
+Nothing in a fragment runs: scripts, styles, event handlers, images and forms are removed (a plugin that wants JavaScript gives it next to the fragment, as [described below](#script-in-the-window)), and a link only opens a web page (`http` or `https`) in the browser of the user. A fragment asks the window to act with attributes, and the plugin answers in C#:
 
 {.table}
 | Attribute | Effect |
@@ -258,7 +258,7 @@ Write text with `PluginHtml.Encode(text)`. `PluginHtml.CommandButton` and `Plugi
 
 ### Markdown, code and diagrams
 
-A fragment cannot load a library. For Markdown, highlighted code and diagrams it uses those of the window:
+A fragment cannot load a library. For Markdown, highlighted code and diagrams it uses those of the window (and for charts, `PluginHtml.Chart(optionJson, label)`, which draws a chart with the colors of the window from a JSON description):
 
 ```csharp
 var html = $"""
@@ -278,6 +278,53 @@ var html = $"""
 Each helper writes an element of class `alta-markdown` whose text is Markdown, which you can also write yourself. The links of that Markdown are followed as in a message: a web link opens in the browser, and a link to a file in the code editor. The code editor, the terminal, tabs, trees, icons and images of the app are not available to a fragment.
 
 Content around the prompt and timeline cards also take Markdown directly, in both apps: `PluginRenderResult.Markdown`, `PluginDerivedSessionEvent.Markdown`.
+
+## Script in the window
+
+CodeAlta Desktop can run JavaScript that a plugin brings. This is how a plugin draws a board, a dashboard or a viewer in a tab, with the same components as the window. The script is a module that the plugin gives next to some HTML: for the tab of a canvas (`PluginCanvasView.Script`), a dialog (`PluginDialogRequest.Script`), content around the prompt (`PluginRenderResult.Script`) or a card of the timeline (`PluginDerivedSessionEvent.Script`). CodeAlta TUI ignores it.
+
+```csharp
+yield return new PluginCanvasContribution
+{
+    Id = "board", Title = "Board",
+    Open = (canvas, ct) => ValueTask.FromResult(
+        PluginCanvasView.Html("<p class=\"alta-muted\">Loading…</p>") with { Script = PluginScript.File("ui/board.js") }),
+};
+```
+
+`PluginScript.File("ui/board.js")` is a file of the plugin folder. `PluginScript.Inline(code)` (or `PluginHtml.Script(code)`) gives the module as text, so that a plugin of one file stays one file; a plugin that ships with CodeAlta uses that form. The module is one of two things:
+
+```js
+// ui/board.js: no build step
+import { Button } from "@blueprintjs/core";
+import { html, useAlta } from "codealta";
+
+export default function Board() {          // a React component that CodeAlta draws in its own window
+    const alta = useAlta();
+    return html`<${Button} onClick=${() => alta.host.notify("Hello")}>Hello<//>`;
+}
+```
+
+or `export async function mount(root, alta)`, which fills the element that holds the HTML and may return a function that is called when the content goes away.
+
+**The libraries are CodeAlta's own.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react` and `lucide-react` by their usual names and gets the very ones the window runs, so a menu or a popover opens above the tabs, and the theme, the color scheme and the zoom apply with no work. The price is their versions: when CodeAlta moves to a new major version of one, a script that used what changed needs an update. `alta.versions` tells the versions, and the `alta plugin api` and the release notes say what changed. Use `PopoverNext` for popovers. What stays the same from one release to the next is the HTML described above and the `codealta` module.
+
+**The `codealta` module** gives `html` (JSX written as a template), `Markdown`, `Code` and `Diagram`, `Icon` and `BrandIcon`, `FileLink` and `SessionLink`, the charts of the window (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, histograms and box plots), and the hooks `useAlta`, `useVisible` and `useTheme`.
+
+**The `alta` object** is what a script is given to reach the window:
+
+{.table}
+| Member | What it is |
+|---|---|
+| `alta.context` | The plugin, the canvas, the project, the session, the key, and the `input` the canvas was opened with |
+| `alta.visible` | Whether the content is shown, with an event. A script pauses its timers and reads while it is not |
+| `alta.closed` | An `AbortSignal` that aborts when the content goes away: the tab closed, the plugin reloaded |
+| `alta.host` | Opens a file in the code editor at a line, the changes of a project, a session, another canvas or a web page; shows a notice; runs a command of the plugin; sets the title, the status and the mark of the tab |
+| `alta.theme` | The colors of the window as values, with an event, for what a script paints itself |
+| `alta.html(text)` | Cleans a string of HTML as fragments are cleaned. Use it to put a string in the page, never `innerHTML` alone |
+| `alta.versions` | The versions of the libraries and of this interface |
+
+When the plugin is built again, or a file of the module changes, the tab mounts the new module and lets the old one go. A tab that is hidden keeps what it drew until it is shown. A script that fails shows its error in its tab, with a button to copy it, and the rest of the window goes on. HTML written as a string still has no script: `<script>` and `onclick` in it are removed, and `alta.html` and the sanitizer keep text that comes from outside from ever becoming script. The `canvas-board` sample is a React canvas with Blueprint tabs and a menu, a chart and `alta.host`.
 
 ## Status items and content around the prompt
 
@@ -465,6 +512,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
 | `canvas-checklist` | A tab that the plugin provides, found from the Canvases page, the search and `alta canvas`: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
+| `canvas-board` | A tab drawn by a script of the package folder: a React component with Blueprint tabs and menus, a chart, Markdown, links and `alta.host` |
 | `report-dialog` | A dialog with Markdown, a diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |

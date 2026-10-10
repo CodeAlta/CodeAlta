@@ -6,7 +6,7 @@ import { createCanvasHub, readInstanceEvent, readOpenRequest, retainedLimit, typ
 import { createCanvasPluginControl, readPluginFolder, type CanvasPluginApi } from "./canvasPlugin";
 
 const event = (kind: string, fields: Partial<CanvasEvent> = {}): CanvasEvent => ({ kind, actions: null, canvasId: null, focus: false, html: null, icon: null, instanceId: null, key: null,
-  package: null, pluginKey: null, projectId: null, revision: null, sessionId: null, spaceId: null, state: null, statusText: null, title: null, ...fields });
+  package: null, pluginKey: null, projectId: null, revision: null, script: null, scriptProblem: null, sessionId: null, spaceId: null, state: null, statusText: null, title: null, ...fields });
 const wait = (milliseconds = 10) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 /** A host the test plays: the events it sends on its channel, and what the page asked of it. */
@@ -17,7 +17,7 @@ function host() {
   let channels = 0;
   const api: CanvasApi = {
     list: async request => { calls.push(`list:${request.expectedEpoch}`); return { status: "ok", canvases: [{ pluginKey: "k", plugin: "Plugin", package: null, id: "board", title: "Board", description: null, icon: null, scope: "Application", input: false, actions: 0, describes: false, iconData: null }] }; },
-    open: async request => { calls.push(`open:${request.canvasId}:${request.visible}`); return { status: "ok", instanceId: "i1", title: "Board", statusText: null, html: "<p>x</p>", actions: true, revision: 1, package: null, icon: null, iconData: null }; },
+    open: async request => { calls.push(`open:${request.canvasId}:${request.visible}`); return { status: "ok", instanceId: "i1", title: "Board", statusText: null, html: "<p>x</p>", actions: true, revision: 1, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null }; },
     visible: async request => { calls.push(`visible:${request.instanceId}:${request.visible}`); return { status: "ok" }; },
     close: async request => { calls.push(`close:${request.instanceId}`); return { status: "ok" }; },
     closeSpace: async request => { calls.push(`closeSpace:${request.spaceId}`); return { status: "ok" }; },
@@ -64,7 +64,11 @@ test("an event about an instance is read for what it says, and an oversized or m
   assert.deepEqual(readInstanceEvent(event("closed", { instanceId: "i" })), { instanceId: "i", event: { kind: "closed" } });
   assert.deepEqual(readInstanceEvent(event("state", { instanceId: "i", state: "plugin_stopped" })), { instanceId: "i", event: { kind: "state", state: "plugin_stopped" } });
   assert.deepEqual(readInstanceEvent(event("update", { instanceId: "i", revision: 3, html: "<p>x</p>", statusText: "" })),
-    { instanceId: "i", event: { kind: "update", revision: 3, html: "<p>x</p>", title: null, statusText: "", actions: null, state: null } });
+    { instanceId: "i", event: { kind: "update", revision: 3, html: "<p>x</p>", title: null, statusText: "", actions: null, state: null, script: null, scriptProblem: null } });
+  // The script of a reloaded plugin travels with the update: its path, or the empty text that says there is none now.
+  const reloaded = readInstanceEvent(event("update", { instanceId: "i", revision: 4, script: "/plugin/k/s/ui/board.js", scriptProblem: "" }))!.event as { script: string | null; scriptProblem: string | null };
+  assert.deepEqual([reloaded.script, reloaded.scriptProblem], ["/plugin/k/s/ui/board.js", ""]);
+  assert.equal((readInstanceEvent(event("update", { instanceId: "i", revision: 4, script: "x".repeat(2049) }))!.event as { script: string | null }).script, null, "a path that is too long says nothing");
   assert.equal(readInstanceEvent(event("update", { instanceId: "i", revision: 3, html: "x".repeat(256 * 1024 + 1) }))!.event.kind, "update");
   assert.equal((readInstanceEvent(event("update", { instanceId: "i", revision: 3, html: "x".repeat(256 * 1024 + 1) }))!.event as { html: string | null }).html, null, "a fragment over the limit is no content");
   for (const bad of [event("update", { instanceId: null, revision: 1 }), event("update", { instanceId: "i" }), event("update", { instanceId: "i", revision: 1.5 }),
@@ -73,12 +77,26 @@ test("an event about an instance is read for what it says, and an oversized or m
   }
 });
 
-test("a tab follows what the plugin sends: its content, its title and status, and where it is not running", () => {
-  const opened = canvasView(canvasView({ phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false }, { kind: "opening" }),
-    { kind: "opened", instanceId: "i", revision: 2, html: "<p>a</p>", title: "Board", statusText: null, actions: true });
-  assert.deepEqual(opened, { phase: "ready", instanceId: "i", revision: 2, html: "<p>a</p>", title: "Board", statusText: null, actions: true });
+test("the script of a tab follows its plugin: set when it opens, replaced when the plugin is reloaded, and held back by the tab until it is shown", () => {
+  const opened = canvasView(canvasView({ phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null }, { kind: "opening" }),
+    { kind: "opened", instanceId: "i", revision: 1, html: "<p>a</p>", title: "Board", statusText: null, actions: false, script: "/plugin/k/one/ui/board.js", scriptProblem: null, input: "{\"a\":1}" });
+  assert.deepEqual([opened.script, opened.scriptProblem, opened.input], ["/plugin/k/one/ui/board.js", null, "{\"a\":1}"]);
   const update = (fields: Partial<Extract<CanvasInstanceEvent, { kind: "update" }>>): CanvasInstanceEvent =>
-    ({ kind: "update", revision: 3, html: null, title: null, statusText: null, actions: null, state: null, ...fields });
+    ({ kind: "update", revision: 2, html: null, title: null, statusText: null, actions: null, state: null, script: null, scriptProblem: null, ...fields });
+  assert.equal(canvasView(opened, { kind: "event", event: update({ html: "<p>b</p>" }) }).script, "/plugin/k/one/ui/board.js", "a push of the fragment keeps the script");
+  const reloaded = canvasView(opened, { kind: "event", event: update({ revision: 3, script: "/plugin/k/two/ui/board.js", scriptProblem: "" }) });
+  assert.equal(reloaded.script, "/plugin/k/two/ui/board.js");
+  assert.equal(canvasView(reloaded, { kind: "event", event: update({ revision: 4, script: "", scriptProblem: "The script of the canvas could not be found." }) }).script, null, "a plugin that dropped its script has none");
+  assert.equal(canvasView(reloaded, { kind: "event", event: update({ revision: 4, script: "", scriptProblem: "The script of the canvas could not be found." }) }).scriptProblem, "The script of the canvas could not be found.");
+  assert.equal(canvasView(opened, { kind: "event", event: { kind: "state", state: "plugin_stopped" } }).script, null, "a plugin that stopped shows its placeholder, not its script");
+});
+
+test("a tab follows what the plugin sends: its content, its title and status, and where it is not running", () => {
+  const opened = canvasView(canvasView({ phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null }, { kind: "opening" }),
+    { kind: "opened", instanceId: "i", revision: 2, html: "<p>a</p>", title: "Board", statusText: null, actions: true, script: null, scriptProblem: null, input: null });
+  assert.deepEqual(opened, { phase: "ready", instanceId: "i", revision: 2, html: "<p>a</p>", title: "Board", statusText: null, actions: true, script: null, scriptProblem: null, input: null });
+  const update = (fields: Partial<Extract<CanvasInstanceEvent, { kind: "update" }>>): CanvasInstanceEvent =>
+    ({ kind: "update", revision: 3, html: null, title: null, statusText: null, actions: null, state: null, script: null, scriptProblem: null, ...fields });
   // Only what the event says changes; an event that is not newer is dropped.
   const pushed = canvasView(opened, { kind: "event", event: update({ html: "<p>b</p>", statusText: "3 of 8" }) });
   assert.deepEqual(pushed, { ...opened, revision: 3, html: "<p>b</p>", statusText: "3 of 8" });
@@ -137,7 +155,7 @@ test("what a plugin sent to an instance before its tab listened is given to the 
 
   const received: CanvasInstanceEvent[] = [];
   const detach = hub.attach("i", 1, value => received.push(value));
-  assert.deepEqual(received, [{ kind: "update", revision: 3, html: "<p>2</p>", title: "Renamed", statusText: "3 of 8", actions: null, state: null }], "the two updates are one");
+  assert.deepEqual(received, [{ kind: "update", revision: 3, html: "<p>2</p>", title: "Renamed", statusText: "3 of 8", actions: null, state: null, script: null, scriptProblem: null }], "the two updates are one");
   // Then what comes goes to the listener.
   played.push(event("update", { instanceId: "i", revision: 4, html: "<p>4</p>" }));
   await wait(20);

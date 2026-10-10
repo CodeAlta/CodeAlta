@@ -1,4 +1,5 @@
 import type { HistoryResponse, SessionPluginEvent, SessionPluginEventsRequest } from "#neoastra";
+import { isScriptPath } from "./pluginScript/scriptModule";
 import type { TimelineItem } from "./timeline";
 
 type Entry = HistoryResponse["entries"][number];
@@ -43,7 +44,7 @@ export function pluginEventItem(event: SessionPluginEvent): TimelineItem {
     detailMarkdown, details: null, detailsLabel: event.details.length === 1 ? event.details[0].header : "Details",
     metadata: [`Plugin: ${event.pluginId}`], truncated: false, bodyOmitted: false,
     copyMarkdown: [event.markdown, copyDetails].filter(value => !!value).join("\n\n") || null,
-    html: event.html ?? null, detailSections, pluginKey: event.pluginId,
+    html: event.html ?? null, script: event.html ? event.script ?? null : null, scriptProblem: event.html ? event.scriptProblem ?? null : null, detailSections, pluginKey: event.pluginId,
   };
 }
 
@@ -58,7 +59,8 @@ function card(value: unknown): value is SessionPluginEvent {
   if (!value || typeof value !== "object") return false;
   const event = value as Record<string, unknown>;
   const html = (value: unknown) => value === null || value === undefined || text(value, 16 * 1024);
-  return text(event.eventId, 512) && event.eventId.length > 0 && text(event.pluginId, 512) && text(event.markdown, 4096) && html(event.html)
+  const scriptPath = (value: unknown) => value === null || value === undefined || typeof value === "string" && isScriptPath(value);
+  return scriptPath(event.script) && html(event.scriptProblem) && text(event.eventId, 512) && event.eventId.length > 0 && text(event.pluginId, 512) && text(event.markdown, 4096) && html(event.html)
     && text(event.timestamp, 64) && Number.isFinite(Date.parse(event.timestamp))
     && Array.isArray(event.details) && event.details.length <= 4 && event.details.every(detail => !!detail && typeof detail === "object"
       && text((detail as Record<string, unknown>).header, 128) && text((detail as Record<string, unknown>).markdown, 16 * 1024)

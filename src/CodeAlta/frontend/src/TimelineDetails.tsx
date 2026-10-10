@@ -34,7 +34,7 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     <AppWindowSurface storageKey="codealta.desktop.window.timeline-details.v1" title={item.title} preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
       onClose={onClose} closeLabel={t("Close")} closeRef={close}>
     <div className="dialog-panes">
-    {item.html && <section className="detail-pane"><PluginHtml html={item.html} pluginKey={item.pluginKey} /></section>}
+    {item.html && <section className="detail-pane"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null }} /></section>}
     {item.summary && !item.html && <section className="detail-pane"><CodePreview text={item.summary} /></section>}
     {item.markdown && item.category !== "file" && <section className="detail-pane"><MarkdownContent source={item.markdown} timelineCodeBlocks /></section>}
     {item.detailMarkdown && item.category !== "file" && item.detailMarkdown !== item.markdown && <section className="detail-pane"><MarkdownContent source={item.detailMarkdown} timelineCodeBlocks /></section>}

@@ -1,4 +1,5 @@
 import { createContext } from "react";
+import { isScriptPath } from "./pluginScript/scriptModule";
 import type { CommandFocus, CommandKey } from "./commandRegistry";
 
 /** A command contributed by a plugin, as the palette, the help and the keyboard use it. */
@@ -11,7 +12,9 @@ export type PluginCommandView = Readonly<{
 /** A prompt picker contributed by a plugin: typing `trigger` at a word start opens it. */
 export type PluginPickerView = Readonly<{ id: string; plugin: string; trigger: string; title: string; placeholder: string | null }>;
 /** What a plugin shows around a prompt: exactly one of the three forms is set. */
-export type PluginRegionView = Readonly<{ id: string; pluginKey: string; region: "footer" | "bar" | "status"; html: string | null; markdown: string | null; text: string | null }>;
+export type PluginRegionView = Readonly<{ id: string; pluginKey: string; region: "footer" | "bar" | "status"; html: string | null; markdown: string | null; text: string | null;
+  /** The module that draws the fragment, as a path of the application's origin; null for a fragment alone. */
+  script: string | null; scriptProblem: string | null }>;
 export type PluginContributionsView = Readonly<{ commands: readonly PluginCommandView[]; pickers: readonly PluginPickerView[];
   /** A plugin has content for the regions around the prompt, so composers read them. */
   regions: boolean }>;
@@ -128,7 +131,9 @@ export function pluginRegions(reply: unknown, projectId: string | null, sessionI
     const text = !html && !markdown && typeof item.text === "string" && item.text.length <= 8192 ? item.text : null;
     if (!identity(item.id) || !identity(item.pluginKey) || !["footer", "bar", "status"].includes(item.region as string)
       || !(html || markdown || text) || items.some(known => known.id === item.id)) continue;
-    items.push({ id: item.id, pluginKey: item.pluginKey, region: item.region as PluginRegionView["region"], html, markdown, text });
+    const script = html && typeof item.script === "string" && isScriptPath(item.script) ? item.script : null;
+    const scriptProblem = html && typeof item.scriptProblem === "string" && item.scriptProblem.length <= 600 ? item.scriptProblem : null;
+    items.push({ id: item.id, pluginKey: item.pluginKey, region: item.region as PluginRegionView["region"], html, markdown, text, script, scriptProblem });
   }
   return items;
 }
@@ -137,7 +142,8 @@ export function pluginRegions(reply: unknown, projectId: string | null, sessionI
 export function samePluginRegions(left: readonly PluginRegionView[], right: readonly PluginRegionView[]): boolean {
   return left.length === right.length && left.every((item, index) => {
     const other = right[index];
-    return item.id === other.id && item.region === other.region && item.html === other.html && item.markdown === other.markdown && item.text === other.text;
+    return item.id === other.id && item.region === other.region && item.html === other.html && item.markdown === other.markdown && item.text === other.text
+      && item.script === other.script && item.scriptProblem === other.scriptProblem;
   });
 }
 

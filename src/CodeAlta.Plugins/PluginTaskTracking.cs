@@ -248,11 +248,13 @@ internal sealed class PluginRuntimeServices : IPluginServices
         Alta = new PluginRuntimeAltaService(pluginRuntimeKey, scope, scopeProjectId, inner.Alta);
         // The host that shows canvases tells each plugin's service apart: a plugin only sees its own.
         Canvases = inner.Canvases is IPluginCanvasRuntimeService canvases ? canvases.ForPlugin(pluginRuntimeKey) : inner.Canvases;
+        Ui = inner.Ui is IPluginUiRuntimeService ui ? ui.ForPlugin(pluginRuntimeKey) : inner.Ui;
     }
 
     public Logger Logger { get; }
 
-    public IPluginUiService Ui => _inner.Ui;
+    // The host that tells the plugins apart gives each its own: what a plugin shows is tied to it.
+    public IPluginUiService Ui { get; }
 
     // The store of the host when it has one; else the files of this plugin.
     public IPluginStateStore State => _state ?? _inner.State;

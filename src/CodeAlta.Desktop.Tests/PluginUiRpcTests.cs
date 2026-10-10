@@ -1,3 +1,4 @@
+using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -6,6 +7,7 @@ using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using NeoAstra;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -138,6 +140,72 @@ public sealed class PluginUiRpcTests
     }
 
     [TestMethod]
+    public async Task TheScriptOfADialog_ARegionAndACard_IsServedForThePluginThatGaveIt()
+    {
+        await using var fixture = await Fixture.CreateAsync(scripted: true);
+        var commands = (await fixture.Service.ContributionsAsync(new(Epoch, fixture.Project.Id), default)).Commands;
+        string Id(string name) => commands.Single(command => command.Name == name).Id;
+        string Source(string? path) => Encoding.UTF8.GetString(fixture.Modules.GetResponse(new NeoResourceRequest(new Uri("app://codealta" + path), "GET", new Dictionary<string, string>(), null, NeoResourceKind.Script, false, default))!.Bytes.Span);
+
+        // A dialog with a script: the page is given the path of the module of the plugin that asked, and answers as it always did.
+        await fixture.Service.InvokeCommandAsync(new(Epoch, Id("dialog"), fixture.Project.Id, null, false, null), default);
+        var ask = await fixture.NextAsync("ask");
+        Assert.AreEqual("html", ask.Dialog);
+        StringAssert.StartsWith(ask.Script, "/plugin/");
+        Assert.IsNull(ask.ScriptProblem);
+        Assert.AreEqual(ScriptedPlugin.DialogScript, Source(ask.Script));
+        Assert.AreEqual("ok", fixture.Service.Respond(new(ask.RequestId, "ok", false, null, null, null)).Status);
+
+        // A script the host cannot serve (a file of a plugin that has no package) is told to the page, with no path.
+        await fixture.Service.InvokeCommandAsync(new(Epoch, Id("missing"), fixture.Project.Id, null, false, null), default);
+        var missing = await fixture.NextAsync("ask");
+        Assert.IsNull(missing.Script);
+        Assert.AreEqual("The script of the dialog could not be found.", missing.ScriptProblem);
+        Assert.AreEqual("ok", fixture.Service.Respond(new(missing.RequestId, "ok", false, null, null, null)).Status);
+
+        // A dialog without a script, from the same plugin, has neither.
+        await fixture.Service.InvokeCommandAsync(new(Epoch, Id("plain"), fixture.Project.Id, null, false, null), default);
+        var plain = await fixture.NextAsync("ask");
+        Assert.IsNull(plain.Script);
+        Assert.IsNull(plain.ScriptProblem);
+        Assert.AreEqual("ok", fixture.Service.Respond(new(plain.RequestId, "ok", false, null, null, null)).Status);
+
+        // A region: the content that has a script says where it is; the one that has none does not.
+        var regions = await fixture.Service.RegionsAsync(new(Epoch, fixture.Project.Id, "session"), default);
+        var footer = regions.Items.Single(static item => item.PluginKey == "builtin:scripted" && item.Region == "footer");
+        Assert.AreEqual(ScriptedPlugin.RegionScript, Source(footer.Script));
+        Assert.IsNull(footer.ScriptProblem);
+        Assert.IsTrue(regions.Items.Where(static item => item.PluginKey == "builtin:scripted" && item.Region != "footer").All(static item => item.Script is null));
+        Assert.IsTrue(regions.Items.Where(static item => item.PluginKey == "builtin:fixture").All(static item => item.Script is null));
+
+        // A card of the timeline.
+        var start = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
+        AgentEvent[] journal =
+        [
+            new AgentContentCompletedEvent(new("provider"), "session", start, new("run"), AgentContentKind.User, "c1", null, "hi"),
+            new AgentSessionUpdateEvent(new("provider"), "session", start.AddSeconds(4), new("run"), AgentSessionUpdateKind.Idle, null),
+        ];
+        var service = new SessionPluginEventsService(
+            (_, _, _) => Task.FromResult(new AgentSessionHistoryPage([.. journal.Select(static (item, index) => new AgentSessionHistoryEntry(index + 1, item))], null, false)),
+            static (_, _) => Task.FromResult(false), Epoch, fixture.Projects, fixture.Runtime, fixture.Modules);
+        var cards = (await service.ReadAsync(new(Epoch, "session", fixture.Project.Id, start), default)).Events;
+        var scripted = cards.Single(static card => card.PluginId == "builtin:scripted");
+        Assert.AreEqual(ScriptedPlugin.CardScript, Source(scripted.Script));
+        Assert.IsNull(scripted.ScriptProblem);
+        Assert.IsNull(cards.Single(static card => card.PluginId == "builtin:fixture").Script);
+    }
+
+    [TestMethod]
+    public async Task TheScriptOfAPluginThatIsNotActive_IsNotServed()
+    {
+        await using var fixture = await Fixture.CreateAsync(scripted: true);
+        var script = PluginScript.Inline("export default () => null;");
+
+        Assert.IsNotNull(fixture.Modules.PublishFor("builtin:scripted", script));
+        Assert.IsNull(fixture.Modules.PublishFor("builtin:not-there", script));
+    }
+
+    [TestMethod]
     public async Task SearchPicker_ReturnsTheItemsOfThePlugin()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -219,13 +287,14 @@ public sealed class PluginUiRpcTests
         private readonly System.Threading.Channels.Channel<PluginUiEvent> _events = System.Threading.Channels.Channel.CreateUnbounded<PluginUiEvent>();
         private readonly Task _pump;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, PluginRuntimeManager runtime, DesktopPluginUi ui)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, PluginRuntimeManager runtime, DesktopPluginUi ui, DesktopPluginModules modules)
         {
             _root = root;
             Projects = projects;
             Project = project;
             Runtime = runtime;
-            Service = new PluginUiService(projects, runtime, ui, Epoch);
+            Modules = modules;
+            Service = new PluginUiService(projects, runtime, ui, Epoch, null, modules);
             _pump = Task.Run(async () =>
             {
                 try
@@ -236,23 +305,29 @@ public sealed class PluginUiRpcTests
             });
         }
 
-        public static async Task<Fixture> CreateAsync()
+        public static async Task<Fixture> CreateAsync(bool scripted = false)
         {
             var root = Path.Combine(Path.GetTempPath(), "CodeAlta-plugin-ui-" + Guid.NewGuid().ToString("N"));
             var global = Directory.CreateDirectory(Path.Combine(root, "home", ".alta")).FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = global });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "project")).FullName);
-            var ui = new DesktopPluginUi();
+            var modules = new DesktopPluginModules();
+            var ui = new DesktopPluginUi { Modules = modules };
             var runtime = new PluginRuntimeManager();
+            List<BuiltInPluginDefinition> builtIns = [new BuiltInPluginDefinition { Id = "fixture", DisplayName = "Fixture", PluginType = typeof(FixturePlugin), Factory = static () => new FixturePlugin() }];
+            if (scripted) builtIns.Add(new BuiltInPluginDefinition { Id = "scripted", DisplayName = "Scripted", PluginType = typeof(ScriptedPlugin), Factory = static () => new ScriptedPlugin() });
             await runtime.StartAsync(new PluginRuntimeManagerOptions
             {
                 GlobalRoot = global,
                 Frontend = PluginFrontends.Desktop,
                 Services = new DesktopPluginServices(new PluginAltaServiceBridge(), ui),
-                BuiltIns = [new BuiltInPluginDefinition { Id = "fixture", DisplayName = "Fixture", PluginType = typeof(FixturePlugin), Factory = static () => new FixturePlugin() }],
+                BuiltIns = builtIns,
             });
-            return new Fixture(root, projects, project, runtime, ui);
+            modules.Attach(runtime);
+            return new Fixture(root, projects, project, runtime, ui, modules);
         }
+
+        public DesktopPluginModules Modules { get; }
 
         public ProjectCatalog Projects { get; }
         public ProjectDescriptor Project { get; }
@@ -280,6 +355,53 @@ public sealed class PluginUiRpcTests
             _watching.Dispose();
             try { Directory.Delete(_root, recursive: true); }
             catch (IOException) { /* Best-effort cleanup of a temporary directory. */ }
+        }
+    }
+
+    /// <summary>A plugin whose dialog, region content and card have a script.</summary>
+    public sealed class ScriptedPlugin : PluginBase
+    {
+        public const string DialogScript = "export default function Dialog() { return null; }";
+        public const string RegionScript = "export function mount() { }";
+        public const string CardScript = "export default function Card() { return null; }";
+
+        public override IEnumerable<PluginCommandContribution> GetCommands()
+        {
+            var button = new PluginDialogButton { Name = "ok", Label = "Close", IsDefault = true };
+            yield return Command.Shell("dialog", "Shows a dialog with a script.", static async (context, cancellationToken) =>
+            {
+                await context.Ui.ShowDialogForResultAsync(PluginUi.HtmlDialog("Scripted", "<p>x</p>", new PluginDialogButton { Name = "ok", Label = "Close", IsDefault = true }) with { Script = PluginScript.Inline(DialogScript) }, cancellationToken);
+                return PluginCommandResult.Handled;
+            });
+            yield return Command.Shell("missing", "Shows a dialog whose script is a file.", static async (context, cancellationToken) =>
+            {
+                await context.Ui.ShowDialogForResultAsync(PluginUi.HtmlDialog("Missing", "<p>x</p>", new PluginDialogButton { Name = "ok", Label = "Close", IsDefault = true }) with { Script = PluginScript.File("ui/dialog.js") }, cancellationToken);
+                return PluginCommandResult.Handled;
+            });
+            yield return Command.Shell("plain", "Shows a dialog without script.", static async (context, cancellationToken) =>
+            {
+                await context.Ui.ShowDialogForResultAsync(PluginUi.HtmlDialog("Plain", "<p>x</p>", new PluginDialogButton { Name = "ok", Label = "Close", IsDefault = true }), cancellationToken);
+                return PluginCommandResult.Handled;
+            });
+            _ = button;
+        }
+
+        public override IEnumerable<PluginUiContribution> GetUiContributions()
+        {
+            yield return PluginUi.Content(PluginUiRegion.SessionFooter, static _ => PluginRenderResult.FromHtml("<b>scripted</b>", "scripted") with { Script = PluginScript.Inline(RegionScript) }, "footer");
+            yield return PluginUi.Content(PluginUiRegion.SessionStatus, static _ => new PluginRenderResult { Text = "plain", Script = PluginScript.Inline(RegionScript) }, "status");
+        }
+
+        public override IEnumerable<PluginSessionEventProjectionContribution> GetSessionEventProjections()
+        {
+            yield return new PluginSessionEventProjectionContribution
+            {
+                Name = "card",
+                ProjectAsync = static (context, _) => ValueTask.FromResult<IReadOnlyList<PluginDerivedSessionEvent>>(
+                [
+                    new PluginDerivedSessionEvent { EventId = "scripted:" + context.SessionId, Markdown = "**Scripted**", Html = "<b>card</b>", Script = PluginScript.Inline(CardScript) },
+                ]),
+            };
         }
     }
 

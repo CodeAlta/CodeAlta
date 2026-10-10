@@ -20,6 +20,6 @@
   "assets": {
     "origin": "app://codealta",
     "cacheHashedAssets": true,
-    "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    "csp": "default-src 'self'; script-src 'self' 'sha256-dyBYZfD8nb9Dhl40YbvCtxjfEJGa9SSwbUV978+NV6o='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
   }
 }

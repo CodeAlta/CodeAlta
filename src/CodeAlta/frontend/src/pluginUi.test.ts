@@ -39,9 +39,17 @@ test("region content keeps one form and is taken for the asked pane only", () =>
     item({ id: "b", region: "status", markdown: "**y**", text: "y" }), item({ id: "c", region: "bar", text: "z" }), item({ id: "d" }), item({ id: "e", region: "header", text: "no" }),
     item({ text: "same id" })] };
   const items = pluginRegions(reply, "project", null);
-  assert.deepEqual(items, [{ id: "a", pluginKey: "source:Sample", region: "footer", html: "<b>x</b>", markdown: null, text: null },
-    { id: "b", pluginKey: "source:Sample", region: "status", html: null, markdown: "**y**", text: null },
-    { id: "c", pluginKey: "source:Sample", region: "bar", html: null, markdown: null, text: "z" }]);
+  assert.deepEqual(items, [{ id: "a", pluginKey: "source:Sample", region: "footer", html: "<b>x</b>", markdown: null, text: null, script: null, scriptProblem: null },
+    { id: "b", pluginKey: "source:Sample", region: "status", html: null, markdown: "**y**", text: null, script: null, scriptProblem: null },
+    { id: "c", pluginKey: "source:Sample", region: "bar", html: null, markdown: null, text: "z", script: null, scriptProblem: null }]);
+  // A script comes with a fragment and is a path the host serves; anything else is dropped, and a problem the host reports is kept.
+  const scripted = pluginRegions({ status: "ok", projectId: null, sessionId: null, items: [
+    item({ id: "s1", html: "<p>x</p>", script: "/plugin/abc/def/main.js" }), item({ id: "s2", html: "<p>x</p>", script: "https://evil.example/x.js" }),
+    item({ id: "s3", html: "<p>x</p>", script: "/plugin/abc/def/../x.js" }), item({ id: "s4", text: "no fragment", script: "/plugin/abc/def/main.js" }),
+    item({ id: "s5", html: "<p>x</p>", scriptProblem: "The script of the content could not be found." })] }, null, null)!;
+  assert.deepEqual(scripted.map(value => [value.id, value.script, value.scriptProblem]), [["s1", "/plugin/abc/def/main.js", null], ["s2", null, null], ["s3", null, null], ["s4", null, null],
+    ["s5", null, "The script of the content could not be found."]]);
+  assert.equal(samePluginRegions(scripted.slice(0, 1), [{ ...scripted[0], script: "/plugin/abc/other/main.js" }]), false, "a reloaded plugin is a change");
   assert.equal(pluginRegions(reply, "project", "session"), null);
   assert.equal(pluginRegions({ ...reply, status: "stale" }, "project", null), null);
   assert.ok(samePluginRegions(items!, pluginRegions(reply, "project", null)!));

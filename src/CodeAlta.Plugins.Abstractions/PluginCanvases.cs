@@ -131,8 +131,9 @@ public sealed record PluginCanvasActionContribution
 /// <remarks>
 /// The fragment is sanitized and drawn by the application as it draws the content of a plugin dialog, with the same
 /// vocabulary (<see cref="PluginHtml"/>): <c>data-alta-command</c> runs a command of the plugin, and
-/// <c>data-alta-action</c> calls the action handler with the values of the named fields. Later versions add script
-/// and a carried RPC to the same type.
+/// <c>data-alta-action</c> calls the action handler with the values of the named fields. <see cref="Script"/> adds the
+/// plugin's own JavaScript module, which draws the tab with the libraries of the application (see <see cref="PluginScript"/>);
+/// the fragment is then the skeleton the module mounts on.
 /// </remarks>
 public sealed record PluginCanvasView
 {
@@ -147,6 +148,19 @@ public sealed record PluginCanvasView
 
     /// <summary>Gets the handler of the actions raised by the fragment, or <see langword="null"/> when it raises none.</summary>
     public PluginCanvasActionHandler? OnAction { get; init; }
+
+    /// <summary>Gets the JavaScript module that draws the tab, or <see langword="null"/> for a canvas that is its fragment alone.</summary>
+    public PluginScript? Script { get; init; }
+
+    /// <summary>
+    /// Gets or sets the module of the tab as text, which is <see cref="Script"/> for a script given inline: a plugin of one file stays one file.
+    /// Reading it gives the text of an inline script, or <see langword="null"/>.
+    /// </summary>
+    public string? ScriptSource
+    {
+        get => Script?.Source;
+        init => Script = string.IsNullOrWhiteSpace(value) ? null : PluginScript.Inline(value);
+    }
 
     /// <summary>Gets the title of the tab, or <see langword="null"/> for the title of the canvas.</summary>
     public string? Title { get; init; }

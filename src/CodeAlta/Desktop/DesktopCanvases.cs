@@ -39,7 +39,11 @@ internal sealed record CanvasDeclaration(ActivePluginInstance Plugin, PluginCanv
 /// <param name="Html">The HTML fragment.</param>
 /// <param name="Actions">The fragment raises actions: its view has an action handler.</param>
 /// <param name="Revision">Grows with every change of the content: a page ignores an event older than what it has.</param>
-internal sealed record CanvasInstanceState(string InstanceId, string Title, string? StatusText, string Html, bool Actions, int Revision);
+/// <param name="Script">The path of the module that draws the tab (<see cref="DesktopPluginModules.Prefix"/>), or null for a fragment alone.</param>
+/// <param name="ScriptProblem">Why a script the plugin asked for cannot be served, or null.</param>
+/// <param name="Input">The input the instance was opened with, as JSON, or null.</param>
+internal sealed record CanvasInstanceState(string InstanceId, string Title, string? StatusText, string Html, bool Actions, int Revision,
+    string? Script = null, string? ScriptProblem = null, string? Input = null);
 
 /// <summary>An instance that is open, with the identity that names it.</summary>
 /// <param name="InstanceId">The identifier of the instance.</param>
@@ -114,13 +118,26 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
 
     /// <summary>Creates the broker.</summary>
     /// <param name="ui">The window service of the plugins, whose current pane tells which project and session an operation is for; null for none.</param>
-    internal DesktopCanvases(DesktopPluginUi? ui = null)
+    /// <param name="modules">The server of scripts the window shares with the other content of plugins; null makes one.</param>
+    internal DesktopCanvases(DesktopPluginUi? ui = null, DesktopPluginModules? modules = null)
     {
         _ui = ui;
+        Modules = modules ?? new DesktopPluginModules();
+        Modules.Attach(ActivePlugins);
     }
 
     /// <inheritdoc />
     public bool HasInteractiveUi => true;
+
+    /// <summary>The server of the scripts that canvases and other HTML of plugins bring: it answers the page from the plugins that are active.</summary>
+    internal DesktopPluginModules Modules { get; }
+
+    private IReadOnlyList<PluginModuleOwner> ActivePlugins()
+    {
+        PluginRuntimeManager? runtime;
+        lock (_gate) runtime = _runtime;
+        return runtime is null ? [] : [.. runtime.ActivePlugins.Where(static plugin => plugin.Instance is not null).Select(DesktopPluginModules.OwnerOf)];
+    }
 
     /// <summary>
     /// Connects the broker to the plugin runtime, which exists once the host started its plugins. It then follows
@@ -619,12 +636,18 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         var context = new HostContext(this, instance, input, declaration.Plugin.RuntimeContext.LifetimeCancellationToken, declaration.Canvas.Scope);
         PluginCanvasView view;
         string html;
+        string? script = null, scriptProblem = null;
         try
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(context.Closed, _lifetime.Token);
             linked.CancelAfter(HandlerTimeout);
             view = await declaration.Canvas.Open(context, linked.Token).ConfigureAwait(false) ?? throw new InvalidOperationException("The canvas opened no view.");
             html = view.Renderer is { } renderer ? await renderer(context, linked.Token).ConfigureAwait(false) : view.Fragment;
+            if (view.Script is { HasEntry: true } wanted)
+            {
+                script = Modules.Publish(DesktopPluginModules.OwnerOf(declaration.Plugin), wanted);
+                if (script is null) scriptProblem = "The script of the canvas could not be found.";
+            }
         }
         catch (Exception exception)
         {
@@ -651,6 +674,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
             instance.Revision++;
             instance.Initialized = true;
             instance.State = "ready";
+            instance.Script = script;
+            instance.ScriptProblem = scriptProblem;
         }
 
         // A version that was replaced: what it held ends with it, and it is not asked to close.
@@ -661,7 +686,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
     }
 
     private static CanvasInstanceState Snapshot(Instance instance)
-        => new(instance.Id, instance.Title, instance.StatusText, instance.Html, instance.View?.OnAction is not null, instance.Revision);
+        => new(instance.Id, instance.Title, instance.StatusText, instance.Html, instance.View?.OnAction is not null, instance.Revision, instance.Script, instance.ScriptProblem,
+            instance.Input is { } input ? input.GetRawText() : null);
 
     private void SetVisible(Instance instance, bool visible)
     {
@@ -729,7 +755,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
             ? new CanvasEvent("update")
             {
                 InstanceId = instance.Id, Html = html, Title = instance.Title, StatusText = instance.StatusText ?? string.Empty, Actions = instance.View?.OnAction is not null,
-                Revision = instance.Revision, State = "ready",
+                Revision = instance.Revision, State = "ready", Script = instance.Script ?? string.Empty, ScriptProblem = instance.ScriptProblem ?? string.Empty,
             }
             : new CanvasEvent("update") { InstanceId = instance.Id, Html = html, Revision = instance.Revision });
     }
@@ -801,6 +827,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         try
         {
             lock (_gate) _outbox?.Add(new CanvasEvent("plugins"));
+            // What a plugin that is gone gave as text is let go.
+            Modules.Prune();
             Instance[] open;
             lock (_gate) open = [.. _instances.Values.OrderBy(static instance => instance.Order)];
             foreach (var instance in open)
@@ -918,6 +946,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, IDisposable
         public JsonElement? Input { get; set; }
 
         public string Html { get; set; } = string.Empty;
+
+        public string? Script { get; set; }
+
+        public string? ScriptProblem { get; set; }
 
         public string Title { get; set; } = string.Empty;
 

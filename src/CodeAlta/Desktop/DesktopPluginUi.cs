@@ -37,7 +37,7 @@ internal sealed class DesktopPluginScope
 /// and given to the page when it arrives; a dialog that is still open is given again to a page that
 /// reloads. Nothing here touches the window: the page shows every request with its own components.
 /// </remarks>
-internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService, IPluginPromptService, IDisposable
+internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionService, IPluginPromptService, IDisposable
 {
     /// <summary>Largest number of notifications kept for a page that does not watch yet.</summary>
     internal const int MaximumBacklog = 32;
@@ -62,6 +62,16 @@ internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService,
 
     /// <inheritdoc />
     public bool HasInteractiveUi => true;
+
+    /// <summary>Gets or sets the server of the scripts of dialogs: set once, when the window has plugins.</summary>
+    internal DesktopPluginModules? Modules { get; set; }
+
+    /// <inheritdoc />
+    public IPluginUiService ForPlugin(string pluginRuntimeKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginRuntimeKey);
+        return new PluginDialogs(this, pluginRuntimeKey);
+    }
 
     /// <summary>Gets the pane of the plugin operation running on this flow, when there is one.</summary>
     internal DesktopPluginScope? Scope => _scope.Value;
@@ -230,10 +240,21 @@ internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService,
         => _ = await ShowDialogForResultAsync(request, cancellationToken).ConfigureAwait(false);
 
     /// <inheritdoc />
-    public async ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
+    public ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
+        => ShowDialogForResultAsync(request, null, cancellationToken);
+
+    // The plugin that asks, when the host knows it: the module of the script of the dialog is served for that plugin.
+    private async ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, string? pluginKey, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Title);
+        string? script = null, scriptProblem = null;
+        if (request.Kind == PluginDialogKind.Custom && request.Html is not null && request.Script is { HasEntry: true } wanted)
+        {
+            script = pluginKey is null ? null : Modules?.PublishFor(pluginKey, wanted);
+            if (script is null) scriptProblem = "The script of the dialog could not be found.";
+        }
+
         var answer = await AskAsync(new PluginUiEvent("ask")
         {
             Dialog = request.Kind switch
@@ -255,6 +276,7 @@ internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService,
                 : [.. request.Buttons.Take(MaximumButtons).Select(static button => new PluginUiButton(
                     Cut(button.Name, MaximumTitleUnits), Cut(button.Label, MaximumTitleUnits), button.IsDefault, button.IsCancel))],
             Actions = request.OnAction is not null,
+            Script = script, ScriptProblem = scriptProblem,
         }, request.OnAction, cancellationToken).ConfigureAwait(false);
         if (answer is null) return null;
         return new PluginDialogResponse
@@ -426,6 +448,29 @@ internal sealed class DesktopPluginUi : IPluginUiService, IPluginSessionService,
             _answer.TrySetCanceled(cancellationToken);
             Cancellation.Cancel();
         }
+    }
+
+    // The dialogs of one plugin: all else the window does for it is the window's, and a dialog with a script is served for this plugin.
+    private sealed class PluginDialogs(DesktopPluginUi owner, string pluginKey) : IPluginUiService
+    {
+        public bool HasInteractiveUi => owner.HasInteractiveUi;
+
+        public ValueTask NotifyAsync(string message, CancellationToken cancellationToken = default) => owner.NotifyAsync(message, cancellationToken);
+
+        public ValueTask<bool> ConfirmAsync(string title, string message, CancellationToken cancellationToken = default) => owner.ConfirmAsync(title, message, cancellationToken);
+
+        public ValueTask<string?> InputAsync(string title, string? initialText = null, CancellationToken cancellationToken = default) => owner.InputAsync(title, initialText, cancellationToken);
+
+        public ValueTask<string?> EditTextAsync(string title, string text, CancellationToken cancellationToken = default) => owner.EditTextAsync(title, text, cancellationToken);
+
+        public ValueTask<T?> SelectAsync<T>(string title, IReadOnlyList<PluginSelectItem<T>> items, CancellationToken cancellationToken = default)
+            => owner.SelectAsync(title, items, cancellationToken);
+
+        public async ValueTask ShowDialogAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
+            => _ = await owner.ShowDialogForResultAsync(request, pluginKey, cancellationToken).ConfigureAwait(false);
+
+        public ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default)
+            => owner.ShowDialogForResultAsync(request, pluginKey, cancellationToken);
     }
 
     private sealed class Registration(DesktopPluginUi owner, Action<PluginUiEvent> watcher) : IDisposable

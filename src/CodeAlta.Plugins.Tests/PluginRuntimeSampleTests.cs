@@ -22,6 +22,7 @@ public sealed class PluginRuntimeSampleTests
         "report-dialog",
         "todo",
         "canvas-checklist",
+        "canvas-board",
     ];
 
     [TestMethod]

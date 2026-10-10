@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { Button, NonIdealState } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { showToast } from "../appToaster";
 import type { FileTab } from "../fileTabs";
 import { PluginHtml } from "../PluginHtml";
+import type { PluginScriptTab } from "../pluginScript/PluginScript";
+import type { ScriptLoader } from "../pluginScript/scriptModule";
 import { useShellLanguage } from "../shellLanguage";
 import type { CanvasHub, CanvasInstanceEvent } from "./canvasHub";
 import type { CanvasPluginControl, CanvasPluginProbe } from "./canvasPlugin";
@@ -14,16 +16,19 @@ type Phase = "loading" | "ready" | "stopped" | "missing" | "failed" | "unavailab
 
 type View = Readonly<{
   phase: Phase; instanceId: string | null; revision: number; html: string; title: string | null; statusText: string | null; actions: boolean;
+  /** The module of the plugin that draws the tab, its path on the origin of the application, or null for a fragment alone. */
+  script: string | null; scriptProblem: string | null; input: string | null;
 }>;
 
 type Change =
   | Readonly<{ kind: "opening" }>
-  | Readonly<{ kind: "opened"; instanceId: string; revision: number; html: string; title: string | null; statusText: string | null; actions: boolean }>
+  | Readonly<{ kind: "opened"; instanceId: string; revision: number; html: string; title: string | null; statusText: string | null; actions: boolean;
+    script: string | null; scriptProblem: string | null; input: string | null }>
   | Readonly<{ kind: "refused"; phase: Exclude<Phase, "loading" | "ready"> }>
   | Readonly<{ kind: "event"; event: CanvasInstanceEvent }>
   | Readonly<{ kind: "html"; html: string }>;
 
-const initial: View = { phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false };
+const initial: View = { phase: "loading", instanceId: null, revision: 0, html: "", title: null, statusText: null, actions: false, script: null, scriptProblem: null, input: null };
 
 /** The phase that a refusal of the host leaves a tab in. */
 export function refusedPhase(status: string): Exclude<Phase, "loading" | "ready"> {
@@ -34,7 +39,8 @@ export function refusedPhase(status: string): Exclude<Phase, "loading" | "ready"
 export function canvasView(view: View, change: Change): View {
   switch (change.kind) {
     case "opening": return view.phase === "ready" ? view : { ...initial, phase: "loading", title: view.title };
-    case "opened": return { phase: "ready", instanceId: change.instanceId, revision: change.revision, html: change.html, title: change.title, statusText: change.statusText, actions: change.actions };
+    case "opened": return { phase: "ready", instanceId: change.instanceId, revision: change.revision, html: change.html, title: change.title, statusText: change.statusText, actions: change.actions,
+      script: change.script, scriptProblem: change.scriptProblem, input: change.input };
     case "refused": return { ...initial, phase: change.phase, title: view.title };
     case "html": return view.phase === "ready" ? { ...view, html: change.html } : view;
     case "event": {
@@ -45,7 +51,9 @@ export function canvasView(view: View, change: Change): View {
       const ready = event.state === "ready" || view.phase === "ready";
       if (!ready) return view;
       return { phase: "ready", instanceId: view.instanceId, revision: event.revision, html: event.html ?? view.html,
-        title: event.title ?? view.title, statusText: event.statusText === null ? view.statusText : event.statusText === "" ? null : event.statusText, actions: event.actions ?? view.actions };
+        title: event.title ?? view.title, statusText: event.statusText === null ? view.statusText : event.statusText === "" ? null : event.statusText, actions: event.actions ?? view.actions,
+        script: event.script === null ? view.script : event.script === "" ? null : event.script,
+        scriptProblem: event.scriptProblem === null ? view.scriptProblem : event.scriptProblem === "" ? null : event.scriptProblem, input: view.input };
     }
   }
 }
@@ -58,7 +66,7 @@ export function canvasView(view: View, change: Change): View {
  * A tab that is hidden stays mounted and keeps the latest fragment it was sent without drawing it; it draws it once it
  * is shown. While its plugin is not running, or its canvas is gone, the tab says so, with what can be done about it.
  */
-export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, onLook, onInstance, onClose, onOpenSource, control }: {
+export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, onLook, onInstance, onClose, onOpenSource, control, loadScript }: {
   tab: FileTab;
   /** The space the tab is in. */
   spaceId: string | null;
@@ -75,11 +83,13 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   onOpenSource: (folder: Readonly<{ id: string; path: string; name: string }>) => void;
   /** What can be done about a plugin that does not run; null when its folder is not known. */
   control: CanvasPluginControl | null;
+  /** How the module of the tab's script is loaded: the window imports it, a test gives its own. */
+  loadScript?: ScriptLoader;
 }) {
   const { t } = useShellLanguage();
   const [view, change] = useReducer(canvasView, initial);
   const [retry, setRetry] = useState(0);
-  const [shown, setShown] = useState("");
+  const [shown, setShown] = useState<Readonly<{ html: string; script: string | null; problem: string | null }>>({ html: "", script: null, problem: null });
   const latest = useRef({ visible, onLook, onClose, onInstance });
   latest.current = { visible, onLook, onClose, onInstance };
   const pluginKey = tab.pluginKey ?? "", canvasId = tab.canvasId ?? "";
@@ -103,7 +113,8 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
 
       opened = reply.instanceId;
       latest.current.onInstance?.(reply.instanceId);
-      change({ kind: "opened", instanceId: reply.instanceId, revision: reply.revision, html: reply.html ?? "", title: reply.title, statusText: reply.statusText, actions: reply.actions });
+      change({ kind: "opened", instanceId: reply.instanceId, revision: reply.revision, html: reply.html ?? "", title: reply.title, statusText: reply.statusText, actions: reply.actions,
+        script: reply.script ?? null, scriptProblem: reply.scriptProblem ?? null, input: reply.input ?? null });
       latest.current.onLook({ ...reply.title ? { title: reply.title } : {}, status: reply.statusText, ...reply.icon ? { icon: reply.icon } : {}, ...reply.package ? { plugin: reply.package } : {} });
       // The plugin closed the instance: its tab goes with it.
       detach = hub.attach(reply.instanceId, reply.revision, event => { if (event.kind === "closed") latest.current.onClose(); else change({ kind: "event", event }); });
@@ -126,12 +137,22 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
   useEffect(() => {
     if (instanceId) void hub.setVisible(instanceId, visible);
   }, [hub, instanceId, visible]);
-  useEffect(() => { if (visible) setShown(view.html); }, [visible, view.html]);
-  // A tab that is shown draws the latest fragment at once; one that is hidden keeps what it last drew.
-  const drawn = visible ? view.html : shown;
+  useEffect(() => { if (visible) setShown(current => current.html === view.html && current.script === view.script && current.problem === view.scriptProblem ? current : { html: view.html, script: view.script, problem: view.scriptProblem }); },
+    [visible, view.html, view.script, view.scriptProblem]);
+  // A tab that is shown draws the latest fragment at once, with the script that goes with it; one that is hidden keeps what it last drew, so a reloaded plugin does not start its script on a skeleton it has not drawn.
+  const drawn = visible ? { html: view.html, script: view.script, problem: view.scriptProblem } : shown;
+
+  // What the script of the tab sets (`alta.host.setTitle`, `setStatus`, `setBadge`) wins over what the plugin gave until the plugin gives it again or the script goes.
+  const [scripted, setScripted] = useState<Readonly<{ title?: string | null; status?: string | null; badge?: string | null }>>({});
+  const scriptTab = useMemo<PluginScriptTab>(() => ({
+    setTitle: value => setScripted(current => ({ ...current, title: value })),
+    setStatus: value => setScripted(current => ({ ...current, status: value })),
+    setBadge: value => setScripted(current => ({ ...current, badge: value })),
+  }), []);
+  useEffect(() => { setScripted({}); }, [view.script, view.instanceId]);
 
   // The strip follows the title and the status the plugin gives.
-  const { title, statusText } = view;
+  const title = scripted.title ?? view.title, statusText = scripted.badge ?? scripted.status ?? view.statusText;
   useEffect(() => {
     if (view.phase === "ready") latest.current.onLook({ ...title ? { title } : {}, status: statusText });
   }, [view.phase, title, statusText]);
@@ -145,10 +166,12 @@ export function CanvasPanel({ tab, spaceId, hub, visible, active, onActivate, on
     });
   }, [hub, instanceId, onClose, t]);
 
-  const pane = { projectId, sessionId };
+  const pane = useMemo(() => ({ projectId, sessionId }), [projectId, sessionId]);
+  const scriptInput = useMemo(() => { try { return view.input ? JSON.parse(view.input) as unknown : null; } catch { return null; } }, [view.input]);
   return <div className="canvas-panel" data-phase={view.phase} data-visible={visible} data-active={active} tabIndex={-1} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {view.phase === "ready"
-      ? <PluginHtml className="canvas-html" html={drawn} pluginKey={pluginKey} pane={pane} onAction={view.actions ? onAction : undefined} />
+      ? <PluginHtml className="canvas-html" html={drawn.html} pluginKey={pluginKey} pane={pane} onAction={view.actions ? onAction : undefined}
+        script={{ path: drawn.script, problem: drawn.problem, visible, tab: scriptTab, load: loadScript, context: { canvasId, instanceId: view.instanceId, spaceId, key, input: scriptInput } }} />
       : view.phase === "loading"
         ? <div className="canvas-loading"><ActivitySpinner size={18} label={t("Loading…")} /></div>
         : <CanvasPlaceholder phase={view.phase} title={view.title ?? tab.name ?? t("Canvas")} icon={tab.icon} pluginKey={tab.pluginKey} control={control} onClose={onClose} onOpenSource={onOpenSource} onRebuilt={() => setRetry(value => value + 1)} />}

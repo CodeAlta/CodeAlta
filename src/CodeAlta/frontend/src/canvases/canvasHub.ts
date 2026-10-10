@@ -19,7 +19,9 @@ export type CanvasOpenRequest = Readonly<{
 
 /** What happened to an instance a tab shows. `update` carries only what changed. */
 export type CanvasInstanceEvent =
-  | Readonly<{ kind: "update"; revision: number; html: string | null; title: string | null; statusText: string | null; actions: boolean | null; state: string | null }>
+  | Readonly<{ kind: "update"; revision: number; html: string | null; title: string | null; statusText: string | null; actions: boolean | null; state: string | null;
+    /** The module that draws the tab after a reload of the plugin: empty for none, null when the event does not say. */
+    script: string | null; scriptProblem: string | null }>
   | Readonly<{ kind: "state"; state: string }>
   | Readonly<{ kind: "closed" }>;
 
@@ -49,13 +51,16 @@ export function readInstanceEvent(event: CanvasEvent): { instanceId: string; eve
   const title = typeof event.title === "string" && event.title.length <= 200 ? event.title : null;
   const statusText = typeof event.statusText === "string" && event.statusText.length <= 200 ? event.statusText : null;
   return { instanceId, event: { kind: "update", revision: event.revision, html, title, statusText, actions: typeof event.actions === "boolean" ? event.actions : null,
-    state: typeof event.state === "string" && event.state.length <= 64 ? event.state : null } };
+    state: typeof event.state === "string" && event.state.length <= 64 ? event.state : null,
+    script: typeof event.script === "string" && event.script.length <= 2048 ? event.script : null,
+    scriptProblem: typeof event.scriptProblem === "string" && event.scriptProblem.length <= 600 ? event.scriptProblem : null } };
 }
 
 // What the second update says wins; what it does not say stays.
 function mergeUpdates(older: Extract<CanvasInstanceEvent, { kind: "update" }>, newer: Extract<CanvasInstanceEvent, { kind: "update" }>): Extract<CanvasInstanceEvent, { kind: "update" }> {
   return { kind: "update", revision: Math.max(older.revision, newer.revision), html: newer.html ?? older.html, title: newer.title ?? older.title,
-    statusText: newer.statusText ?? older.statusText, actions: newer.actions ?? older.actions, state: newer.state ?? older.state };
+    statusText: newer.statusText ?? older.statusText, actions: newer.actions ?? older.actions, state: newer.state ?? older.state,
+    script: newer.script ?? older.script, scriptProblem: newer.scriptProblem ?? older.scriptProblem };
 }
 
 /**
@@ -150,12 +155,12 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     /** Opens the instance a tab shows. A host that cannot answer is `unavailable`. */
     async open(request: Readonly<{ pluginKey: string; canvasId: string; spaceId: string | null; projectId: string | null; sessionId: string | null; key: string | null; visible: boolean }>): Promise<CanvasOpenResponse> {
       const host = epoch;
-      if (!host) return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null };
+      if (!host) return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null };
       try {
         const reply = await api.open({ expectedEpoch: host, ...request }, { timeoutMilliseconds: 45_000 });
         pluginIconFiles.register(request.pluginKey, reply.icon, reply.iconData);
         return reply;
-      } catch { return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null }; }
+      } catch { return { status: "unavailable", instanceId: null, title: null, statusText: null, html: null, actions: false, revision: 0, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null }; }
     },
     /** Says whether a tab shows an instance; false when the host could not be told. */
     async setVisible(instanceId: string, visible: boolean): Promise<boolean> {

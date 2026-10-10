@@ -80,6 +80,12 @@ public record PluginDerivedSessionEvent
     /// <remarks>Keep <see cref="Markdown"/>: it is what the terminal application shows and what Copy uses.</remarks>
     public string? Html { get; init; }
 
+    /// <summary>
+    /// Gets the script of <see cref="Html"/> in the desktop application, or <see langword="null"/> for a fragment alone (see <see cref="PluginScript"/>).
+    /// The window runs it when the card becomes visible, since a session can have hundreds of cards.
+    /// </summary>
+    public PluginScript? Script { get; init; }
+
     /// <summary>Gets the timestamp to show for the transient event, when available.</summary>
     public DateTimeOffset? Timestamp { get; init; }
 

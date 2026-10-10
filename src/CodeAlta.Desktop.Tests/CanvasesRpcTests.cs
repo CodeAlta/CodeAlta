@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using CodeAlta.Desktop;
@@ -6,6 +7,7 @@ using CodeAlta.Desktop.Rpc;
 using CodeAlta.LiveTool;
 using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
+using NeoAstra;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -49,14 +51,14 @@ public sealed class CanvasesRpcTests
         var response = fixture.Service.List(new(Epoch));
 
         Assert.AreEqual("ok", response.Status);
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "plain" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
         var board = response.Canvases[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "Application", true, 2, true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.Input, board.Actions, board.Describes));
         Assert.IsNull(board.Package, "a built-in plugin has no package folder");
         Assert.AreEqual("Project", response.Canvases[1].Scope);
         Assert.AreEqual("Session", response.Canvases[2].Scope);
-        Assert.IsFalse(response.Canvases[4].Describes);
+        Assert.IsFalse(response.Canvases[6].Describes);
     }
 
     [TestMethod]
@@ -427,6 +429,142 @@ public sealed class CanvasesRpcTests
     }
 
     [TestMethod]
+    public async Task Open_GivesTheScriptOfTheCanvas_AndTheInputItWasOpenedWith()
+    {
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        string Source(string? path) => Encoding.UTF8.GetString(fixture.Broker.Modules.GetResponse(new NeoResourceRequest(new Uri("app://codealta" + path), "GET", new Dictionary<string, string>(), null, NeoResourceKind.Script, false, default))!.Bytes.Span);
+
+        // A canvas whose script is given as text: the page is told where to import it from, and the host serves it.
+        await fixture.PluginServices.Canvases.OpenAsync("scripted", new PluginCanvasOpenOptions { Input = JsonDocument.Parse("{\"issue\":42}").RootElement });
+        var scripted = await fixture.OpenAsync("scripted");
+        Assert.AreEqual("ok", scripted.Status);
+        StringAssert.StartsWith(scripted.Script, $"/plugin/{DesktopPluginModules.KeySegment(Plugin)}/");
+        StringAssert.EndsWith(scripted.Script, "/main.js");
+        Assert.IsNull(scripted.ScriptProblem);
+        Assert.AreEqual(CanvasFixturePlugin.ScriptText, Source(scripted.Script));
+        Assert.AreEqual("{\"issue\":42}", scripted.Input);
+        Assert.AreEqual("<p>scripted</p>", scripted.Html, "the fragment is the skeleton the module mounts on");
+
+        // The same open again is the same module: a tab that is drawn again does not import another one.
+        Assert.AreEqual(scripted.Script, (await fixture.OpenAsync("scripted")).Script);
+
+        // A script that cannot be served is told to the tab, not hidden: a built-in plugin has no package folder for a file.
+        var missing = await fixture.OpenAsync("scriptfile");
+        Assert.AreEqual("ok", missing.Status);
+        Assert.IsNull(missing.Script);
+        Assert.AreEqual("The script of the canvas could not be found.", missing.ScriptProblem);
+
+        // A canvas without a script says neither.
+        var plain = await fixture.OpenAsync("plain");
+        Assert.IsNull(plain.Script);
+        Assert.IsNull(plain.ScriptProblem);
+        Assert.IsNull(plain.Input);
+    }
+
+    [TestMethod]
+    [TestCategory("RequiresDotNet10FileBuild")]
+    public async Task ASourcePlugin_GivesAScriptThatIsAFileOfItsPackage_AndANewVersionOfTheFileIsANewAddress()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-canvases-" + Guid.NewGuid().ToString("N"));
+        var global = Directory.CreateDirectory(Path.Combine(root, "home", ".alta")).FullName;
+        var folder = Directory.CreateDirectory(Path.Combine(global, "plugins", "boards")).FullName;
+        var file = Path.Combine(folder, "plugin.cs");
+        Directory.CreateDirectory(Path.Combine(folder, "ui"));
+        File.WriteAllText(Path.Combine(folder, "ui", "board.js"), "export default () => 'one';");
+        File.WriteAllText(file, ScriptedSource());
+        var ui = new DesktopPluginUi();
+        var broker = new DesktopCanvases(ui);
+        ui.Modules = broker.Modules;
+        var runtime = new PluginRuntimeManager();
+        try
+        {
+            await runtime.StartAsync(new PluginRuntimeManagerOptions
+            {
+                GlobalRoot = global, Frontend = PluginFrontends.Desktop, IsHeadless = true,
+                Services = new DesktopPluginServices(new PluginAltaServiceBridge(), ui, broker),
+            });
+            var package = runtime.GetPackages().Single(static candidate => candidate.Package.PackageId == "boards");
+            if (package.Build is { Succeeded: false } build && (build.StandardOutput + build.StandardError).Contains("The project file could not be loaded", StringComparison.OrdinalIgnoreCase))
+                Assert.Inconclusive("The installed .NET SDK did not accept `dotnet build plugin.cs` file-based builds in this environment.");
+            broker.Attach(runtime, () => "work");
+            var service = new CanvasesService(broker, Epoch);
+            var events = Channel.CreateUnbounded<CanvasEvent>();
+            using var watching = new CancellationTokenSource();
+            var pump = Task.Run(async () =>
+            {
+                try { await foreach (var value in service.WatchAsync(new(Epoch), watching.Token)) events.Writer.TryWrite(value); }
+                catch (OperationCanceledException) { /* The test is over. */ }
+            });
+            async Task<CanvasEvent> NextAsync(string kind)
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                while (true)
+                {
+                    var value = await events.Reader.ReadAsync(timeout.Token);
+                    if (value.Kind == kind) return value;
+                }
+            }
+
+            string Module(string? path) => Encoding.UTF8.GetString(broker.Modules.GetResponse(new NeoResourceRequest(new Uri("app://codealta" + path), "GET", new Dictionary<string, string>(), null, NeoResourceKind.Script, false, default))!.Bytes.Span);
+            var key = runtime.ActivePlugins.Single().Descriptor.RuntimeKey;
+            var opened = await service.OpenAsync(new(Epoch, key, "board", "work", null, null, null, true), default);
+            Assert.AreEqual("ok", opened.Status);
+            StringAssert.EndsWith(opened.Script, "/ui/board.js");
+            Assert.AreEqual("export default () => 'one';", Module(opened.Script));
+            // A module of the package can import another one beside it.
+            File.WriteAllText(Path.Combine(folder, "ui", "helper.js"), "export const x = 1;");
+            var helper = string.Join('/', opened.Script!.Split('/').SkipLast(1)) + "/helper.js";
+            Assert.AreEqual("export const x = 1;", Module(helper));
+            // Nothing else of the folder is served: not the source of the plugin, not what it built.
+            Assert.AreEqual(404, broker.Modules.GetResponse(new NeoResourceRequest(new Uri("app://codealta" + string.Join('/', opened.Script.Split('/').SkipLast(2)) + "/plugin.cs"), "GET", new Dictionary<string, string>(), null, NeoResourceKind.Script, false, default))!.StatusCode);
+
+            // A new version of the plugin and of its file: the instance is opened again with another address, and the old one is not asked for.
+            File.WriteAllText(Path.Combine(folder, "ui", "board.js"), "export default () => 'two';");
+            Assert.AreEqual(PluginPackageChange.Reloaded, (await runtime.ReloadPackageAsync(package.Package)).Change);
+            var update = await NextAsync("update");
+            Assert.AreEqual(opened.InstanceId, update.InstanceId);
+            Assert.AreNotEqual(opened.Script, update.Script);
+            StringAssert.EndsWith(update.Script, "/ui/board.js");
+            Assert.AreEqual(string.Empty, update.ScriptProblem);
+            Assert.AreEqual("export default () => 'two';", Module(update.Script));
+            Assert.AreEqual(update.Script, (await service.OpenAsync(new(Epoch, key, "board", "work", null, null, null, true), default)).Script);
+
+            // A file of the package that is gone: the tab is told, and nothing is served.
+            File.Delete(Path.Combine(folder, "ui", "board.js"));
+            Assert.AreEqual(PluginPackageChange.Reloaded, (await runtime.ReloadPackageAsync(package.Package)).Change);
+            var gone = await NextAsync("update");
+            Assert.AreEqual((string.Empty, "The script of the canvas could not be found."), (gone.Script, gone.ScriptProblem));
+            watching.Cancel();
+            await pump;
+        }
+        finally
+        {
+            broker.Dispose();
+            await runtime.DisposeAsync();
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { /* Best-effort cleanup of a temporary directory. */ }
+        }
+    }
+
+    private static string ScriptedSource()
+        => """
+using CodeAlta.Plugins.Abstractions;
+
+[Plugin("boards")]
+public sealed class BoardsPlugin : PluginBase
+{
+    public override IEnumerable<PluginCanvasContribution> GetCanvases()
+    {
+        yield return new PluginCanvasContribution
+        {
+            Id = "board", Title = "Board",
+            Open = static (_, _) => ValueTask.FromResult(PluginCanvasView.Html("<p>skeleton</p>") with { Script = PluginScript.File("ui/board.js") }),
+        };
+    }
+}
+""";
+
+    [TestMethod]
     public async Task TheRequestsOfAPluginAreKeptForAPageThatIsNotThereYet_AndInputIsGivenToTheInstanceThatTheTabCreates()
     {
         await using var fixture = await Fixture.CreateAsync(watch: false);
@@ -664,15 +802,15 @@ public sealed class NotesPlugin : PluginBase
 
         var declared = view.List();
 
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "plain" }, declared.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain" }, declared.Select(static canvas => canvas.Id).ToArray());
         var board = declared[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "application", "{\"type\":\"object\"}", true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.InputSchema, board.Describes));
         CollectionAssert.AreEqual(new[] { "add", "throw" }, board.Actions.Select(static action => action.Name).ToArray());
         Assert.AreEqual("Adds an item.", board.Actions[0].Description);
         Assert.AreEqual(("project", "session"), (declared[1].Scope, declared[2].Scope));
-        Assert.IsNull(declared[4].Description);
-        Assert.IsFalse(declared[4].Describes);
+        Assert.IsNull(declared[6].Description);
+        Assert.IsFalse(declared[6].Describes);
 
         var opened = await fixture.OpenAsync("board", space: "work", key: "k1");
         var open = view.ListOpen().Single();
@@ -982,6 +1120,9 @@ public sealed class NotesPlugin : PluginBase
 
         public int Counter { get; set; }
 
+        /// <summary>The module the scripted canvas gives; the number after it says which version.</summary>
+        public const string ScriptText = "export default function Board() { return null; }";
+
         public ConcurrentDictionary<string, PluginCanvasContext> Contexts { get; } = new();
 
         public ConcurrentQueue<string> Closed { get; } = new();
@@ -1038,6 +1179,20 @@ public sealed class NotesPlugin : PluginBase
                     Interlocked.Increment(ref _brokenAttempts);
                     throw new InvalidOperationException("secret");
                 },
+            };
+            yield return new PluginCanvasContribution
+            {
+                Id = "scripted", Title = "Scripted",
+                Open = (canvas, _) =>
+                {
+                    Contexts[canvas.InstanceId] = canvas;
+                    return ValueTask.FromResult(PluginCanvasView.Html("<p>scripted</p>") with { ScriptSource = ScriptText });
+                },
+            };
+            yield return new PluginCanvasContribution
+            {
+                Id = "scriptfile", Title = "Script file",
+                Open = (_, _) => ValueTask.FromResult(PluginCanvasView.Html("<p>file</p>") with { Script = PluginScript.File("ui/board.js") }),
             };
             yield return new PluginCanvasContribution
             {

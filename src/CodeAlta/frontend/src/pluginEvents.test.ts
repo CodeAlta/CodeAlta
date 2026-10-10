@@ -9,7 +9,7 @@ const entry = (offset: string, patch: Partial<Entry>): Entry => ({ offset, event
   interactionId: null, sourceSessionId: null, name: null, text: "text", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, files: null, tool: null, images: null, ...patch });
 const idle = (offset: string) => entry(offset, { eventType: "sessionUpdate", kind: "Idle", text: null });
 const card = (patch: Partial<SessionPluginEvent> = {}): SessionPluginEvent => ({ eventId: "statistics:session:run-1", pluginId: "statistics", timestamp: "2026-01-01T10:00:09Z",
-  markdown: "**Turn statistics** · 4.0s · tools 2 calls / 1.5s", details: [{ header: "Detailed statistics", markdown: "| Metric | Value |\n| --- | ---: |", html: null }], html: null, ...patch });
+  markdown: "**Turn statistics** · 4.0s · tools 2 calls / 1.5s", details: [{ header: "Detailed statistics", markdown: "| Metric | Value |\n| --- | ---: |", html: null }], html: null, script: null, scriptProblem: null, ...patch });
 
 test("cards are read again when a turn ends or older history is loaded, not while a turn streams", () => {
   assert.equal(pluginEventsWindow([]), null);
@@ -54,6 +54,17 @@ test("a card is a compact row titled by its leading bold phrase, with its sectio
   assert.equal(rich.detailMarkdown, null);
   assert.equal(sections.detailSections, undefined);
   assert.ok(rich.copyMarkdown?.endsWith("### One\n\na\n\n### Two\n\nb"));
+});
+
+test("a card that has a script and a fragment carries the script, and only a path the host serves is believed", async () => {
+  const scripted = pluginEventItem(card({ html: "<p>x</p>", script: "/plugin/abc/def/main.js" }));
+  assert.deepEqual([scripted.script, scripted.scriptProblem], ["/plugin/abc/def/main.js", null]);
+  assert.equal(pluginEventItem(card({ html: null, script: "/plugin/abc/def/main.js" })).script, null, "a card without a fragment has nothing to run a script on");
+  assert.equal(pluginEventItem(card({ html: "<p>x</p>", script: null, scriptProblem: "The script of the card could not be found." })).scriptProblem, "The script of the card could not be found.");
+  const reply = (script: string | null) => ({ status: "ok", sessionId: "session", events: [card({ html: "<p>x</p>", script })] });
+  const read = (value: unknown) => createPluginEventsRead(async () => value, { epoch: "epoch", sessionId: "session", projectId: null })("2026-01-01T00:00:00Z", new AbortController().signal);
+  assert.equal((await read(reply("/plugin/abc/def/main.js")))?.length, 1);
+  for (const bad of ["https://evil.example/x.js", "/plugin/abc/../x.js", "/assets/index.js", "javascript:1"]) assert.equal(await read(reply(bad)), null, bad);
 });
 
 test("only cards of turns inside the loaded window are shown", () => {

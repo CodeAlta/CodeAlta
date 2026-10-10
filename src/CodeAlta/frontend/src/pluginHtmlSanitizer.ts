@@ -4,6 +4,13 @@ import createDOMPurify from "dompurify";
 export const pluginCommandAttribute = "data-alta-command";
 export const pluginActionAttribute = "data-alta-action";
 export const pluginValueAttribute = "data-alta-value";
+/** The class of a block that holds a chart, and the attributes that carry its option (JSON) and its label. */
+export const pluginChartClass = "alta-chart";
+export const pluginChartOptionAttribute = "data-option";
+export const pluginChartLabelAttribute = "data-label";
+/** The most characters of the JSON option of one chart in a fragment. */
+export const pluginChartOptionLimit = 256 * 1024;
+const isChartBlock = (node: Node) => /(?:^|\s)alta-chart(?:\s|$)/u.test((node as Element).getAttribute("class") ?? "");
 
 const tags = ["p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code",
   "ul", "ol", "li", "dl", "dt", "dd", "strong", "em", "s", "del", "b", "i", "u", "sub", "sup", "kbd", "samp", "var", "small", "mark",
@@ -12,7 +19,7 @@ const tags = ["p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
 // Every attribute is then checked for its element and its value by the hook below.
 const attributes = ["title", "class", "href", "open", "scope", "align", "colspan", "rowspan", "type", "name", "value", "placeholder", "checked", "readonly",
   "required", "disabled", "selected", "multiple", "label", "min", "max", "step", "rows", "cols", "maxlength", "id", "for", "aria-label",
-  "data-alta-command", "data-alta-action", "data-alta-value"];
+  "data-alta-command", "data-alta-action", "data-alta-value", "data-option", "data-label"];
 const inputTypes = /^(text|search|number|checkbox|radio|password|email|url|date|time|range|color|hidden)$/u;
 const fields = ["input", "select", "textarea"];
 const name = /^[A-Za-z][A-Za-z0-9._:-]{0,63}$/u;
@@ -60,7 +67,10 @@ export function createPluginHtmlSanitizer(view: Window & typeof globalThis) {
       || (attribute === "id" && (field || tag === "button") || attribute === "for" && tag === "label") && /^alta-[A-Za-z0-9_-]{1,64}$/u.test(value)
       || attribute === "aria-label" && value.length <= 256
       || (attribute === pluginCommandAttribute || attribute === pluginActionAttribute) && name.test(value)
-      || attribute === pluginValueAttribute && value.length <= 4096;
+      || attribute === pluginValueAttribute && value.length <= 4096
+      // A chart is data: its option is JSON that the window checks again before it draws anything (charts/sanitize.ts).
+      || attribute === pluginChartOptionAttribute && tag === "div" && isChartBlock(node) && value.length <= pluginChartOptionLimit
+      || attribute === pluginChartLabelAttribute && tag === "div" && isChartBlock(node) && value.length <= 256;
   });
 
   function dress(fragment: DocumentFragment) {

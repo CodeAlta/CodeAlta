@@ -56,7 +56,7 @@ export function PluginRegionContent({ items, region, projectId, sessionId }: {
   if (shown.length === 0) return null;
   const pane = { projectId, sessionId };
   return <>{shown.map(item => <span key={item.id} className={`plugin-region plugin-region-${item.region}`}>
-    {item.html ? <PluginHtml html={item.html} pluginKey={item.pluginKey} pane={pane} />
+    {item.html ? <PluginHtml html={item.html} pluginKey={item.pluginKey} pane={pane} script={{ path: item.script, problem: item.scriptProblem }} />
       : item.markdown ? <MarkdownContent source={item.markdown} /> : item.text}
   </span>)}</>;
 }

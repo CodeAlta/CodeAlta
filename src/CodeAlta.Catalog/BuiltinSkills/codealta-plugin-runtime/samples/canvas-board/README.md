@@ -1,0 +1,5 @@
+# Canvas board sample
+
+A tab that a plugin provides and a script draws. `plugin.cs` declares one canvas, `board`, whose view names a script of the package folder (`PluginScript.File("ui/board.js")`) and gives the cards as the input of the canvas (`alta board open`). `ui/board.js` is a React component: the window draws its default export in its own tree, so it imports `react` and `@blueprintjs/core` and gets the instances the application runs, and a menu or a popover opens in the layer of the window, above the tabs. It uses the `codealta` module (`html`, `Chart`, `Markdown`, `Icon`, `FileLink`, `useAlta`, `useVisible`) and the `alta` object (`alta.context.input`, `alta.host.openDiff`, `notify`, `setBadge`, `alta.visible`). No build step: the file is the module.
+
+A plugin of one file keeps to one file by giving the module as text (`PluginCanvasView.ScriptSource` or `PluginHtml.Script(code)`), served under a generated name. A reload of the plugin, or an edit of the file, is a new address: the tab mounts the new module and lets the old one go.

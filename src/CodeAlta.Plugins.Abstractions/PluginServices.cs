@@ -432,6 +432,12 @@ public record PluginDialogRequest
     public string? Html { get; init; }
 
     /// <summary>
+    /// Gets the script of <see cref="Html"/>, or <see langword="null"/> for a dialog that is its fragment alone. The module draws the content
+    /// of the dialog (see <see cref="PluginScript"/>); it reaches the plugin's commands and the window through the <c>alta</c> object.
+    /// </summary>
+    public PluginScript? Script { get; init; }
+
+    /// <summary>
     /// Gets the handler called when an element with <c>data-alta-action</c> is activated in <see cref="Html"/>.
     /// The dialog stays open while the handler runs; its result updates the content or closes the dialog.
     /// </summary>

@@ -40,6 +40,7 @@ internal sealed class PluginUiService
     private readonly ProjectCatalog? _projects;
     private readonly PluginRuntimeManager? _plugins;
     private readonly DesktopPluginUi? _ui;
+    private readonly DesktopPluginModules? _modules;
     private readonly DesktopCanvases? _canvases;
     private readonly PluginIcons _icons = new();
     private readonly string? _epoch;
@@ -60,7 +61,8 @@ internal sealed class PluginUiService
     /// <param name="canvases">The canvas broker, which says whether a canvas that a button names exists; null leaves the buttons that open a canvas out.</param>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal PluginUiService(ProjectCatalog projects, PluginRuntimeManager plugins, DesktopPluginUi ui, string epoch, DesktopCanvases? canvases = null)
+    /// <param name="modules">The server of the scripts of what plugins show, or null: the one of the canvas broker is used.</param>
+    internal PluginUiService(ProjectCatalog projects, PluginRuntimeManager plugins, DesktopPluginUi ui, string epoch, DesktopCanvases? canvases = null, DesktopPluginModules? modules = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(plugins);
@@ -70,6 +72,7 @@ internal sealed class PluginUiService
         _plugins = plugins;
         _ui = ui;
         _canvases = canvases;
+        _modules = modules ?? canvases?.Modules;
         _epoch = epoch;
     }
 
@@ -240,11 +243,19 @@ internal sealed class PluginUiService
                     if (string.Equals(entry.Registration.Handle.PluginRuntimeKey, McpRuntimeKey, StringComparison.Ordinal)) continue;
                     var content = entry.Content;
                     if (content.Html is null && content.Markdown is null && string.IsNullOrWhiteSpace(content.Text)) continue;
+                    string? script = null, scriptProblem = null;
+                    if (content.Html is not null && content.Script is { HasEntry: true } wanted)
+                    {
+                        script = _modules?.PublishFor(entry.Registration.Handle.PluginRuntimeKey, wanted);
+                        if (script is null) scriptProblem = "The script of the content could not be found.";
+                    }
+
                     items.Add(new(entry.Registration.Handle.RuntimeContributionKey, entry.Registration.Handle.PluginRuntimeKey,
                         region switch { PluginUiRegion.SessionFooter => "footer", PluginUiRegion.CommandBar => "bar", _ => "status" },
                         content.Html is null ? null : DesktopPluginUi.Cut(content.Html, DesktopPluginUi.MaximumHtmlUnits),
                         content.Html is not null || content.Markdown is null ? null : DesktopPluginUi.Cut(content.Markdown, DesktopPluginUi.MaximumMessageUnits),
-                        content.Html is not null || content.Markdown is not null || content.Text is null ? null : DesktopPluginUi.Cut(content.Text, DesktopPluginUi.MaximumMessageUnits)));
+                        content.Html is not null || content.Markdown is not null || content.Text is null ? null : DesktopPluginUi.Cut(content.Text, DesktopPluginUi.MaximumMessageUnits))
+                    { Script = script, ScriptProblem = scriptProblem });
                 }
             }
 
@@ -504,7 +515,17 @@ internal sealed record PluginUiRegionsResponse(string Status, string? ProjectId,
 /// <param name="Id">The contribution.</param>
 /// <param name="PluginKey">The plugin, as named by <c>data-alta-command</c> lookups.</param>
 /// <param name="Region"><c>footer</c> (above the prompt), <c>bar</c> or <c>status</c> (in the status line).</param>
-internal sealed record PluginUiContent(string Id, string PluginKey, string Region, string? Html, string? Markdown, string? Text);
+/// <param name="Html">The HTML fragment, or null.</param>
+/// <param name="Markdown">The Markdown, or null.</param>
+/// <param name="Text">The text, or null.</param>
+internal sealed record PluginUiContent(string Id, string PluginKey, string Region, string? Html, string? Markdown, string? Text)
+{
+    /// <summary>The path of the module that draws the fragment, on the origin of the application, or null for a fragment alone.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>Why the script is not served, or null.</summary>
+    public string? ScriptProblem { get; init; }
+}
 
 /// <param name="CommandId">The command, as listed by <c>contributions</c>.</param>
 /// <param name="SessionBusy">The pane's session is running.</param>
@@ -546,6 +567,12 @@ internal sealed record PluginUiEvent(string Kind)
 
     /// <summary>The HTML fragment of an <c>html</c> dialog.</summary>
     public string? Html { get; init; }
+
+    /// <summary>The path of the module that draws an <c>html</c> dialog, on the origin of the application, or null for a fragment alone.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>Why the script a dialog asked for is not served, or null.</summary>
+    public string? ScriptProblem { get; init; }
 
     public PluginUiChoice[]? Items { get; init; }
 

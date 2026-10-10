@@ -150,7 +150,7 @@ function PluginDialog({ ask, api, onFinish, onClosed }: {
           onClick={() => setSelected(index)} onDoubleClick={() => { setSelected(index); onFinish({ button: "ok", cancelled: false, text: null, selectedIndex: index, values: null }); }}>
           <strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</div>)}
       </div>}
-      {kind === "html" && <PluginHtml ref={content} html={html} className="plugin-dialog-html" onAction={(name, value, fields) => void action(name, value, fields)} onSubmit={accept} />}
+      {kind === "html" && <PluginHtml ref={content} html={html} className="plugin-dialog-html" script={{ path: ask.script ?? null, problem: ask.scriptProblem ?? null }} onAction={(name, value, fields) => void action(name, value, fields)} onSubmit={accept} />}
     </div>
     <footer className="plugin-dialog-buttons">
       {buttons.map(button => <Button key={button.name} intent={button.isDefault && !button.isCancel ? "primary" : "none"} disabled={busy}

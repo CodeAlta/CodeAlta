@@ -108,6 +108,12 @@ public sealed record PluginRenderResult
     /// </remarks>
     public string? Html { get; init; }
 
+    /// <summary>
+    /// Gets the script of <see cref="Html"/> in the desktop application, or <see langword="null"/> for a fragment alone (see <see cref="PluginScript"/>).
+    /// The terminal application ignores it.
+    /// </summary>
+    public PluginScript? Script { get; init; }
+
     /// <summary>Creates an HTML render result with the text shown where HTML is not.</summary>
     /// <param name="html">The HTML fragment for the desktop application.</param>
     /// <param name="text">The plain text shown by a frontend that does not show HTML.</param>

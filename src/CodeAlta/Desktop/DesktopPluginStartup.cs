@@ -43,9 +43,12 @@ internal sealed class DesktopStartupStatus
 }
 
 /// <summary>
-/// The application's files, plus the start-up status document.
+/// The application's files, plus the start-up status document and the scripts of plugins.
 /// </summary>
-internal sealed class DesktopStartupResources(INeoResourceProvider assets, DesktopStartupStatus status) : INeoResourceProvider
+/// <param name="assets">The files of the application.</param>
+/// <param name="status">The start-up status.</param>
+/// <param name="modules">The server of the plugins' scripts (<see cref="DesktopPluginModules.Prefix"/>), or null when plugins have no window.</param>
+internal sealed class DesktopStartupResources(INeoResourceProvider assets, DesktopStartupStatus status, DesktopPluginModules? modules = null) : INeoResourceProvider
 {
     private readonly INeoResourceProvider _assets = assets ?? throw new ArgumentNullException(nameof(assets));
     private readonly DesktopStartupStatus _status = status ?? throw new ArgumentNullException(nameof(status));
@@ -54,6 +57,9 @@ internal sealed class DesktopStartupResources(INeoResourceProvider assets, Deskt
     public NeoResourceResponse? GetResponse(NeoResourceRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        // The files of plugins are answered by their own server: nothing under this prefix is a file of the application.
+        if (request.Uri.AbsolutePath.StartsWith(DesktopPluginModules.Prefix, StringComparison.Ordinal))
+            return modules?.GetResponse(request) ?? NeoResourceResponse.Empty(404, "Not Found");
         return string.Equals(request.Uri.AbsolutePath, DesktopStartupStatus.DocumentPath, StringComparison.Ordinal)
             ? NeoResourceResponse.FromBytes(_status.ToJson(), "application/json")
             : _assets.GetResponse(request);

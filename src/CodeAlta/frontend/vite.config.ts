@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { blueprintPaletteVariables } from "./src/blueprintPalette";
+import { appModuleFile, appModules } from "./src/lent/appModules";
+import { lentLibraries } from "./src/lent/libraries";
 import { splashDocument, splashMarkup, splashScript } from "./src/splashMarkup";
 
 // Blueprint's stylesheet reaches the bundle with its palette literals turned into palette variables, so a
@@ -41,6 +43,24 @@ const terminalFontLicense = (): Plugin => ({
   },
 });
 
+// The libraries lent to plugins (src/lent) are entries of the build of their own, at fixed addresses (lib/<name>.js), that share
+// their code with the application's: a module of a plugin that imports them gets the instances the application runs. Their
+// exports are kept whole (a build of the application alone drops what its entry does not export), so a library is complete and
+// the part the application does not use stays in the file of the library, loaded when a plugin first imports it.
+const lentModules = (): Plugin => ({
+  name: "codealta:lent-modules",
+  buildStart() {
+    for (const library of lentLibraries) {
+      this.emitFile({ type: "chunk", id: fileURLToPath(new URL(`./${library.entry}`, import.meta.url)), fileName: library.file, preserveSignature: "strict" });
+    }
+
+    // The modules of the application's own build that built-in plugins name (src/lent/appModules.ts).
+    for (const module of appModules) {
+      this.emitFile({ type: "chunk", id: fileURLToPath(new URL(`./${module.entry}`, import.meta.url)), fileName: appModuleFile(module.name), preserveSignature: "strict" });
+    }
+  },
+});
+
 export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
@@ -54,7 +74,7 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_DEMO_MODE": JSON.stringify(mode === "demo" ? "true" : "false"),
   },
   base: "./",
-  plugins: [blueprintPalette(), react(), startupScreen(), terminalFontLicense()],
+  plugins: [blueprintPalette(), react(), startupScreen(), terminalFontLicense(), lentModules()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   build: { sourcemap: false, assetsInlineLimit: 0 },
 }));

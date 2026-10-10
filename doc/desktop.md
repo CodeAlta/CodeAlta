@@ -1471,6 +1471,15 @@ A plugin can put buttons in the window (see "Buttons" in [Plugins](plugins.md)).
 - **Hiding.** A right click (or the menu key) on a button offers **Hide this button**. The choice is kept in the window (`codealta.desktop.pluginButtons.hidden.v1`), under the plugin and the button, for every space. **Settings > Plugins** lists the buttons of each running plugin under its row, with the place and a switch that shows the button again.
 - **Icons.** An icon is a Lucide icon by name, a brand logo, or an SVG file of the plugin package. The icons the window draws itself are in its main file; the others come from one file with the whole library (395 KB, 105 KB compressed), loaded the first time a plugin names one, and the place of the icon is kept while it loads. A file of the plugin is read by the host (an SVG file of 32 KiB at most, rebuilt from a short list of shapes) and sent as a data URL; the page draws it as a mask in the color of the text. A name that is nothing draws the icon of a plugin. Tabs of canvases draw their icon the same way.
 
+### Plugin script
+
+A canvas, a dialog, the content around the prompt and a card of the timeline can have a script (see "Plugin script" in [Plugins](plugins.md)). The host serves the module of a plugin under `app://codealta/plugin/<key>/<stamp>/` (`DesktopPluginModules`, wrapped around the resources of the application in `DesktopStartupResources`), and sends the page the path of the module with the content: `script` and `scriptProblem` on the open reply and the update events of a canvas, on the `ask` event of a dialog, on a region and on a card. The page imports it (`pluginScript/scriptModule.ts`) and `PluginHtml` draws it: a default export that is a component replaces the fragment in the tree of the window, inside an error boundary; a `mount` function fills the element that holds the fragment, and the fragment is put back when it ends. The `alta` object (`pluginScript/alta.ts`) is made for each load of a module and ended (`alta.closed` aborts) when the content goes away or the plugin reloads.
+
+- **One React.** The libraries a script imports are the instances the page runs (see "Lent libraries" in the development guide). A component of a script is in the tree of the window, so the theme, the zoom, the language and the keyboard handling reach it by the same contexts as the panels of the window.
+- **Hidden tabs** keep the module they drew until they are shown; the script is told with `alta.visible`. A timeline card starts its script when it is first on the screen.
+- **A reloaded plugin** gives the tab a new path: the old module ends and the new one mounts. A script that fails shows its error in the content, with a button that copies it.
+- **`alta.host`** goes through what the content already has: the link opener of the window (`openFile`, `openLink`), the sessions of the window, the commands of plugins, the toaster, and a small bridge of the shell for another canvas and the changes of a project (`PluginHostBridgeContext`).
+
 ## Brand icons
 
 The logos of brands (model providers, models, coding agents, issue trackers) are not part

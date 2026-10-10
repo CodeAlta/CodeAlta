@@ -208,6 +208,7 @@ import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./pluginButtons/pluginButtons.css";
 import { CanvasPanel } from "./canvases/CanvasPanel";
+import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/hostBridge";
 import { createCanvasHub, type CanvasOpenRequest } from "./canvases/canvasHub";
 import { CanvasesPanel } from "./canvases/CanvasesPanel";
 import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasTabOf, defaultCanvasTarget, newCanvasPrompt, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
@@ -1106,6 +1107,18 @@ function App() {
       return { id: session.id, title: plainTitle(session.title), project: project ? { id: project.id, path: project.path } : null, projectName: project?.name ?? null }; }), [snapshot]);
   const canvasProjects = useMemo(() => (snapshot?.projects ?? []).filter(value => !value.archived).map(value => ({ id: value.id, path: value.path, name: value.name })), [snapshot]);
   const openCanvasLatest = useRef(openCanvasRequest); openCanvasLatest.current = openCanvasRequest;
+  // What the script of a plugin asks of the shell (`alta.host`): another canvas, and the changes of a project.
+  const pluginHostBridge = useMemo<PluginHostBridge>(() => ({
+    openCanvas: request => {
+      const declared = canvasHub.getCatalog().find(item => item.pluginKey === request.pluginKey && item.id === request.canvasId);
+      if (!declared) return;
+      openCanvasLatest.current({ ...request, spaceId: shownSpace.current, plugin: declared.package, focus: true, title: declared.title, icon: declared.icon });
+    },
+    showChanges: projectId => {
+      const project = projectId ? (catalog.current ?? currentSnapshot.current)?.projects.find(candidate => candidate.id === projectId && !candidate.archived) : undefined;
+      if (project) showChangesLatest.current({ id: project.id, path: project.path });
+    },
+  }), [canvasHub]);
   useEffect(() => {
     if (!tabsReady) return;
     canvasHub.onOpenRequest(request => openCanvasLatest.current(request));
@@ -2769,7 +2782,7 @@ function App() {
     ? { expectedEpoch: referenceEpoch, projectId: referenceProject, projectPath: referencePath, sessionId, lifetime: referenceLifetime,
       capturePopup: captureReferencePopup, observe: observeReference } : null,
   [referenceAvailable, referenceEpoch, referenceProject, referencePath, sessionId, referenceLifetime, captureReferencePopup, observeReference]);
-  return <ShellLanguageContext.Provider value={language}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -3253,7 +3266,7 @@ function App() {
       onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
         && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,

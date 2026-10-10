@@ -67,7 +67,7 @@ The desktop application (`src/CodeAlta`) and the terminal application (`src/Code
 
 **Portable results with an HTML form.** `PluginRenderResult.Html`, `PluginDerivedSessionEvent.Html`, `PluginDerivedSessionEventDetailSection.Html`, `PluginDynamicDerivedSessionEventContent.Html` and `PluginDialogRequest.Html` carry a fragment for the desktop application. The desktop shows the richest form (`Html`, then `Markdown`, then `Text`) and never a terminal visual; the terminal ignores `Html`. `PluginDialogRequest.OnAction` handles the actions of an HTML dialog and returns `PluginDialogActionResult` (keep open, new HTML, or close with a button name); `PluginDialogResponse.Values` holds the named fields.
 
-**HTML fragments are data, not code.** The page sanitizes a fragment with DOMPurify (`frontend/src/pluginHtmlSanitizer.ts`): an allow-list of text, structure and form elements, a per-element allow-list of attributes, `alta-*` classes only, and `http(s)` links that are shown and never followed. Scripts, styles, event handlers, images, frames and forms are removed. Buttons, inputs, tables, tags and callouts then get Blueprint classes. A fragment reaches the application only through attributes that `PluginHtml.tsx` handles by event delegation: `data-alta-command` runs a plugin command by name (the fragment's own plugin first), `data-alta-action` with `data-alta-value` raises a dialog action, and named fields are collected into `Values`. `PluginHtml` in the abstractions has the attribute and class names (rows and stacks, `alta-grow` for the element that takes the free width, `alta-field` for a label above its field, `alta-card`, tags, callouts, tones) and the `Encode`, `CommandButton` and `ActionButton` helpers. A plugin has no JavaScript in the window: the page runs the application's own scripts only, and what a fragment does goes through its plugin's C# handlers.
+**HTML fragments are data, not code.** The page sanitizes a fragment with DOMPurify (`frontend/src/pluginHtmlSanitizer.ts`): an allow-list of text, structure and form elements, a per-element allow-list of attributes, `alta-*` classes only, and `http(s)` links that are shown and never followed. Scripts, styles, event handlers, images, frames and forms are removed. Buttons, inputs, tables, tags and callouts then get Blueprint classes. A fragment reaches the application only through attributes that `PluginHtml.tsx` handles by event delegation: `data-alta-command` runs a plugin command by name (the fragment's own plugin first), `data-alta-action` with `data-alta-value` raises a dialog action, and named fields are collected into `Values`. `PluginHtml` in the abstractions has the attribute and class names (rows and stacks, `alta-grow` for the element that takes the free width, `alta-field` for a label above its field, `alta-card`, tags, callouts, tones) and the `Encode`, `CommandButton` and `ActionButton` helpers. Nothing a fragment contains runs, whatever it is written as: a `<script>` or an `on...=` attribute in a string is removed, so text that comes from outside never becomes script. A plugin that wants JavaScript gives it next to the fragment, as a module the application serves from the plugin (see "Plugin script"): the page runs the application's own scripts and the modules of the plugins that are loaded, and what a plain fragment does goes through its plugin's C# handlers.
 
 **What a fragment uses of the window.** An element of class `alta-markdown` (`PluginHtml.MarkdownClass`) holds Markdown as its text. `PluginHtml.tsx` takes that text out of the sanitized fragment (`pluginMarkdownSource` removes the indentation its lines share and the blank lines around it) and draws the element with `MarkdownContent`, the component of the timeline, through a React portal. A fragment therefore has what that component has, without a script of its own: the `markdown-it` renderer behind its own sanitizer, fenced code colored by highlight.js, and `mermaid` fences drawn as diagrams in the colors of the window. `PluginHtml.Markdown`, `PluginHtml.Code(code, language)` and `PluginHtml.Diagram(mermaid)` write such an element with the text encoded; `Code` and `Diagram` write a fence that the text cannot close. The same fragment given again leaves the drawn blocks in place. The other parts of the page (the Monaco editor, the terminal, Blueprint components that keep state such as tabs, trees and popovers, icons, images) are not reachable from a fragment. Region content, timeline cards and their detail sections also accept Markdown directly, which goes through the same component.
 
@@ -316,7 +316,88 @@ public override IEnumerable<PluginCanvasContribution> GetCanvases()
 
 **For agents.** The actions of a canvas and its `Describe` handler work whether or not a tab is open, since the state is the plugin's. The window keeps no state that the plugin does not have, so a restored tab asks the plugin for it again.
 
-The `canvas-checklist` sample of the `codealta-plugin-runtime` skill is a complete canvas plugin: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent.
+The `canvas-checklist` sample of the `codealta-plugin-runtime` skill is a complete canvas plugin: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent. `canvas-board` is a canvas drawn by a script (see "Plugin script").
+
+## Plugin script
+
+A plugin can give the desktop window a JavaScript module next to some HTML, and the window runs it. A canvas drawn by script is a board, a dashboard or a viewer that uses the same components as the window itself. The module is the plugin's: CodeAlta Desktop only; the terminal application ignores it.
+
+**Where a script goes.** A script is a `PluginScript`, given beside the HTML and never inside it:
+
+| Where | Member |
+| --- | --- |
+| The tab of a canvas | `PluginCanvasView.Script`, or `PluginCanvasView.ScriptSource` for a module given as text |
+| A dialog | `PluginDialogRequest.Script` |
+| What a plugin shows around the prompt | `PluginRenderResult.Script` |
+| A card of the timeline | `PluginDerivedSessionEvent.Script`; the module starts when the card is first on the screen, since a session can have hundreds |
+
+`PluginScript.App("statistics")` names a module of the application's own build, for a built-in plugin whose interface is written in the frontend of CodeAlta; the host refuses it for any other plugin (see "Application modules" in the development guide). `PluginScript.File("ui/board.js")` names a module of the package folder of a source plugin (a path with `/`, ending in `.js` or `.mjs`); `PluginScript.Inline(code)` (or `PluginHtml.Script(code)`) gives the module as text, so a plugin of one file stays one file, and `.WithModule("helper.js", code)` adds a module that the first one imports as `./helper.js`. A built-in plugin has no package folder: it names a module of the application's build with `App`, or gives a small script as text. The HTML given as a string stays sanitized, and a `<script>` in it stays removed.
+
+**The module.** It has one of two forms, and the window tells them apart:
+
+```js
+// ui/board.js: a file of the package folder. No build step.
+import { Button, Tab, Tabs } from "@blueprintjs/core";
+import { Chart, html, useAlta, useVisible } from "codealta";
+
+export default function Board() {            // 1. a React component, drawn by the window in its own tree
+    const alta = useAlta();
+    return html`<${Button} onClick=${() => alta.host.notify("Hello")}>Hello<//>`;
+}
+
+export async function mount(root, alta) {     // 2. or a function that fills the element that holds the fragment
+    root.querySelector(".alta-board").append("drawn by script");
+    return () => { /* called when the content goes away */ };
+}
+```
+
+A default export that is a component takes the place of the fragment, inside an error boundary; a module with both forms is a component. `mount(root, alta)` gets the element that holds the sanitized fragment, which is the skeleton to fill; what it returns, if it is a function, is called when the content goes away, and the element is then put back to the fragment, so a script can be mounted again. The window runs React in strict mode: effects run twice for a new component, so they must be able to run again.
+
+**Addresses and limits.** The application serves a module at `app://codealta/plugin/<plugin key>/<stamp>/<path>`, from its own origin, so the content security policy of the page (`script-src 'self'`, no inline script, no `eval`) is unchanged. The stamp changes when the plugin is reloaded or a file of the package changes: a new address is a new module that the window mounts, and the old one is let go (a browser never unloads a module; what matters is that it no longer runs, which `alta.closed` and the function `mount` returned ensure). Only files with a web extension are served (`.js`, `.mjs`, `.css`, `.json`, `.svg`, `.png`, `.jpg`, `.gif`, `.webp`, `.woff`, `.woff2`, `.txt`), at most 8 MiB, only below the package folder and never through a link. Modules given as text are at most 1 MiB each, 32 for a script, and a few versions of them are kept for each plugin. A plugin of a package folder can import its own files (`import "./helper.js"`) and keep a library as one module file (`vendor/d3.js`); only React must not come twice.
+
+**The libraries the application lends.** A module imports these by their usual names, through an import map in the entry document of the page, and gets **the instances the application runs**, not copies: one React (two copies break hooks and contexts), and the Blueprint, FlexLayout and icons of the window, with its theme, color scheme, zoom and language. A menu or a popover of a plugin opens in the layer of the window, above the tabs, and is not cut at the edge of the canvas.
+
+| Name | What it is | Version of this release |
+| --- | --- | --- |
+| `react`, `react/jsx-runtime` | React | 19.2.8 |
+| `react-dom`, `react-dom/client` | `createPortal`, `flushSync`; `createRoot` for a `mount` that draws with React | 19.2.8 |
+| `@blueprintjs/core`, `@blueprintjs/table` | The components of the window, and its tables (use `PopoverNext`: Blueprint warns about `Popover` under React 19) | 6.21.0, 6.3.0 |
+| `flexlayout-react` | A dock of its own inside a tab. The dock of the window is not lent: open another canvas, a file or a session with `alta.host` | 0.11.0 |
+| `lucide-react` | The whole icon library, loaded when a script first imports it | 0.511.0 |
+| `codealta` | What the application wrote for itself, below | interface 1 |
+
+The price is the versions: what is lent is the real library at the version CodeAlta ships, so a script that uses what a new major version changes has to be updated (`alta.versions` and the release notes say the versions). There are two tiers. The HTML vocabulary (`alta-*` classes, `alta-markdown`, `alta-chart`) and the `codealta` module are owned by CodeAlta and do not move with a library; a script that wants no surprise stays there. A script that wants everything takes the libraries and follows their versions. What is not lent is the inside of the application: its state, its RPC services and its own dock, which change without notice.
+
+**The `alta` object** is the one argument of `mount` and what `useAlta()` returns, so a script touches no global:
+
+| Member | Content |
+| --- | --- |
+| `alta.context` | `pluginKey`, `canvasId`, `instanceId`, `spaceId`, `projectId`, `sessionId`, `key` and `input` (the JSON the canvas was opened with) |
+| `alta.visible` | `value` and `subscribe(listener)`: whether the content is shown; a script pauses its timers and reads while it is not |
+| `alta.closed` | An `AbortSignal` that aborts when the content goes away: the tab closed, the plugin reloaded |
+| `alta.host` | `openFile(path, { line })`, `openDiff()`, `openSession(id)`, `openCanvas(id, options)`, `openLink(url)`, `notify(message, { tone })`, `runCommand(name)`, `setTitle`, `setStatus`, `setBadge` (the last three are for the tab; a badge takes the place of the status while it is set). A request the window cannot serve does nothing |
+| `alta.theme` | `value` and `subscribe`: the colors of the window as values (`text`, `muted`, `grid`, `surface`, `series`, `ramp`…), for what a script paints itself |
+| `alta.html(text)` | Cleans a string of HTML as fragments are cleaned; assign the result to `innerHTML`. Insert a string with this, never with `innerHTML` alone |
+| `alta.rpc` | The calls and streams of the plugin's own handlers; not available yet: every call rejects with `rpc_unavailable` |
+| `alta.versions` | The version of this interface and of the lent libraries |
+
+**The `codealta` module** adds what no library has:
+
+| Export | What it is |
+| --- | --- |
+| `html` | JSX without a build step: ``html`<${Button} intent="primary">Save<//>` `` (the syntax of `htm`; `class` and `for` on a page element are read as `className` and `htmlFor`) |
+| `useAlta`, `useVisible`, `useTheme` | The `alta` object, and the two signals of it as hooks |
+| `useRpc`, `useStream` | The calls and streams of the plugin as hooks; they need `alta.rpc` |
+| `Markdown`, `Code`, `Diagram` | The Markdown of the timeline, colored code, Mermaid diagrams in the colors of the window |
+| `Icon`, `BrandIcon` | An icon of the window by its name, the logo of a provider or a service |
+| `FileLink`, `SessionLink` | A link that opens a file in the code editor at a line, or a session |
+| `Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, `WeekdayHourHeatmap`, `histogram`, `histogramOption`, `boxPlotOption`, `boxStats`, `quantile` | The charts of the window (ECharts loads when the first one is drawn) |
+
+**Charts in plain HTML.** A fragment, with or without script, can hold `PluginHtml.Chart(optionJson, label)`: a `div` of class `alta-chart` whose `data-option` is the JSON of the chart and whose `data-label` says what it shows. The window draws it with its colors and gives it a table view. An option that is not data (a function, a link, a toolbox, a formatter that is not a template of `{b}` and `{c}`) or not JSON shows a short message and nothing else.
+
+**What happens around a script.** A tab that is hidden stays mounted and is told (`alta.visible`); a tab keeps the script it drew until it is shown, so a plugin that reloads while its tab is hidden is not started on a skeleton the tab has not drawn. A script that fails to load, is neither form, or throws shows its error in its content with a button that copies it, and the window around it goes on. A script the host cannot serve (a file that is missing or too large) says so in the same place. The safe mode that starts CodeAlta without plugins starts it without their scripts. A script runs in the document of the application, so it can do what the page can; a plugin is trusted code that runs in the process anyway, and the policy of the page and the sanitizer keep the property that matters: text from outside never becomes script.
+
+The `canvas-board` sample of the `codealta-plugin-runtime` skill is a React canvas with Blueprint tabs, a menu, a chart, Markdown, a file link and `alta.host`.
 
 ## Buttons
 

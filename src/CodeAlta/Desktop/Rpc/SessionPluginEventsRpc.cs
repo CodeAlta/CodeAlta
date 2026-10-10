@@ -52,6 +52,7 @@ internal sealed class SessionPluginEventsService
     private readonly string? _epoch;
     private readonly ProjectCatalog? _projects;
     private readonly CodeAlta.Plugins.PluginRuntimeManager? _plugins;
+    private readonly DesktopPluginModules? _modules;
     // One instance for the host: it keeps the summary of each completed turn it has already built.
     private readonly PluginSessionEventProjectionContribution[] _statistics = [.. new StatisticsPlugin().GetSessionEventProjections()];
 
@@ -71,7 +72,7 @@ internal sealed class SessionPluginEventsService
     internal SessionPluginEventsService(
         Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> read,
         Func<string?, CancellationToken, Task<bool>> statisticsEnabled, string epoch,
-        ProjectCatalog? projects = null, CodeAlta.Plugins.PluginRuntimeManager? plugins = null)
+        ProjectCatalog? projects = null, CodeAlta.Plugins.PluginRuntimeManager? plugins = null, DesktopPluginModules? modules = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(statisticsEnabled);
@@ -81,6 +82,7 @@ internal sealed class SessionPluginEventsService
         _epoch = epoch;
         _projects = projects;
         _plugins = plugins;
+        _modules = modules;
     }
 
     /// <summary>Creates the service for an owned host.</summary>
@@ -88,9 +90,10 @@ internal sealed class SessionPluginEventsService
     /// <param name="projects">The host's project catalog; its global root holds the configuration.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
     /// <param name="plugins">The host's plugin runtime, or null when the host runs no plugin.</param>
+    /// <param name="modules">The server of the scripts of cards, or null for none.</param>
     internal SessionPluginEventsService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, ProjectCatalog projects, string epoch,
-        CodeAlta.Plugins.PluginRuntimeManager? plugins = null)
-        : this((reads ?? throw new ArgumentNullException(nameof(reads))).ReadTimelinePageAsync, StatisticsEnablement(projects), epoch, projects, plugins)
+        CodeAlta.Plugins.PluginRuntimeManager? plugins = null, DesktopPluginModules? modules = null)
+        : this((reads ?? throw new ArgumentNullException(nameof(reads))).ReadTimelinePageAsync, StatisticsEnablement(projects), epoch, projects, plugins, modules)
     {
     }
 
@@ -129,7 +132,7 @@ internal sealed class SessionPluginEventsService
                 foreach (var contribution in _statistics)
                 {
                     var derived = await contribution.ProjectAsync(Context(StatisticsHandle, null), cancellationToken).ConfigureAwait(false);
-                    cards.AddRange(derived.Where(static item => !item.Remove).Select(item => Project(item, StatisticsPluginId, events[^1].Timestamp)));
+                    cards.AddRange(derived.Where(static item => !item.Remove).Select(item => Project(item, StatisticsPluginId, events[^1].Timestamp, StatisticsHandle.PluginRuntimeKey)));
                 }
             }
 
@@ -140,7 +143,7 @@ internal sealed class SessionPluginEventsService
                     var contribution = (PluginSessionEventProjectionContribution)registration.Contribution;
                     var derived = await contribution.ProjectAsync(Context(registration.Handle, projectPath), cancellationToken).ConfigureAwait(false);
                     cards.AddRange(derived.Where(static item => item is not null && !item.Remove)
-                        .Select(item => Project(item, registration.Handle.PluginRuntimeKey, events[^1].Timestamp)));
+                        .Select(item => Project(item, registration.Handle.PluginRuntimeKey, events[^1].Timestamp, registration.Handle.PluginRuntimeKey)));
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
@@ -228,8 +231,15 @@ internal sealed class SessionPluginEventsService
             .Select(registration => (registration, project.Root))];
     }
 
-    private static SessionPluginEvent Project(PluginDerivedSessionEvent derived, string pluginId, DateTimeOffset fallback)
+    private SessionPluginEvent Project(PluginDerivedSessionEvent derived, string pluginId, DateTimeOffset fallback, string runtimeKey)
     {
+        string? script = null, scriptProblem = null;
+        if ((derived.DynamicContent?.Html ?? derived.Html) is not null && derived.Script is { HasEntry: true } wanted)
+        {
+            script = _modules?.PublishFor(runtimeKey, wanted);
+            if (script is null) scriptProblem = "The script of the card could not be found.";
+        }
+
         var sections = derived.DynamicContent?.DetailSections is { Count: > 0 } dynamic ? dynamic : derived.DetailSections;
         var html = derived.DynamicContent?.Html ?? derived.Html;
         return new(Cut(derived.EventId, 512), Cut(pluginId, 512), derived.Timestamp ?? fallback,
@@ -237,7 +247,7 @@ internal sealed class SessionPluginEventsService
             [.. sections.Take(MaximumDetailSections).Select(static section =>
                 new SessionPluginEventDetail(Cut(section.Header, MaximumHeaderUnits), Cut(section.Markdown, MaximumDetailUnits),
                     section.Html is null ? null : Cut(section.Html, MaximumHtmlUnits)))],
-            html is null ? null : Cut(html, MaximumHtmlUnits));
+            html is null ? null : Cut(html, MaximumHtmlUnits)) { Script = script, ScriptProblem = scriptProblem };
     }
 
     // Cuts between characters, never inside a surrogate pair.
@@ -282,7 +292,14 @@ internal sealed record SessionPluginEventsResponse(string Status, string? Sessio
 /// the plugin gives an HTML fragment, the page shows it instead of the Markdown, which stays what Copy uses.
 /// </summary>
 internal sealed record SessionPluginEvent(string EventId, string PluginId, DateTimeOffset Timestamp, string Markdown, SessionPluginEventDetail[] Details,
-    string? Html = null);
+    string? Html = null)
+{
+    /// <summary>The path of the module that draws the fragment of the card, on the origin of the application, or null for a fragment alone.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>Why the script is not served, or null.</summary>
+    public string? ScriptProblem { get; init; }
+}
 
 /// <summary>A titled detail section of a card: Markdown, and an HTML fragment shown instead when there is one.</summary>
 internal sealed record SessionPluginEventDetail(string Header, string Markdown, string? Html = null);

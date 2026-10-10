@@ -10,7 +10,8 @@ namespace CodeAlta.Plugins.Abstractions;
 /// <para>
 /// A fragment is inserted in the page of the application after it is sanitized. Scripts, styles, event
 /// handler attributes and <c>javascript:</c> links are removed, so a fragment cannot call the application's
-/// code directly. Elements act through attributes that the application handles:
+/// code directly. A plugin that wants script gives it next to the fragment (<see cref="PluginScript"/>, <see cref="Script"/>),
+/// never inside it. Elements act through attributes that the application handles:
 /// </para>
 /// <list type="bullet">
 /// <item><description><c>data-alta-command="name"</c> runs a command of the same plugin when the element is activated.</description></item>
@@ -23,7 +24,8 @@ namespace CodeAlta.Plugins.Abstractions;
 /// <para>
 /// A fragment runs no script of its own. What the application itself draws is reached through Markdown:
 /// <see cref="Markdown"/>, <see cref="Code"/> and <see cref="Diagram"/> write a block that the application
-/// renders as it renders the messages of a session, with highlighted code and Mermaid diagrams.
+/// renders as it renders the messages of a session, with highlighted code and Mermaid diagrams, and
+/// <see cref="Chart"/> writes a chart.
 /// </para>
 /// </remarks>
 public static partial class PluginHtml
@@ -76,6 +78,9 @@ public static partial class PluginHtml
     /// fences as diagrams. The indentation that every line of the block shares is not part of the Markdown.
     /// </summary>
     public const string MarkdownClass = "alta-markdown";
+
+    /// <summary>Marks a block that holds a chart: the application draws the chart whose option is the JSON in its <c>data-option</c> attribute.</summary>
+    public const string ChartClass = "alta-chart";
 
     /// <summary>Encodes text so that it can be placed in a fragment as content or as an attribute value.</summary>
     /// <param name="text">The text to encode; <see langword="null"/> is encoded as an empty string.</param>
@@ -137,6 +142,26 @@ public static partial class PluginHtml
         ArgumentException.ThrowIfNullOrWhiteSpace(mermaid);
         return Markdown(Fence(mermaid, "mermaid"));
     }
+
+    /// <summary>Creates a chart, drawn by the application with the colors of the window and of its color scheme.</summary>
+    /// <param name="optionJson">
+    /// The option of the chart as JSON: an ECharts option made of data only (series, axes, a legend). A function, a link, a toolbox or a
+    /// formatter that is not a template of <c>{b}</c> and <c>{c}</c> is refused, and the block then shows a short message.
+    /// </param>
+    /// <param name="label">The text that says what the chart shows, for people who cannot see it, or <see langword="null"/>.</param>
+    /// <returns>The block markup, with the option and the label encoded.</returns>
+    /// <exception cref="ArgumentException"><paramref name="optionJson"/> is null, empty or whitespace.</exception>
+    public static string Chart(string optionJson, string? label = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(optionJson);
+        return $"<div class=\"{ChartClass}\" data-option=\"{Encode(optionJson)}\"{(string.IsNullOrWhiteSpace(label) ? string.Empty : $" data-label=\"{Encode(label)}\"")}></div>";
+    }
+
+    /// <summary>Creates the script of a fragment from the text of a JavaScript module; give it to the contribution that shows the fragment.</summary>
+    /// <param name="code">The module, as <see cref="PluginScript"/> describes.</param>
+    /// <returns>The script.</returns>
+    /// <exception cref="ArgumentException"><paramref name="code"/> is blank or too long.</exception>
+    public static PluginScript Script(string code) => PluginScript.Inline(code);
 
     // A fence longer than any run of backticks in the text, so that the text cannot close it.
     private static string Fence(string text, string? language)

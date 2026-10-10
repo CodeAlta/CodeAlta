@@ -72,7 +72,10 @@ internal sealed class CanvasesService
             return new(opening.Status, null, declaration?.Canvas.Title is { } title ? Line(title) : null, null, null, false, 0, declaration?.Package, declaration?.Canvas.Icon, IconData(declaration));
         }
 
-        return new("ok", state.InstanceId, state.Title, state.StatusText, state.Html, state.Actions, state.Revision, declaration?.Package, declaration?.Canvas.Icon, IconData(declaration));
+        return new("ok", state.InstanceId, state.Title, state.StatusText, state.Html, state.Actions, state.Revision, declaration?.Package, declaration?.Canvas.Icon, IconData(declaration))
+        {
+            Script = state.Script, ScriptProblem = state.ScriptProblem, Input = state.Input,
+        };
     }
 
     /// <summary>Says whether a tab shows an instance now: the plugin sees it as <c>IsVisible</c>.</summary>
@@ -223,7 +226,17 @@ internal sealed record CanvasOpenRequest(string? ExpectedEpoch, string? PluginKe
 /// <param name="Icon">The name of the icon of the canvas, or null.</param>
 /// <param name="IconData">When the icon names a file of the plugin package, that file as a clean SVG data URL; null otherwise.</param>
 internal sealed record CanvasOpenResponse(string Status, string? InstanceId, string? Title, string? StatusText, string? Html, bool Actions, int Revision,
-    string? Package, string? Icon, string? IconData = null);
+    string? Package, string? Icon, string? IconData = null)
+{
+    /// <summary>The path of the module that draws the tab, to import from the application's origin, or null for a fragment alone.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>Why a script the plugin asked for is not served, or null.</summary>
+    public string? ScriptProblem { get; init; }
+
+    /// <summary>The input the instance was opened with, as JSON, or null.</summary>
+    public string? Input { get; init; }
+}
 
 /// <summary>Says whether a tab shows an instance.</summary>
 internal sealed record CanvasVisibleRequest(string? ExpectedEpoch, string? InstanceId, bool Visible);
@@ -310,6 +323,12 @@ internal sealed record CanvasEvent(string Kind)
 
     /// <summary>Whether the fragment raises actions, or null for no change.</summary>
     public bool? Actions { get; init; }
+
+    /// <summary>For a full <c>update</c> (the plugin was reloaded): the path of the module that draws the tab, empty for none; null for no change.</summary>
+    public string? Script { get; init; }
+
+    /// <summary>For a full <c>update</c>: why a script is not served, empty for none; null for no change.</summary>
+    public string? ScriptProblem { get; init; }
 
     /// <summary>For <c>update</c> and <c>state</c>: <c>ready</c>, <c>plugin_stopped</c>, <c>unknown_canvas</c> or <c>failed</c>; null for no change.</summary>
     public string? State { get; init; }
