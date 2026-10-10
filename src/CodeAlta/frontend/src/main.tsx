@@ -111,7 +111,9 @@ import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
-import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage, type MoveScope } from "./sessionMove";
+import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage } from "./sessionMove";
+import { useSessionRowDrag, type SessionDrag, type SessionRowDrag } from "./explorer/sessionDrag";
+import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
@@ -122,7 +124,7 @@ import { createProjectRename, projectNameVisible, projectRenameMessage, projectR
 import { sessionHierarchy } from "./sessionHierarchy";
 import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
-import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
@@ -609,7 +611,10 @@ function App() {
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
   // The session whose project is being chosen, with the project it is in when its menu was used.
-  const [movingSession, setMovingSession] = useState<{ id: string; title: string; from: MoveScope } | null>(null);
+  const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
+  // The row of a session dragged onto the row of another project, and that project.
+  const rowDrag = useSessionRowDrag(id => currentSnapshot.current?.projects.find(project => project.id === id),
+    (drag, project) => { if (!movingPending.current) { setMenuTarget(null); void moveSessionTo(drag, project); } });
   const [movingBusy, setMovingBusy] = useState(false);
   const movingPending = useRef(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -2459,6 +2464,7 @@ function App() {
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
       onAction={(session, action) => openScopeSession(scope, session, action)} menuEntries={session => sessionCanvasEntries(session, project)} deleteAsks={confirms.sessionDelete}
+      drag={session => sessionDragSource(session, scope)}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
 
@@ -2561,6 +2567,18 @@ function App() {
     setMovingSession({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
   }
 
+  // The row of a session of a project can be dragged onto the row of another project: the drop moves it there.
+  function sessionDragSource(session: WorkspaceSession, scope: string | null): SessionRowDrag {
+    const project = scope === null ? undefined : snapshot?.projects.find(value => value.id === scope);
+    if (!project || !sessionMoveAccess(session, project, currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
+      batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
+      renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)) return {};
+    return rowDrag.source({ id: session.id, title: plainTitle(session.title), from: { projectId: project.id, projectPath: project.path } });
+  }
+  function projectDropTarget(project: WorkspaceProject): ProjectRowDrop | undefined {
+    return rowDrag.view?.over === project.id ? { "data-over": "true" } : undefined;
+  }
+
   // The tabs of moved sessions follow them, in every space: the one shown, those kept in memory, and those only stored.
   function retargetMovedTabs(moved: Parameters<typeof retargetSessionTabs>[1]) {
     writeTabs(current => retargetSessionTabs(current, moved));
@@ -2575,10 +2593,10 @@ function App() {
     } catch { /* Storage that cannot be read keeps what it has: those tabs are dropped when their space is shown. */ }
   }
 
-  async function moveSessionTo(target: WorkspaceProject) {
-    const moving = movingSession;
+  // A session chosen in its menu, or dropped on the row of a project, goes to that project.
+  async function moveSessionTo(moving: SessionDrag, target: WorkspaceProject) {
     const capability = mutation?.capability;
-    if (!moving || movingPending.current || !owned || !capability?.canMutate() || target.archived || target.id === moving.from.projectId) return;
+    if (movingPending.current || !owned || !capability?.canMutate() || target.archived || target.id === moving.from.projectId) return;
     movingPending.current = true;
     setMovingBusy(true);
     try {
@@ -3242,6 +3260,7 @@ function App() {
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           {!snapshot && railHead}
           {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={selectProject} children={sessions}
+            drop={owned ? projectDropTarget : undefined}
             tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,
@@ -3325,7 +3344,7 @@ function App() {
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
                 mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
-              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id}
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} {...sessionDragSource(session, projectId)}
                 onContextMenu={event => {
                   const target = event.target as HTMLElement;
                   if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
@@ -3632,8 +3651,10 @@ function App() {
         focusPromptSoon();
         return true;
       }} onClose={() => setDialog(null)} />}
+    {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
+      style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
     {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
-      projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(project)}
+      projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
       onClose={() => { if (!movingPending.current) setMovingSession(null); }} />}
     {spaceDialog && <SpaceDialog spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} create={spacesHub.create}
       // A space made from Settings is organized there; one made from the title bar is shown at once.

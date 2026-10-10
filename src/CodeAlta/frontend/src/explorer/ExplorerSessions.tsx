@@ -11,6 +11,7 @@ import { plainTitle } from "../sessionTitle";
 import { providerHasRemoteControl } from "../remoteControl";
 import { useShellLanguage } from "../shellLanguage";
 import type { SessionListEntry } from "./sessionTree";
+import type { SessionRowDrag } from "./sessionDrag";
 
 /** How far a row is pushed in for each level of its session under its parents. */
 export const sessionRowIndent = (depth: number) => 14 + Math.min(depth, 8) * 12;
@@ -71,7 +72,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, menuEntries, deleteAsks = true, onMore, onFewer, tree }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, menuEntries, deleteAsks = true, onMore, onFewer, tree, drag }: {
   /** The sessions listed, and what stands for the sub-agents that are not. */
   entries: readonly SessionListEntry[];
   /** Whether the scope is the global sessions, and not a project. */
@@ -95,6 +96,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   onFewer: () => void;
   /** The sub-agents of a session: hidden or shown, and more or fewer of them listed. */
   tree: Readonly<{ toggle: (session: WorkspaceSession, collapsed: boolean) => void; more: (sessionId: string) => void; fewer: (sessionId: string) => void }>;
+  /** What makes the row of a session draggable onto another project. */
+  drag?: (session: WorkspaceSession) => SessionRowDrag;
 }) {
   const { t } = useShellLanguage();
   const brands = useContext(ProviderBrandsContext);
@@ -110,7 +113,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
       const twist = sessionTwist(entry, tree.toggle);
       const shown = menu?.id === session.id ? menu : null;
       const allowed = shown ? access(session) : null;
-      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id}
+      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} {...drag?.(session)}
         onContextMenu={event => {
           if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
           event.preventDefault();

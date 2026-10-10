@@ -20,6 +20,16 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
   return { open, rename: mutate, fork: mutate, delete: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null };
 }
 
+/**
+ * Whether the row of a session can be dragged onto another project: a session of the exact scope of its project, on
+ * an owned host that can change sessions now. Unlike the menu, it does not ask for the session to be the selected one.
+ */
+export function sessionMoveAccess(row: WorkspaceSession, project: WorkspaceProject | undefined, hostEpoch: string | null,
+  owned: boolean, canMutate: boolean, busy: boolean, uncertain: boolean) {
+  return !!project && !project.archived && row.scopeKind === "project" && row.projectId === project.id && row.workspacePath === project.path
+    && owned && !!hostEpoch && canMutate && !busy && !uncertain;
+}
+
 export function isSessionContextKey(key: string, shiftKey: boolean, composing: boolean, editing: boolean) {
   return !composing && !editing && (key === "ContextMenu" || key === "F10" && shiftKey);
 }
