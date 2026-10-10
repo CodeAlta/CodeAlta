@@ -167,6 +167,8 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
 
         public IPluginStateStore State => inner.State;
 
+        public IPluginDatabase Database => inner.Database;
+
         public IPluginWorkspaceService Workspace => inner.Workspace;
 
         public IPluginSessionService Sessions => inner.Sessions;

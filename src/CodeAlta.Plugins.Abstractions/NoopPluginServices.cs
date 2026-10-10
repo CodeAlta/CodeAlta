@@ -19,6 +19,7 @@ public sealed class NoopPluginServices : IPluginServices
         Logger = logger;
         Ui = new NoopPluginUiService();
         State = new NoopPluginStateStore();
+        Database = new NoopPluginDatabase();
         Workspace = new NoopPluginWorkspaceService();
         Sessions = new NoopPluginSessionService();
         Prompts = new NoopPluginPromptService();
@@ -35,6 +36,9 @@ public sealed class NoopPluginServices : IPluginServices
 
     /// <inheritdoc />
     public IPluginStateStore State { get; }
+
+    /// <inheritdoc />
+    public IPluginDatabase Database { get; }
 
     /// <inheritdoc />
     public IPluginWorkspaceService Workspace { get; }

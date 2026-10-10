@@ -11,7 +11,7 @@ namespace CodeAlta.Hosting;
 /// <para>
 /// A developer instance (<see cref="DeveloperOption"/>) shares that directory for configuration, providers,
 /// credentials, prompts, skills and the project catalog, but keeps what two processes must not write
-/// together — sessions, the session cache, view state, prompt drafts, logs and the single-instance lock —
+/// together — sessions, the application database, view state, prompt drafts, logs and the single-instance lock —
 /// in its <c>dev</c> subdirectory. It can therefore run beside the normal instance, which is how CodeAlta is
 /// developed with CodeAlta. Only one developer instance runs at a time.
 /// </para>

@@ -934,7 +934,7 @@ A local session:
 - can transfer replayable local history to another compatible configured provider when no exact provider continuation state exists;
 - persists session summary/state snapshots and legacy session-view headers/state into the same JSONL journal.
 
-The journal path is `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. Startup session listing reads a local projection cache at `~/.alta/cache/cache.sqlite3` first, then reconciles external journal additions/changes after the initial projection; journals remain the source of truth and are used to rebuild a missing or corrupt cache. Optional traces live at `~/.alta/sessions/traces/<session-id>.trace` when protocol tracing is enabled for a provider.
+The journal path is `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. Startup session listing reads a local projection of the sessions in the application database (`~/.alta/data/alta.sqlite3`, see `catalog-and-config.md`) first, then reconciles external journal additions/changes after the initial projection; journals remain the source of truth and are used to rebuild the projection when its tables are missing, damaged or stale. Optional traces live at `~/.alta/sessions/traces/<session-id>.trace` when protocol tracing is enabled for a provider.
 
 Built-in file mutation tools use `AgentTurnFileChangeTracker` for per-tool and whole-turn diffs.
 Text snapshot capture skips files larger than 1 MiB and retains at most 8,388,608 text characters

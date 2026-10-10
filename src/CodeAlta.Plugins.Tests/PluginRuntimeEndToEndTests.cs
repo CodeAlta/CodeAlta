@@ -111,6 +111,83 @@ public sealed class PluginRuntimeEndToEndTests
         Assert.AreEqual(0, deactivationDiagnostics.Count, string.Join(Environment.NewLine, deactivationDiagnostics.Select(static diagnostic => diagnostic.Message)));
     }
 
+    [TestMethod]
+    [TestCategory("RequiresDotNet10FileBuild")]
+    public async Task SourcePluginKeepsItsTablesInTheApplicationDatabase()
+    {
+        using var temp = new TestTempDirectory();
+        var root = new PluginRoot { RootPath = temp.Path, Scope = PluginScope.Global };
+        var packageDirectory = Path.Combine(temp.Path, "notes-db");
+        Directory.CreateDirectory(packageDirectory);
+        File.WriteAllText(Path.Combine(packageDirectory, "plugin.cs"), """
+            using CodeAlta.Plugins.Abstractions;
+            using Microsoft.Data.Sqlite;
+
+            [Plugin("notes-db", DisplayName = "Notes DB")]
+            public sealed class NotesDbPlugin : PluginBase
+            {
+                public override async ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
+                {
+                    var database = Context.Services.Database;
+                    await database.MigrateAsync(1, async (connection, from, to, token) =>
+                    {
+                        await using var command = connection.CreateCommand();
+                        command.CommandText = $"CREATE TABLE {database.TablePrefix}notes (id INTEGER PRIMARY KEY, text TEXT);";
+                        await command.ExecuteNonQueryAsync(token);
+                    }, cancellationToken);
+                    await database.WriteAsync(async (connection, token) =>
+                    {
+                        await using var command = connection.CreateCommand();
+                        command.CommandText = $"INSERT INTO {database.TablePrefix}notes (text) VALUES ($text);";
+                        command.Parameters.AddWithValue("$text", "written by a source plugin");
+                        await command.ExecuteNonQueryAsync(token);
+                    }, cancellationToken);
+                }
+            }
+            """);
+        var generation = await new PluginRootBuildFileGenerator().GenerateAsync(root, new PluginRootBuildFileOptions
+        {
+            CodeAltaExeFolder = AppContext.BaseDirectory,
+            GlobalJsonContent = """
+            {
+              "sdk": { "version": "10.0.100", "rollForward": "latestMinor", "allowPrerelease": false }
+            }
+            """,
+            PackageVersions = LoadPluginPackageVersions(),
+        });
+        Assert.IsTrue(generation.Succeeded, string.Join(Environment.NewLine, generation.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        var package = new SourcePluginDiscoveryService().Discover(root).Single();
+        var buildResult = await new PluginBuildService(new PluginBuildManifestStore(Path.Combine(temp.Path, ".cache"), "codealta-test", "sdk-test"))
+            .BuildAsync(new PluginBuildRequest { Package = package, ForceRebuild = true });
+        AssertIfFileBasedBuildIsUnsupported(buildResult);
+        Assert.IsTrue(buildResult.Succeeded, BuildFailureMessage(buildResult));
+        await using var application = new CodeAlta.Catalog.ApplicationDatabase(new CodeAlta.Catalog.ApplicationDatabaseOptions
+        {
+            DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
+        });
+
+        var loadResult = new PluginAssemblyLoader().Load(buildResult);
+        Assert.IsTrue(loadResult.Succeeded, string.Join(Environment.NewLine, loadResult.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        var discoveredType = new PluginTypeDiscoveryService().Discover(loadResult).Single();
+        var activation = await new PluginRuntimeActivator(new PluginContributionRegistry()).ActivateAsync(
+            discoveredType,
+            package,
+            loadResult.LoadContext,
+            new PluginActivationOptions { HostInfo = CreateHostInfo(temp.Path), ApplicationDatabase = application });
+
+        Assert.IsTrue(activation.Succeeded, string.Join(Environment.NewLine, activation.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        var prefix = PluginDatabase.CreateTablePrefix(discoveredType.Descriptor.RuntimeKey);
+        var text = await application.ReadAsync("test", async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT text FROM {prefix}notes;";
+            return (string?)await command.ExecuteScalarAsync(token);
+        });
+        Assert.AreEqual("written by a source plugin", text);
+        Assert.AreEqual(1, await application.GetVersionAsync(PluginDatabase.GetOwner(discoveredType.Descriptor.RuntimeKey)));
+        await activation.ActivePlugin!.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
     private static string BuildFailureMessage(PluginBuildResult buildResult)
         => string.Join(Environment.NewLine,
             buildResult.RuntimeDiagnostics.Select(static diagnostic => diagnostic.Message)

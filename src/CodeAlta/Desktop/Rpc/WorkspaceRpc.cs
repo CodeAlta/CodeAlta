@@ -7,7 +7,7 @@ namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>Persisted catalog browsing for one explicitly admitted task-owned copy.</summary>
 /// <remarks>
-/// Listing can create/rebuild cache/cache.sqlite3 and SQLite sidecars. It never falls back to header scans.
+/// Listing can create/rebuild data/alta.sqlite3 and SQLite sidecars. It never falls back to header scans.
 /// AgentSessionCatalog starts its shared load using Task.Run and CancellationToken.None: canceling a waiter
 /// does not stop that load. NeoAstra stops waiting for invocations after five seconds during teardown.
 /// Consequently catalog/cache work can outlive bridge teardown; this service adds no lifetime guarantee.

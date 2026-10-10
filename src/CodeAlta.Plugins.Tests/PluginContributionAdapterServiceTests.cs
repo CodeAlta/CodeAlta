@@ -569,6 +569,8 @@ public sealed class PluginContributionAdapterServiceTests
 
         public IPluginStateStore State { get; }
 
+        public IPluginDatabase Database => _inner.Database;
+
         public IPluginWorkspaceService Workspace => _inner.Workspace;
 
         public IPluginSessionService Sessions => _inner.Sessions;

@@ -153,6 +153,8 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
 
     public IPluginStateStore State => _inner.State;
 
+    public IPluginDatabase Database => _inner.Database;
+
     public IPluginWorkspaceService Workspace { get; } = new RunWorkspace(ui);
 
     public IPluginSessionService Sessions => _ui;

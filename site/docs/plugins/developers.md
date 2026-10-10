@@ -373,6 +373,19 @@ Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `Dispo
   ```
 
   `PluginStateScope.User` stores under `~/.alta/plugin-data/`, and `PluginStateScope.Project` under `<project>/.alta/plugin-data/`.
+- `Services.Database` gives the plugin tables of its own in the SQLite database of CodeAlta, for data that is queried or that grows. Every table name starts with `Services.Database.TablePrefix`, which CodeAlta derives from the plugin, and `MigrateAsync` runs the changes to the tables once for each version:
+
+  ```csharp
+  var database = Services.Database;
+  await database.MigrateAsync(1, async (connection, from, to, token) =>
+  {
+      await using var command = connection.CreateCommand();
+      command.CommandText = $"CREATE TABLE {database.TablePrefix}notes (id INTEGER PRIMARY KEY, text TEXT)";
+      await command.ExecuteNonQueryAsync(token);
+  }, cancellationToken);
+  ```
+
+  `ReadAsync` reads without waiting for anyone, and `WriteAsync` writes in one transaction, in turn with the other writers: keep a write short. The data is kept when the plugin is turned off.
 - `Logger` writes to the CodeAlta log.
 - Do not keep static references to host objects, and do not put secrets in plugin source.
 

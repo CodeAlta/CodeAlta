@@ -14,7 +14,8 @@ public sealed class CatalogStateRootTests
         Assert.AreEqual(options.GlobalRoot, options.StateRoot);
         Assert.IsFalse(options.HasSeparateStateRoot);
         Assert.AreEqual(Path.Combine(options.GlobalRoot, "sessions"), options.SessionsRoot);
-        Assert.AreEqual(Path.Combine(options.GlobalRoot, "cache", "cache.sqlite3"), options.SessionCacheDatabasePath);
+        Assert.AreEqual(Path.Combine(options.GlobalRoot, "data", "alta.sqlite3"), options.ApplicationDatabasePath);
+        Assert.AreEqual(Path.Combine(options.GlobalRoot, "cache", "cache.sqlite3"), options.LegacySessionCacheDatabasePath);
         Assert.AreEqual(Path.Combine(options.GlobalRoot, "ui-state.yaml"), options.UiStatePath);
         Assert.AreEqual(Path.Combine(options.GlobalRoot, "saved_prompts"), options.PromptDraftsRoot);
 
@@ -32,7 +33,9 @@ public sealed class CatalogStateRootTests
         Assert.IsTrue(options.HasSeparateStateRoot);
         // Written by one instance only.
         Assert.AreEqual(Path.Combine(state, "sessions"), options.SessionsRoot);
-        Assert.AreEqual(Path.Combine(state, "cache", "cache.sqlite3"), options.SessionCacheDatabasePath);
+        Assert.AreEqual(Path.Combine(state, "data", "alta.sqlite3"), options.ApplicationDatabasePath);
+        Assert.AreEqual(Path.Combine(state, "data", "backups"), options.ApplicationDatabaseBackupRoot);
+        Assert.AreEqual(Path.Combine(state, "cache", "cache.sqlite3"), options.LegacySessionCacheDatabasePath);
         Assert.AreEqual(Path.Combine(state, "ui-state.yaml"), options.UiStatePath);
         Assert.AreEqual(Path.Combine(state, "saved_prompts"), options.PromptDraftsRoot);
         Assert.AreEqual(Path.Combine(state, "threads", "internal"), options.InternalSessionsRoot);

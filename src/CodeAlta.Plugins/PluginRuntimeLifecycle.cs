@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
 
@@ -133,6 +134,9 @@ public sealed record PluginActivationOptions
     /// <summary>Gets the activation generation.</summary>
     public int ActivationGeneration { get; init; } = 1;
 
+    /// <summary>Gets the application database the plugins get their tables from, or <see langword="null"/> for a host without one.</summary>
+    public IApplicationDatabase? ApplicationDatabase { get; init; }
+
     /// <summary>Gets the explicitly composed built-in factory; source plugins retain type-based activation.</summary>
     internal Func<PluginBase>? BuiltInFactory { get; init; }
 }
@@ -213,6 +217,10 @@ public sealed class PluginRuntimeActivator
             var state = hostServices.State is NoopPluginStateStore && !string.IsNullOrWhiteSpace(options.HostInfo.UserDataDirectory)
                 ? new PluginFileStateStore(Path.Combine(options.HostInfo.UserDataDirectory, "plugin-data"), discoveredType.Descriptor.RuntimeKey, sourcePackage?.Root.ProjectPath, hostServices)
                 : null;
+            // The tables of this plugin: its key decides the prefix, so it finds them again after a restart.
+            IPluginDatabase? database = options.ApplicationDatabase is { } applicationDatabase
+                ? new PluginDatabase(applicationDatabase, discoveredType.Descriptor.RuntimeKey, lifetime.Token)
+                : null;
             var services = new PluginRuntimeServices(
                 logger,
                 discoveredType.Descriptor.RuntimeKey,
@@ -220,7 +228,8 @@ public sealed class PluginRuntimeActivator
                 sourcePackage?.Root.ProjectId,
                 hostServices,
                 taskService,
-                state);
+                state,
+                database);
             var context = new PluginRuntimeContext
             {
                 Plugin = discoveredType.Descriptor,

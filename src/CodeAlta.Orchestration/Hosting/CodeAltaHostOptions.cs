@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
@@ -162,6 +163,13 @@ public sealed class CodeAltaHostOptions
     /// Gets a prestarted plugin runtime supplied by the caller. When set, the host will not dispose it.
     /// </summary>
     public PluginRuntimeManager? PrestartedPluginRuntime { get; init; }
+
+    /// <summary>
+    /// Gets the application database of the state root, supplied by the caller. When set, the host will not dispose it.
+    /// When it is not set, the host uses the one of <see cref="PrestartedPluginRuntime"/>, and otherwise opens and
+    /// disposes the one of its own state root.
+    /// </summary>
+    public ApplicationDatabase? ApplicationDatabase { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the host should start a plugin runtime when one is not supplied.

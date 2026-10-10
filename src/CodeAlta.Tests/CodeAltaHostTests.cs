@@ -40,6 +40,107 @@ public sealed class CodeAltaHostTests
     }
 
     [TestMethod]
+    public async Task CreateAsync_OpensTheApplicationDatabaseOfItsStateRootAndSharesItWithItsPlugins()
+    {
+        using var temp = TempDirectory.Create();
+        var projectRoot = Path.Combine(temp.Path, "project");
+        Directory.CreateDirectory(projectRoot);
+        var home = Path.Combine(temp.Path, "home");
+        var developerState = Path.Combine(home, "dev");
+        var options = new CodeAltaHostOptions
+        {
+            GlobalRoot = home,
+            StateRoot = developerState,
+            CurrentProjectPath = projectRoot,
+            IsHeadless = true,
+            HasInteractiveUi = false,
+            RawArguments = ["--headless"],
+            PluginBuiltIns = [new CodeAlta.Plugins.BuiltInPluginDefinition { Id = "sample", DisplayName = "Sample", PluginType = typeof(SamplePlugin), Factory = static () => new SamplePlugin() }],
+        };
+        ApplicationDatabase database;
+        await using (var host = await CodeAltaHost.CreateAsync(options, CancellationToken.None))
+        {
+            database = host.ApplicationDatabase;
+            var plugin = host.PluginRuntime.ActivePlugins.Single();
+            var pluginDatabase = plugin.RuntimeContext.Services.Database;
+
+            Assert.AreEqual(Path.Combine(developerState, "data", "alta.sqlite3"), database.DatabasePath);
+            Assert.AreSame(database, host.PluginRuntime.ApplicationDatabase);
+            Assert.IsTrue(pluginDatabase.HasDatabase);
+            Assert.AreEqual("sample_", pluginDatabase.TablePrefix);
+            await pluginDatabase.MigrateAsync(1, async (connection, from, to, token) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "CREATE TABLE sample_rows (id INTEGER);";
+                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+            // The list of sessions and the plugin write to one file.
+            await host.SessionViewCatalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+            Assert.AreEqual(1, await database.GetVersionAsync("plugin:sample").ConfigureAwait(false));
+            Assert.AreEqual(1, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        }
+
+        Assert.IsFalse(File.Exists(Path.Combine(home, "data", "alta.sqlite3")), "The developer instance never opens the database of the other instance.");
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(async () =>
+            await database.WriteAsync("test", (connection, token) => ValueTask.CompletedTask).ConfigureAwait(false)).ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task CreateAsync_UsesTheDatabaseOfThePrestartedRuntimeAndDoesNotDisposeIt()
+    {
+        using var temp = TempDirectory.Create();
+        var projectRoot = Path.Combine(temp.Path, "project");
+        Directory.CreateDirectory(projectRoot);
+        var home = Path.Combine(temp.Path, "home");
+        Directory.CreateDirectory(home);
+        await using var runtime = new CodeAlta.Plugins.PluginRuntimeManager();
+        await runtime.StartAsync(new CodeAlta.Plugins.PluginRuntimeManagerOptions { GlobalRoot = home, StateRoot = home, IsHeadless = true }).ConfigureAwait(false);
+        var options = new CodeAltaHostOptions
+        {
+            GlobalRoot = home,
+            CurrentProjectPath = projectRoot,
+            IsHeadless = true,
+            HasInteractiveUi = false,
+            PrestartedPluginRuntime = runtime,
+        };
+
+        await using (var host = await CodeAltaHost.CreateAsync(options, CancellationToken.None).ConfigureAwait(false))
+        {
+            Assert.AreSame(runtime.ApplicationDatabase, host.ApplicationDatabase);
+        }
+
+        await runtime.ApplicationDatabase!.WriteAsync("test", (connection, token) => ValueTask.CompletedTask).ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task CreateAsync_DoesNotDisposeADatabaseItWasGiven()
+    {
+        using var temp = TempDirectory.Create();
+        var projectRoot = Path.Combine(temp.Path, "project");
+        Directory.CreateDirectory(projectRoot);
+        var home = Path.Combine(temp.Path, "home");
+        Directory.CreateDirectory(home);
+        await using var database = ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = home });
+        var options = new CodeAltaHostOptions
+        {
+            GlobalRoot = home,
+            CurrentProjectPath = projectRoot,
+            IsHeadless = true,
+            HasInteractiveUi = false,
+            PluginSafeMode = true,
+            StartPlugins = false,
+            ApplicationDatabase = database,
+        };
+
+        await using (var host = await CodeAltaHost.CreateAsync(options, CancellationToken.None).ConfigureAwait(false))
+        {
+            Assert.AreSame(database, host.ApplicationDatabase);
+        }
+
+        await database.WriteAsync("test", (connection, token) => ValueTask.CompletedTask).ConfigureAwait(false);
+    }
+
+    [TestMethod]
     public async Task CreateAsync_ConfiguresHostRegisteredModelProviderRuntimes()
     {
         using var temp = TempDirectory.Create();
@@ -303,6 +404,10 @@ public sealed class CodeAltaHostTests
 
         public ValueTask DisposeAsync()
             => ValueTask.CompletedTask;
+    }
+
+    private sealed class SamplePlugin : CodeAlta.Plugins.Abstractions.PluginBase
+    {
     }
 
     private sealed class TempDirectory : IDisposable

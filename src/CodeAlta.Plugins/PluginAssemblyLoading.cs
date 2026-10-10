@@ -160,6 +160,7 @@ public sealed class PluginAssemblyLoader
         "CodeAlta.Plugins.Tui",
         "CodeAlta.Agent",
         "CodeAlta.Catalog",
+        "Microsoft.Data.Sqlite",
         "Microsoft.Extensions.AI.Abstractions",
         "XenoAtom.CommandLine",
         "XenoAtom.Logging",

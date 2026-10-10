@@ -9,26 +9,30 @@ namespace CodeAlta.Catalog;
 
 internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
-    private const int SqliteBusy = 5;
-    private const int SqliteLocked = 6;
-    private const int SqliteCorrupt = 11;
-    private const int SqliteNotADatabase = 26;
+    private const string Owner = "session_cache";
+    private const string TablePrefix = "session_projection_cache";
+    private const int SchemaVersion = 1;
     private const int ProjectionVersion = 1;
     private const string CacheCompleteMetadataKey = "session_projection_cache_complete";
     private const string CacheCompleteValue = "1";
     private const string CacheIncompleteValue = "0";
 
-    private readonly string _databasePath;
-    private readonly SemaphoreSlim _gate = new(initialCount: 1, maxCount: 1);
-    private bool _schemaReady;
+    private readonly ApplicationDatabase _database;
+    private readonly SemaphoreSlim _schemaGate = new(initialCount: 1, maxCount: 1);
+    private int _schemaGeneration = -1;
 
     public SessionJournalSqliteCache(CatalogOptions options)
+        : this(ApplicationDatabase.Create(options ?? throw new ArgumentNullException(nameof(options))))
     {
-        ArgumentNullException.ThrowIfNull(options);
-        _databasePath = options.SessionCacheDatabasePath;
     }
 
-    public string DatabasePath => _databasePath;
+    public SessionJournalSqliteCache(ApplicationDatabase database)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        _database = database;
+    }
+
+    public string DatabasePath => _database.DatabasePath;
 
     public async IAsyncEnumerable<AgentSessionCacheProjection> ListSessionsAsync(
         AgentSessionCacheProjectionContext context,
@@ -108,14 +112,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         ArgumentNullException.ThrowIfNull(projection);
 
-        await ExecuteWriteWithRecoveryAsync(
-                async () =>
-                {
-                    var hydrated = await HydrateSessionViewDataAsync(projection, cancellationToken).ConfigureAwait(false);
-                    await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-                    await UpsertSessionCoreAsync(connection, transaction: null, hydrated, cancellationToken).ConfigureAwait(false);
-                },
+        // The journal is read before the write starts: the queue of writers is not held while a file is read.
+        var hydrated = await HydrateSessionViewDataAsync(projection, cancellationToken).ConfigureAwait(false);
+        await WriteAsync(
+                (connection, token) => UpsertSessionCoreAsync(connection, transaction: null, hydrated, token),
                 cancellationToken)
             .ConfigureAwait(false);
     }
@@ -124,15 +124,13 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
 
-        await ExecuteWriteWithRecoveryAsync(
-                async () =>
+        await WriteAsync(
+                async (connection, token) =>
                 {
-                    await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
                     await using var command = connection.CreateCommand();
                     command.CommandText = "DELETE FROM session_projection_cache WHERE session_id = $session_id;";
                     AddParameter(command, "$session_id", sessionId.Trim());
-                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -206,11 +204,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         ArgumentException.ThrowIfNullOrWhiteSpace(journalPath);
         ArgumentNullException.ThrowIfNull(header);
 
-        await ExecuteWriteWithRecoveryAsync(
-                async () =>
+        await WriteAsync(
+                async (connection, token) =>
                 {
-                    await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
                     await using var command = connection.CreateCommand();
                     command.CommandText = """
                         UPDATE session_projection_cache
@@ -232,7 +228,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     AddParameter(command, "$project_ref", NormalizeOptionalText(header.ProjectRef));
                     AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(header.ParentSessionId));
                     AddParameter(command, "$created_by_json", SerializeCreatedBy(header.CreatedBy));
-                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -248,11 +244,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         ArgumentException.ThrowIfNullOrWhiteSpace(journalPath);
         ArgumentNullException.ThrowIfNull(state);
 
-        await ExecuteWriteWithRecoveryAsync(
-                async () =>
+        await WriteAsync(
+                async (connection, token) =>
                 {
-                    await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
                     await using var command = connection.CreateCommand();
                     command.CommandText = """
                         UPDATE session_projection_cache
@@ -285,44 +279,165 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     AddParameter(command, "$message_count", state.MessageCount);
                     AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
                     AddParameter(command, "$created_by_json", SerializeCreatedBy(state.CreatedBy));
-                    await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 },
                 cancellationToken)
             .ConfigureAwait(false);
     }
 
+    // The tables are made once for each file the database has had: a file that was replaced (or deleted) has none.
     private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
     {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (Volatile.Read(ref _schemaGeneration) == _database.Generation && File.Exists(_database.DatabasePath))
+        {
+            return;
+        }
+
+        await _schemaGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_schemaReady && File.Exists(_databasePath))
+            var known = _schemaGeneration;
+            if (known == _database.Generation && File.Exists(_database.DatabasePath))
             {
                 return;
             }
 
+            var before = _database.Generation;
             try
             {
-                await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-                _schemaReady = true;
+                await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (SqliteException ex) when (IsRecoverableCorruption(ex))
+            catch (SqliteException exception) when (ApplicationDatabase.IsDamaged(exception))
             {
-                await RecreateDatabaseFileAsync(cancellationToken).ConfigureAwait(false);
-                await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-                _schemaReady = true;
+                await ClearDamagedTablesAsync(exception, before, cancellationToken).ConfigureAwait(false);
+                await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
             }
-        }
-        catch (SqliteException ex) when (IsLocked(ex))
-        {
-            throw CreateLockedException(ex);
+
+            // A file that was replaced since the rows were written (restored from an older copy, or deleted and made
+            // again) says nothing about the sessions that exist: they are listed from the journals again.
+            var after = _database.Generation;
+            if (after != before || (known >= 0 && known != before))
+            {
+                try
+                {
+                    await WriteCoreAsync(
+                            (connection, token) => SetCacheCompleteCoreAsync(connection, complete: false, token),
+                            schemaOwned: true,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (SqliteException exception) when (ApplicationDatabase.IsDamaged(exception))
+                {
+                    // The tables are made again, and a new set of tables is incomplete anyway.
+                    await ClearDamagedTablesAsync(exception, _database.Generation, cancellationToken).ConfigureAwait(false);
+                    await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            Volatile.Write(ref _schemaGeneration, _database.Generation);
         }
         finally
         {
-            _gate.Release();
-            SqliteConnection.ClearAllPools();
+            _schemaGate.Release();
+        }
+    }
+
+    private async Task MigrateSchemaAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _database.MigrateAsync(
+                    Owner,
+                    tablePrefix: null,
+                    SchemaVersion,
+                    (connection, _, _, token) => new ValueTask(EnsureSchemaCoreAsync(connection, token)),
+                    recoverDamagedFile: false,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
+        {
+            throw CreateLockedException(exception);
+        }
+    }
+
+    // The session list is rebuilt from the journals, so a damaged table is dropped and made again; the plugins
+    // that share the file keep their tables. When the damage is not in these tables, the file itself is replaced.
+    private async Task ClearDamagedTablesAsync(SqliteException damage, int generation, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _database.DropTablesAsync(Owner, TablePrefix, recoverDamagedFile: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException again) when (ApplicationDatabase.IsDamaged(again))
+        {
+            await _database.RecoverDamagedFileAsync(again, generation, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException locked) when (ApplicationDatabase.IsLocked(locked))
+        {
+            throw CreateLockedException(locked);
+        }
+
+        Volatile.Write(ref _schemaGeneration, -1);
+    }
+
+    // A write of the session list: it makes the tables when they are missing, and when SQLite finds them damaged
+    // it clears them and runs the write once more.
+    private async Task WriteAsync(Func<SqliteConnection, CancellationToken, Task> write, CancellationToken cancellationToken)
+    {
+        await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+        await WriteCoreAsync(write, schemaOwned: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    // schemaOwned: the caller is making the schema and holds its gate, so a damage it meets is its own to handle.
+    private async Task WriteCoreAsync(Func<SqliteConnection, CancellationToken, Task> write, bool schemaOwned, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var generation = _database.Generation;
+            try
+            {
+                await _database.WriteAsync<object?>(
+                        Owner,
+                        async (connection, token) =>
+                        {
+                            await write(connection, token).ConfigureAwait(false);
+                            return null;
+                        },
+                        recoverDamagedFile: false,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                return;
+            }
+            catch (SqliteException exception) when (attempt == 0 && !schemaOwned && ApplicationDatabase.IsDamaged(exception))
+            {
+                await ClearDamagedTablesAsync(exception, generation, cancellationToken).ConfigureAwait(false);
+                await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
+            {
+                throw CreateLockedException(exception);
+            }
+        }
+    }
+
+    // A read of the session list; null when SQLite finds its tables damaged: the caller lists the journals again.
+    private async Task<T?> TryReadAsync<T>(Func<SqliteConnection, CancellationToken, ValueTask<T>> read, CancellationToken cancellationToken)
+    {
+        await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+        var generation = _database.Generation;
+        try
+        {
+            return await _database.ReadAsync(Owner, read, recoverDamagedFile: false, cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception) when (ApplicationDatabase.IsDamaged(exception))
+        {
+            await ClearDamagedTablesAsync(exception, generation, cancellationToken).ConfigureAwait(false);
+            return default;
+        }
+        catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
+        {
+            throw CreateLockedException(exception);
         }
     }
 
@@ -354,164 +469,88 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await MarkCacheCompleteAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task PrepareProgressiveRebuildAsync(CancellationToken cancellationToken)
-        => await ExecuteWriteWithRecoveryAsync(
-                async () =>
-                {
-                    await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-                    await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
-                    await ClearSessionRowsCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-                },
-                cancellationToken)
-            .ConfigureAwait(false);
-
-    private async Task UpsertHydratedSessionAsync(
-        SqliteSessionProjection projection,
-        CancellationToken cancellationToken)
-        => await ExecuteWriteWithRecoveryAsync(
-                async () =>
-                {
-                    await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                    await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-                    await UpsertSessionCoreAsync(connection, transaction: null, projection, cancellationToken).ConfigureAwait(false);
-                },
-                cancellationToken)
-            .ConfigureAwait(false);
-
-    private Task MarkCacheCompleteAsync(CancellationToken cancellationToken)
-        => ExecuteWriteWithRecoveryAsync(
-            async () =>
+    private Task PrepareProgressiveRebuildAsync(CancellationToken cancellationToken)
+        => WriteAsync(
+            async (connection, token) =>
             {
-                await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-                await SetCacheCompleteCoreAsync(connection, complete: true, cancellationToken).ConfigureAwait(false);
+                await SetCacheCompleteCoreAsync(connection, complete: false, token).ConfigureAwait(false);
+                await ClearSessionRowsCoreAsync(connection, token).ConfigureAwait(false);
             },
             cancellationToken);
 
-    private async Task ExecuteWriteWithRecoveryAsync(Func<Task> action, CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            try
-            {
-                await action().ConfigureAwait(false);
-            }
-            catch (SqliteException ex) when (IsRecoverableCorruption(ex))
-            {
-                await RecreateDatabaseFileAsync(cancellationToken).ConfigureAwait(false);
-                _schemaReady = false;
-                await action().ConfigureAwait(false);
-                _schemaReady = true;
-            }
-        }
-        catch (SqliteException ex) when (IsLocked(ex))
-        {
-            throw CreateLockedException(ex);
-        }
-        finally
-        {
-            _gate.Release();
-            SqliteConnection.ClearAllPools();
-        }
-    }
+    private Task UpsertHydratedSessionAsync(
+        SqliteSessionProjection projection,
+        CancellationToken cancellationToken)
+        => WriteAsync(
+            (connection, token) => UpsertSessionCoreAsync(connection, transaction: null, projection, token),
+            cancellationToken);
+
+    private Task MarkCacheCompleteAsync(CancellationToken cancellationToken)
+        => WriteAsync(
+            (connection, token) => SetCacheCompleteCoreAsync(connection, complete: true, token),
+            cancellationToken);
 
     private async Task<bool> IsCacheCompleteAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT value FROM session_projection_cache_metadata WHERE key = $key LIMIT 1;";
-            AddParameter(command, "$key", CacheCompleteMetadataKey);
-            var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return string.Equals(value, CacheCompleteValue, StringComparison.Ordinal);
-            }
+        => await TryReadAsync(
+                async (connection, token) =>
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT value FROM session_projection_cache_metadata WHERE key = $key LIMIT 1;";
+                    AddParameter(command, "$key", CacheCompleteMetadataKey);
+                    var value = await command.ExecuteScalarAsync(token).ConfigureAwait(false) as string;
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        return string.Equals(value, CacheCompleteValue, StringComparison.Ordinal);
+                    }
 
-            return await SessionRowCountCoreAsync(connection, cancellationToken).ConfigureAwait(false) > 0;
-        }
-        catch (SqliteException ex) when (IsLocked(ex))
-        {
-            throw CreateLockedException(ex);
-        }
-        catch (SqliteException ex) when (IsRecoverableCorruption(ex))
-        {
-            await RecreateDatabaseFileAsync(cancellationToken).ConfigureAwait(false);
-            return false;
-        }
-        finally
-        {
-            SqliteConnection.ClearAllPools();
-        }
-    }
+                    return await SessionRowCountCoreAsync(connection, token).ConfigureAwait(false) > 0;
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
 
     private async Task<IReadOnlyList<SqliteSessionProjectionRow>> QuerySessionRowsAsync(
         string? sessionId,
         CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-            await EnsureSchemaCoreAsync(connection, cancellationToken).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandText = sessionId is null
-                ? """
-                    SELECT *
-                    FROM session_projection_cache
-                    ORDER BY updated_at_utc_ticks DESC, session_id COLLATE NOCASE DESC;
-                    """
-                : """
-                    SELECT *
-                    FROM session_projection_cache
-                    WHERE session_id = $session_id
-                    LIMIT 1;
-                    """;
-            if (sessionId is not null)
-            {
-                AddParameter(command, "$session_id", sessionId.Trim());
-            }
+        => await TryQuerySessionRowsAsync(sessionId, cancellationToken).ConfigureAwait(false) ?? [];
 
-            var rows = new List<SqliteSessionProjectionRow>();
-            await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                var row = ReadRow(reader);
-                if (row is not null)
-                {
-                    rows.Add(row);
-                }
-            }
-
-            return rows;
-        }
-        catch (SqliteException ex) when (IsLocked(ex))
-        {
-            throw CreateLockedException(ex);
-        }
-        finally
-        {
-            SqliteConnection.ClearAllPools();
-        }
-    }
-
-    private async Task<IReadOnlyList<SqliteSessionProjectionRow>?> TryQuerySessionRowsAsync(
+    private Task<IReadOnlyList<SqliteSessionProjectionRow>?> TryQuerySessionRowsAsync(
         string? sessionId,
         CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await QuerySessionRowsAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        }
-        catch (SqliteException ex) when (IsRecoverableCorruption(ex))
-        {
-            await RecreateDatabaseFileAsync(cancellationToken).ConfigureAwait(false);
-            return null;
-        }
-    }
+        => TryReadAsync<IReadOnlyList<SqliteSessionProjectionRow>?>(
+            async (connection, token) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = sessionId is null
+                    ? """
+                        SELECT *
+                        FROM session_projection_cache
+                        ORDER BY updated_at_utc_ticks DESC, session_id COLLATE NOCASE DESC;
+                        """
+                    : """
+                        SELECT *
+                        FROM session_projection_cache
+                        WHERE session_id = $session_id
+                        LIMIT 1;
+                        """;
+                if (sessionId is not null)
+                {
+                    AddParameter(command, "$session_id", sessionId.Trim());
+                }
+
+                var rows = new List<SqliteSessionProjectionRow>();
+                await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, token).ConfigureAwait(false);
+                while (await reader.ReadAsync(token).ConfigureAwait(false))
+                {
+                    var row = ReadRow(reader);
+                    if (row is not null)
+                    {
+                        rows.Add(row);
+                    }
+                }
+
+                return rows;
+            },
+            cancellationToken);
 
     private async Task<int> PruneRowsMissingFromDiskAsync(
         HashSet<string> journalPathsOnDisk,
@@ -575,41 +614,6 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         catch (IOException) when (!cancellationToken.IsCancellationRequested)
         {
             return (false, null);
-        }
-    }
-
-    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
-    {
-        var directory = Path.GetDirectoryName(_databasePath)
-            ?? throw new InvalidOperationException($"Cache database path '{_databasePath}' did not resolve to a directory.");
-        Directory.CreateDirectory(directory);
-
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = _databasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Private,
-            DefaultTimeout = 1,
-            Pooling = false,
-        };
-        var connection = new SqliteConnection(builder.ToString());
-        try
-        {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await using var command = connection.CreateCommand();
-            command.CommandText = "PRAGMA busy_timeout = 0;";
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-            return connection;
-        }
-        catch (SqliteException ex) when (IsLocked(ex))
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-            throw CreateLockedException(ex);
-        }
-        catch
-        {
-            await connection.DisposeAsync().ConfigureAwait(false);
-            throw;
         }
     }
 
@@ -678,15 +682,12 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     }
 
     // A cache written before the permission mode of a session was kept has no column for it, and rows that do not
-    // say it: the column is added and the rows are read again from the journals.
+    // say it: the column is added and the rows are read again from the journals. It runs in the write transaction
+    // of the migration, which holds the write lock: no other connection adds the column at the same time.
     private static async Task AddPermissionModeColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        // The column is looked for inside the transaction, which holds the write lock: another connection opening the
-        // cache at the same time may have added it since.
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using (var command = connection.CreateCommand())
         {
-            command.Transaction = transaction;
             command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_permission_mode';";
             if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
             {
@@ -696,7 +697,6 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         await using (var command = connection.CreateCommand())
         {
-            command.Transaction = transaction;
             command.CommandText = """
                 ALTER TABLE session_projection_cache ADD COLUMN local_permission_mode TEXT;
                 DELETE FROM session_projection_cache;
@@ -704,20 +704,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await using (var command = connection.CreateCommand())
-        {
-            command.Transaction = transaction;
-            command.CommandText = """
-                INSERT INTO session_projection_cache_metadata (key, value)
-                VALUES ($key, $value)
-                ON CONFLICT(key) DO UPDATE SET value = excluded.value;
-                """;
-            AddParameter(command, "$key", CacheCompleteMetadataKey);
-            AddParameter(command, "$value", CacheIncompleteValue);
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ExecuteSchemaCommandAsync(
@@ -1014,25 +1001,6 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             localState);
     }
 
-    private async Task RecreateDatabaseFileAsync(CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        SqliteConnection.ClearAllPools();
-        _schemaReady = false;
-        DeleteIfExists(_databasePath);
-        DeleteIfExists(_databasePath + "-wal");
-        DeleteIfExists(_databasePath + "-shm");
-        await Task.CompletedTask.ConfigureAwait(false);
-    }
-
-    private static void DeleteIfExists(string path)
-    {
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
-    }
-
     private static void AddParameter(SqliteCommand command, string name, object? value)
     {
         var parameter = command.CreateParameter();
@@ -1093,14 +1061,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             : null;
     }
 
-    private static bool IsLocked(SqliteException exception)
-        => exception.SqliteErrorCode is SqliteBusy or SqliteLocked;
-
-    private static bool IsRecoverableCorruption(SqliteException exception)
-        => exception.SqliteErrorCode is SqliteCorrupt or SqliteNotADatabase;
-
     private AgentSessionCacheLockedException CreateLockedException(SqliteException exception)
-        => new($"The CodeAlta local session cache database is locked: {_databasePath}", exception);
+        => new($"The CodeAlta application database is locked: {_database.DatabasePath}", exception);
 
     private static string? GetString(SqliteDataReader reader, string name)
     {

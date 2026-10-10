@@ -17,6 +17,9 @@ public interface IPluginServices
     /// <summary>Gets durable plugin state services.</summary>
     IPluginStateStore State { get; }
 
+    /// <summary>Gets the tables the plugin keeps in the SQLite database of the application.</summary>
+    IPluginDatabase Database { get; }
+
     /// <summary>Gets workspace services.</summary>
     IPluginWorkspaceService Workspace { get; }
 

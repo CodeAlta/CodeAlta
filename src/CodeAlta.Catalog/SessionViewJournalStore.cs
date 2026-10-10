@@ -42,13 +42,25 @@ public sealed partial class SessionViewJournalStore
     {
     }
 
-    internal SessionViewJournalStore(CatalogOptions options, AgentSessionJournalFile journalFile)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SessionViewJournalStore" /> class on a database that is shared
+    /// with other owners, such as the plugins.
+    /// </summary>
+    /// <param name="options">Catalog options.</param>
+    /// <param name="database">The application database that holds the list of sessions.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options" /> or <paramref name="database" /> is <see langword="null" />.</exception>
+    public SessionViewJournalStore(CatalogOptions options, ApplicationDatabase database)
+        : this(options, new AgentSessionJournalFile(), database)
+    {
+    }
+
+    internal SessionViewJournalStore(CatalogOptions options, AgentSessionJournalFile journalFile, ApplicationDatabase? database = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(journalFile);
         _layout = new AgentRuntimePathLayout(options.StateRoot);
         _journalFile = journalFile;
-        _sessionCache = new SessionJournalSqliteCache(options);
+        _sessionCache = database is null ? new SessionJournalSqliteCache(options) : new SessionJournalSqliteCache(database);
     }
 
     /// <summary>

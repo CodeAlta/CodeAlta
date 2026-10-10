@@ -373,6 +373,36 @@ rendering, terminal-free builtin loading, or background-task/unload guarantees.
 
 An item is the file `<name>.json` (a name with or without the extension is the same item). The plugin key is made a folder name (`plugin:notes` gives `plugin_notes`). A name that is not a file name is refused with `ArgumentException`, and a scope without its project or session with `InvalidOperationException`. A missing or unreadable item reads as the default value; reading creates nothing. A write goes to a temporary file that is moved over the item.
 
+## Plugin database
+
+`Services.Database` (`IPluginDatabase`) gives a plugin tables of its own in the SQLite database of the application (`<state root>/data/alta.sqlite3`, see `catalog-and-config.md`, "The application database"): the database of the instance the plugin runs in, so the developer instance has separate ones. Both applications and every built-in or source plugin get it; a host that has no database (a catalog-only tool, a test) gives a service whose `HasDatabase` is `false` and whose operations throw `InvalidOperationException`. `NoopPluginServices` is such a host.
+
+| Member | Behavior |
+| --- | --- |
+| `TablePrefix` | The prefix of every table, index, view and trigger of the plugin, derived from its runtime key: `builtin:statistics` is `statistics_`. A source plugin gets its letters and digits (at most sixteen) followed by eight hexadecimal digits of the hash of the key, for example `notesdb1f2e3d4c_`. A prefix is lowercase, has one underscore (its last character) so that no prefix starts another one, and the same key gives the same prefix after every restart. A built-in id that the application keeps for itself (`session`, `app`, `plugin`, `alta`, `sqlite`) takes the hashed form. |
+| `MigrateAsync(version, migrate)` | The host records the version of the tables of the plugin. When it is lower than `version`, `migrate(connection, fromVersion, toVersion, token)` runs once, in a write transaction, and the version is recorded in the same transaction. Write the steps as `if (fromVersion < 1) { create }`, `if (fromVersion < 2) { alter }`. The host compares the schema before and after the steps: an object that does not start with `TablePrefix` that was created, changed or dropped (a table of another plugin, one of the application) rolls the migration back with `InvalidOperationException`. A plugin is trusted code, so this is a convention checked at migration time, not a wall. A recorded version above `version` (the data was written by a newer build) is an error too. |
+| `ReadAsync(read)` | Runs on a connection of its own that cannot write; it never waits for a writer, however long the writer takes. |
+| `WriteAsync(write)` | One transaction (do not begin or end one inside it), in turn with every other writer of the application. Commands need no `Transaction` object. Keep a write short: the others wait for it, and the host logs a write that holds the queue for more than two seconds. A plugin that reads a long history commits every few megabytes, never once for the whole. A write that is still queued when the plugin is deactivated or the token is canceled never runs. |
+
+```csharp
+public override async ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
+{
+    var database = Context.Services.Database;
+    if (!database.HasDatabase) return;
+    var table = database.TablePrefix + "notes";
+    await database.MigrateAsync(1, async (connection, from, to, token) =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"CREATE TABLE {table} (id INTEGER PRIMARY KEY, text TEXT NOT NULL);";
+        await command.ExecuteNonQueryAsync(token);
+    }, cancellationToken);
+}
+```
+
+SQL is the interface, through `Microsoft.Data.Sqlite` (`SqliteConnection`, `SqliteCommand`), which source plugins reference like the other shared packages. **`Services.State` or `Services.Database`:** use `State` for settings and small documents that are read and written whole; use `Database` for rows that are queried, filtered or added up, and for anything that grows. The file is shared with the list of sessions and the other plugins, copied once a day and restored from the copy when it is damaged, but a plugin that cannot rebuild its data should still expect to lose what was written since the last copy in that case.
+
+The data stays when a plugin is disabled. The host side removes it with `PluginRuntimeManager.ListPluginTablesAsync(key)` (the names for a confirmation that lists them) and `DropPluginTablesAsync(key)`, which drops every object that starts with the prefix and forgets the version; the plugin should be deactivated first. Open `ApplicationDatabase` is owned by the host: `PluginRuntimeManagerOptions.ApplicationDatabase` is borrowed, and a runtime given only `StateRoot` opens (and disposes) the database of that state root itself; `PluginActivationOptions.ApplicationDatabase` is what an activation test gives.
+
 ## Background tasks and unload
 
 Long-running plugin work should use `Services.Tasks.Run(...)` or the `PluginBase.Tasks` shortcut instead of untracked `Task.Run`. The runtime tracks task handles, cancels them during deactivation, and can delay unload while tracked work completes.

@@ -398,6 +398,8 @@ public sealed partial class PluginRuntimeManager
                     _diagnostics.AddRange(plugin.DeactivationDiagnostics);
                 }
                 lock (_lock) { _activePlugins.Clear(); _retired.Clear(); }
+                // A database the runtime opened itself ends with it, after the plugins that wrote to it.
+                if (_ownedDatabase is { } ownedDatabase) await ownedDatabase.DisposeAsync().ConfigureAwait(false);
             });
         }
         operation.Launch();

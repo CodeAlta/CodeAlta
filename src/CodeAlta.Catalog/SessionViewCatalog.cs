@@ -26,7 +26,8 @@ public sealed class SessionViewCatalog
     internal SessionViewCatalog(
         CatalogOptions options,
         AgentSessionJournalFile journalFile,
-        SessionViewYamlSerializer? serializer = null)
+        SessionViewYamlSerializer? serializer = null,
+        ApplicationDatabase? database = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(journalFile);
@@ -37,7 +38,7 @@ public sealed class SessionViewCatalog
 
         _options = options;
         _serializer = serializer ?? new SessionViewYamlSerializer();
-        JournalStore = new SessionViewJournalStore(options, journalFile);
+        JournalStore = new SessionViewJournalStore(options, journalFile, database);
     }
 
     /// <summary>

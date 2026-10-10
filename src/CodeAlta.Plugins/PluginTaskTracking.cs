@@ -224,6 +224,7 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     private readonly IPluginServices _inner;
     private readonly IPluginStateStore? _state;
+    private readonly IPluginDatabase? _database;
 
     public PluginRuntimeServices(
         Logger logger,
@@ -232,7 +233,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
         string? scopeProjectId,
         IPluginServices inner,
         IPluginTaskService tasks,
-        IPluginStateStore? state = null)
+        IPluginStateStore? state = null,
+        IPluginDatabase? database = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginRuntimeKey);
@@ -241,6 +243,7 @@ internal sealed class PluginRuntimeServices : IPluginServices
         Logger = logger;
         _inner = inner;
         _state = state;
+        _database = database;
         Tasks = tasks;
         Alta = new PluginRuntimeAltaService(pluginRuntimeKey, scope, scopeProjectId, inner.Alta);
     }
@@ -251,6 +254,9 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     // The store of the host when it has one; else the files of this plugin.
     public IPluginStateStore State => _state ?? _inner.State;
+
+    // The tables of this plugin when the host has a database; else what the host gave, which has none.
+    public IPluginDatabase Database => _database ?? _inner.Database;
 
     public IPluginWorkspaceService Workspace => _inner.Workspace;
 

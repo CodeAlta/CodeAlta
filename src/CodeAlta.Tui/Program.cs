@@ -506,6 +506,8 @@ internal partial class Program
                 new PluginRuntimeManagerOptions
                 {
                     GlobalRoot = homeRoot,
+                    // The database of the instance (the developer instance has its own) is shared with the host that follows.
+                    StateRoot = CodeAltaInstanceProfile.FromArguments(args).StateRoot,
                     ProjectContext = new PluginProjectContext
                     {
                         ProjectId = "current",

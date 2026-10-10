@@ -40,6 +40,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         PluginRuntimeManager pluginRuntime,
         bool ownsPluginRuntime,
         bool ownsLogging,
+        ApplicationDatabase applicationDatabase,
+        ApplicationDatabase? ownedApplicationDatabase,
         ProjectDescriptor currentProject,
         int ownedCommandReceiptCapacity,
         Func<bool> reviewOwnedCommandPermissions,
@@ -58,6 +60,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         RuntimeService = runtimeService;
         ProjectFileSearchService = projectFileSearchService;
         PluginRuntime = pluginRuntime;
+        ApplicationDatabase = applicationDatabase;
         CurrentProject = currentProject;
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)
         {
@@ -72,7 +75,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         _earlyReadShutdown = new HostDisposalStage(() => WorkspaceReads.DisposeAsync().AsTask());
         _earlyCommandShutdown = new HostDisposalStage(() => Commands.DisposeAsync().AsTask());
-        _disposeTask = CreateHostDisposal(
+        var disposal = CreateHostDisposal(
             DisposeCommandsAndRuntimeAsync,
             AgentHub.DisposeAsync,
             ModelProviderRegistry.DisposeAsync,
@@ -80,6 +83,38 @@ public sealed class CodeAltaHost : IAsyncDisposable
             LogManager.Shutdown,
             ownsPluginRuntime,
             ownsLogging);
+        _disposeTask = ownedApplicationDatabase is null
+            ? disposal
+            : new Lazy<Task>(() => DisposeWithDatabaseAsync(disposal, ownedApplicationDatabase));
+    }
+
+    // The database ends after everything that writes to it: the sessions, the hub and the plugins. When a stage
+    // keeps a dependency it could not release, work may still write: the database stays open then.
+    private static async Task DisposeWithDatabaseAsync(Lazy<Task> disposal, ApplicationDatabase database)
+    {
+        Exception? failure = null;
+        try
+        {
+            await disposal.Value.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        if (failure is null || !OwnedProviderEventForwarding.HasRetention(failure))
+        {
+            try
+            {
+                await database.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                failure = failure is null ? exception : new AggregateException(failure, exception);
+            }
+        }
+
+        if (failure is not null) ExceptionDispatchInfo.Throw(failure);
     }
 
     /// <summary>
@@ -149,6 +184,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
     public PluginRuntimeManager PluginRuntime { get; }
 
     /// <summary>
+    /// Gets the SQLite database of this instance, shared by the list of sessions and the plugins. It is a borrowed view:
+    /// the host disposes it when it opened it.
+    /// </summary>
+    public ApplicationDatabase ApplicationDatabase { get; }
+
+    /// <summary>
     /// Gets the current project descriptor used for host composition.
     /// </summary>
     public ProjectDescriptor CurrentProject { get; }
@@ -209,6 +250,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         SessionRuntimeService? runtimeService = null;
         var ownsPluginRuntime = false;
         var ownsLogging = false;
+        ApplicationDatabase? applicationDatabase = null;
+        ApplicationDatabase? ownedApplicationDatabase = null;
 
         try
         {
@@ -222,6 +265,14 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 StateRoot = string.IsNullOrWhiteSpace(options.StateRoot) ? globalRoot : Path.GetFullPath(options.StateRoot),
             };
             Directory.CreateDirectory(catalogOptions.StateRoot);
+            // One database for the instance: the list of sessions and the plugins use the same file and the same queue of writers.
+            applicationDatabase = options.ApplicationDatabase ?? options.PrestartedPluginRuntime?.ApplicationDatabase;
+            if (applicationDatabase is null)
+            {
+                applicationDatabase = ownedApplicationDatabase = ApplicationDatabase.Create(catalogOptions);
+            }
+
+            applicationDatabase.StartMaintenance();
             // The owner of the global root keeps the coordinator instructions current; a second instance on a
             // separate state root is usually another build, and only supplies them when they are missing.
             if (!catalogOptions.HasSeparateStateRoot || !File.Exists(Path.Combine(globalRoot, "AGENTS.md")))
@@ -246,6 +297,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                         new PluginRuntimeManagerOptions
                         {
                             GlobalRoot = globalRoot,
+                            ApplicationDatabase = applicationDatabase,
                             ProjectContext = new PluginProjectContext
                             {
                                 ProjectId = currentProject.Id,
@@ -266,7 +318,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             }
 
             var sessionJournalFile = new AgentSessionJournalFile();
-            var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile);
+            var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile, serializer: null, applicationDatabase);
             if (catalogOptions.HasSeparateStateRoot)
                 await SeedViewStateAsync(sessionViewCatalog, globalRoot, cancellationToken).ConfigureAwait(false);
             var pluginOperationOptions = CreatePluginOperationOptions(options, catalogOptions, currentProject);
@@ -340,6 +392,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 pluginRuntime,
                 ownsPluginRuntime,
                 ownsLogging,
+                applicationDatabase,
+                ownedApplicationDatabase,
                 currentProject,
                 options.OwnedCommandReceiptCapacity,
                 reviewOwnedPermissions,
@@ -372,15 +426,24 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 // Retain this exact outer inventory even when an inner plugin marker already has OuterDependencies.
                 throw new AgentDependencyRetentionException("host creation", "plugin barrier", [barrierFailure], acquisitions);
             }
-            await RollbackHostCreationAsync(
-                creationFailure,
-                () => runtimeService?.DisposeAsync() ?? ValueTask.CompletedTask,
-                () => agentHub?.DisposeAsync() ?? ValueTask.CompletedTask,
-                () => modelProviderRegistry?.DisposeAsync() ?? ValueTask.CompletedTask,
-                () => pluginRuntime?.DisposeAsync() ?? ValueTask.CompletedTask,
-                LogManager.Shutdown,
-                ownsPluginRuntime,
-                ownsLogging).ConfigureAwait(false);
+            try
+            {
+                await RollbackHostCreationAsync(
+                    creationFailure,
+                    () => runtimeService?.DisposeAsync() ?? ValueTask.CompletedTask,
+                    () => agentHub?.DisposeAsync() ?? ValueTask.CompletedTask,
+                    () => modelProviderRegistry?.DisposeAsync() ?? ValueTask.CompletedTask,
+                    () => pluginRuntime?.DisposeAsync() ?? ValueTask.CompletedTask,
+                    LogManager.Shutdown,
+                    ownsPluginRuntime,
+                    ownsLogging).ConfigureAwait(false);
+            }
+            finally
+            {
+                // The database the creation opened goes with the creation that failed.
+                if (ownedApplicationDatabase is not null) await ownedApplicationDatabase.DisposeAsync().ConfigureAwait(false);
+            }
+
             throw;
         }
     }

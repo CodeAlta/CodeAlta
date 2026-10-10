@@ -41,6 +41,19 @@ public sealed record PluginRuntimeManagerOptions
     /// <summary>Gets host services exposed to activated plugins.</summary>
     public IPluginServices? Services { get; init; }
 
+    /// <summary>
+    /// Gets the application database the plugins keep their tables in. It is borrowed: its owner disposes it after the
+    /// runtime. When it is <see langword="null"/> and <see cref="StateRoot"/> is set, the runtime opens the database
+    /// of that state root itself and disposes it with its own deactivation.
+    /// </summary>
+    public ApplicationDatabase? ApplicationDatabase { get; init; }
+
+    /// <summary>
+    /// Gets the state root of the instance (see <see cref="CatalogOptions.StateRoot"/>), used to open the application
+    /// database when <see cref="ApplicationDatabase"/> is not given. A host that has neither gives its plugins no database.
+    /// </summary>
+    public string? StateRoot { get; init; }
+
     /// <summary>Gets the maximum number of source plugin builds that can run in parallel.</summary>
     public int MaxParallelBuilds { get; init; } = Math.Min(Environment.ProcessorCount, 4);
 
@@ -76,6 +89,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     private readonly PluginRuntimeDiagnosticStore _diagnostics = new();
     private readonly List<ActivePluginInstance> _activePlugins = [];
     private readonly object _lock = new();
+    private ApplicationDatabase? _ownedDatabase;
     private int _activationGeneration;
     private bool _disposed;
 
@@ -88,6 +102,13 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     /// back here to attach that interface later.
     /// </summary>
     public IPluginServices? HostServices { get; private set; }
+
+    /// <summary>
+    /// Gets the application database the plugins were given, or <see langword="null"/> before the start and for a
+    /// host that gave none. A host that starts its plugins before the rest of its services shares this database with
+    /// them: the list of sessions and the plugins use one file.
+    /// </summary>
+    public ApplicationDatabase? ApplicationDatabase { get; private set; }
 
     /// <summary>Gets the adapter service used by hosts to materialize contribution points.</summary>
     public PluginContributionAdapterService Adapter { get; }
@@ -132,6 +153,15 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         HostServices = options.Services;
+        if (options.ApplicationDatabase is { } applicationDatabase)
+        {
+            ApplicationDatabase = applicationDatabase;
+        }
+        else if (!string.IsNullOrWhiteSpace(options.StateRoot))
+        {
+            _ownedDatabase = ApplicationDatabase = ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = options.GlobalRoot, StateRoot = options.StateRoot });
+        }
+
         PluginRuntimeManagerStartResult? result = null;
         await RunOwnedStartAsync(async () => result = await StartOwnedCoreAsync(options, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
         return result!;
@@ -190,7 +220,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                     discovered,
                     sourcePackage: null,
                     loadContext: null,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)

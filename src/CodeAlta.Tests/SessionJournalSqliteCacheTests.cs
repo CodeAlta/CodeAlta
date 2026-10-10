@@ -18,14 +18,14 @@ public sealed class SessionJournalSqliteCacheTests
         var session = CreateSummary("session-hot", updatedAt: "2026-06-18T10:00:00+00:00");
         await store.UpsertSessionAsync(session).ConfigureAwait(false);
         await store.UpsertStateAsync(CreateState(session, "resp_hot")).ConfigureAwait(false);
-        File.Delete(options.SessionCacheDatabasePath);
+        File.Delete(options.ApplicationDatabasePath);
 
         var rebuiltCatalog = new SessionViewCatalog(options);
         var rebuiltStore = rebuiltCatalog.JournalStore.CreateSessionStore();
         var rebuilt = await rebuiltStore.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
         Assert.AreEqual(1, rebuilt.Length);
         Assert.AreEqual("session-hot", rebuilt[0].SessionId);
-        Assert.IsTrue(File.Exists(options.SessionCacheDatabasePath));
+        Assert.IsTrue(File.Exists(options.ApplicationDatabasePath));
 
         var journalPath = new AgentRuntimePathLayout(temp.Path).GetSessionFilePath(session.SessionId, session.CreatedAt);
         await File.AppendAllTextAsync(journalPath, Environment.NewLine + "{not-json" + Environment.NewLine).ConfigureAwait(false);
@@ -46,8 +46,8 @@ public sealed class SessionJournalSqliteCacheTests
         var session = CreateSummary("session-corrupt-db", updatedAt: "2026-06-18T11:00:00+00:00");
         var uncachedStore = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path));
         await uncachedStore.UpsertSessionAsync(session).ConfigureAwait(false);
-        Directory.CreateDirectory(options.CacheRoot);
-        await File.WriteAllTextAsync(options.SessionCacheDatabasePath, "not a sqlite database").ConfigureAwait(false);
+        Directory.CreateDirectory(Path.GetDirectoryName(options.ApplicationDatabasePath)!);
+        await File.WriteAllTextAsync(options.ApplicationDatabasePath, "not a sqlite database").ConfigureAwait(false);
 
         var catalog = new SessionViewCatalog(options);
         var sessions = await catalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
@@ -57,19 +57,26 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
-    public async Task ListSessionsAsync_ThrowsWhenDatabaseIsLocked()
+    public async Task ListSessionsAsync_ReadsTheHotCacheWhileAnotherConnectionWrites_AndAWriteFailsAsLockedAfterTheTimeout()
     {
         using var temp = TestTempDirectory.Create();
         var options = CreateOptions(temp.Path);
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = options.ApplicationDatabasePath,
+            BusyTimeout = TimeSpan.FromMilliseconds(300),
+        });
         var catalog = new SessionViewCatalog(options);
-        _ = await catalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        var summary = CreateSummary("session-locked", updatedAt: "2026-06-18T10:30:00+00:00");
+        await new SessionViewJournalStore(options, database).CreateSessionStore().UpsertSessionAsync(summary).ConfigureAwait(false);
+        var lockedStore = new SessionViewJournalStore(options, database).CreateSessionStore();
+        Assert.AreEqual(1, (await lockedStore.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
 
         await using (var lockConnection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
-            DataSource = options.SessionCacheDatabasePath,
+            DataSource = options.ApplicationDatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Cache = SqliteCacheMode.Private,
-            DefaultTimeout = 1,
             Pooling = false,
         }.ToString()))
         {
@@ -78,17 +85,171 @@ public sealed class SessionJournalSqliteCacheTests
             lockCommand.CommandText = "BEGIN EXCLUSIVE;";
             await lockCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
 
-            var lockedCatalog = new SessionViewCatalog(options);
+            // A reader does not wait for the writer: the hot list is still there.
+            Assert.AreEqual(1, (await lockedStore.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+
+            // A write waits for the lock, then reports it.
             await Assert.ThrowsExactlyAsync<AgentSessionCacheLockedException>(async () =>
-                _ = await lockedCatalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).ConfigureAwait(false);
+                await lockedStore.UpsertSessionAsync(CreateSummary("session-locked-2", updatedAt: "2026-06-18T10:31:00+00:00")).ConfigureAwait(false)).ConfigureAwait(false);
 
             await using var rollbackCommand = lockConnection.CreateCommand();
             rollbackCommand.CommandText = "ROLLBACK;";
             await rollbackCommand.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
-        SqliteConnection.ClearAllPools();
-        Assert.IsTrue(File.Exists(options.SessionCacheDatabasePath));
+        await lockedStore.UpsertSessionAsync(CreateSummary("session-locked-2", updatedAt: "2026-06-18T10:31:00+00:00")).ConfigureAwait(false);
+        Assert.AreEqual(2, (await lockedStore.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        Assert.IsTrue(File.Exists(options.ApplicationDatabasePath));
+        Assert.IsNotNull(catalog);
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_MovesTheCacheOfTheOldLocationInsteadOfReadingTheJournalsAgain()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var store = new SessionViewCatalog(options).JournalStore.CreateSessionStore();
+        var session = CreateSummary("session-legacy", updatedAt: "2026-06-18T10:40:00+00:00");
+        await store.UpsertSessionAsync(session).ConfigureAwait(false);
+        await store.UpsertStateAsync(CreateState(session, "resp_legacy")).ConfigureAwait(false);
+        Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+
+        // The state of a version before the application database: the cache lives under cache/.
+        Directory.CreateDirectory(Path.GetDirectoryName(options.LegacySessionCacheDatabasePath)!);
+        File.Move(options.ApplicationDatabasePath, options.LegacySessionCacheDatabasePath);
+        var journalPath = new AgentRuntimePathLayout(temp.Path).GetSessionFilePath(session.SessionId, session.CreatedAt);
+        await File.AppendAllTextAsync(journalPath, Environment.NewLine + "{not-json" + Environment.NewLine).ConfigureAwait(false);
+
+        var sessions = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, sessions.Length);
+        Assert.AreEqual("resp_legacy", ((RawApiSessionMetadataDetails?)sessions[0].Details)?.ProviderSessionId, "The rows moved: the changed journal was not parsed.");
+        Assert.IsFalse(File.Exists(options.LegacySessionCacheDatabasePath));
+        Assert.IsTrue(File.Exists(options.ApplicationDatabasePath));
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_AfterTheFileIsDamaged_RebuildsTheListAndKeepsThePluginTablesOfTheCopy()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using var database = ApplicationDatabase.Create(options);
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        var session = CreateSummary("session-damaged", updatedAt: "2026-06-18T10:50:00+00:00");
+        await store.UpsertSessionAsync(session).ConfigureAwait(false);
+        Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        await database.MigrateAsync("plugin:test", "test_", 1, async (connection, from, to, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE test_facts (id INTEGER); INSERT INTO test_facts VALUES (42);";
+            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        Assert.IsNotNull(await database.BackupAsync().ConfigureAwait(false));
+
+        // Newer sessions than the copy has: the restored list must not hide them.
+        var newer = CreateSummary("session-newer-than-the-copy", updatedAt: "2026-06-18T10:55:00+00:00");
+        await store.UpsertSessionAsync(newer).ConfigureAwait(false);
+        await File.WriteAllBytesAsync(options.ApplicationDatabasePath, new byte[8192].Select(static (_, index) => (byte)(index % 241)).ToArray()).ConfigureAwait(false);
+
+        var sessions = await new SessionViewJournalStore(options, database).CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        CollectionAssert.AreEquivalent(new[] { "session-damaged", "session-newer-than-the-copy" }, sessions.Select(static item => item.SessionId).ToArray());
+        Assert.IsNotNull(database.LastRecovery?.RestoredFromCopy);
+        Assert.AreEqual(42L, await database.ReadAsync("plugin:test", async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id FROM test_facts;";
+            return (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
+        }).ConfigureAwait(false));
+        Assert.AreEqual(1, Directory.GetFiles(Path.GetDirectoryName(options.ApplicationDatabasePath)!, "*.corrupt-*").Length, "The damaged file is kept aside.");
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_AfterOnlyThePagesOfTheSessionTableAreDamaged_RebuildsTheListAndKeepsThePluginData()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using var database = ApplicationDatabase.Create(options);
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        for (var index = 0; index < 5; index++)
+        {
+            await store.UpsertSessionAsync(CreateSummary($"session-pages-{index}", updatedAt: $"2026-06-18T12:0{index}:00+00:00")).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(5, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        await database.MigrateAsync("plugin:test", "test_", 1, async (connection, from, to, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE test_facts (id INTEGER); INSERT INTO test_facts VALUES (11);";
+            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        Assert.IsNotNull(await database.BackupAsync().ConfigureAwait(false));
+
+        // The root page of the session table is overwritten; the pages of the plugin table are not touched.
+        long rootPage;
+        long pageSize;
+        await using (var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT rootpage FROM sqlite_master WHERE name = 'session_projection_cache';";
+            rootPage = (long)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
+            command.CommandText = "PRAGMA page_size;";
+            pageSize = (long)(await command.ExecuteScalarAsync().ConfigureAwait(false))!;
+        }
+
+        await using (var stream = new FileStream(options.ApplicationDatabasePath, FileMode.Open, FileAccess.Write, FileShare.None))
+        {
+            stream.Position = (rootPage - 1) * pageSize;
+            await stream.WriteAsync(Enumerable.Repeat((byte)0xFF, (int)pageSize).ToArray()).ConfigureAwait(false);
+        }
+
+        var sessions = await new SessionViewJournalStore(options, database).CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(5, sessions.Length, "The list is read again from the journals.");
+        Assert.AreEqual(11L, await database.ReadAsync("plugin:test", async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id FROM test_facts;";
+            return (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
+        }).ConfigureAwait(false), "The data of the plugin survives, by dropping the session tables or by the copy.");
+        Assert.AreEqual(5, (await new SessionViewJournalStore(options, database).CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_NeverDeletesThePluginTablesOfAValidFile()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using var database = ApplicationDatabase.Create(options);
+        await database.MigrateAsync("plugin:test", "test_", 1, async (connection, from, to, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE test_facts (id INTEGER); INSERT INTO test_facts VALUES (7);";
+            await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        await store.UpsertSessionAsync(CreateSummary("session-plugin-neighbour", updatedAt: "2026-06-18T11:10:00+00:00")).ConfigureAwait(false);
+
+        // A rebuild of the session list (the cache is marked incomplete) leaves the other tables of the file alone.
+        await using (var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE session_projection_cache_metadata SET value = '0';";
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        var sessions = await new SessionViewJournalStore(options, database).CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, sessions.Length);
+        Assert.AreEqual(7L, await database.ReadAsync("plugin:test", async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id FROM test_facts;";
+            return (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
+        }).ConfigureAwait(false));
+        Assert.IsNull(database.LastRecovery);
     }
 
     [TestMethod]
@@ -233,7 +394,7 @@ public sealed class SessionJournalSqliteCacheTests
         Assert.AreEqual("acceptEdits", (await ListSingleAsync()).ViewState!.PermissionMode);
 
         // A cache rebuilt from the journals reads it there.
-        File.Delete(options.SessionCacheDatabasePath);
+        File.Delete(options.ApplicationDatabasePath);
         Assert.AreEqual("acceptEdits", (await ListSingleAsync()).ViewState!.PermissionMode);
 
         // A state written before the choice existed names no mode: the session runs in the one of its provider.
@@ -260,12 +421,12 @@ public sealed class SessionJournalSqliteCacheTests
             .ConfigureAwait(false);
         Assert.AreEqual(1, (await catalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
 
-        // The cache of a version that did not keep the mode: no column, and a row without it.
-        await using (var connection = new SqliteConnection($"Data Source={options.SessionCacheDatabasePath};Pooling=False"))
+        // The cache of a version that did not keep the mode: no column, a row without it, and no version recorded for the owner.
+        await using (var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False"))
         {
             await connection.OpenAsync().ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandText = "ALTER TABLE session_projection_cache DROP COLUMN local_permission_mode;";
+            command.CommandText = "ALTER TABLE session_projection_cache DROP COLUMN local_permission_mode; DELETE FROM app_meta WHERE owner = 'session_cache';";
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
         }
 
@@ -287,7 +448,7 @@ public sealed class SessionJournalSqliteCacheTests
         var sessions = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
 
         Assert.AreEqual(0, sessions.Length);
-        Assert.IsTrue(File.Exists(options.SessionCacheDatabasePath));
+        Assert.IsTrue(File.Exists(options.ApplicationDatabasePath));
     }
 
     private static CatalogOptions CreateOptions(string globalRoot)

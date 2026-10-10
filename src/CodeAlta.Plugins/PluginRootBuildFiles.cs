@@ -161,6 +161,7 @@ public sealed class PluginRootBuildFileGenerator
     /// <summary>Gets the Terminal compatibility catalog of shared external package references.</summary>
     public static IReadOnlyList<string> DefaultSharedPackageNames { get; } =
     [
+        "Microsoft.Data.Sqlite",
         "Microsoft.Extensions.AI.Abstractions",
         "XenoAtom.CommandLine",
         "XenoAtom.Logging",

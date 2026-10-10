@@ -415,7 +415,7 @@ public sealed partial class PluginRuntimeManager
                     discovered,
                     package,
                     load.LoadContext,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = Interlocked.Increment(ref _activationGeneration) },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = Interlocked.Increment(ref _activationGeneration), ApplicationDatabase = ApplicationDatabase },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)

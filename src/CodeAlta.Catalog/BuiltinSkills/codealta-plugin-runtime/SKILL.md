@@ -380,6 +380,7 @@ A dynamic text is asked for each prompt of each session; return null to add noth
   await Services.State.WriteJsonAsync(PluginStateScope.User, "notes", _notes, cancellationToken);
   ```
   `PluginStateScope.User` is one file for the user, in `~/.alta/plugin-data/`. `PluginStateScope.Project` is one file per project, in `<project>/.alta/plugin-data/`; it needs a project, so use it in a command or a tool, not when the plugin starts. Store public types with public properties. Do not put secrets in the source of a plugin.
+- **Tables.** For data that is queried or grows, `Services.Database` gives the plugin tables in the SQLite database of CodeAlta. Name every table with `Services.Database.TablePrefix`, create them in `MigrateAsync(version, (connection, from, to, token) => ...)`, which runs once per version, and use `ReadAsync` and `WriteAsync` (one short transaction, in turn with the other writers). Check `HasDatabase` first when the plugin may run in a host without one.
 - **Background work.** Start it with `Tasks.Run("name", async token => { ... })`, in `OnActivatedAsync`. CodeAlta cancels the token when the plugin is reloaded. Do not start an untracked `Task.Run`.
 - **Other commands of CodeAlta.** `await Services.Alta.InvokeAsync(["session", "list"])` runs an `alta` command; the result has `ExitCode` and `TranscriptJsonl`, its JSON lines.
 - **Logs.** With `using XenoAtom.Logging;`, `Logger.Info("...")` writes to the log of the application: Settings > Application Logs on the desktop, `~/.alta/logs/codealta.log` for the terminal.

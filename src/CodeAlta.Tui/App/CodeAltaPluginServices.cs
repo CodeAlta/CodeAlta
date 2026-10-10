@@ -31,6 +31,8 @@ internal sealed class CodeAltaPluginServices(PluginAltaServiceBridge alta, Termi
 
     public IPluginStateStore State => _inner.State;
 
+    public IPluginDatabase Database => _inner.Database;
+
     public IPluginWorkspaceService Workspace => _inner.Workspace;
 
     public IPluginSessionService Sessions => TerminalUi;

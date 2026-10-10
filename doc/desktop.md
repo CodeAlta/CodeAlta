@@ -3250,14 +3250,14 @@ Both catalog options are required together. The roots must not overlap, and neit
 under a `.alta` path component. Path spelling does not prove ownership or protect against
 symlinks/reparse points: do not point this mode at a production profile or an untrusted tree.
 Preparing the copy is an explicit operator action; the application does not copy a profile.
-Prepare it without copying `cache/cache.sqlite3` or its sidecars: existing cache rows can
+Prepare it without copying `data/alta.sqlite3` (or the old `cache/cache.sqlite3`) or its sidecars: existing cache rows can
 contain absolute paths into the original tree. Normal shared cache creation then indexes
 the copy. The desktop does not silently repair copied cache paths or switch discovery
 strategies after an error; history refuses resolved paths outside the copy's sessions root.
 Existing cache lookup can still probe whether a stored path exists before that refusal.
 
 **This is not read-only filesystem access.** The opt-in permits the shared durable catalog
-to create, rebuild and update `cache/cache.sqlite3` and SQLite sidecars in the copy. It does
+to create, rebuild and update `data/alta.sqlite3` and SQLite sidecars in the copy. It does
 not enable config migration, provider/plugin startup, agent execution or journal editing.
 Cache/read failures are surfaced; the desktop does not substitute a header scan.
 

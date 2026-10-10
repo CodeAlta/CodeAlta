@@ -60,7 +60,7 @@ It runs beside the normal app on the same `~/.alta` profile:
 
 - it shares configuration, providers, credentials, prompts, skills, the project catalog and the
   spaces;
-- it keeps its own sessions, session cache and lock under `~/.alta/dev/`;
+- it keeps its own sessions, database (the list of sessions and the tables of the plugins) and lock under `~/.alta/dev/`;
 - it keeps its own web view data (tabs, drafts, theme) under `CodeAlta/desktop-dev` in the local
   application data folder.
 

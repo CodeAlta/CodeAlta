@@ -84,9 +84,27 @@ public sealed class CatalogOptions
     public string CacheRoot => Path.Combine(GlobalRoot, "cache");
 
     /// <summary>
-    /// Gets the SQLite cache database path of this instance's sessions, under <see cref="StateRoot"/>.
+    /// Gets the path of the SQLite database of the application, under <see cref="StateRoot"/>: the one file of
+    /// this instance that holds the list of sessions and the tables of the plugins.
     /// </summary>
-    public string SessionCacheDatabasePath => Path.Combine(StateRoot, "cache", "cache.sqlite3");
+    public string ApplicationDatabasePath => Path.Combine(StateRoot, "data", "alta.sqlite3");
+
+    /// <summary>
+    /// Gets the folder of the copies of the application database, beside it.
+    /// </summary>
+    public string ApplicationDatabaseBackupRoot => Path.Combine(StateRoot, "data", "backups");
+
+    /// <summary>
+    /// Gets the path the session list database had before the application database existed, under
+    /// <see cref="StateRoot"/>. The application database takes the file over from there at its first start.
+    /// </summary>
+    public string LegacySessionCacheDatabasePath => Path.Combine(StateRoot, "cache", "cache.sqlite3");
+
+    /// <summary>
+    /// Gets the path the session list database had before the application database existed.
+    /// </summary>
+    [Obsolete("The database is no longer a cache: use ApplicationDatabasePath, or LegacySessionCacheDatabasePath for the file it replaced.", error: false)]
+    public string SessionCacheDatabasePath => LegacySessionCacheDatabasePath;
 
     /// <summary>
     /// Gets the session journals root path, under <see cref="StateRoot"/>.

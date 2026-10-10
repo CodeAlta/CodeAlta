@@ -4883,6 +4883,8 @@ public sealed class AltaLiveToolTests
 
         public IPluginStateStore State => _inner.State;
 
+        public IPluginDatabase Database => _inner.Database;
+
         public IPluginWorkspaceService Workspace => _inner.Workspace;
 
         public IPluginSessionService Sessions => _inner.Sessions;
