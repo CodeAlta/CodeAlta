@@ -152,6 +152,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (context.Invocation.Services.Get<IAltaCanvasView>() is not null)
         {
             yield return CreateCanvasCommand(context.Invocation);
+            // The landing page is one of them.
+            yield return CreateLandingCommand(context.Invocation);
         }
 
         // And for the terminals.
@@ -218,6 +220,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (changes) policies.Add(DiffShowPolicy);
         if (editor) policies.Add(EditorOpenPolicy);
         if (canvases) policies.AddRange(CanvasPolicies);
+        if (canvases) policies.AddRange(LandingPolicies);
         if (terminals) policies.AddRange(TerminalPolicies);
         if (automations) policies.AddRange(AutomationPolicies);
         return policies;

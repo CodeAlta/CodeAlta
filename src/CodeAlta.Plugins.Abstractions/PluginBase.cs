@@ -195,6 +195,12 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginCanvasContribution> GetCanvases() => [];
 
     /// <summary>
+    /// Gets the cards that the plugin pins on the landing page of the desktop application.
+    /// </summary>
+    /// <returns>Landing card contributions.</returns>
+    public virtual IEnumerable<PluginLandingCardContribution> GetLandingCards() => [];
+
+    /// <summary>
     /// Observes or transforms prompt submission.
     /// </summary>
     /// <param name="context">The prompt submission context.</param>

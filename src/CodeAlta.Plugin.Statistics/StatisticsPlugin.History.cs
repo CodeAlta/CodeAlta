@@ -75,6 +75,7 @@ public sealed partial class StatisticsPlugin
         });
         _engine = engine;
         engine.StatusChanged += OnButtonStatusChanged;
+        engine.StatusChanged += OnLandingStatusChanged;
         _job = Tasks.Run(
             "statistics-history",
             token => new ValueTask(engine.RunAsync(token)),
@@ -114,6 +115,7 @@ public sealed partial class StatisticsPlugin
         }
 
         engine.StatusChanged -= OnButtonStatusChanged;
+        engine.StatusChanged -= OnLandingStatusChanged;
         job?.RequestCancellation();
         if (job is not null)
         {

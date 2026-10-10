@@ -70,6 +70,8 @@ internal static class DesktopPlugins
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(sessions);
         var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals) : definition)];
+        // The landing page is the window's: the terminal application has no such plugin.
+        builtIns = [.. builtIns, DesktopLandingPlugin.Definition()];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
     }
 

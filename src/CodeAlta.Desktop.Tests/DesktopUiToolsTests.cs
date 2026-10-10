@@ -361,16 +361,16 @@ public sealed class DesktopUiToolsTests
         var ui = new FakeUi(temp.Path);
         var sessions = new DesktopUiSessions();
 
-        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "ui" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false).Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "landing", "ui" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false).Select(static plugin => plugin.Id).ToArray());
         // A session that drives the window could answer the review itself.
-        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: true).Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "landing" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: true).Select(static plugin => plugin.Id).ToArray());
         var definition = DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false)[^1];
         Assert.AreEqual(typeof(DesktopUiPlugin), definition.PluginType);
         Assert.IsInstanceOfType<DesktopUiPlugin>(definition.Factory());
 
         // With the journals of the instance the Statistics plugin keeps the statistics of the sessions, in the same place of the list.
         var journals = DesktopPlugins.CreateJournalCatalog(new CodeAlta.Catalog.CatalogOptions { GlobalRoot = temp.Path });
-        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "ui" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false, journals).Select(static plugin => plugin.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "landing", "ui" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false, journals).Select(static plugin => plugin.Id).ToArray());
         var statistics = DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: true, journals).Single(static plugin => plugin.Id == "statistics");
         Assert.AreEqual(typeof(CodeAlta.Plugin.Statistics.StatisticsPlugin), statistics.PluginType);
         Assert.IsNull(((CodeAlta.Plugin.Statistics.StatisticsPlugin)statistics.Factory()).Statistics, "Nothing runs before the plugin is activated.");

@@ -1358,6 +1358,35 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task PluginAltaCommandContribution_LandingRootIsReserved_EvenWhereTheHostHasNoLandingPage()
+    {
+        // `alta landing` is a command of CodeAlta Desktop, as `alta canvas` is: a plugin does not take the name in a host that has no window.
+        var factoryCalled = false;
+        var catalog = new FakeAltaPluginCatalog(
+            new AltaPluginCommandContribution
+            {
+                Plugin = CreatePluginDescriptor("landing-root-plugin"),
+                Services = NoopPluginServices.Create(),
+                Scope = PluginScope.Global,
+                Command = new PluginAltaCommandContribution
+                {
+                    Path = "Landing",
+                    CreateCommandNode = _ =>
+                    {
+                        factoryCalled = true;
+                        return new Command("landing", "Collision");
+                    },
+                },
+            });
+        var dispatcher = CreateDispatcher(catalog);
+
+        var result = await dispatcher.InvokeAsync(["landing", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.IsFalse(factoryCalled);
+        Assert.IsFalse(result.Stdout.Contains("Collision", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task PluginAltaCommandContribution_MutatingCommandInvokesSessionCreateWithPluginProvenance()
     {
         using var root = TempDirectory.Create();

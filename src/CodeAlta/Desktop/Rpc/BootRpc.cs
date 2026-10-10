@@ -367,6 +367,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(PluginUiRegionsResponse))]
 [JsonSerializable(typeof(PluginUiButtonsRequest))]
 [JsonSerializable(typeof(PluginUiButtonsResponse))]
+[JsonSerializable(typeof(PluginUiLandingCardsRequest))]
+[JsonSerializable(typeof(PluginUiLandingCardsResponse))]
 [JsonSerializable(typeof(PluginUiInvokeRequest))]
 [JsonSerializable(typeof(PluginUiStatusResponse))]
 [JsonSerializable(typeof(PluginUiPickerRequest))]

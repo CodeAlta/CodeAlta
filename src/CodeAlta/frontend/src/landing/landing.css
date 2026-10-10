@@ -1,0 +1,72 @@
+/* The landing page. The colors are the variables of the application (--panel, --text, --accent...), so a color scheme restyles it; the
+   only colors of its own are those of the Alta logo, in the accent of the hero. The page answers to its own width (a container
+   query), because it lives in a tab that can be narrow or wide. */
+.landing { container: landing / inline-size; min-width: 0; color: var(--text); font-size: 13px; line-height: 1.45; }
+.landing-page { display: flex; flex-direction: column; gap: 16px; }
+
+/* The hero: the welcome at the left, the accent at the right. The accent is a part of the hero, never the background of the page. */
+.landing-hero { position: relative; isolation: isolate; overflow: hidden; display: flex; align-items: center; min-height: 172px; padding: 26px 30px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.landing-pixels { position: absolute; inset: 0 0 0 auto; z-index: -1; width: 62%; height: 100%; image-rendering: pixelated; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 60%); mask-image: linear-gradient(to right, transparent 0%, #000 60%); }
+.landing-hero-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; max-width: 560px; }
+.landing-wordmark { display: flex; font: 700 14px/1 "Cascadia Code", Consolas, ui-monospace, monospace; letter-spacing: 0.08em; color: var(--muted); user-select: none; }
+.landing[data-animate="false"] .landing-wordmark .logo-alta { animation: none; }
+/* Behind another tab nothing of the page moves. */
+.canvas-panel[data-visible="false"] .landing * { animation-play-state: paused !important; }
+.landing .landing-page .landing-hero h1 { margin: 6px 0 0; font-size: 30px; font-weight: 650; line-height: 1.15; letter-spacing: -0.01em; }
+.landing .landing-tagline { margin: 0; color: var(--muted); font-size: 14px; }
+.landing-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+/* The first things to do, while there is no provider or no project. */
+.landing-onboarding { padding: 14px 16px; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent-soft, var(--panel)); }
+.landing .landing-page .landing-onboarding h2 { margin: 0 0 10px; font-size: 14px; font-weight: 650; }
+.landing-steps { display: grid; gap: 10px; }
+.landing-step { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.landing-step > svg { color: var(--accent); }
+.landing-step strong { display: block; font-weight: 600; }
+.landing .landing-step p { margin: 2px 0 0; color: var(--muted); font-size: 12.5px; }
+
+/* The cards: the lists of the application and the cards of plugins share one grid and one look. */
+.landing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; gap: 14px; }
+.landing-card { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.landing-card-header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.landing-card-icon { flex: none; color: var(--muted); }
+.landing .landing-page .landing-card-header h2 { flex: 1 1 auto; min-width: 0; margin: 0; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.landing-card-project, .landing-card-status { flex: none; max-width: 45%; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.landing-card-project { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; }
+.landing-card-status[data-tone="Success"] { color: var(--green); }
+.landing-card-status[data-tone="Warning"] { color: var(--yellow); }
+.landing-card-status[data-tone="Error"] { color: var(--red); }
+.landing .landing-card-html { min-width: 0; }
+.landing .landing-card-html .alta-row { gap: 10px 22px; }
+.landing .landing-card-failed, .landing .landing-empty { margin: 0; color: var(--muted); }
+.landing-card-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 2px; }
+.landing-plugin-card[data-state="failed"] { border-style: dashed; }
+
+/* A list of the application: a project or a session on a line. */
+.landing .landing-list ul { display: flex; flex-direction: column; gap: 1px; margin: 0 -8px; padding: 0; list-style: none; }
+.landing-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.landing-row:hover { background: var(--panel-2); }
+.landing-row:focus-visible, .landing-links .bp6-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.landing-row-icon { flex: none; color: var(--muted); }
+.landing-row-text { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.landing-row-title, .landing-row-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.landing-row-detail { color: var(--muted); font-size: 11.5px; }
+.landing-row-time { flex: none; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.landing-links { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px; margin: 0 -8px; }
+.landing-links .bp6-button { justify-content: flex-start; }
+
+/* What the user chose for the page, said quietly at the bottom. */
+.landing-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 18px; color: var(--muted); }
+.landing-footer .landing-switch.bp6-control { margin: 0; font-size: 12px; }
+.landing-unavailable.bp6-non-ideal-state { height: 100%; }
+
+@container landing (max-width: 620px) {
+  .landing-hero { min-height: 0; padding: 20px 18px; }
+  .landing-pixels { width: 100%; opacity: 0.55; }
+  .landing .landing-page .landing-hero h1 { font-size: 24px; }
+  .landing-step { grid-template-columns: auto minmax(0, 1fr); }
+  .landing-step > .bp6-button { grid-column: 2; justify-self: start; }
+  .landing-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (forced-colors: active) { .landing-pixels { display: none; } }

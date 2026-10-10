@@ -89,6 +89,30 @@ Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions fro
   </div>
 </div>
 
+### Welcome page (desktop)
+
+CodeAlta Desktop has a start page, in a tab titled **Welcome**. It shows:
+
+- three buttons: **New session**, **Open a project** and **Documentation**;
+- **Get started**, while something is left to set up: a model provider when none is ready, a first project when you have none;
+- **Recent sessions** and **Recent projects** of the [space](spaces.md) the window shows. A click on a session opens it; a click on a project shows its new-session prompt;
+- the cards of your plugins, such as the **Statistics** overview of the last seven days with a button that opens the [Statistics](plugins/statistics.md) page;
+- **Explore**: the documentation, the Canvases page, Plugins, Model Providers, Settings and the keyboard shortcuts.
+
+Open it with **Welcome** in the search, or `/landing`. It is a tab like the others: close it with `Ctrl+W`, and it is restored with your tabs when it was left open. An agent opens it with `alta landing open`.
+
+**Documentation** opens the documentation that ships with CodeAlta, in the window.
+
+Two switches at the bottom of the page are kept on your computer. The same two are in **Settings > Appearance**, as **Show the welcome page at startup** and **Animate the welcome page**:
+
+{.table}
+| Switch | What it does |
+| --- | --- |
+| **Show at startup** | The page opens in front each time CodeAlta Desktop starts. On by default. Turn it off to start on your last tab |
+| **Animation** | The colored pixels at the right of the welcome move slowly. On by default. They never move when your system asks for reduced motion, or while the tab is not in front |
+
+A plugin can pin its own card on the page: see [Cards on the welcome page](plugins/developers.md#cards-on-the-welcome-page). To remove the page, turn the **Landing page** plugin off in Settings > Plugins.
+
 ## Timeline cards
 
 {{ alta_shot "alta-desktop-modified-files.webp" "alta-modified-files.png" "Diff of a modified file opened from the timeline" "Modified-file cards summarize changed files and diff totals. Open a file to read its diff." }}
@@ -470,6 +494,7 @@ The **Appearance** page sets:
 - how projects are sorted, how many recent sessions are listed per project, and how many sub-agents per session;
 - the width of the conversation, as a percentage of the space of a session;
 - **Ask before deleting a session** and **Ask before archiving a project**: turn one on again after you ticked **Do not ask again** in its question;
+- **Show the welcome page at startup** and **Animate the welcome page**, the two switches of the [welcome page](#welcome-page-desktop);
 - what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
 
 The zoom of the window is in the title bar, as a percentage before the theme switch. Click it to zoom out, to zoom in, or to go back to 100% with a click on the percentage. `Ctrl+-`, `Ctrl+=` and `Ctrl+0` do the same, and the zoom is kept for the next start.

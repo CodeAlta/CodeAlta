@@ -326,6 +326,10 @@ public sealed class PluginContributionRegistry
                 // A button belongs to the plugin that puts it: two plugins with the same identifier do not shadow each other.
                 yield return new ContributionConflictKey("ui-button", $"button:{registration.Handle.PluginRuntimeKey}:{button.Id}", button.Id);
                 yield break;
+            case PluginLandingCardContribution card:
+                // A card belongs to the plugin that pins it: two plugins with the same identifier do not shadow each other.
+                yield return new ContributionConflictKey("landing-card", $"landing-card:{registration.Handle.PluginRuntimeKey}:{card.Id}", card.Id);
+                yield break;
             case PluginUiContribution ui:
                 yield return new ContributionConflictKey("ui-region", $"ui:{ui.Region}:{ui.Name ?? ui.GetType().Name}", $"{ui.Region}:{ui.Name ?? ui.GetType().Name}");
                 yield break;
@@ -383,6 +387,7 @@ public sealed class PluginContributionRegistry
             PluginAltaCommandContribution alta => alta.Order,
             PluginCompactionContribution compaction => compaction.Order,
             PluginCanvasContribution canvas => canvas.Order,
+            PluginLandingCardContribution card => card.Order,
             _ => 0,
         };
 
@@ -403,6 +408,7 @@ public sealed class PluginContributionRegistry
             PluginResourceContribution resource => resource.Path,
             PluginCompactionContribution _ => null,
             PluginCanvasContribution canvas => canvas.Id,
+            PluginLandingCardContribution card => card.Id,
             _ => null,
         };
 

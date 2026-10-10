@@ -97,6 +97,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `diff` | Show the changed files of a project to the user. Only in CodeAlta Desktop. |
 | `editor` | Show the files of a project to the user in the code editor. Only in CodeAlta Desktop. |
 | `canvas` | List the canvases that plugins provide, show one, open, focus and close its tab, and run its actions. Only in CodeAlta Desktop. |
+| `landing` | Open the landing page of the window. Only in CodeAlta Desktop. |
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
 | `automation` | List, create, run, enable, disable and delete automations, and find the one that started a session. Only in CodeAlta Desktop. |
 | `task` | List, show, propose, start, complete, set aside, dismiss and remove the follow-up tasks of a project. |
@@ -586,6 +587,26 @@ Nothing here changes a setting of the user, and a window that is not open is `vi
 
 Like `editor`, the group exists only where a host registers its view (`IAltaCanvasView`), which the desktop host does when it runs plugins: in the terminal UI and the standalone tool it is not among the commands, their help or `alta tool list`.
 
+## Landing commands
+
+`alta landing` shows the landing page of the CodeAlta Desktop window (see "The landing page" in `doc/desktop.md`). The page is a canvas of the application, `builtin:landing/landing`, so the command is a short name for `alta canvas open builtin:landing/landing`, and `alta canvas show`, `focus`, `close` and `list --open` apply to the page as to any canvas.
+
+```text
+alta landing open [--space <space>]
+```
+
+- **`open`** asks the window for the tab of the page, or brings it to the front, and prints an `alta.landing.opened` with `instanceId`, `spaceId`, `space` and `shown`. Without `--space` the tab opens in the space the window shows; a space that is not shown gets the tab without the window moving (`shown: false`), as for a canvas.
+- The page is the start page of the user: an agent opens it when the user asks for it.
+- The command changes no setting: whether the page opens when the application starts is the user's choice, kept by the window.
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `space.notFound` | 3 | `--space` names no space. |
+| `view.unavailable`, `service.unavailable` | 5 | No window is open, or the service is missing. |
+| `landing.unavailable`, `space.unavailable` | 7 | The plugin of the page (`[plugins.landing]`) is turned off or did not start, or the host keeps no spaces. |
+
+The group exists where `alta canvas` does (a host that registers `IAltaCanvasView`); the terminal UI and the standalone tool do not have it. `landing` is a reserved root on every host.
+
 ## Appearance commands
 
 `alta appearance` reads how a session is shown in the CodeAlta Desktop window, and changes the view of one
@@ -868,7 +889,7 @@ Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPl
 
 Plugins add live-tool commands by returning `PluginAltaCommandContribution` records from `PluginBase.GetAltaCommands()`. Each contribution declares a root/path, policy flags, ordering, and a factory that creates a fresh unattached `XenoAtom.CommandLine.CommandNode`.
 
-The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool` and `canvas`. A root is reserved on every host, also where the host has no such command (`alta canvas` is a command of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
+The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas` and `landing`. A root is reserved on every host, also where the host has no such command (`alta canvas` and `alta landing` are commands of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
 
 Plugin command policy flags describe whether a command mutates state, is disruptive, requires the in-process runtime, or supports catalog-only context. Mutating plugin-originated commands include plugin provenance for audit and timeline reconstruction.
 

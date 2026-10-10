@@ -53,6 +53,7 @@ internal sealed class RecordingUi : IPluginUiService
 {
     private readonly NoopPluginUiService _inner = new();
     private int _invalidations;
+    private int _landingInvalidations;
 
     public int Invalidations => Volatile.Read(ref _invalidations);
 
@@ -73,6 +74,11 @@ internal sealed class RecordingUi : IPluginUiService
     public ValueTask<PluginDialogResponse?> ShowDialogForResultAsync(PluginDialogRequest request, CancellationToken cancellationToken = default) => _inner.ShowDialogForResultAsync(request, cancellationToken);
 
     public void InvalidateButtons() => Interlocked.Increment(ref _invalidations);
+
+    /// <summary>Gets how many times the plugin asked for its cards of the landing page to be read again.</summary>
+    public int LandingInvalidations => Volatile.Read(ref _landingInvalidations);
+
+    public void InvalidateLandingCards() => Interlocked.Increment(ref _landingInvalidations);
 }
 
 /// <summary>A canvas service that records the requests to open a canvas.</summary>

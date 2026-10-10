@@ -1669,6 +1669,10 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .plugin-html label.alta-field > :is(input, select, textarea) { width: 100%; color: var(--text); font-size: 13px; }
 .plugin-html .alta-card.bp6-card { padding: 10px 12px; box-shadow: none; border: 1px solid var(--line); background: var(--panel-2); }
 .plugin-html .alta-muted { color: var(--muted); }
+/* One figure above its label; a row of them is a line of figures. */
+.plugin-html .alta-stat { display: flex; flex-direction: column; gap: 2px; min-width: 64px; }
+.plugin-html .alta-stat > strong { font-size: 18px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.plugin-html .alta-stat > .alta-muted { font-size: 11px; }
 .plugin-html .alta-markdown { min-width: 0; }
 .plugin-html .alta-markdown > .markdown-content { color: inherit; font-size: inherit; line-height: 1.5; }
 .plugin-html .alta-markdown > .markdown-content > :first-child { margin-top: 0; }

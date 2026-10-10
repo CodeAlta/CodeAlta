@@ -189,7 +189,9 @@ import { PluginRegionSlot } from "./PluginRegions";
 import { askPluginComposer, noPluginContributions, pluginCommandAvailable, pluginContributions, pluginKeymap, PluginUiContext, resolvePluginKey,
   findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue, pluginsChangedEvent } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
-import { resolveCommandKey, type CommandId } from "./commandRegistry";
+import { commandDefinitions, resolveCommandKey, type CommandId } from "./commandRegistry";
+import { LandingShellContext } from "./landing/landingShell";
+import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
 import "normalize.css";
 import "@blueprintjs/core/lib/css/blueprint.css";
@@ -209,6 +211,7 @@ import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
+import "./landing/landing.css";
 import "./pluginButtons/pluginButtons.css";
 import { CanvasPanel } from "./canvases/CanvasPanel";
 import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/hostBridge";
@@ -2000,6 +2003,27 @@ function App() {
     }
   }
 
+  // What the landing page asks of the shell. A command is named as it is after a slash: one of the window first, then one of a plugin.
+  function runNamedCommand(name: string): boolean {
+    const builtIn = commandDefinitions.find(command => command.name === name);
+    if (builtIn) { if (!commandAvailable(builtIn.id)) return false; runCommand(builtIn.id); return true; }
+    const contributed = findPluginCommand(pluginContributed.commands, name, null);
+    if (!contributed || !pluginEpoch) return false;
+    runPluginCommand(contributed.id);
+    return true;
+  }
+  const landingUnavailable = (label: string) => showToast({ message: t("{name} is not available here.", { name: label }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+  // The command of a card runs for the project of its plugin, whatever is selected. The host checks the project and the command, as for a button of a plugin.
+  function runLandingCardCommand(commandId: string, cardProjectId: string | null, label: string) {
+    if (!pluginEpoch) return;
+    const unavailable = () => landingUnavailable(label);
+    void pluginUi.invokeCommand({ expectedEpoch: pluginEpoch, commandId, projectId: cardProjectId, sessionId: null, sessionBusy: false, draftText: null, spaceId: shownSpace.current },
+      { timeoutMilliseconds: 8000 }).then(reply => { if (reply.status !== "started") unavailable(); }, unavailable);
+  }
+  const landingShell = useLandingShell({ epoch: pluginEpoch, space: findSpace(spacesState.spaces, spaceId), snapshot, run: runNamedCommand, notifyUnavailable: landingUnavailable,
+    openProject: id => { selectProject(id); focusPromptSoon(); }, openSession: id => void openAutomationSession(id), runCardCommand: runLandingCardCommand });
+  useLandingAtStartup(owned && tabsReady, canvasCatalog, openCanvasHere);
+
   useEffect(() => {
     // Capture phase: the prompt editor (Monaco) must not see keys that belong to a command.
     function commandKey(event: globalThis.KeyboardEvent) {
@@ -3079,12 +3103,12 @@ function App() {
             files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} fileStatus={tab => canvasStatuses.get(canvasStatusKey(tab, spaceId))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
             terminal={id => terminalList.find(terminal => terminal.id === id)}
             renderFile={(tab, visible) => isCanvasTab(tab)
-              ? <CanvasPanel key={fileTabKey(tab)} tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}
+              ? <LandingShellContext.Provider key={fileTabKey(tab)} value={landingShell}><CanvasPanel tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}
                 active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} onLook={look => changeCanvasLook(tab, spaceId, look)}
                 onInstance={instance => instance ? canvasInstances.opened(tab, spaceId, instance) : canvasInstances.released(tab, spaceId)}
                 onAbandoned={(instance, space) => canvasInstances.abandoned(tab, space ?? spaceId, instance)}
                 onClose={() => closeFile(tab)} control={canvasControl(tab)}
-                onOpenSource={folder => openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true })} />
+                onOpenSource={folder => openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true })} /></LandingShellContext.Provider>
               : isCanvasesTab(tab)
               ? <CanvasesPanel key={fileTabKey(tab)} hub={canvasHub} tabs={fileTabs.open} projects={canvasProjects} sessions={canvasSessions} selection={canvasSelection}
                 visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)} onOpen={openCanvas} onNew={owned && canvasSelection.project ? newCanvas : null} />

@@ -251,6 +251,7 @@ Classes you can use:
 | `alta-tag` | A small rounded label |
 | `alta-callout` | A highlighted block |
 | `alta-card` | A bordered block |
+| `alta-stat` | One figure above its label, written by `PluginHtml.Stat(value, label)`; several in an `alta-row` make a line of figures |
 
 Other classes are removed. Allowed elements are text and structure (`p`, `div`, `span`, headings, lists, `table`, `pre`, `code`, `details`, `a`, …) and fields (`button`, `input`, `select`, `textarea`, `label`, `fieldset`, `progress`, `meter`).
 
@@ -419,6 +420,43 @@ People can hide any button with a right click, and turn each one back on in Sett
   <img src="{{site.basepath}}/img/alta-desktop-plugin-buttons-settings.webp" alt="The Plugins page of Settings: under Statistics and under the Canvas checklist plugin, a line for each button with its place, Title bar or Project menu, and a switch" loading="lazy">
   <figcaption class="small text-secondary mt-2">Settings > Plugins lists the canvases and the buttons of each plugin, with a switch for each button.</figcaption>
 </figure>
+
+## Cards on the welcome page
+
+CodeAlta Desktop has a [welcome page](../workspace.md#welcome-page-desktop), and a plugin can pin a card on it: a title, an icon, a short piece of HTML and up to three buttons. CodeAlta TUI has no such page.
+
+```csharp
+public override IEnumerable<PluginLandingCardContribution> GetLandingCards()
+{
+    yield return new PluginLandingCardContribution
+    {
+        Id = "notes", Title = "Notes", Icon = "notebook-pen",
+        GetCard = async (context, cancellationToken) =>
+        {
+            var notes = await ReadAsync(cancellationToken);
+            if (notes.Count == 0) return null;                                   // nothing to say: no card for now
+            return PluginLandingCard.Of($"<p>{PluginHtml.Encode(notes[^1].Title)}</p>",
+                PluginLandingCardAction.OpenCanvas("Open", "notes") with { Primary = true },
+                PluginLandingCardAction.RunCommand("Add", "notes-add")) with { Status = $"{notes.Count} notes" };
+        },
+    };
+}
+```
+
+{.table}
+| Part | What it is |
+|---|---|
+| `Id`, `Title`, `Icon`, `Order` | The card. One plugin pins at most 2 cards |
+| `GetCard` | Returns what the card shows now, or `null` to leave it out. It may read a file or a database, within 5 seconds |
+| `Html` | A fragment like the ones of dialogs and canvases. `PluginHtml.Stat("128", "Sessions")` writes a figure above its label; put several in a `<div class="alta-row">` |
+| `Status`, `Tone` | A short text beside the title, and its color |
+| `Actions` | Up to 3 buttons. Each runs a command of your plugin (`RunCommand`) or opens a canvas of your plugin (`OpenCanvas`) |
+
+`context.SpaceId` is the space the page is shown in. A plugin of a project folder also gets `context.ProjectId`: its card is shown only in the spaces that have that project, and its commands run for it.
+
+The page asks for the card when it is shown, when a command of your plugin ends, and when you call `Services.Ui.InvalidateLandingCards()` after a change. A card that throws, or is too slow, is shown as a card that could not be loaded; the page and the other cards are not affected.
+
+The `landing-card` sample of the `codealta-plugin-runtime` skill is a complete plugin with a card, two commands and a canvas.
 
 ## Prompt pickers
 

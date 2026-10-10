@@ -27,6 +27,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "plugin",
         "tool",
         "canvas",
+        "landing",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />

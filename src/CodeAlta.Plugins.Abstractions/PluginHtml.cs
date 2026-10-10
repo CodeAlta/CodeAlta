@@ -72,6 +72,9 @@ public static partial class PluginHtml
     /// <summary>Marks a block shown as a card: a bordered panel.</summary>
     public const string CardClass = "alta-card";
 
+    /// <summary>Marks a block that shows one number above its label; several of them in a <see cref="RowClass"/> make a line of figures.</summary>
+    public const string StatClass = "alta-stat";
+
     /// <summary>
     /// Marks a block whose text is Markdown. The application renders it as it renders the messages of a
     /// session: headings, lists, tables, fenced code with the colors of its language, and <c>mermaid</c>
@@ -111,6 +114,18 @@ public static partial class PluginHtml
         ArgumentException.ThrowIfNullOrWhiteSpace(action);
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         return Button(ActionAttribute, action, label, primary);
+    }
+
+    /// <summary>Creates a figure: a number, or any short value, above the label that says what it counts.</summary>
+    /// <param name="value">The value as it is shown (<c>128</c>, <c>1.2M</c>, <c>3h 12m</c>).</param>
+    /// <param name="label">What the value counts.</param>
+    /// <returns>The block markup, with both texts encoded.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="value"/> or <paramref name="label"/> is null, empty or whitespace.</exception>
+    public static string Stat(string value, string label)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
+        return $"<div class=\"{StatClass}\"><strong>{Encode(value)}</strong><span class=\"{MutedClass}\">{Encode(label)}</span></div>";
     }
 
     /// <summary>Creates a block that the application renders as Markdown.</summary>

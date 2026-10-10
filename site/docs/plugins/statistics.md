@@ -35,6 +35,7 @@ In CodeAlta Desktop the numbers have a page of their own, in a tab. Open it from
 | The search | **Statistics**, or `/statistics` |
 | A project | **Statistics of this project** in the menu of a project row opens the page for that project only, in a tab of its own |
 | An agent | `alta canvas open statistics` |
+| The welcome page | The **Statistics** card shows the sessions, your prompts, the tokens and the active time of the last seven days, and **Open Statistics** opens the page |
 
 Each space has its own Statistics tab, which starts on the space it shows; a space counts its projects and your chats (the sessions of no project), which the Explorer lists in every space. CodeAlta TUI has no page: it keeps the card of each turn and the `alta statistics` commands.
 

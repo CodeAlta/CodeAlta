@@ -4,6 +4,7 @@ import { AppIcon, type IconName } from "./AppIcon";
 import { useElementSize } from "./AppWindow";
 import { ChangesViewSetting } from "./changes/ChangesViewSetting";
 import { ColorSchemeSettings } from "./ColorSchemeSettings";
+import { LandingSettings } from "./landing/LandingSettings";
 import type { ProjectSort } from "./explorer/projectRail";
 import { SettingsField as Field } from "./SettingsField";
 import { themeLabel, themes, type Confirmation, type Theme, type PreferenceNotices } from "./windowPreferences";
@@ -115,6 +116,7 @@ export function GeneralSettings({ theme, setTheme, darker, setDarker, schemes, s
         <Switch id="settings-confirm-project-archive" className="settings-checkbox" checked={confirms.projectArchive} onChange={event => confirms.set("projectArchive", event.currentTarget.checked)} />
       </Field>
     </>}
+    <LandingSettings />
     {closing && <Field label={t("When the window is closed")} htmlFor="settings-on-close"
       notice={closing.behavior === "keep" && <p className="settings-field-help">{t(keepRunningPlace(closing.platform, closing.trayIcon))}</p>}>
       <HTMLSelect id="settings-on-close" value={closing.behavior} onChange={event => closing.set(closeBehavior(event.target.value))}>

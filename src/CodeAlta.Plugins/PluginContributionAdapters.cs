@@ -62,6 +62,15 @@ public sealed record PluginStatusEntry(PluginContributionRegistration Registrati
 /// <param name="State">The state the plugin gave for the context, or the default state.</param>
 public sealed record PluginButtonEntry(PluginContributionRegistration Registration, PluginButtonContribution Button, PluginButtonState State);
 
+/// <summary>A card of the landing page, with what its plugin gave for a space.</summary>
+/// <param name="Registration">The card contribution.</param>
+/// <param name="Contribution">The card as the plugin declares it.</param>
+/// <param name="Context">The space and the project the card was asked about.</param>
+/// <param name="Card">What the card shows, or <see langword="null"/> when the plugin leaves it out or could not write it.</param>
+/// <param name="Failed">Whether the plugin threw or did not answer in time: the card is shown as one that could not be read.</param>
+public sealed record PluginLandingCardEntry(PluginContributionRegistration Registration, PluginLandingCardContribution Contribution, PluginLandingCardContext Context,
+    PluginLandingCard? Card, bool Failed);
+
 /// <summary>The content of a UI region and the contribution it comes from.</summary>
 /// <param name="Registration">The content contribution.</param>
 /// <param name="Content">The content.</param>
@@ -188,6 +197,8 @@ public sealed class PluginContributionAdapterService
 {
     private readonly PluginContributionRegistry _registry;
     private readonly PluginRuntimeDiagnosticStore? _diagnostics;
+    // The calls of landing cards that run, by the card as its plugin declared it: a card that is gone with its plugin takes its calls with it.
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<PluginLandingCardContribution, LandingReads> _landingReads = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginContributionAdapterService"/> class.
@@ -842,6 +853,134 @@ public sealed class PluginContributionAdapterService
         }
 
         return entries;
+    }
+
+    /// <summary>
+    /// Asks the active plugins for the cards they pin on the landing page of a space. The cards are asked at the same time, each
+    /// with its own time limit: a card that throws or does not answer is returned as failed, and the others are not affected.
+    /// </summary>
+    /// <param name="activePlugins">Active plugins.</param>
+    /// <param name="spaceId">The space the landing page is shown in, or <see langword="null"/>.</param>
+    /// <param name="spaceProjectIds">The projects of that space, or <see langword="null"/> when every project is in it: the cards of a plugin of a project are asked for only when its project is in the space.</param>
+    /// <param name="timeout">How long one card may take.</param>
+    /// <param name="cancellationToken">A token to cancel the reading.</param>
+    /// <returns>The cards in contribution order; a card that its plugin leaves out is not in the list.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="activePlugins"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="timeout"/> is not positive.</exception>
+    public async ValueTask<IReadOnlyList<PluginLandingCardEntry>> GetLandingCardEntriesAsync(IReadOnlyList<ActivePluginInstance> activePlugins, string? spaceId,
+        IReadOnlySet<string>? spaceProjectIds, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(activePlugins);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+        var pending = new List<Task<PluginLandingCardEntry?>>();
+        foreach (var registration in _registry.GetSnapshot())
+        {
+            if (registration.Handle.Point != PluginPoint.LandingCard || registration.Contribution is not PluginLandingCardContribution card
+                || !TryGetActivePlugin(activePlugins, registration, out var active))
+            {
+                continue;
+            }
+
+            string? projectId = null;
+            if (registration.Scope != PluginScope.Global)
+            {
+                // A plugin of a project speaks of that project: its card is on the landing page of the spaces the project is in.
+                projectId = registration.ScopeProjectId;
+                if (string.IsNullOrWhiteSpace(projectId) || spaceProjectIds is not null && !spaceProjectIds.Contains(projectId)) continue;
+            }
+
+            pending.Add(ReadLandingCardAsync(registration, card, active, new PluginLandingCardContext(spaceId, projectId), timeout, cancellationToken));
+        }
+
+        var entries = await Task.WhenAll(pending).ConfigureAwait(false);
+        return [.. entries.OfType<PluginLandingCardEntry>()];
+    }
+
+    private async Task<PluginLandingCardEntry?> ReadLandingCardAsync(PluginContributionRegistration registration, PluginLandingCardContribution card, ActivePluginInstance active,
+        PluginLandingCardContext context, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var (reading, started) = StartOrJoinLandingRead(card, active, context, timeout);
+        if (!started)
+        {
+            // A call of the card runs, started before this reading: what it returns may be older than the question. The reading waits for
+            // it to end and asks again, so that calls of a card follow one another. A call that does not end within the limit is not
+            // followed by another one: the card failed, and its handler holds what it holds until it returns.
+            try
+            {
+                await reading.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                if (active.RuntimeContext.LifetimeCancellationToken.IsCancellationRequested) return null;
+                if (!reading.IsCompleted) return new PluginLandingCardEntry(registration, card, context, null, Failed: true);
+            }
+
+            (reading, started) = StartOrJoinLandingRead(card, active, context, timeout);
+        }
+
+        try
+        {
+            // The wait ends at the limit even when the plugin ignores its token: one card never holds the page.
+            var shown = await reading.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            return shown is null ? null : new PluginLandingCardEntry(registration, card, context, shown, Failed: false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The plugin stopped while it was asked: it has no card any more.
+            if (active.RuntimeContext.LifetimeCancellationToken.IsCancellationRequested) return null;
+            // The failure of one call of the plugin is told once, by the reading that made the call, not by each one that waited for it.
+            if (started)
+            {
+                LogCallbackFailure(active, "Landing card callback failed.", ex);
+                AddDiagnostic(CreateCallbackDiagnostic(registration, ex is TimeoutException or OperationCanceledException ? "Landing card callback did not answer in time." : "Landing card callback failed.", ex));
+            }
+
+            return new PluginLandingCardEntry(registration, card, context, null, Failed: true);
+        }
+    }
+
+    // The call of a card for a space that is running, or a new one. A card is asked once at a time for the same space and project, so a
+    // handler that never returns holds one thread and one token, however often the page asks. The call ends with its time limit or with
+    // its plugin, not with the reading that started it, since other readings may wait for it.
+    private (Task<PluginLandingCard?> Reading, bool Started) StartOrJoinLandingRead(PluginLandingCardContribution card, ActivePluginInstance active, PluginLandingCardContext context, TimeSpan timeout)
+    {
+        var reads = _landingReads.GetValue(card, static _ => new LandingReads());
+        lock (reads.Gate)
+        {
+            // A call that ended is not an answer to a new question, whether or not it was taken out of the table yet.
+            if (reads.Running.TryGetValue(context, out var running) && !running.IsCompleted) return (running, false);
+            var limit = CancellationTokenSource.CreateLinkedTokenSource(active.RuntimeContext.LifetimeCancellationToken);
+            limit.CancelAfter(timeout);
+            var reading = Task.Run(() => card.GetCard(context, limit.Token).AsTask(), CancellationToken.None);
+            reads.Running[context] = reading;
+            // The token is the plugin's for as long as its handler runs: a handler that outlives the wait is not left with a disposed source,
+            // and what it throws afterwards is looked at here, since nobody may wait for it any more.
+            _ = reading.ContinueWith(task =>
+            {
+                _ = task.Exception;
+                limit.Dispose();
+                lock (reads.Gate)
+                {
+                    if (reads.Running.TryGetValue(context, out var current) && ReferenceEquals(current, task)) reads.Running.Remove(context);
+                }
+            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            return (reading, true);
+        }
+    }
+
+    private sealed class LandingReads
+    {
+        public Lock Gate { get; } = new();
+
+        public Dictionary<PluginLandingCardContext, Task<PluginLandingCard?>> Running { get; } = [];
     }
 
     /// <summary>Creates the content of a UI region with the contribution each one comes from.</summary>

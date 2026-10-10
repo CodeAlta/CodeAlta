@@ -265,6 +265,7 @@ The terminal implementation is `CodeAlta.Tui.Plugins.TerminalPluginStartupFeedba
 - UI contributions such as status rows, visuals, and renderers;
 - canvases: tabs that the plugin provides in CodeAlta Desktop (see "Canvases");
 - buttons that the plugin puts in the window of CodeAlta Desktop (see "Buttons"), returned with the other UI contributions;
+- cards that the plugin pins on the landing page of CodeAlta Desktop (see "Landing cards");
 - transient session/timeline projections (current APIs still use some legacy `Session` names);
 - resource roots (the hosts read the skill roots; the other kinds have no consumer yet);
 - plugin-lifetime background tasks through `IPluginTaskService`.
@@ -495,6 +496,44 @@ public override IEnumerable<PluginUiContribution> GetUiContributions()
 
 The `canvas-checklist` sample of the `codealta-plugin-runtime` skill has a button that opens its canvas, a button that runs a command with a badge, and a line in the menu of each project.
 
+## Landing cards
+
+A plugin can pin a card on the landing page of CodeAlta Desktop (`/landing`, see "The landing page" in [Desktop](desktop.md)): a title, an icon, a short piece of content and a few actions. The terminal application has no landing page and never asks for a card. Cards are returned by `GetLandingCards()` and registered under `PluginPoint.LandingCard`.
+
+```csharp
+public override IEnumerable<PluginLandingCardContribution> GetLandingCards()
+{
+    yield return new PluginLandingCardContribution
+    {
+        Id = "release", Title = "Release", Icon = "list-checks",
+        GetCard = async (context, cancellationToken) =>
+        {
+            var left = await StepsLeftAsync(context.ProjectId, cancellationToken);
+            if (left == 0) return null; // Nothing to say: the card is left out for now.
+            return PluginLandingCard.Of($"<p>{left} steps before the release.</p>",
+                PluginLandingCardAction.OpenCanvas("Open the checklist", "release") with { Primary = true },
+                PluginLandingCardAction.RunCommand("Tick the next step", "release.tick")) with { Status = $"{left} left" };
+        },
+    };
+}
+```
+
+**The card.** `PluginLandingCardContribution` has an `Id` (1 to 64 letters, digits, `-`, `_` or `.`, unique in the plugin), a `Title`, an `Icon` (as for a button), an `Order` among the cards of plugins, and `GetCard`. A plugin pins at most 2 cards (`PluginLandingCardLimits.Cards`); the extras, a card without a valid identifier or title, and an identifier used twice are left out when the plugin starts, each with a warning.
+
+**What it shows.** `GetCard` returns a `PluginLandingCard`, or `null` to leave the card out for now. `Html` is a fragment like any other HTML of a plugin (see `PluginHtml`): it is sanitized, `data-alta-command` runs a command of the plugin, `PluginHtml.Markdown` and `PluginHtml.Chart` draw Markdown and a chart, and `PluginHtml.Stat(value, label)` writes one figure above its label (several in an `alta-row` make a line of figures). It is cut at 32 KiB. `Status` is a short text beside the title, colored by `Tone`. A card has no script and no action handler of its own: what it does is a command or a canvas of its plugin.
+
+**Actions.** At most 3 buttons at the bottom of the card (`PluginLandingCardLimits.Actions`). Each names exactly one of a command and a canvas of the same plugin, as a button of a plugin does: `PluginLandingCardAction.RunCommand(label, command)` and `PluginLandingCardAction.OpenCanvas(label, canvas, key)`. An action that names a command or a canvas the plugin does not have is left out; one whose command or canvas needs a project or a session that the page does not have is shown disabled. A canvas of the application opens as it does from the Canvases page; only a canvas of a project opens for the project of the card.
+
+**Commands of the fragment.** A `data-alta-command` element of a card runs a command of the plugin of the card, for the project of the card, whatever project is selected in the window: the host sends the page the commands of that plugin with each card, and a name that is not among them runs nothing (it is never looked up among the commands of other plugins).
+
+**What it is asked about.** `PluginLandingCardContext` has the `SpaceId` of the space the page is shown in and a `ProjectId`. A plugin of the application or of the user (built-in, or in the user's `plugins` folder) is asked with no project, and its card is on the page of every space. A plugin of a project (in the `.alta/plugins` folder of that project) is asked only for the spaces that have its project, with that project: its commands run for it and its project canvases open for it. Its card is never on the page of a space that does not have the project, nor shown for an archived project.
+
+**When it is asked.** `GetCard` may read a file or a database: it is asynchronous and runs off the window, with a limit of 5 seconds. The page asks for the cards each time it is shown, when plugins start, are reloaded or stop, when a command of a plugin ends, and when the plugin calls `Services.Ui.InvalidateLandingCards()` (cheap, and one read for a burst). Nothing is asked while the page is hidden, and nothing on a timer. A card is asked once at a time for a space: a reading that comes while a call of `GetCard` runs waits for it to end and then asks again, so a handler that never returns holds one thread, however often the page asks. The token of the handler is cancelled at the limit or when the plugin stops.
+
+**When it fails.** A card that throws, or does not answer within the limit, is shown as a card that could not be loaded, with its title; the other cards and the page are not affected, the text of the failure stays in the application log, and the next read asks again.
+
+The `landing-card` sample of the `codealta-plugin-runtime` skill pins a card with two commands and a canvas. The Statistics plugin pins its overview through the same contract.
+
 ## Prompt and instruction processing
 
 `PluginBase.GetPromptProcessors()` is for user prompt text and attachment preparation before a turn is submitted. It must not be used to mutate built-in system/developer instructions.
@@ -669,6 +708,13 @@ project): on request it gives a session the tools that see and drive the window,
 root and a line of developer instructions that says whether the session has them. It is disabled with
 `[plugins.ui]` and `enabled = false`; see `doc/desktop.md`, UI tools.
 
+The desktop application also has the built-in plugin `landing` ("Landing page", `DesktopLandingPlugin` in the desktop
+project): it declares the canvas of the landing page (`landing`, scope Application, module `PluginScript.App("landing")`)
+and the command `landing` (`/landing`) that opens it, and nothing else. The page is drawn by the frontend of the
+application and holds no state; the cards on it are the landing cards of the other plugins. It is disabled with
+`[plugins.landing]` and `enabled = false`, which also takes the page out of the Canvases page and makes
+`alta landing open` answer `landing.unavailable`; see `doc/desktop.md`, "The landing page".
+
 The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
 
 ```toml
@@ -676,7 +722,7 @@ The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by
 enabled = false
 ```
 
-It contributes transient per-turn/session statistics projections (the cards of the timeline, without writing plugin messages into canonical session history) and the `alta statistics` command root. In CodeAlta Desktop it also **keeps the statistics of every session** in the application database (`statistics_*` tables, `doc/catalog-and-config.md`): `DesktopPlugins.StatisticsDefinition` builds it with the journals of the session store (`StatisticsPlugin.CreateForDesktop(ISessionJournalCatalog)`), and once it is activated on a host that has a database it runs a tracked job that reads the history the user chose to read, and a flow that catches a session up a second after an agent event signals it (`OnAgentEventAsync` only enqueues the session id). In CodeAlta Desktop the plugin is also a **canvas** (`statistics`, scope Application, icon `chart-column`, module `PluginScript.App("statistics")`), a **button** of the title bar (`PluginUi.Button(PluginButtonPlace.TitleBar, "statistics", ...)` whose state is a ring while the history is read and a dot while the first choice waits, and `InvalidateButtons()` is called only when that changes), a line in the menu of a project (`ProjectMenu`, which opens the canvas with the key `project:<id>`), a command `statistics` (`/statistics`) with the binding `Ctrl+G C`, and the calls of the canvas (`canvas.Rpc`, names `statistics.*`, results written by `StatisticsJson`). They exist only where the plugin reads the sessions (CodeAlta Desktop with a database): CodeAlta TUI and a disabled plugin declare none. The plugin exposes the running engine as `StatisticsPlugin.Statistics` (`IStatisticsService`: the status of the reading, its events, its controls and `StatisticsQueries`); it is null in CodeAlta TUI, which runs no job, and when the plugin is disabled, where the tables stay as they are. The store, the job, the flow, the questions and the commands are in `doc/statistics.md`; the reader and the facts in `doc/statistics-facts.md`.
+It contributes transient per-turn/session statistics projections (the cards of the timeline, without writing plugin messages into canonical session history) and the `alta statistics` command root. In CodeAlta Desktop it also **keeps the statistics of every session** in the application database (`statistics_*` tables, `doc/catalog-and-config.md`): `DesktopPlugins.StatisticsDefinition` builds it with the journals of the session store (`StatisticsPlugin.CreateForDesktop(ISessionJournalCatalog)`), and once it is activated on a host that has a database it runs a tracked job that reads the history the user chose to read, and a flow that catches a session up a second after an agent event signals it (`OnAgentEventAsync` only enqueues the session id). In CodeAlta Desktop the plugin is also a **canvas** (`statistics`, scope Application, icon `chart-column`, module `PluginScript.App("statistics")`), a **button** of the title bar (`PluginUi.Button(PluginButtonPlace.TitleBar, "statistics", ...)` whose state is a ring while the history is read and a dot while the first choice waits, and `InvalidateButtons()` is called only when that changes), a line in the menu of a project (`ProjectMenu`, which opens the canvas with the key `project:<id>`), a command `statistics` (`/statistics`) with the binding `Ctrl+G C`, the calls of the canvas (`canvas.Rpc`, names `statistics.*`, results written by `StatisticsJson`), and a **landing card** (`overview`, `StatisticsPlugin.Landing.cs`): four figures of the last seven days for the space of the page (sessions, your prompts, tokens, active time) and an action that opens the canvas. The card reads what the statistics hold: while the first choice waits it says to choose in Statistics, and it never chooses how much history to read nor starts a reading; it is asked again when the state of the history changes (`InvalidateLandingCards()`), not for each step of a reading. They exist only where the plugin reads the sessions (CodeAlta Desktop with a database): CodeAlta TUI and a disabled plugin declare none. The plugin exposes the running engine as `StatisticsPlugin.Statistics` (`IStatisticsService`: the status of the reading, its events, its controls and `StatisticsQueries`); it is null in CodeAlta TUI, which runs no job, and when the plugin is disabled, where the tables stay as they are. The store, the job, the flow, the questions and the commands are in `doc/statistics.md`; the reader and the facts in `doc/statistics-facts.md`.
 
 The MCP plugin is packaged as `CodeAlta.Plugin.Mcp`, is enabled by default, and contributes the `alta mcp` command root plus compact dynamic developer prompt guidance for active/inactive configured MCP servers. It reads fixed MCP JSON server files (`~/.alta/mcp.json` and project `.alta/mcp.json`) and TOML policy under `[plugins.mcp]`; connection fields stay in JSON, while enablement, `disabled_tools`, prompt caps, timeouts, and direct-exposure policy stay in TOML. The plugin also provides reusable `McpManagementService`/runtime services consumed by session-activated MCP agent tools, the TUI MCP Servers dialog, and the status indicator. Dynamic MCP `AgentToolDefinition` exposure is progressive: `alta mcp activate <id>*` marks servers active for the session, and tools from active servers are registered on agent runs where policy allows them. Automatic refresh on `tool-list-changed` remains follow-up work unless direct-tool freshness requires it. See [MCP support](mcp.md).
 

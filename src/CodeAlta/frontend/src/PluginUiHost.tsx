@@ -6,6 +6,7 @@ import { showToast } from "./appToaster";
 import { PluginHtml } from "./PluginHtml";
 import { collectPluginFields } from "./pluginHtmlSanitizer";
 import { pluginButtonsChangedEvent } from "./pluginButtons/pluginButtonModel";
+import { landingCardsChangedEvent } from "./landing/landingShell";
 import { pluginsChangedEvent } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -53,6 +54,9 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
           } else if (event.kind === "buttons") {
             // A plugin says its buttons changed: only they are read again.
             window.dispatchEvent(new Event(pluginButtonsChangedEvent));
+          } else if (event.kind === "landing") {
+            // A plugin says its cards of the landing page changed: only they are read again.
+            window.dispatchEvent(new Event(landingCardsChangedEvent));
           }
         }
       } catch { /* The channel ended: watch again below, unless the window is going away. */ }

@@ -46,6 +46,8 @@ public enum PluginPoint
     Resource,
     /// <summary>Canvas: a tab that the plugin provides.</summary>
     Canvas,
+    /// <summary>Landing card: a card that the plugin pins on the landing page.</summary>
+    LandingCard,
 }
 
 /// <summary>

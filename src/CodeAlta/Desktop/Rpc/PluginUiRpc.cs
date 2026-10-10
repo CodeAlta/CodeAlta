@@ -18,7 +18,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// query, or the answer to a dialog. Plugin exception text does not cross the bridge.
 /// </remarks>
 [NeoRpcService("pluginUi", Version = 1)]
-internal sealed class PluginUiService
+internal sealed partial class PluginUiService
 {
     /// <summary>Largest number of commands, pickers or region contents in one response.</summary>
     internal const int MaximumContributions = 256;
@@ -549,8 +549,9 @@ internal sealed record PluginUiWatchRequest(string? ExpectedEpoch);
 /// </summary>
 /// <param name="Kind">
 /// <c>notify</c> (a message), <c>ask</c> (a dialog to show and answer), <c>close</c> (a request that no longer
-/// waits), <c>prompt</c> (send, queue or steer a prompt, or compact; to answer), <c>draft</c> (replace a prompt draft)
-/// or <c>refresh</c> (read again what plugins show: a command or a dialog action of a plugin ended).
+/// waits), <c>prompt</c> (send, queue or steer a prompt, or compact; to answer), <c>draft</c> (replace a prompt draft),
+/// <c>refresh</c> (read again what plugins show: a command or a dialog action of a plugin ended), <c>buttons</c> (read the
+/// buttons of plugins again) or <c>landing</c> (read the cards of the landing page again).
 /// </param>
 internal sealed record PluginUiEvent(string Kind)
 {

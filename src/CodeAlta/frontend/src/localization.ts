@@ -1,3 +1,4 @@
+import { landingMessages } from "./landing/messages";
 import { statisticsMessages } from "./statistics/messages";
 import { worktreeMessages } from "./worktrees/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
@@ -2286,6 +2287,7 @@ export const messages = dictionary({
   "A canvas of {plugin}.": ["Un lienzo de {plugin}.", "Un canevas de {plugin}.", "Ein Canvas von {plugin}.", "{plugin} のキャンバス。", "{plugin} 提供的画布。"],
   "More…": ["Más…", "Plus…", "Mehr …", "その他…", "更多…"],
   "Canvas: {title} ({scope})": ["Lienzo: {title} ({scope})", "Canevas : {title} ({scope})", "Canvas: {title} ({scope})", "キャンバス: {title}（{scope}）", "画布：{title}（{scope}）"],
+  ...landingMessages,
   ...statisticsMessages,
   ...worktreeMessages,
 } satisfies Record<string, Row>);

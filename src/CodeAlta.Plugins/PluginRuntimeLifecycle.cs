@@ -313,6 +313,7 @@ public sealed class PluginRuntimeActivator
         Add(PluginPoint.SessionEventProjection, instance.GetSessionEventProjections());
         Add(PluginPoint.Resource, instance.GetResources());
         Add(PluginPoint.Canvas, instance.GetCanvases());
+        Add(PluginPoint.LandingCard, PluginLandingCardValidation.Filter(descriptor, instance.GetLandingCards(), diagnostics));
         return registrations;
 
         void Add(PluginPoint point, IEnumerable<object> contributions)

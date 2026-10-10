@@ -179,6 +179,16 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         }
     }
 
+    /// <inheritdoc />
+    public void InvalidateLandingCards()
+    {
+        // A landing page that is not there reads the cards when it is shown.
+        lock (_gate)
+        {
+            if (!_closed && _watcher is { } watcher) watcher(new PluginUiEvent("landing"));
+        }
+    }
+
     /// <summary>Shows a notification with the tone of a problem.</summary>
     internal void NotifyProblem(string message)
         => Post(new PluginUiEvent("notify") { Message = Cut(message, MaximumMessageUnits), Tone = "warning" });
@@ -473,6 +483,8 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
             => owner.ShowDialogForResultAsync(request, pluginKey, cancellationToken);
 
         public void InvalidateButtons() => owner.InvalidateButtons();
+
+        public void InvalidateLandingCards() => owner.InvalidateLandingCards();
     }
 
     private sealed class Registration(DesktopPluginUi owner, Action<PluginUiEvent> watcher) : IDisposable

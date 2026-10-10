@@ -213,6 +213,15 @@ public interface IPluginUiService
     void InvalidateButtons()
     {
     }
+
+    /// <summary>
+    /// Tells the host that what the cards of the plugin on the landing page show may have changed, so it asks for them again
+    /// (<see cref="PluginLandingCardContribution.GetCard"/>). A command of the plugin that ends does it already.
+    /// </summary>
+    /// <remarks>A host without a landing page ignores it. It is cheap and may be called often: the page reads once for a burst, and only while it is shown.</remarks>
+    void InvalidateLandingCards()
+    {
+    }
 }
 
 /// <summary>

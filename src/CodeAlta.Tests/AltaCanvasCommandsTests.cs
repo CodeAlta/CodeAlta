@@ -35,6 +35,71 @@ public sealed class AltaCanvasCommandsTests
     }
 
     [TestMethod]
+    public async Task LandingGroup_ExistsWhereCanvasesAreShown_AndNotElsewhere()
+    {
+        using var none = await Fixture.CreateAsync(canvases: false);
+        Assert.AreEqual(AltaExitCodes.Usage, (await none.RunAsync("landing", "open")).ExitCode, "A host without a window has no landing page.");
+        Assert.IsFalse((await none.RunAsync("tool", "list")).Stdout.Contains("landing open", StringComparison.Ordinal));
+        Assert.IsFalse((await none.RunAsync("--help")).Stdout.Contains("landing", StringComparison.Ordinal));
+
+        using var window = await Fixture.CreateAsync();
+        var help = await window.RunAsync("landing", "open", "--help");
+        Assert.AreEqual(AltaExitCodes.Success, help.ExitCode);
+        Assert.IsTrue(help.IsHelp);
+        StringAssert.Contains((await window.RunAsync("tool", "list")).Stdout, "landing open");
+        StringAssert.Contains((await window.RunAsync("--help")).Stdout, "landing");
+        StringAssert.Contains((await window.RunAsync("landing", "--help")).Stdout, "builtin:landing/landing");
+    }
+
+    [TestMethod]
+    public async Task LandingOpen_AsksTheWindowForTheTabOfTheLandingPage_InTheShownSpaceOrTheOneNamed()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Canvases.Landing = true;
+        await fixture.Spaces.CreateAsync("Work");
+        fixture.View.ShownSpaceId = "default";
+
+        var opened = fixture.Single(await fixture.OkAsync("landing", "open"), "alta.landing.opened");
+
+        Assert.AreEqual(("default", true, "instance-1"), (opened.GetProperty("spaceId").GetString(), opened.GetProperty("shown").GetBoolean(), opened.GetProperty("instanceId").GetString()));
+        var request = fixture.Canvases.Opened.Single();
+        Assert.AreEqual(new AltaCanvasTarget("builtin:landing", "landing", "default", null, null, null), request.Target, "The page of the application: no project, no session, no key.");
+        Assert.IsTrue(request.Focus);
+        Assert.IsNull(request.Input);
+        Assert.AreEqual(0, fixture.View.Shown.Count, "Opening the page never moves the window.");
+
+        // Another space: the tab joins its tabs, and the window stays where it is.
+        var elsewhere = fixture.Single(await fixture.OkAsync("landing", "open", "--space", "Work"), "alta.landing.opened");
+        Assert.AreEqual(("work", "Work", false), (elsewhere.GetProperty("spaceId").GetString(), elsewhere.GetProperty("space").GetString(), elsewhere.GetProperty("shown").GetBoolean()));
+        Assert.AreEqual("work", fixture.Canvases.Opened[1].Target.SpaceId);
+        Assert.AreEqual("default", fixture.View.ShownSpaceId);
+        await fixture.FailsAsync(AltaExitCodes.NotFound, "space.notFound", "landing", "open", "--space", "nowhere");
+        Assert.AreEqual(2, fixture.Canvases.Opened.Count);
+    }
+
+    [TestMethod]
+    public async Task LandingOpen_SaysWhenThePageOrTheWindowIsNotThere()
+    {
+        using var fixture = await Fixture.CreateAsync();
+
+        // The plugin of the page is turned off, or plugins did not start: there is no such canvas.
+        await fixture.FailsAsync(AltaExitCodes.Unsupported, "landing.unavailable", "landing", "open");
+        Assert.AreEqual(0, fixture.Canvases.Opened.Count);
+
+        fixture.Canvases.Landing = true;
+        fixture.Canvases.Window = false;
+        await fixture.FailsAsync(AltaExitCodes.ServiceUnavailable, "view.unavailable", "landing", "open");
+        fixture.Canvases.Window = true;
+        fixture.Canvases.OpenStatus = "unavailable";
+        await fixture.FailsAsync(AltaExitCodes.ServiceUnavailable, "view.unavailable", "landing", "open");
+        fixture.Canvases.OpenStatus = "plugin_stopped";
+        await fixture.FailsAsync(AltaExitCodes.Unsupported, "landing.unavailable", "landing", "open");
+        fixture.Canvases.OpenStatus = "requested";
+        await fixture.OkAsync("landing", "open");
+        await fixture.FailsAsync(AltaExitCodes.Usage, "usage.invalid", "landing", "open", "extra");
+    }
+
+    [TestMethod]
     public async Task List_ShowsTheDeclaredCanvases_WithTheirRefs_AndFiltersByPlugin()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -336,6 +401,9 @@ public sealed class AltaCanvasCommandsTests
 
         public bool HasWindow => Window;
 
+        /// <summary>Whether the plugin of the landing page runs: its canvas is then among the ones declared.</summary>
+        public bool Landing { get; set; }
+
         public IReadOnlyList<AltaCanvasDeclaration> List()
             =>
             [
@@ -345,6 +413,7 @@ public sealed class AltaCanvasCommandsTests
                     [new("tick", "Ticks a step.", "{\"type\":\"object\",\"properties\":{\"step\":{\"type\":\"string\"}}}"), new("reset", null, null)]),
                 new("global:tools", "Tools", "board", "Board", null, null, AltaCanvasScopes.Session, null, false, []),
                 new("project:x", "X", "checklist", "Checklist of X", null, null, AltaCanvasScopes.Project, null, false, []),
+                .. Landing ? [new AltaCanvasDeclaration(AltaLanding.PluginKey, "Landing page", AltaLanding.CanvasId, "Welcome", "The landing page.", "house", AltaCanvasScopes.Application, null, true, [])] : Array.Empty<AltaCanvasDeclaration>(),
             ];
 
         public IReadOnlyList<AltaCanvasInstance> ListOpen() => [.. Instances];

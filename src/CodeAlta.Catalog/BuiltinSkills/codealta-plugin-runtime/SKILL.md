@@ -121,6 +121,7 @@ Override only what the plugin needs.
 | `GetCommands()` | Commands: the palette, `/name` in the prompt, shortcuts | yes | yes |
 | `GetUiContributions()` | Status items and content around the prompt; buttons in the window (`PluginUi.Button`) | yes | yes (no buttons) |
 | `GetCanvases()` | Tabs the plugin provides, which users and agents open, filled by HTML or by a script (see "Canvases") | yes | no |
+| `GetLandingCards()` | Cards pinned on the landing page (see "Cards on the landing page") | yes | no |
 | `GetPromptPickers()` | A picker opened by a character typed in the prompt | yes | yes |
 | `GetSessionEventProjections()` | Cards in the timeline of a session | yes | yes |
 | `GetAgentTools()` | Tools the model can call | yes | yes |
@@ -194,6 +195,7 @@ The window of CodeAlta Desktop is made with React and Blueprint. **A fragment of
 | `class="alta-grow"` | In a row, takes the space that is left: a field beside a button |
 | `<label class="alta-field">Title <input name="title"></label>` | A label above its field, which takes the width |
 | `class="alta-card"` | Blueprint card: a bordered block |
+| `PluginHtml.Stat("128", "Sessions")` (`class="alta-stat"`) | One figure above its label; several in an `alta-row` make a line of figures |
 | `class="alta-muted"`, or a tone class on text | Muted or colored text |
 | `PluginHtml.Markdown(text)` | The text rendered as Markdown by the window, as in the timeline: headings, lists, tables, links |
 | `PluginHtml.Code(code, "csharp")` | Source code with the colors of its language (`csharp`, `json`, `diff`, `bash`, `typescript`, ...) |
@@ -343,6 +345,32 @@ yield return PluginUi.Button(PluginButtonPlace.TitleBar, "notes", icon: "noteboo
 - `GetState` takes a `PluginButtonContext` (place, space, project, session). It is synchronous and runs each time the window reads the buttons, so read a field. The window reads them when the selection changes, when a command of the plugin ends, and when you call `Services.Ui.InvalidateButtons()` after a change. Do not poll.
 - `Icon`: a Lucide icon name (`chart-column`), a brand logo name, or an SVG file of the package (`icons/notes.svg`, 32 KiB at most, drawn in the color of the text). A missing icon shows a neutral one. A canvas takes the same icons.
 - A person can hide a button with a right click and turn it on again in Settings > Plugins, so a plugin does not rely on a button being there. The buttons fold into a menu in a narrow window.
+
+## Cards on the landing page
+
+CodeAlta Desktop has a landing page (`/landing`, `alta landing open`), and a plugin pins a card on it with `GetLandingCards()`: a title, an icon, a short HTML fragment and up to three actions. CodeAlta TUI has no landing page. See `samples/landing-card`.
+
+```csharp
+public override IEnumerable<PluginLandingCardContribution> GetLandingCards()
+{
+    yield return new PluginLandingCardContribution
+    {
+        Id = "notes", Title = "Notes", Icon = "notebook-pen",
+        GetCard = (context, cancellationToken) => ValueTask.FromResult<PluginLandingCard?>(_notes.Count == 0
+            ? null                                                                       // nothing to say: the card is left out
+            : PluginLandingCard.Of($"<p>{PluginHtml.Encode(_notes[^1])}</p>",            // a fragment, as in a dialog or a canvas
+                PluginLandingCardAction.OpenCanvas("Open", "notes") with { Primary = true },   // a canvas of this plugin
+                PluginLandingCardAction.RunCommand("Add", "notes-add")) with { Status = $"{_notes.Count} notes" }),
+    };
+}
+```
+
+- A plugin pins 2 cards at most. A card over the limit, with an invalid identifier or without a title, is left out with a warning in `alta plugin status`.
+- The fragment is sanitized like every fragment: `data-alta-command` runs a command of the plugin, `PluginHtml.Stat("128", "Sessions")` writes a figure above its label (put several in a `<div class="alta-row">`), `PluginHtml.Markdown` and `PluginHtml.Chart` work. A card has no script and no `data-alta-action`: what it does is a command or a canvas of the plugin.
+- An action names exactly one of a command and a canvas of the plugin (`RunCommand`, `OpenCanvas` with an optional key). One that names something the plugin does not have is left out; one that needs a project or a session the page does not have is disabled.
+- `context.SpaceId` is the space the page is shown in. `context.ProjectId` is the project of a project plugin (null for a user plugin): the card of a project plugin is shown only in the spaces that have its project, and its commands run for that project.
+- `GetCard` is asynchronous and may read a file or a database, within 5 seconds. It is called when the page is shown, when a command of the plugin ends, and when you call `Services.Ui.InvalidateLandingCards()` after a change. Do not poll.
+- A card that throws or is too slow is shown as a card that could not be loaded; the page and the other cards are not affected.
 
 ## Prompt pickers
 
@@ -515,6 +543,7 @@ Each folder under `samples/` is a complete plugin that the tests of CodeAlta bui
 | `saved-data` | Data kept between runs with `Services.State` |
 | `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
 | `canvas-board` | A tab drawn by a script of the package folder: a React component with Blueprint tabs and menus, a chart, Markdown, links and `alta.host` |
+| `landing-card` | A card pinned on the landing page: a fragment, a status, two commands and a canvas |
 | `report-dialog` | A dialog with Markdown, a Mermaid diagram and highlighted code |
 | `agent-tool` | A tool the model calls |
 | `alta-command` | A command of the `alta` tool |
