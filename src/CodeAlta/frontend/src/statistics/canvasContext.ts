@@ -33,6 +33,7 @@ export function statisticsContext(alta: Pick<Alta, "context" | "host">, visible:
     spaces: directory?.spaces.map(item => ({ id: item.id, name: item.name, projectIds: item.projectIds })),
     projectId: project,
     projectName: known?.name ?? null,
+    providers: directory?.providers,
     weekStart: weekDayIndex(directory?.weekStart),
     openSession: id => alta.host.openSession(id),
   };

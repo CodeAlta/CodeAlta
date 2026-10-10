@@ -11,7 +11,7 @@ import { costIn, costUnits } from "./shared";
 /** The Sessions page. */
 export function SessionsPage() {
   const { t } = useText();
-  const { fmt } = useStatistics();
+  const { fmt, providerName } = useStatistics();
   const drill = useDrill();
   const sessions = useSessions("recent", { main: true, extra: { limit: 500, comparison: "none" } });
   const rows = sessions.data?.rows ?? [];
@@ -22,7 +22,7 @@ export function SessionsPage() {
       ? <span className="stats-deleted" title={t("This session was deleted; its numbers are kept.")}>{row.title ?? row.sessionId.slice(0, 8)}</span>
       : <button type="button" className="stats-cell-link" onClick={() => open(row.sessionId)} title={t("Open the session")}>{row.title ?? row.sessionId.slice(0, 8)}</button> },
     { id: "project", header: t("Project"), sort: row => row.projectName ?? "", render: row => row.projectName ?? "–" },
-    { id: "model", header: t("Model"), sort: row => row.model ?? "", render: row => row.model ? <>{row.model}<small className="stats-cell-sub">{row.provider}</small></> : "–" },
+    { id: "model", header: t("Model"), sort: row => row.model ?? "", render: row => row.model ? <>{row.model}<small className="stats-cell-sub">{row.provider ? providerName(row.provider) : ""}</small></> : "–" },
     { id: "runs", header: t("Runs"), sort: row => row.runs, align: "end", render: row => fmt.number(row.runs) },
     { id: "time", header: t("Active time"), sort: row => row.activeMs, align: "end", render: row => fmt.duration(row.activeMs) },
     { id: "tokens", header: t("Tokens"), sort: row => row.tokens, align: "end", render: row => fmt.compact(row.tokens) },

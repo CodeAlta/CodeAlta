@@ -87,8 +87,8 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `theme-dark`, `theme-light`, `themes` | One scene in each theme; `themes` is a montage of six color schemes. |
 | `work-items`, `issues`, `sub-agents`, `pull-request`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with more sub-agents than the sidebar lists (five), the pull request menu (a crop), a conversation at 70%. |
 | `terminal`, `worktrees`, `automations`, `plugins` and their close-ups | They need state that is built for them (a running terminal, two worktrees, automations in the project configuration, a temporary plugin) and removed afterwards. |
-| `statistics-overview`, `statistics-overview-light`, `statistics-activity`, `statistics-models`, `statistics-tools`, `statistics-filters` | The Statistics tab beside a session tab, with the numbers of a real profile for a space of public projects. `overview` is the last 90 days by week, the time by project; `overview-light` the last 30 days by day, the tokens by model, in the light theme; the three pages are taken from their top; `filters` is a crop of the bar with the **Filter** menu open. |
-| `statistics-history`, `statistics-history-reading` | The first card of the tab (a crop) and the tab while the history is read, with the sessions of the developer instance itself. |
+| `statistics-overview`, `statistics-overview-light`, `statistics-activity`, `statistics-models`, `statistics-tools`, `statistics-tools-time`, `statistics-projects`, `statistics-filters` | The Statistics tab beside a session tab, with the numbers of a real profile for a space of public projects. `overview` is the last 90 days by week, the time by project; `overview-light` the last 30 days by day, the tokens by model, in the light theme; the pages are taken from their top, and `tools-time` is the Tools page scrolled to its end; `filters` is a crop of the bar with the **Filter** menu open. |
+| `statistics-history`, `statistics-history-reading`, `statistics-sessions` | With the sessions of the developer instance itself: the first card of the tab (a crop), the tab while the history is read, and the Sessions page of the last 30 days. |
 | `canvases`, `canvas-board`, `canvas-agent` | The Canvases page with the two canvas samples; a session whose agent used `alta canvas` and `alta statistics`, alone, and with the Board tab of the `canvas-board` sample in a pane at its right. |
 | `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, made tall enough to show the buttons of every plugin (a crop of the Settings window). |
 
@@ -122,8 +122,13 @@ What the scenes with state of their own need:
   the pictures, or they are counted too. Show a space that holds every project whose repository is public
   (`gh repo view <repository> --json visibility` says so; a project without a public repository stays out) and
   leave the filter of that space on the page: the names of projects in the legends and the lists are then all
-  public. Do not take the Sessions page, nor the bottom of the Agents page: they list titles of real sessions.
-  Read every legend, tool name and program name of a picture before keeping it.
+  public. Do not take the Sessions page, nor the bottom of the Agents page, with those numbers: they list titles
+  of real sessions, and a session whose journal is not in the developer instance is shown as deleted. Read every
+  legend, tool name and program name of a picture before keeping it.
+- **The Sessions page.** It is taken with the sessions of the developer instance: with the journals that are not
+  in a picture moved aside, **Reset statistics…** and **Read all the history** leave the sessions of the scenes
+  alone, each a link. The page names a session by the title it was created with: move aside too the sessions
+  that were renamed since, whose first title is a test name.
 - **The history of the statistics.** **Reset statistics…** in the menu of the page brings the first card back.
   **Read all the history** takes about two seconds on the developer instance: take the capture right after the
   click, with the page dressed before. Do it last, since the numbers are deleted.

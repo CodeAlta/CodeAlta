@@ -40,3 +40,19 @@ export function mcpParts(name: string): Readonly<{ server: string; tool: string 
   const match = /^mcp__(.+?)__(.+)$/.exec(name);
   return match ? { server: match[1], tool: match[2] } : null;
 }
+
+// The plugin keys a tool by the kind of activity it was recorded as and its name (`ToolCall:read_file`, `Skill:alta`), and every shell tool by `shell`.
+const activityKind = /^(?:ToolCall|CommandExecution|FileChange|McpToolCall|DynamicToolCall|CollabAgentToolCall|WebSearch|ImageGeneration|Skill):(?=.)/;
+
+/** The name of a tool as people know it, and the MCP server it belongs to when it has one, from the key the plugin gives it. */
+export function toolParts(tool: string): Readonly<{ name: string; server: string | null }> {
+  const name = tool.replace(activityKind, "");
+  const mcp = mcpParts(name);
+  return mcp ? { name: mcp.tool, server: mcp.server } : { name, server: null };
+}
+
+/** The name of a tool in one text: `read_file`, and `issue_read (github)` for a tool of an MCP server. */
+export function toolName(tool: string): string {
+  const parts = toolParts(tool);
+  return parts.server ? `${parts.name} (${parts.server})` : parts.name;
+}

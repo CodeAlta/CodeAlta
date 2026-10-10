@@ -48,7 +48,9 @@ internal sealed class FakeAlta : IPluginAltaService
             ? "{\"type\":\"alta.project.item\",\"projectId\":\"project-0\",\"slug\":\"alpha\",\"displayName\":\"Alpha\",\"spaces\":[\"work\"]}\n{\"type\":\"alta.project.item\",\"projectId\":\"project-1\",\"slug\":\"beta\",\"displayName\":\"Beta\",\"spaces\":[]}\n"
             : text.StartsWith("space list", StringComparison.Ordinal)
                 ? "{\"type\":\"alta.space.item\",\"id\":\"default\",\"name\":\"Default\",\"default\":true}\n{\"type\":\"alta.space.item\",\"id\":\"work\",\"name\":\"Work\",\"default\":false}\n"
-                : string.Empty;
+                : text.StartsWith("provider list", StringComparison.Ordinal)
+                    ? "{\"type\":\"alta.provider.item\",\"providerKey\":\"claude-code\",\"displayName\":\"Claude Code\"}\n{\"type\":\"alta.provider.item\",\"providerKey\":\"codex\",\"displayName\":\"Codex\"}\n{\"type\":\"alta.provider.item\",\"providerKey\":\"bare\"}\n"
+                    : string.Empty;
         return ValueTask.FromResult(new PluginAltaCommandResult { ExitCode = 0, TranscriptJsonl = transcript });
     }
 }

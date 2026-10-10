@@ -227,13 +227,15 @@ public sealed partial class StatisticsPlugin
         return result.Requested ? PluginCommandResult.Handled : PluginCommandResult.Message("The Statistics canvas cannot be shown here.");
     }
 
-    // The spaces and the projects the filters of the page choose among (the default space has every project), and the first day of the
-    // week the questions use when they name none: the page lays its weeks out from it, as `alta statistics` cuts them.
+    // The spaces and the projects the filters of the page choose among (the default space has every project), the providers with the name
+    // the window shows each under, and the first day of the week the questions use when they name none: the page lays its weeks out from
+    // it, as `alta statistics` cuts them.
     private async ValueTask<byte[]> WriteContextAsync(CancellationToken cancellationToken)
     {
         var directory = _directory;
         var projects = directory is null ? [] : await directory.ListProjectsAsync(cancellationToken).ConfigureAwait(false);
         var spaces = directory is null ? [] : await directory.ListSpacesAsync(cancellationToken).ConfigureAwait(false);
+        var providers = directory is null ? [] : await directory.ListProvidersAsync(cancellationToken).ConfigureAwait(false);
         using var stream = new MemoryStream();
         await using (var writer = new Utf8JsonWriter(stream))
         {
@@ -263,6 +265,16 @@ public sealed partial class StatisticsPlugin
                 writer.WriteStartObject();
                 writer.WriteString("id", project.Id);
                 writer.WriteString("name", project.Name);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            writer.WriteStartArray("providers");
+            foreach (var provider in providers)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("key", provider.Key);
+                writer.WriteString("name", provider.Name);
                 writer.WriteEndObject();
             }
 

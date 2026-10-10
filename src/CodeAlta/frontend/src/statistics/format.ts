@@ -17,6 +17,8 @@ export type Formatter = Readonly<{
   percent(ratio: number, digits?: number): string;
   /** `850 ms`, `4.2 s`, `4 min 12 s`, `1 h 05`. */
   duration(milliseconds: number): string;
+  /** A duration for a mark of an axis, in one unit: `100 ms`, `10 s`, `17 min`, `2.8 h`. */
+  durationMark(milliseconds: number): string;
   /** `12 KB`, `1.4 GB`. */
   bytes(value: number): string;
   /** A cost in its unit: `$1,204.50`, `340 AI credits`. */
@@ -74,6 +76,15 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
     if (minutes < 60) return `${minutes} min ${pad(seconds % 60)} s`;
     return `${grouped.format(Math.floor(minutes / 60))} h ${pad(minutes % 60)}`;
   };
+  const upToOneDecimal = new Intl.NumberFormat(safe, { maximumFractionDigits: 1 });
+  const durationMark = (milliseconds: number) => {
+    if (!Number.isFinite(milliseconds)) return words.none;
+    const ms = Math.max(0, milliseconds);
+    if (ms < 1000) return `${upToOneDecimal.format(ms)} ms`;
+    if (ms < 120_000) return `${upToOneDecimal.format(ms / 1000)} s`;
+    if (ms < 7_200_000) return `${grouped.format(Math.round(ms / 60_000))} min`;
+    return `${upToOneDecimal.format(ms / 3_600_000)} h`;
+  };
   const bytes = (value: number) => {
     if (!Number.isFinite(value)) return words.none;
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -105,7 +116,7 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
     switch (unit) {
       case "ms": return duration(amount);
       case "bytes": return bytes(amount);
-      case "usd": case "AI credits": return unit === "usd" ? usd.format(amount) : compact(amount);
+      case "usd": case "AI credits": return unit === "usd" ? (Math.abs(amount) >= 100 && Number.isInteger(amount) ? usdWhole : usd).format(amount) : compact(amount);
       case "ratio": return percent(amount, 0);
       default: return compact(amount);
     }
@@ -133,7 +144,7 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
     if (from === to) return dayLongText(from);
     return from.slice(0, 4) === to.slice(0, 4) ? `${dayText(from)} – ${dayLongText(to)}` : `${dayLongText(from)} – ${dayLongText(to)}`;
   };
-  return { locale: safe, number, compact, percent, duration, bytes, cost, costShort, day: dayText, dayLong: dayLongText, range, value, axis, bucket, bucketLong };
+  return { locale: safe, number, compact, percent, duration, durationMark, bytes, cost, costShort, day: dayText, dayLong: dayLongText, range, value, axis, bucket, bucketLong };
 }
 
 /** A text with its first letter in capitals, for a phrase that starts a sentence ("about 40 seconds left."). */

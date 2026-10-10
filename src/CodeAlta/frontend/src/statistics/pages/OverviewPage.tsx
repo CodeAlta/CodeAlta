@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { CalendarHeatmap, StatTile } from "../../charts";
 import { Block, Choice, RankedBars, type RankedItem } from "../blocks";
 import { usePageColors } from "../colors";
@@ -8,7 +8,8 @@ import { SeriesChart, useDrill } from "../pageKit";
 import { useCalendar, useRecords, useSeries, useSummary, useTop } from "../queries";
 import { useStatistics } from "../runtime";
 import { useText } from "../text";
-import type { RankedRow, RecordEntry, SummaryTile } from "../types";
+import type { RankedRow, RecordEntry, SeriesLine, SummaryTile } from "../types";
+import { toolName } from "./shared";
 import type { StackBy, UsageUnit } from "../frame";
 
 // The Overview: how much did I use CodeAlta, and on what?
@@ -36,8 +37,9 @@ export function SummaryTiles({ ids }: Readonly<{ ids: readonly string[] }>) {
   </div>;
 }
 
-function rankedOf(rows: readonly RankedRow[], kind: "projects" | "models" | "tools", textOf: (row: RankedRow) => string): RankedItem[] {
-  return rows.map(row => ({ key: row.key, label: row.label, detail: kind === "tools" ? row.detail : kind === "models" ? row.detail : undefined, value: row.value, text: textOf(row), share: row.share, spark: row.spark }));
+/** The rows of a ranking as the list draws them: label and detail write the name of a row and what stands under it. */
+function rankedOf(rows: readonly RankedRow[], textOf: (row: RankedRow) => string, label: (row: RankedRow) => string = row => row.label, detail: (row: RankedRow) => string | undefined = () => undefined): RankedItem[] {
+  return rows.map(row => ({ key: row.key, label: label(row), detail: detail(row), value: row.value, text: textOf(row), share: row.share, spark: row.spark }));
 }
 
 /** The records as small cards. */
@@ -58,7 +60,7 @@ export function RecordCards({ records }: Readonly<{ records: readonly RecordEntr
   const when = (record: RecordEntry) => record.at ? (record.at.length > 10 ? fmt.dayLong(record.at) : fmt.dayLong(record.at)) : "";
   return <ul className="stats-records">{records.map(record => {
     const body = <><span className="stats-record-label">{recordLabel(t, record.measure)}</span><strong>{text(record)}</strong>
-      <small>{[record.subject || null, when(record)].filter(Boolean).join(" · ")}</small></>;
+      <small>{[(record.measure === "longestTool" && record.subject ? toolName(record.subject) : record.subject) || null, when(record)].filter(Boolean).join(" · ")}</small></>;
     return <li key={`${record.measure}-${record.subject}`}>{record.sessionId
       ? <button type="button" className="stats-record" onClick={() => drill.openSession(record.sessionId!)} title={t("Open the session")}>{body}</button>
       : <div className="stats-record">{body}</div>}</li>;
@@ -68,7 +70,7 @@ export function RecordCards({ records }: Readonly<{ records: readonly RecordEntr
 /** The Overview page. */
 export function OverviewPage() {
   const { t } = useText();
-  const { fmt, frame, dispatch, today, weekStart } = useStatistics();
+  const { fmt, frame, dispatch, today, weekStart, providerName } = useStatistics();
   const drill = useDrill();
   const colors = usePageColors();
   const { stackBy, unit } = frame.view;
@@ -81,7 +83,9 @@ export function OverviewPage() {
   const records = useRecords({ extra: { comparison: "none" } });
   const days = useMemo(() => (calendar.data?.days ?? []).map(day => ({ date: day.date, value: day.activeMs })), [calendar.data]);
   const stackKey: Record<StackBy, "provider" | "project" | "model"> = { provider: "provider", project: "project", model: "model" };
-  const onLine = (line: { key: string; label: string }) => { if (line.key !== "other") drill.filterBy(stackKey[stackBy], line.key, line.label); };
+  // A provider is filed under its key and read under the name the window gives it.
+  const lineName = useCallback((line: SeriesLine) => stackBy === "provider" && line.key !== "other" ? providerName(line.key) : line.label, [stackBy, providerName]);
+  const onLine = (line: SeriesLine) => { if (line.key !== "other") drill.filterBy(stackKey[stackBy], line.key, lineName(line)); };
   const unitOptions = [{ value: "tokens", label: t("Tokens") }, { value: "requests", label: t("Requests") }, { value: "time", label: t("Time") }] as const;
   const stackOptions = [{ value: "provider", label: t("Provider") }, { value: "project", label: t("Project") }, { value: "model", label: t("Model") }] as const;
   return <>
@@ -91,7 +95,7 @@ export function OverviewPage() {
         actions={<><Choice label={t("Show")} value={unit} onChange={value => dispatch({ type: "view", view: { unit: value } })} options={unitOptions} />
           <Choice label={t("Stack by")} value={stackBy} onChange={value => dispatch({ type: "view", view: { stackBy: value } })} options={stackOptions} /></>}
         empty={stacked.data !== undefined && stacked.data.series.length === 0}>
-        {stacked.data && <SeriesChart result={stacked.data} brush height={280} ariaLabel={t("Activity")} onLine={onLine}
+        {stacked.data && <SeriesChart result={stacked.data} brush height={280} ariaLabel={t("Activity")} onLine={onLine} name={lineName}
           unit={stacked.data.unit} />}
       </Block>
       <Block title={t("The year")} span={12} minHeight={150} query={calendar} empty={calendar.data !== undefined && calendar.data.days.length === 0}>
@@ -100,17 +104,17 @@ export function OverviewPage() {
       </Block>
       <Block title={t("Top projects")} span={4} minHeight={170} query={projects} empty={projects.data !== undefined && projects.data.rows.length === 0}
         actions={projects.data && projects.data.truncated ? <button type="button" className="stats-link" onClick={() => drill.goto("projects")}>{t("Show all")}</button> : undefined}>
-        {projects.data && <RankedBars label={t("Projects by active time")} color={colors.at(0)} showSpark items={rankedOf(projects.data.rows, "projects", row => fmt.duration(row.timeMs))}
+        {projects.data && <RankedBars label={t("Projects by active time")} color={colors.at(0)} showSpark items={rankedOf(projects.data.rows, row => fmt.duration(row.timeMs))}
           onSelect={item => drill.filterBy("project", item.key, item.label)} selectLabel={item => t("Filter on {name}", { name: item.label })} />}
       </Block>
       <Block title={t("Top models")} span={4} minHeight={170} query={models} empty={models.data !== undefined && models.data.rows.length === 0}
         actions={models.data && models.data.truncated ? <button type="button" className="stats-link" onClick={() => drill.goto("models")}>{t("Show all")}</button> : undefined}>
-        {models.data && <RankedBars label={t("Models by tokens")} color={colors.at(1)} showSpark items={rankedOf(models.data.rows, "models", row => fmt.compact(row.tokens))}
+        {models.data && <RankedBars label={t("Models by tokens")} color={colors.at(1)} showSpark items={rankedOf(models.data.rows, row => fmt.compact(row.tokens), row => row.label, row => row.detail ? providerName(row.detail) : undefined)}
           onSelect={item => drill.filterBy("model", item.key.split("/").slice(1).join("/") || item.key, item.label)} selectLabel={item => t("Filter on {name}", { name: item.label })} />}
       </Block>
       <Block title={t("Top tools")} span={4} minHeight={170} query={tools} empty={tools.data !== undefined && tools.data.rows.length === 0}
         actions={tools.data && tools.data.truncated ? <button type="button" className="stats-link" onClick={() => drill.goto("tools")}>{t("Show all")}</button> : undefined}>
-        {tools.data && <RankedBars label={t("Tools by calls")} color={colors.at(2)} showSpark items={rankedOf(tools.data.rows, "tools", row => fmt.compact(row.calls))}
+        {tools.data && <RankedBars label={t("Tools by calls")} color={colors.at(2)} showSpark items={rankedOf(tools.data.rows, row => fmt.compact(row.calls), row => toolName(row.label), row => row.detail ? filterValueLabel(t, "toolKind", row.detail) : undefined)}
           onSelect={item => { const kind = tools.data?.rows.find(row => row.key === item.key)?.detail; if (kind) drill.filterBy("toolKind", kind, filterValueLabel(t, "toolKind", kind)); }}
           selectLabel={item => t("Filter on {name}", { name: item.label })} />}
       </Block>

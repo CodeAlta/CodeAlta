@@ -703,10 +703,10 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       const resolved = resolve(request);
       const toolCalls = (name: string) => sum(cellsOf(resolved, "tools").flatMap(cell => cell.tools.filter(tool => tool.tool === name).map(tool => tool.calls)));
       const shares: Record<string, [number, readonly (readonly [string, number])[]]> = {
-        "shell-program": [toolCalls("shell_command"), [["git", 0.34], ["dotnet", 0.22], ["npm", 0.12], ["node", 0.08], ["rg", 0.07], ["ls", 0.05], ["curl", 0.04], ["pwsh", 0.03], ["cat", 0.03], ["gh", 0.02]]],
-        "alta-command": [toolCalls("alta"), [["session create", 0.3], ["session send", 0.22], ["task create", 0.14], ["notes set", 0.12], ["reminder create", 0.1], ["plan status", 0.07], ["project list", 0.05]]],
-        "changed-file-extension": [toolCalls("apply_patch") + toolCalls("write_file"), [[".cs", 0.38], [".tsx", 0.17], [".ts", 0.15], [".md", 0.12], [".css", 0.07], [".json", 0.06], [".csproj", 0.03], [".toml", 0.02]]],
-        skill: [toolCalls("skill"), [["codealta-plugin-runtime", 0.5], ["ilspy-decompile", 0.3], ["dataviz", 0.2]]],
+        "shell-program": [toolCalls("shell"), [["git", 0.34], ["dotnet", 0.22], ["npm", 0.12], ["node", 0.08], ["rg", 0.07], ["ls", 0.05], ["curl", 0.04], ["pwsh", 0.03], ["cat", 0.03], ["gh", 0.02]]],
+        "alta-command": [toolCalls("ToolCall:alta"), [["session create", 0.3], ["session send", 0.22], ["task create", 0.14], ["notes set", 0.12], ["reminder create", 0.1], ["plan status", 0.07], ["project list", 0.05]]],
+        "changed-file-extension": [toolCalls("ToolCall:apply_patch") + toolCalls("ToolCall:write_file"), [[".cs", 0.38], [".tsx", 0.17], [".ts", 0.15], [".md", 0.12], [".css", 0.07], [".json", 0.06], [".csproj", 0.03], [".toml", 0.02]]],
+        skill: [toolCalls("Skill:alta"), [["codealta-plugin-runtime", 0.5], ["ilspy-decompile", 0.3], ["dataviz", 0.2]]],
         "permission-mode": [sum(cellsOf(resolved, "activity").map(cell => cell.runs)), [["ask", 0.5], ["accept edits", 0.38], ["bypass", 0.12]]],
         "compaction-trigger": [sum(cellsOf(resolved, "activity").map(cell => cell.compactions)), [["threshold", 0.62], ["overflow", 0.23], ["manual", 0.15]]],
         "run-origin": [sum(cellsOf(resolved, "activity").map(cell => cell.runs)), [["you", 0.8], ["agent", 0.12], ["automation", 0.05], ["reminder", 0.03]]],

@@ -89,6 +89,8 @@ export type StatisticsContext = Readonly<{
   /** Starts the canvas filtered on this project (the menu of a project). */
   projectId?: string | null;
   projectName?: string | null;
+  /** The providers of the window with the names it shows them under: a number is filed under the key, and read under the name. */
+  providers?: readonly Readonly<{ key: string; name: string }>[];
   /**
    * The first day of the week, 0 for Sunday, as the plugin has it from the regional settings of the computer: the weeks of the canvas
    * are then the weeks of `alta statistics`. The one of the language of the window when absent.

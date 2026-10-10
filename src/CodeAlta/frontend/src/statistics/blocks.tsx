@@ -143,7 +143,8 @@ export function RankedBars({ label, items, onSelect, selectLabel, color, showSpa
   return <ol className="stats-ranked" aria-label={label} style={color ? { "--ranked-color": color } as React.CSSProperties : undefined}>
     {items.map(item => {
       const body = <>
-        <span className="stats-ranked-name"><span>{item.label}</span>{item.detail && <small>{item.detail}</small>}</span>
+        {/* A long name is cut to the width of its column: its title has all of it. */}
+        <span className="stats-ranked-name"><span title={item.label}>{item.label}</span>{item.detail && <small title={item.detail}>{item.detail}</small>}</span>
         <span className="stats-ranked-bar" aria-hidden="true"><i style={{ width: `${Math.max(1.5, (item.value / largest) * 100)}%` }} /></span>
         {showSpark && item.spark && item.spark.length > 1 && <Sparkline values={item.spark} width={56} height={18} className="stats-ranked-spark" />}
         <span className="stats-ranked-value">{item.text}</span>

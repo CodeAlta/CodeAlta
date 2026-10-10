@@ -6,6 +6,7 @@ import { filterValueLabel, triggerLabel } from "../labels";
 import { SeriesChart } from "../pageKit";
 import { useHealth } from "../queries";
 import { useStatistics } from "../runtime";
+import { toolName } from "./shared";
 import { useText } from "../text";
 import type { ContextFillRow, SeriesResult } from "../types";
 
@@ -19,18 +20,18 @@ function asSeries(health: NonNullable<ReturnType<typeof useHealth>["data"]>, key
 /** The Health page. */
 export function HealthPage() {
   const { t } = useText();
-  const { fmt } = useStatistics();
+  const { fmt, providerName } = useStatistics();
   const colors = usePageColors();
   const health = useHealth({ main: true });
   const data = health.data;
   const errors = useMemo(() => data ? asSeries(data, "errors", t("Errors"), data.errors) : null, [data, t]);
   const interrupted = useMemo(() => data ? asSeries(data, "interrupted", t("Interrupted runs"), data.interruptedRuns) : null, [data, t]);
   const compactions = useMemo(() => data ? asSeries(data, "compactions", t("Compactions"), data.compactions) : null, [data, t]);
-  const failed = useMemo<RankedItem[]>(() => (data?.failedTools ?? []).map(row => ({ key: row.tool, label: row.tool, detail: filterValueLabel(t, "toolKind", row.kind), value: row.failures,
+  const failed = useMemo<RankedItem[]>(() => (data?.failedTools ?? []).map(row => ({ key: row.tool, label: toolName(row.tool), detail: filterValueLabel(t, "toolKind", row.kind), value: row.failures,
     text: `${fmt.number(row.failures)} · ${fmt.percent(row.failureRate)}`, share: 0, spark: row.spark })), [data, t, fmt]);
   const triggers = useMemo<RankedItem[]>(() => (data?.compactionsByTrigger ?? []).map(item => ({ key: item.key, label: triggerLabel(t, item.key), value: item.value, text: fmt.number(item.value), share: 0 })), [data, t, fmt]);
   const fill: Column<ContextFillRow>[] = [
-    { id: "model", header: t("Model"), sort: row => row.model, wide: true, render: row => <>{row.model}<small className="stats-cell-sub">{row.provider}</small></> },
+    { id: "model", header: t("Model"), sort: row => row.model, wide: true, render: row => <>{row.model}<small className="stats-cell-sub">{providerName(row.provider)}</small></> },
     { id: "average", header: t("Average fill"), sort: row => row.average ?? 0, align: "end", render: row => row.average === undefined ? "–" : fmt.percent(row.average, 0) },
     { id: "highest", header: t("Highest fill"), sort: row => row.highest, align: "end", render: row => fmt.percent(row.highest, 0) },
     { id: "bar", header: "", render: row => <span className="stats-fill" aria-hidden="true"><i style={{ width: `${Math.min(100, row.highest * 100)}%` }} /></span> },

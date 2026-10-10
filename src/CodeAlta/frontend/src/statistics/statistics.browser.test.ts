@@ -202,6 +202,88 @@ test("the lines of a chart cut by a kind of tool, by who sent a prompt or by how
   });
 });
 
+test("tools and providers are named as people know them, the MCP servers are listed, and the Models chart says what it counts", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    const block = (title: string) => `[...document.querySelectorAll('.stats-block')].find(item => item.querySelector('h3')?.textContent === ${JSON.stringify(title)})`;
+    const texts = (title: string, selector: string) => page.evaluate<string[]>(`[...(${block(title)}?.querySelectorAll(${JSON.stringify(selector)}) ?? [])].map(item => item.textContent.trim())`);
+    const raw = (names: readonly string[]) => names.filter(name => /^(ToolCall|Skill|McpToolCall):|mcp__/.test(name));
+    await render(page, { scenario: "ready" });
+    await page.until(settled, "the overview");
+
+    // The plugin files a provider under its key; the pages read it under the name the window gives it, and under its key when the window has none.
+    const legend = `[...document.querySelectorAll('.chart-legend-item')].map(item => item.textContent.trim())`;
+    await page.clickText('.stats-choice button', "Provider");
+    await page.until(`${settled} && ${legend}.includes("Claude Code")`, "the providers of the legend");
+    const providers = await page.evaluate<string[]>(legend);
+    assert.ok(["Claude Code", "Codex", "GitHub Copilot", "gemini", "mistral"].every(name => providers.includes(name)), providers.join(", "));
+    assert.ok(!providers.includes("claude-code") && !providers.includes("codex"), providers.join(", "));
+    assert.deepEqual(raw(await texts("Top tools", ".stats-ranked-name span")), []);
+    assert.ok((await texts("Top models", ".stats-ranked-name small")).includes("Claude Code"));
+    await page.clickText('.stats-add-filter', "Filter");
+    await page.clickText('.bp6-menu-item', "Provider");
+    await page.until(`[...document.querySelectorAll('.stats-filter-list .bp6-menu-item')].some(item => item.textContent.trim() === "Claude Code")`, "the providers of the filter");
+    await page.clickText('.stats-filter-list .bp6-menu-item', "Claude Code");
+    await page.until(`document.querySelector('.stats-chip-text')?.textContent === "Provider: Claude Code"`, "the chip of the provider");
+    await page.until(`${settled} && statsFixture.calls().some(call => call.request?.filter?.provider === "claude-code")`, "the questions filtered on the key");
+    await page.click('.stats-chip-remove');
+
+    await openPage(page, "Tools");
+    const tools = await texts("The tools", "tbody td:first-child");
+    assert.deepEqual(raw(tools), [], "no tool is named by the key of the plugin");
+    assert.ok(tools.some(name => name.startsWith("read_file")) && tools.some(name => name.startsWith("shell")) && tools.some(name => name.startsWith("issue_read")), tools.join(" | "));
+    assert.ok(tools.find(name => name.startsWith("issue_read"))!.includes("github"), "a tool of an MCP server says which server");
+    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name span"), ["issue_read"]);
+    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name small"), ["github"]);
+    // A name cut to its column can be read whole.
+    assert.deepEqual(await page.evaluate<string[]>(`[...${block("MCP servers")}.querySelectorAll('.stats-ranked-name span')].map(item => item.title)`), ["issue_read"]);
+    for (const title of ["Where time goes", "Duration of one tool"]) {
+      // A chart is drawn when it comes into view.
+      await page.evaluate(`${block(title)}.scrollIntoView({ block: "center" })`);
+      await page.until(`${block(title)}?.querySelectorAll('.chart-surface svg text').length > 2`, `the chart of ${title}`);
+      const drawn = await texts(title, ".chart-surface svg text");
+      assert.deepEqual(drawn.filter(text => /ToolCall|Skill:|mcp__/.test(text)), [], `${title}: ${drawn.join(" | ")}`);
+    }
+    // The marks of the axis of time: none runs into its neighbor, in a wide block and in a narrow one.
+    const overlaps = `(() => { const marks = [...${block("Duration of one tool")}.querySelectorAll('.chart-surface svg text')].filter(item => /^[\\d.,]+ (ms|s|min|h)$/.test(item.textContent.trim())).map(item => item.getBoundingClientRect()).sort((a, b) => a.left - b.left);
+      return { count: marks.length, overlaps: marks.filter((mark, index) => index > 0 && mark.left < marks[index - 1].right + 2).length }; })()`;
+    for (const width of [1280, 640]) {
+      await page.resize(width, 800);
+      await page.evaluate(`${block("Duration of one tool")}.scrollIntoView({ block: "center" })`);
+      await idle(700);
+      const marks = await page.evaluate<{ count: number; overlaps: number }>(overlaps);
+      assert.ok(marks.count >= 3, `${width}px: ${marks.count} marks on the axis`);
+      assert.equal(marks.overlaps, 0, `${width}px: marks of the axis overlap`);
+    }
+    await page.resize(1280, 800);
+
+    await openPage(page, "Models");
+    const title = `document.querySelector('.stats-block h3')?.textContent`;
+    assert.equal(await page.evaluate(title), "Tokens by model");
+    await page.clickText('.stats-choice button', "Requests");
+    await page.until(`${title} === "Requests by model"`, "the title follows Requests");
+    await page.clickText('.stats-choice button', "Time");
+    await page.until(`${title} === "Time by model"`, "the title follows Time");
+    await page.clickText('.stats-choice button', "Tokens");
+    await page.until(`${title} === "Tokens by model" && ${settled}`, "the title back to Tokens");
+    assert.ok((await texts("The models", "tbody td:first-child small")).includes("Claude Code"));
+    assert.ok(!(await texts("The models", "tbody td:first-child small")).includes("claude-code"));
+
+    await openPage(page, "Sessions");
+    const sessionProviders = await page.evaluate<string[]>(`[...document.querySelectorAll('.stats-table tbody .stats-cell-sub')].map(item => item.textContent.trim())`);
+    assert.ok(sessionProviders.includes("Claude Code") && !sessionProviders.includes("claude-code"), sessionProviders.slice(0, 8).join(", "));
+    // In a block too narrow for its table, the name of a model stays on one line: the table scrolls, the page does not.
+    await page.resize(820, 800);
+    await idle(500);
+    const cut = await page.evaluate<string[]>(`[...document.querySelectorAll('.stats-table tbody td')].filter(cell => cell.querySelector('.stats-cell-sub') && cell.firstChild?.nodeType === 3)
+      .filter(cell => { const range = document.createRange(); range.selectNodeContents(cell.firstChild); return range.getClientRects().length > 1; }).map(cell => cell.firstChild.textContent)`);
+    assert.deepEqual([...new Set(cut)], [], "a model name is cut over two lines");
+    assert.ok(await page.evaluate<number>(`document.documentElement.scrollWidth - document.documentElement.clientWidth`) <= 0, "the page does not scroll sideways");
+    await page.resize(1280, 800);
+    await openPage(page, "Health");
+    assert.deepEqual(raw(await texts("Tools that fail", ".stats-ranked-name span")), []);
+  });
+});
+
 test("the first time asks how much history to read, then shows the progress, the pause and the end", { skip: !edge, timeout: 300_000 }, async () => {
   await withCanvas(async page => {
     await render(page, { scenario: "first-time" });

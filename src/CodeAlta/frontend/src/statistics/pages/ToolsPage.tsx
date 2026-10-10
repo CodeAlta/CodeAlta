@@ -1,17 +1,17 @@
 import { useMemo } from "react";
-import { Sparkline, boxPlotOption } from "../../charts";
+import { Sparkline } from "../../charts";
 import { Block, DataTable, RankedBars, type Column, type RankedItem } from "../blocks";
 import { usePageColors } from "../colors";
 import { filterValueLabel } from "../labels";
 import { SeriesChart, useDrill } from "../pageKit";
-import { treemapOption } from "../options";
+import { toolDurationOption, treemapOption } from "../options";
 import { StatChart } from "../StatChart";
 import { useDetails, useSeries, useToolDurations, useTools } from "../queries";
 import { boxStatsOfSteps } from "../steps";
 import { useStatistics } from "../runtime";
 import { useText } from "../text";
 import type { ToolRow } from "../types";
-import { mcpParts } from "./shared";
+import { toolName, toolParts } from "./shared";
 
 // Tools: what do agents do — which tools, how often, how long, how often do they fail?
 
@@ -33,22 +33,19 @@ export function ToolsPage() {
     const kinds = new Map<string, ToolRow[]>();
     for (const row of rows) (kinds.get(row.kind) ?? kinds.set(row.kind, []).get(row.kind)!).push(row);
     const items = [...kinds].map(([kind, list]) => ({ name: filterValueLabel(t, "toolKind", kind), value: list.reduce((sum, row) => sum + row.timeMs, 0),
-      children: list.filter(row => row.timeMs > 0).map(row => ({ name: row.tool, value: row.timeMs })) })).filter(item => item.value > 0).sort((a, b) => b.value - a.value);
+      children: list.filter(row => row.timeMs > 0).map(row => ({ name: toolName(row.tool), value: row.timeMs })) })).filter(item => item.value > 0).sort((a, b) => b.value - a.value);
     return treemapOption(items, t("Time"), fmt, "ms", (_, index) => colors.at(index));
   }, [rows, t, fmt, colors]);
   const boxes = useMemo(() => {
-    const items = (durations.data ?? []).flatMap(result => { const stats = boxStatsOfSteps(result.steps); return stats && result.subject ? [{ name: result.subject, stats }] : []; });
-    if (items.length === 0) return null;
-    const option = boxPlotOption(items, { horizontal: true, log: true, p90Name: t("90th percentile"), name: t("Duration") }) as Record<string, any>;
-    option.xAxis = { ...option.xAxis, axisLabel: { formatter: (value: number) => fmt.duration(value) } };
-    option.tooltip = { trigger: "item", valueFormatter: (value: unknown) => typeof value === "number" ? fmt.duration(value) : String(value ?? "") };
-    return option;
+    const items = (durations.data ?? []).flatMap(result => { const stats = boxStatsOfSteps(result.steps); return stats && result.subject ? [{ name: toolName(result.subject), stats }] : []; });
+    return items.length === 0 ? null : toolDurationOption(items, { fmt, name: t("Duration"), p90Name: t("90th percentile") });
   }, [durations.data, t, fmt]);
-  const mcp = useMemo<RankedItem[]>(() => rows.flatMap(row => { const parts = mcpParts(row.tool); return parts ? [{ key: row.tool, label: parts.tool, detail: parts.server, value: row.calls, text: fmt.number(row.calls), share: 0, spark: row.spark }] : []; }).slice(0, 8), [rows, fmt]);
+  const mcp = useMemo<RankedItem[]>(() => rows.flatMap(row => { const parts = toolParts(row.tool); return parts.server ? [{ key: row.tool, label: parts.name, detail: parts.server, value: row.calls, text: fmt.number(row.calls), share: 0, spark: row.spark }] : []; }).slice(0, 8), [rows, fmt]);
   const toItems = (list: readonly { name: string; count: number }[] | undefined): RankedItem[] => (list ?? []).map(row => ({ key: row.name, label: row.name, value: row.count, text: fmt.number(row.count), share: 0 }));
 
   const columns: Column<ToolRow>[] = [
-    { id: "tool", header: t("Tool"), sort: row => row.tool, wide: true, render: row => <>{row.tool}<small className="stats-cell-sub">{filterValueLabel(t, "toolKind", row.kind)}</small></> },
+    { id: "tool", header: t("Tool"), sort: row => toolParts(row.tool).name, wide: true, render: row => { const parts = toolParts(row.tool);
+      return <>{parts.name}<small className="stats-cell-sub">{parts.server ? `${filterValueLabel(t, "toolKind", row.kind)} · ${parts.server}` : filterValueLabel(t, "toolKind", row.kind)}</small></>; } },
     { id: "calls", header: t("Calls"), sort: row => row.calls, align: "end", render: row => fmt.number(row.calls) },
     { id: "failures", header: t("Failures"), sort: row => row.failureRate, align: "end", render: row => row.failures ? `${fmt.number(row.failures)} · ${fmt.percent(row.failureRate)}` : "–" },
     { id: "time", header: t("Total time"), sort: row => row.timeMs, align: "end", render: row => fmt.duration(row.timeMs) },
@@ -56,7 +53,7 @@ export function ToolsPage() {
     { id: "p90", header: t("90th percentile"), sort: row => row.p90Ms ?? 0, align: "end", render: row => row.p90Ms === undefined ? "–" : fmt.duration(row.p90Ms) },
     { id: "in", header: t("Bytes in"), sort: row => row.bytesIn, align: "end", render: row => fmt.bytes(row.bytesIn) },
     { id: "out", header: t("Bytes out"), sort: row => row.bytesOut, align: "end", render: row => fmt.bytes(row.bytesOut) },
-    { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Calls of {name} over time", { name: row.tool })} /> },
+    { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Calls of {name} over time", { name: toolName(row.tool) })} /> },
   ];
 
   return <div className="stats-grid">

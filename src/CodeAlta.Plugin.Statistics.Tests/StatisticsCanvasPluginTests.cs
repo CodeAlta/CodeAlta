@@ -345,6 +345,10 @@ public sealed class StatisticsCanvasPluginTests
         var projects = context.GetProperty("projects").EnumerateArray().ToDictionary(project => project.GetProperty("id").GetString()!, project => project.GetProperty("name").GetString());
         Assert.AreEqual("Alpha", projects["project-0"]);
         Assert.AreEqual("Beta", projects["project-1"]);
+        // A number is filed under the key of a provider; the page reads it under the name the window shows the provider with.
+        var providers = context.GetProperty("providers").EnumerateArray().ToDictionary(provider => provider.GetProperty("key").GetString()!, provider => provider.GetProperty("name").GetString());
+        Assert.AreEqual("Claude Code", providers["claude-code"]);
+        Assert.AreEqual("Codex", providers["codex"]);
         // The page lays its weeks out from the day the questions use when a request names none.
         Assert.AreEqual(StatisticsQueries.DefaultWeekStart.ToString(), context.GetProperty("weekStart").GetString());
     }

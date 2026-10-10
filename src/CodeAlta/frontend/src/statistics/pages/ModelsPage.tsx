@@ -20,7 +20,7 @@ const unitMetric: Record<UsageUnit, string> = { tokens: "tokens", requests: "req
 /** The Models page. */
 export function ModelsPage() {
   const { t } = useText();
-  const { fmt, frame, dispatch } = useStatistics();
+  const { fmt, frame, dispatch, providerName } = useStatistics();
   const colors = usePageColors();
   const drill = useDrill();
   const unit = frame.view.unit;
@@ -38,7 +38,7 @@ export function ModelsPage() {
 
   const columns: Column<ModelRow>[] = [
     { id: "model", header: t("Model"), sort: row => row.model, wide: true, render: row => <button type="button" className="stats-cell-link" onClick={() => drill.filterBy("model", row.model, row.model)}
-      title={t("Filter on {name}", { name: row.model })}>{row.model}<small>{row.provider}</small></button> },
+      title={t("Filter on {name}", { name: row.model })}>{row.model}<small>{providerName(row.provider)}</small></button> },
     { id: "requests", header: t("Requests"), sort: row => row.requests, align: "end", render: row => fmt.number(row.requests) },
     { id: "input", header: t("Input"), sort: row => row.inputTokens, align: "end", render: row => fmt.compact(row.inputTokens) },
     { id: "cache", header: t("Cached"), sort: row => row.cacheShare, align: "end", render: row => fmt.percent(row.cacheShare, 0) },
@@ -50,14 +50,14 @@ export function ModelsPage() {
     { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Tokens of {name} over time", { name: row.model })} /> },
   ];
   const effortColumns: Column<EffortRow>[] = [
-    { id: "model", header: t("Model"), sort: row => row.model, wide: true, render: row => <>{row.model}<small className="stats-cell-sub">{row.provider}</small></> },
+    { id: "model", header: t("Model"), sort: row => row.model, wide: true, render: row => <>{row.model}<small className="stats-cell-sub">{providerName(row.provider)}</small></> },
     { id: "effort", header: t("Effort"), sort: row => row.effort, render: row => row.effort || "–" },
     { id: "requests", header: t("Requests"), sort: row => row.requests, align: "end", render: row => fmt.number(row.requests) },
     { id: "tokens", header: t("Tokens"), sort: row => row.tokens, align: "end", render: row => fmt.compact(row.tokens) },
     { id: "share", header: t("Reasoning share"), sort: row => row.reasoningShare, align: "end", render: row => fmt.percent(row.reasoningShare, 0) },
   ];
   return <div className="stats-grid">
-    <Block title={t("Tokens by model")} span={12} minHeight={300} query={over} empty={over.data !== undefined && over.data.series.length === 0}
+    <Block title={unit === "requests" ? t("Requests by model") : unit === "time" ? t("Time by model") : t("Tokens by model")} span={12} minHeight={300} query={over} empty={over.data !== undefined && over.data.series.length === 0}
       actions={<Choice label={t("Show")} value={unit} onChange={value => dispatch({ type: "view", view: { unit: value } })} options={unitOptions} />}>
       {over.data && <SeriesChart result={over.data} kind="area" height={270} ariaLabel={t("By model")} onLine={line => { if (line.key !== "other") drill.filterBy("model", line.key, line.label); }} />}
     </Block>

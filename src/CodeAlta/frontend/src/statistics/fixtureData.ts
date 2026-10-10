@@ -67,18 +67,18 @@ export type FixtureData = Readonly<{
   cells: readonly Cell[];
 }>;
 
-/** The tools the fixture knows, with their kind and typical duration (median, in ms) and failure rate. */
+/** The tools the fixture knows, keyed as the plugin keys them (the kind of activity and the name, `shell` for every shell tool), with their kind and typical duration (median, in ms) and failure rate. */
 export const fixtureTools = [
-  { tool: "read_file", kind: "files", median: 40, spread: 0.7, failure: 0.01 },
-  { tool: "apply_patch", kind: "files", median: 120, spread: 0.8, failure: 0.04 },
-  { tool: "write_file", kind: "files", median: 90, spread: 0.7, failure: 0.01 },
-  { tool: "grep", kind: "search", median: 260, spread: 0.9, failure: 0.015 },
-  { tool: "list_dir", kind: "search", median: 35, spread: 0.6, failure: 0.005 },
-  { tool: "shell_command", kind: "shell", median: 2400, spread: 1.5, failure: 0.12 },
-  { tool: "webget", kind: "web", median: 1300, spread: 1, failure: 0.06 },
-  { tool: "alta", kind: "alta", median: 480, spread: 0.9, failure: 0.03 },
-  { tool: "mcp__github__issue_read", kind: "mcp", median: 900, spread: 0.8, failure: 0.05 },
-  { tool: "skill", kind: "skill", median: 70, spread: 0.5, failure: 0.0 },
+  { tool: "ToolCall:read_file", kind: "files", median: 40, spread: 0.7, failure: 0.01 },
+  { tool: "ToolCall:apply_patch", kind: "files", median: 120, spread: 0.8, failure: 0.04 },
+  { tool: "ToolCall:write_file", kind: "files", median: 90, spread: 0.7, failure: 0.01 },
+  { tool: "ToolCall:grep", kind: "search", median: 260, spread: 0.9, failure: 0.015 },
+  { tool: "ToolCall:list_dir", kind: "search", median: 35, spread: 0.6, failure: 0.005 },
+  { tool: "shell", kind: "shell", median: 2400, spread: 1.5, failure: 0.12 },
+  { tool: "ToolCall:webget", kind: "web", median: 1300, spread: 1, failure: 0.06 },
+  { tool: "ToolCall:alta", kind: "alta", median: 480, spread: 0.9, failure: 0.03 },
+  { tool: "ToolCall:mcp__github__issue_read", kind: "mcp", median: 900, spread: 0.8, failure: 0.05 },
+  { tool: "Skill:alta", kind: "skill", median: 70, spread: 0.5, failure: 0.0 },
 ] as const;
 
 export const fixtureProjects: readonly FixtureProject[] = [
@@ -92,7 +92,7 @@ export const fixtureSpaces: readonly FixtureSpace[] = [
 ];
 
 export const fixtureModels: readonly FixtureModel[] = [
-  { provider: "claude", model: "claude-opus-5-5", efforts: ["medium", "high"], costUnit: "usd", contextWindow: 1_000_000, speed: 1 },
+  { provider: "claude-code", model: "claude-opus-5-5", efforts: ["medium", "high"], costUnit: "usd", contextWindow: 1_000_000, speed: 1 },
   { provider: "codex", model: "gpt-6.1", efforts: ["low", "medium", "high"], costUnit: null, contextWindow: 400_000, speed: 1.2 },
   { provider: "copilot", model: "claude-sonnet-5-5", efforts: ["medium"], costUnit: "AI credits", contextWindow: 200_000, speed: 0.9 },
   { provider: "gemini", model: "gemini-3-pro", efforts: ["medium", "high"], costUnit: null, contextWindow: 1_000_000, speed: 1.1 },
@@ -188,7 +188,7 @@ function makeCell(random: () => number, base: Readonly<{ session: string; day: s
   const requests = Math.round(runs * (6 + random() * 18));
   const fresh = Math.round(requests * logNormal(random, 5200, 0.7));
   const cacheRead = Math.round(requests * logNormal(random, 52000, 0.6) * (model.provider === "mistral" ? 0.2 : 1));
-  const cacheWrite = Math.round(requests * logNormal(random, 1800, 0.8) * (model.provider === "claude" ? 1 : 0.3));
+  const cacheWrite = Math.round(requests * logNormal(random, 1800, 0.8) * (model.provider === "claude-code" ? 1 : 0.3));
   const output = Math.round(requests * logNormal(random, 620, 0.7));
   const reasoning = Math.round(output * (model.provider === "mistral" ? 0.05 : 0.2 + random() * 0.4));
   const promptsYou = base.origin === "you" ? runs - Math.floor(random() * Math.min(2, runs)) : 0;
@@ -203,7 +203,7 @@ function makeCell(random: () => number, base: Readonly<{ session: string; day: s
     const failures = Math.round(calls * definition.failure * (0.5 + random()));
     const timeMs = Math.round(calls * definition.median * (1.2 + random() * 0.8));
     const maxMs = Math.round(definition.median * (4 + random() * 30));
-    const edits = definition.tool === "apply_patch" || definition.tool === "write_file";
+    const edits = definition.tool === "ToolCall:apply_patch" || definition.tool === "ToolCall:write_file";
     return [{ tool: definition.tool, kind: definition.kind, calls, failures, timeMs, maxMs, bytesIn: calls * Math.round(logNormal(random, 380, 0.7)), bytesOut: calls * Math.round(logNormal(random, 2600, 1)),
       linesAdded: edits ? Math.round(calls * logNormal(random, 24, 0.9)) : 0, linesRemoved: edits ? Math.round(calls * logNormal(random, 11, 0.9)) : 0, filesChanged: edits ? calls : 0 }];
   });

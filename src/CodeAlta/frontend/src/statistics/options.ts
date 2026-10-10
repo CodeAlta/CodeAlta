@@ -1,4 +1,5 @@
-import type { ChartTable } from "../charts";
+import type { BoxStats, ChartTable } from "../charts";
+import { boxPlotOption } from "../charts/distribution";
 import type { Formatter } from "./format";
 import { addDays, dayDistance } from "./frame";
 import { binOf, binSteps, type StepBin } from "./steps";
@@ -152,13 +153,19 @@ export function distributionOption(spec: DistributionSpec): Readonly<{ option: R
   const write = spec.value ?? ((value: number) => fmt.value(result.unit === "micro-unit" ? "count" : result.unit, value));
   const bins = binSteps(result.steps, spec.maxBins ?? 24);
   const labels = bins.map(bin => `${write(bin.lower)}`);
-  const marks = [[spec.medianName, result.p50], [spec.p90Name, result.p90]].flatMap(([name, value]) => {
-    const at = binOf(bins, value as number | undefined);
-    return at < 0 ? [] : [{ name: name as string, xAxis: at, label: { formatter: `${name as string} ${write(value as number)}`, position: "end", align: name === spec.medianName ? "right" : "left", distance: 4 } }];
-  });
+  // The two marks are named above the plot: the median to the left of its line and the 90th percentile to the right of its own, so that
+  // they never meet. A mark near an edge is written towards the inside instead, and when that brings the two names together the 90th
+  // percentile takes a row of its own.
+  const place = (value: number | undefined) => { const at = binOf(bins, value); return at < 0 ? null : { at, where: (at + 0.5) / Math.max(1, bins.length) }; };
+  const median = place(result.p50), p90 = place(result.p90);
+  const medianInside = median !== null && median.where < 0.3, p90Inside = p90 !== null && p90.where > 0.7;
+  const twoRows = median !== null && p90 !== null && (medianInside || p90Inside) && p90.where - median.where < 0.4;
+  const mark = (name: string, value: number | undefined, placed: Readonly<{ at: number }> | null, align: "left" | "right", distance: number) =>
+    placed === null ? [] : [{ name, xAxis: placed.at, label: { formatter: `${name} ${write(value as number)}`, position: "end", align, distance } }];
+  const marks = [...mark(spec.medianName, result.p50, median, medianInside ? "left" : "right", 4), ...mark(spec.p90Name, result.p90, p90, p90Inside ? "right" : "left", twoRows ? 18 : 4)];
   const option = {
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, valueFormatter: (value: unknown) => typeof value === "number" ? fmt.number(value) : String(value ?? "") },
-    grid: { left: 40, right: 16, top: 28, bottom: 30, containLabel: false },
+    grid: { left: 40, right: 16, top: twoRows ? 42 : 28, bottom: 30, containLabel: false },
     xAxis: { type: "category", data: bins.map(bin => `${write(bin.lower)} – ${write(bin.upper)}`), boundaryGap: true, axisLabel: { interval: 0, hideOverlap: true, formatter: (_: string, index: number) => labels[index] ?? "" } },
     yAxis: { type: "value", minInterval: 1, axisLabel: { formatter: (value: number) => fmt.compact(value) } },
     series: [{ name: spec.name, type: "bar", barCategoryGap: "10%", data: bins.map(bin => bin.count),
@@ -200,8 +207,11 @@ export type TreeItem = Readonly<{ name: string; value: number; children?: readon
 
 /** A treemap of the items: area is the value; two levels at most. */
 export function treemapOption(items: readonly TreeItem[], name: string, fmt: Formatter, unit: string, colors: (name: string, index: number) => string): Readonly<{ option: Record<string, unknown>; table: ChartTable }> {
+  // A cell too small for its name shows no cut letters: the name is in the tooltip and in the table.
+  const whole = items.reduce((sum, item) => sum + item.value, 0);
+  const quiet = (value: number) => whole > 0 && value / whole < 0.03 ? { label: { show: false } } : {};
   const data = items.map((item, index) => ({ name: item.name, value: item.value, itemStyle: { color: colors(item.name, index) },
-    ...(item.children && item.children.length > 0 ? { children: item.children.map(child => ({ name: child.name, value: child.value })) } : {}) }));
+    ...(item.children && item.children.length > 0 ? { children: item.children.map(child => ({ name: child.name, value: child.value, ...quiet(child.value) })) } : quiet(item.value)) }));
   const option = {
     tooltip: { trigger: "item", valueFormatter: (value: unknown) => typeof value === "number" ? fmt.value(unit, value) : String(value ?? "") },
     series: [{ name, type: "treemap", roam: false, nodeClick: false, breadcrumb: { show: false }, left: 0, right: 0, top: 0, bottom: 0,
@@ -211,6 +221,15 @@ export function treemapOption(items: readonly TreeItem[], name: string, fmt: For
   return { option, table: { columns: ["", name], rows } };
 }
 
+/** The durations of some tools as boxes on a logarithmic axis of time: its marks are short and one that would run into its neighbor is left out. */
+export function toolDurationOption(items: readonly Readonly<{ name: string; stats: BoxStats }>[], spec: Readonly<{ fmt: Formatter; name: string; p90Name: string }>): Record<string, unknown> {
+  const option = boxPlotOption(items, { horizontal: true, log: true, p90Name: spec.p90Name, name: spec.name }) as Record<string, any>;
+  option.xAxis = { ...option.xAxis, axisLabel: { hideOverlap: true, formatter: (value: number) => spec.fmt.durationMark(value) } };
+  option.yAxis = { ...option.yAxis, axisLabel: { width: 150, overflow: "truncate" } };
+  option.tooltip = { trigger: "item", valueFormatter: (value: unknown) => typeof value === "number" ? spec.fmt.duration(value) : String(value ?? "") };
+  return option;
+}
+
 /** A scatter of points on two logarithmic axes: what a prompt of this size brought back in time. */
 export function scatterOption(points: readonly (readonly [number, number])[], name: string, xName: string, yName: string, fmt: Formatter, yUnit: string): Readonly<{ option: Record<string, unknown>; table: ChartTable }> {
   const usable = points.filter(([x, y]) => x > 0 && y > 0);
@@ -218,7 +237,7 @@ export function scatterOption(points: readonly (readonly [number, number])[], na
     tooltip: { trigger: "item", formatter: (params: { value?: unknown }) => { const [x, y] = (params.value as [number, number]) ?? [0, 0]; return `${xName}: ${fmt.number(x)}<br>${yName}: ${fmt.value(yUnit, y)}`; } },
     grid: { left: 60, right: 16, top: 16, bottom: 44, containLabel: false },
     xAxis: { type: "log", name: xName, nameLocation: "middle", nameGap: 26, axisLabel: { formatter: (value: number) => fmt.compact(value) } },
-    yAxis: { type: "log", axisLabel: { formatter: (value: number) => fmt.axis(yUnit, value) } },
+    yAxis: { type: "log", axisLabel: { formatter: (value: number) => yUnit === "ms" ? fmt.durationMark(value) : fmt.axis(yUnit, value) } },
     series: [{ name, type: "scatter", symbolSize: 6, itemStyle: { opacity: 0.6 }, data: usable }],
   };
   return { option, table: { columns: [xName, yName], rows: usable.map(([x, y]) => [x, y]) } };

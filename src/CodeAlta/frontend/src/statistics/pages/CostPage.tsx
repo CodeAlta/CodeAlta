@@ -14,7 +14,7 @@ import { costIn } from "./shared";
 
 function UnitBlocks({ unit, over }: Readonly<{ unit: string; over: SeriesResult }>) {
   const { t } = useText();
-  const { fmt } = useStatistics();
+  const { fmt, providerName } = useStatistics();
   const colors = usePageColors();
   const drill = useDrill();
   const models = useModels();
@@ -22,7 +22,7 @@ function UnitBlocks({ unit, over }: Readonly<{ unit: string; over: SeriesResult 
   const perRun = useDistribution("run-cost", unit);
   const only = useMemo<SeriesResult>(() => ({ ...over, series: over.series.filter(line => line.key === unit) }), [over, unit]);
   const write = (value: number) => unit === "usd" ? fmt.cost(unit, value / 1_000_000) : fmt.number(value / 1_000_000);
-  const modelItems = (models.data?.rows ?? []).map(row => ({ key: `${row.provider}/${row.model}`, label: row.model, detail: row.provider, value: costIn(row.costs, unit), text: fmt.cost(unit, costIn(row.costs, unit)), share: 0 }))
+  const modelItems = (models.data?.rows ?? []).map(row => ({ key: `${row.provider}/${row.model}`, label: row.model, detail: providerName(row.provider), value: costIn(row.costs, unit), text: fmt.cost(unit, costIn(row.costs, unit)), share: 0 }))
     .filter(item => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
   const projectItems = (projects.data?.rows ?? []).map(row => ({ key: row.project, label: row.name, value: costIn(row.costs, unit), text: fmt.cost(unit, costIn(row.costs, unit)), share: 0 }))
     .filter(item => item.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);

@@ -133,7 +133,8 @@ button.stats-record:hover { border-color: var(--line-strong); background: var(--
 .stats-table th button > span { display: inline-block; width: 1em; }
 .stats-table td { padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: middle; }
 /* The window breaks a word anywhere in the HTML of a plugin; a name in a narrow column stays whole, and the table scrolls. */
-.stats-table td:not([data-wide]) { overflow-wrap: normal; }
+/* Only the wide column of a table gives way: a model, a project or a number is never cut at a hyphen, and a table too wide for its block scrolls in it. */
+.stats-table td:not([data-wide]) { overflow-wrap: normal; white-space: nowrap; }
 .stats-table [data-align="end"] { font-variant-numeric: tabular-nums; text-align: right; }
 .stats-table [data-wide] { min-width: 160px; }
 .stats-table tbody tr:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }

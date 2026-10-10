@@ -75,15 +75,15 @@ function ComparePicker() {
 /** The menu "+ Filter": the kinds not set yet, then the values of the kind chosen. */
 function AddFilter() {
   const { t } = useText();
-  const { frame, dispatch, api, request, context } = useStatistics();
+  const { frame, dispatch, api, request, context, providerName } = useStatistics();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<FilterKey | null>(null);
   const [search, setSearch] = useState("");
   const wide = request({ period: "all", frequency: "month", comparison: "none", filter: {}, limit: 500 });
   const models = useStatisticsQuery(queryKey("models", wide), signal => api.models(wide, signal), open && (kind === "model" || kind === "provider" || kind === "effort"));
   const projects = useStatisticsQuery(queryKey("projects", wide), signal => api.projects(wide, signal), open && kind === "project");
-  const choices = useMemo(() => kind ? filterChoices(kind, { models: models.data ?? null, projects: projects.data ?? null, spaces: context.spaces ?? [], word: (key, value) => filterValueLabel(t, key, value) }) : [],
-    [kind, models.data, projects.data, context.spaces]); // eslint-disable-line react-hooks/exhaustive-deps
+  const choices = useMemo(() => kind ? filterChoices(kind, { models: models.data ?? null, projects: projects.data ?? null, spaces: context.spaces ?? [], word: (key, value) => filterValueLabel(t, key, value), provider: providerName }) : [],
+    [kind, models.data, projects.data, context.spaces, providerName]); // eslint-disable-line react-hooks/exhaustive-deps
   const shown = search ? choices.filter(choice => `${choice.label} ${choice.detail ?? ""}`.toLowerCase().includes(search.toLowerCase())) : choices;
   const unset = unsetFilters(frame.filters);
   const loading = (kind === "project" && projects.loading) || ((kind === "model" || kind === "provider" || kind === "effort") && models.loading);

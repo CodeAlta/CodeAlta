@@ -10,11 +10,12 @@ import {
 } from "./frame";
 import { statisticsContext } from "./canvasContext";
 import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, skippedToRetry, timeLeft } from "./history";
-import { distributionOption, hatchFraction, periodOfBrush, ratioSeries, timeSeriesOption, unreadBuckets } from "./options";
+import { distributionOption, hatchFraction, periodOfBrush, ratioSeries, scatterOption, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
+import { providerNamer, senderLabel } from "./labels";
 import { QueryStore, joinRanges } from "./queryStore";
 import { binSteps, boxStatsOfSteps, percentileOfSteps, stepsCount } from "./steps";
 import type { DistributionStep, SeriesResult, StatisticsStatus } from "./types";
-import { mcpParts, combineSeries } from "./pages/shared";
+import { mcpParts, combineSeries, toolName, toolParts } from "./pages/shared";
 
 const today = "2026-10-09";
 const fmt = createFormatter("en", { credits: amount => `${amount} AI credits`, none: "–" });
@@ -311,8 +312,12 @@ test("filters list the values the plugin knows, and a chip knows when its filter
   const api = createFixtureApi({ sessionCount: 120 });
   const models = await api.models({ period: "all", limit: 500 });
   const projects = await api.projects({ period: "all", limit: 500 });
-  const sources = { models, projects, spaces: [{ id: "space-work", name: "Work" }], word: (_key: string, value: string) => value.toUpperCase() };
+  const sources = { models, projects, spaces: [{ id: "space-work", name: "Work" }], word: (_key: string, value: string) => value.toUpperCase(), provider: providerNamer([{ key: "claude-code", name: "Claude Code" }]) };
   assert.ok(filterChoices("project", sources).some(choice => choice.label === "CodeAlta"));
+  // A provider is offered under the name the window shows it with, and filters on its key.
+  assert.deepEqual(filterChoices("provider", sources).find(choice => choice.value === "claude-code"), { value: "claude-code", label: "Claude Code" });
+  assert.ok(filterChoices("provider", sources).some(choice => choice.value === "codex" && choice.label === "codex"));
+  assert.ok(filterChoices("model", sources).some(choice => choice.detail === "Claude Code"));
   assert.deepEqual(filterChoices("project", sources).map(choice => choice.label), [...filterChoices("project", sources).map(choice => choice.label)].sort((a, b) => a.localeCompare(b)));
   assert.ok(filterChoices("provider", sources).every((choice, index, all) => all.findIndex(other => other.value === choice.value) === index));
   assert.ok(filterChoices("model", sources).every(choice => choice.detail));
@@ -335,7 +340,7 @@ test("the fixture API answers like the plugin: filters narrow, a comparison adds
   assert.equal(all.buckets.length, 30);
   assert.equal(tile(all, "runs").spark.length, 30);
   assert.equal(Math.round(tile(all, "runs").spark.reduce((a, b) => a + b, 0)), tile(all, "runs").value);
-  const claude = await api.summary({ period: "30d", filter: { provider: "claude" } });
+  const claude = await api.summary({ period: "30d", filter: { provider: "claude-code" } });
   assert.ok(tile(claude, "runs").value < tile(all, "runs").value);
   assert.ok(claude.costs.every(cost => cost.unit === "usd"), "only Claude reports dollars");
   const byProvider = await api.series({ period: "30d" }, "runs", "provider");
@@ -413,6 +418,95 @@ test("pages combine several results into one chart and read the names of MCP too
   assert.equal(combineSeries([], "x"), null);
   assert.deepEqual(mcpParts("mcp__github__issue_read"), { server: "github", tool: "issue_read" });
   assert.equal(mcpParts("read_file"), null);
+});
+
+test("a tool is named as people know it, whatever the plugin keys it by", () => {
+  // The plugin keys a tool by the kind of activity and its name, every shell tool by `shell`, and a tool of an MCP server keeps its long name.
+  assert.equal(toolName("ToolCall:read_file"), "read_file");
+  assert.equal(toolName("shell"), "shell");
+  assert.equal(toolName("Skill:alta"), "alta");
+  assert.equal(toolName("WebSearch:WebSearch"), "WebSearch");
+  assert.equal(toolName("ToolCall:mcp__github__issue_read"), "issue_read (github)");
+  assert.equal(toolName("McpToolCall:mcp__codealta_dev__take_screenshot"), "take_screenshot (codealta_dev)");
+  assert.equal(toolName("read_file"), "read_file", "a name without a kind is itself");
+  assert.equal(toolName("functions:exec"), "functions:exec", "a colon in a name is not a kind of activity");
+  assert.equal(toolName("ToolCall:"), "ToolCall:");
+  assert.deepEqual(toolParts("ToolCall:mcp__github__issue_read"), { name: "issue_read", server: "github" });
+  assert.deepEqual(toolParts("ToolCall:grep"), { name: "grep", server: null });
+});
+
+test("a provider is named as the window names it, and one the window does not know keeps its key", () => {
+  const name = providerNamer([{ key: "claude-code", name: "Claude Code" }, { key: "codex", name: "Codex" }, { key: "blank", name: " " }]);
+  assert.equal(name("claude-code"), "Claude Code");
+  assert.equal(name("Codex"), "Codex", "keys are compared without their case");
+  assert.equal(name("alibaba-token-plan"), "alibaba-token-plan");
+  assert.equal(name("blank"), "blank");
+  assert.equal(providerNamer(undefined)("codex"), "codex");
+  const directory = { spaces: [], projects: [], providers: [{ key: "codex", name: "Codex" }] };
+  const context = statisticsContext({ context: { instanceId: "i", spaceId: null, key: null, input: null }, host: { openSession: () => { } } } as never, true, directory);
+  assert.deepEqual(context.providers, [{ key: "codex", name: "Codex" }]);
+});
+
+test("the durations of the tools are drawn on an axis whose labels never run into each other", () => {
+  const box = { count: 12, min: 1, q1: 20, median: 300, q3: 4_000, max: 9_000_000, p90: 60_000 };
+  const option = toolDurationOption([{ name: "shell", stats: box }, { name: "read_file", stats: box }], { fmt, name: "Duration", p90Name: "90th percentile" }) as any;
+  assert.equal(option.xAxis.type, "log");
+  assert.equal(option.xAxis.axisLabel.hideOverlap, true);
+  // A mark of the axis is a round duration: written short, in one unit.
+  assert.deepEqual([1, 10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000].map(value => option.xAxis.axisLabel.formatter(value)), ["1 ms", "10 ms", "100 ms", "1 s", "10 s", "100 s", "17 min", "2.8 h"]);
+  assert.deepEqual(option.yAxis.data, ["shell", "read_file"]);
+  assert.equal(option.tooltip.valueFormatter(100_000), fmt.duration(100_000), "the tooltip keeps the whole duration");
+});
+
+test("the marks of an axis are short: round durations in one unit, whole dollars without cents", () => {
+  assert.deepEqual([0.5, 1, 250, 1_000, 1_500, 90_000, 120_000, 6_000_000, 7_200_000, 36_000_000].map(value => fmt.durationMark(value)),
+    ["0.5 ms", "1 ms", "250 ms", "1 s", "1.5 s", "90 s", "2 min", "100 min", "2 h", "10 h"]);
+  assert.equal(fmt.durationMark(Number.NaN), "–");
+  assert.deepEqual([0, 0.5, 20, 200, 1_400].map(value => fmt.axis("usd", value)), ["$0.00", "$0.50", "$20.00", "$200", "$1,400"]);
+  // The time a prompt takes is on a logarithmic axis too: its marks are the round ones.
+  const scatter = scatterOption([[10, 1_000], [200, 100_000]], "Runs", "Words", "Time", fmt, "ms").option as any;
+  assert.deepEqual([1_000, 100_000, 1_000_000].map(value => scatter.yAxis.axisLabel.formatter(value)), ["1 s", "100 s", "17 min"]);
+  assert.equal(scatterOption([[10, 5]], "Runs", "Words", "Calls", fmt, "count").option.yAxis instanceof Object, true);
+  assert.equal((scatterOption([[10, 5]], "Runs", "Words", "Calls", fmt, "count").option as any).yAxis.axisLabel.formatter(1_500), "1.5K");
+});
+
+test("the median and the 90th percentile of a histogram are written inside the chart, never one over the other", () => {
+  const steps = (counts: readonly number[]): DistributionStep[] => counts.map((count, index) => ({ lower: 2 ** index, upper: 2 ** (index + 1), count }));
+  const marksOf = (result: Parameters<typeof distributionOption>[0]["result"]) => {
+    const option = distributionOption({ result, fmt, name: "Runs", medianName: "Median", p90Name: "90th percentile" }).option as any;
+    return { top: option.grid.top as number, marks: (option.series[0].markLine?.data ?? []).map((mark: any) => ({ name: mark.name, at: mark.xAxis, align: mark.label.align, distance: mark.label.distance })) };
+  };
+  const base = { query: {} as never, measure: "run-cost", unit: "count" };
+  // In the middle: the median is written to the left of its line and the 90th percentile to the right of its own, on one row.
+  const middle = marksOf({ ...base, count: 100, p50: 2 ** 3.5, p90: 2 ** 5.5, steps: steps([5, 10, 15, 20, 20, 15, 5, 4, 3, 3]) });
+  assert.deepEqual(middle.marks.map((mark: any) => [mark.name, mark.align]), [["Median", "right"], ["90th percentile", "left"]]);
+  assert.equal(new Set(middle.marks.map((mark: any) => mark.distance)).size, 1);
+  // The 90th percentile near the right edge is written to the left of its line, and above the median when the two are close.
+  const right = marksOf({ ...base, count: 100, p50: 2 ** 6.5, p90: 2 ** 8.5, steps: steps([3, 3, 4, 5, 10, 15, 20, 20, 15, 5]) });
+  assert.deepEqual(right.marks.map((mark: any) => [mark.name, mark.align]), [["Median", "right"], ["90th percentile", "right"]]);
+  assert.notEqual(right.marks[0].distance, right.marks[1].distance, "two rows");
+  assert.ok(right.top > middle.top, "the plot leaves room for the second row");
+  // The median near the left edge is written to the right of its line.
+  const left = marksOf({ ...base, count: 100, p50: 2 ** 1.5, p90: 2 ** 2.5, steps: steps([20, 30, 25, 10, 5, 4, 3, 1, 1, 1]) });
+  assert.deepEqual(left.marks.map((mark: any) => [mark.name, mark.align]), [["Median", "left"], ["90th percentile", "left"]]);
+  assert.notEqual(left.marks[0].distance, left.marks[1].distance);
+  // Far apart, each on its side of the chart: one row is enough.
+  const apart = marksOf({ ...base, count: 100, p50: 2 ** 1.5, p90: 2 ** 8.5, steps: steps([20, 30, 5, 5, 5, 5, 5, 5, 15, 5]) });
+  assert.deepEqual(apart.marks.map((mark: any) => [mark.name, mark.align]), [["Median", "left"], ["90th percentile", "right"]]);
+  assert.equal(new Set(apart.marks.map((mark: any) => mark.distance)).size, 1);
+});
+
+test("a treemap names the cells that have room for a name, and keeps every name in its table", () => {
+  const built = treemapOption([{ name: "Shell", value: 9_600, children: [{ name: "shell", value: 9_600 }] }, { name: "Files", value: 400, children: [{ name: "read_file", value: 300 }, { name: "apply_patch", value: 100 }] }],
+    "Time", fmt, "ms", () => "#000");
+  const cells = (built.option as any).series[0].data.flatMap((item: any) => item.children) as { name: string; label?: { show: boolean } }[];
+  assert.deepEqual(cells.map(cell => [cell.name, cell.label?.show ?? true]), [["shell", true], ["read_file", true], ["apply_patch", false]]);
+  assert.deepEqual(built.table.rows.map(row => row[0]), ["Shell", "Shell / shell", "Files", "Files / read_file", "Files / apply_patch"]);
+});
+
+test("who sent a prompt has a name, the senders the plugin folds together too", () => {
+  const t = (key: string) => translate("en", key as never);
+  assert.deepEqual(["you", "agent", "automation", "reminder", "other"].map(sender => senderLabel(t, sender)), ["You", "An agent", "An automation", "A reminder", "Other"]);
 });
 
 test("every sentence of the canvas is translated in all the languages, with the same placeholders", async () => {

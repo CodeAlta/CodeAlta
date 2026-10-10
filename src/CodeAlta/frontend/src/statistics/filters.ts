@@ -13,6 +13,8 @@ export type FilterSources = Readonly<{
   spaces: readonly Readonly<{ id: string; name: string }>[];
   /** The words of a fixed value: the origin `agent`, the kind of tool `mcp`. */
   word: (key: FilterKey, value: string) => string;
+  /** The name of a provider from its key. */
+  provider: (key: string) => string;
 }>;
 
 /** The values a kind of filter can take, in the order they should be offered. */
@@ -20,8 +22,8 @@ export function filterChoices(key: FilterKey, sources: FilterSources): FilterCho
   switch (key) {
     case "space": return sources.spaces.map(space => ({ value: space.id, label: space.name }));
     case "project": return (sources.projects?.rows ?? []).map(row => ({ value: row.project, label: row.name })).sort((a, b) => a.label.localeCompare(b.label));
-    case "provider": return unique((sources.models?.rows ?? []).map(row => row.provider)).map(value => ({ value, label: value }));
-    case "model": return (sources.models?.rows ?? []).map(row => ({ value: row.model, label: row.model, detail: row.provider }));
+    case "provider": return unique((sources.models?.rows ?? []).map(row => row.provider)).map(value => ({ value, label: sources.provider(value) })).sort((a, b) => a.label.localeCompare(b.label));
+    case "model": return (sources.models?.rows ?? []).map(row => ({ value: row.model, label: row.model, detail: sources.provider(row.provider) }));
     case "effort": return unique((sources.models?.efforts ?? []).map(row => row.effort).filter(value => value !== "")).map(value => ({ value, label: value }));
     case "origin": return originValues.map(value => ({ value, label: sources.word("origin", value) }));
     case "toolKind": return toolKindValues.map(value => ({ value, label: sources.word("toolKind", value) }));

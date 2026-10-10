@@ -60,6 +60,18 @@ public sealed class ProjectDirectoryTests
         Assert.AreEqual(2, (await directory.ListSpacesAsync()).Count);
     }
 
+    [TestMethod]
+    public async Task The_providers_are_read_with_the_name_the_host_shows_each_under()
+    {
+        var directory = new AltaProjectDirectory(new ScriptedAlta { Ready = true }, new ManualClock());
+
+        var providers = await directory.ListProvidersAsync();
+
+        CollectionAssert.AreEqual(new[] { "claude-code=Claude Code", "codex=Codex", "bare=bare" }, providers.Select(static provider => $"{provider.Key}={provider.Name}").ToArray(), "a provider without a name is shown under its key");
+        Assert.AreEqual(2, (await directory.ListProjectsAsync()).Count, "the projects and the spaces are read as before");
+        Assert.AreEqual(2, (await directory.ListSpacesAsync()).Count);
+    }
+
     private sealed class ManualClock : TimeProvider
     {
         private DateTimeOffset _now = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
@@ -88,7 +100,9 @@ public sealed class ProjectDirectoryTests
             var text = string.Join(' ', args);
             var transcript = text.StartsWith("project list", StringComparison.Ordinal)
                 ? "{\"type\":\"alta.project.item\",\"projectId\":\"project-0\",\"slug\":\"alpha\",\"displayName\":\"Alpha\",\"spaces\":[\"work\"]}\n{\"type\":\"alta.project.item\",\"projectId\":\"project-1\",\"slug\":\"beta\",\"displayName\":\"Beta\",\"spaces\":[]}\n"
-                : "{\"type\":\"alta.space.item\",\"id\":\"default\",\"name\":\"Default\",\"default\":true}\n{\"type\":\"alta.space.item\",\"id\":\"work\",\"name\":\"Work\",\"default\":false}\n";
+                : text.StartsWith("provider list", StringComparison.Ordinal)
+                    ? "{\"type\":\"alta.provider.item\",\"providerKey\":\"claude-code\",\"displayName\":\"Claude Code\"}\n{\"type\":\"alta.provider.item\",\"providerKey\":\"codex\",\"displayName\":\"Codex\"}\n{\"type\":\"alta.provider.item\",\"providerKey\":\"bare\"}\n"
+                    : "{\"type\":\"alta.space.item\",\"id\":\"default\",\"name\":\"Default\",\"default\":true}\n{\"type\":\"alta.space.item\",\"id\":\"work\",\"name\":\"Work\",\"default\":false}\n";
             return ValueTask.FromResult(new PluginAltaCommandResult { ExitCode = 0, TranscriptJsonl = transcript });
         }
     }

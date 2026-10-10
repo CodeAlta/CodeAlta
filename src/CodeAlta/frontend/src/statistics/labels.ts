@@ -118,6 +118,15 @@ export function filterValueLabel(t: Translate, key: FilterKey, value: string): s
   return value;
 }
 
+/**
+ * Names a provider from its key as the window names it (`claude-code` is "Claude Code"). A provider the window does not know, such as one
+ * that was removed since its sessions ran, keeps its key.
+ */
+export function providerNamer(providers: readonly Readonly<{ key: string; name: string }>[] | undefined): (key: string) => string {
+  const names = new Map((providers ?? []).filter(provider => provider.name.trim()).map(provider => [provider.key.toLowerCase(), provider.name.trim()]));
+  return key => names.get(key.toLowerCase()) ?? key;
+}
+
 /** The name of an outcome of a run. */
 export function outcomeLabel(t: Translate, outcome: string): string {
   switch (outcome) {
@@ -136,6 +145,7 @@ export function senderLabel(t: Translate, sender: string): string {
     case "agent": return t("An agent");
     case "automation": return t("An automation");
     case "reminder": return t("A reminder");
+    case "other": return t("Other");
     default: return sender;
   }
 }

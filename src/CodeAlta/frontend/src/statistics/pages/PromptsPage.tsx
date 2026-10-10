@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Block, Choice } from "../blocks";
 import { usePageColors } from "../colors";
 import { senderLabel } from "../labels";
@@ -23,6 +23,8 @@ export function PromptsPage() {
   const [cut, setCut] = useState<Cut>("sender");
   const bySender = useSeries("prompts", "origin", { main: true, enabled: cut === "sender" });
   const byKind = useSeries("prompts", "prompt-kind", { enabled: cut === "kind" });
+  // A prompt has a whole number of characters and of words: a median between two sizes is written as the nearest one.
+  const whole = useCallback((value: number) => fmt.compact(Math.round(value)), [fmt]);
   const chars = useDistribution("prompt-chars", null, { extra: { comparison: "none" } });
   const words = useDistribution("prompt-words", null, { extra: { comparison: "none" } });
   const files = useSeries("prompt-files", null);
@@ -56,10 +58,10 @@ export function PromptsPage() {
       {shown.data && <SeriesChart result={shown.data} height={260} ariaLabel={cut === "sender" ? t("Prompts by sender") : t("Prompts by kind")} name={name} />}
     </Block>
     <Block title={t("Size of your prompts, in characters")} span={6} minHeight={240} query={chars} empty={chars.data !== undefined && chars.data.count === 0}>
-      {chars.data && <DistributionChart result={chars.data} name={t("Prompts")} ariaLabel={t("Characters per prompt, on a logarithmic scale")} value={value => fmt.compact(value)} />}
+      {chars.data && <DistributionChart result={chars.data} name={t("Prompts")} ariaLabel={t("Characters per prompt, on a logarithmic scale")} value={whole} />}
     </Block>
     <Block title={t("Size of your prompts, in words")} span={6} minHeight={240} query={words} empty={words.data !== undefined && words.data.count === 0}>
-      {words.data && <DistributionChart result={words.data} name={t("Prompts")} ariaLabel={t("Words per prompt, on a logarithmic scale")} value={value => fmt.compact(value)} />}
+      {words.data && <DistributionChart result={words.data} name={t("Prompts")} ariaLabel={t("Words per prompt, on a logarithmic scale")} value={whole} />}
     </Block>
     <Block title={t("Attachments")} span={6} minHeight={240} query={firstQuery(files, images, directories)} empty={attachments !== null && attachments.series.every(line => line.total === 0)}>
       {attachments && <SeriesChart result={attachments} height={220} ariaLabel={t("Attachments")}

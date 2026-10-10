@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import { useText } from "./text";
 import type { StatisticsApi, StatisticsContext, StatisticsEvent } from "./api";
 import { createFormatter, type Formatter } from "./format";
+import { providerNamer } from "./labels";
 import { decodeFrame, encodeFrame, firstDayOfWeek, frameReducer, initialFrame, localToday, requestOf, type Frame, type FrameAction } from "./frame";
 import { QueryStore, joinRanges, type DayRange } from "./queryStore";
 import type { HistoryChoice, QueryHeader, StatisticsRequest, StatisticsStatus } from "./types";
@@ -49,6 +50,8 @@ export type StatisticsRuntime = Readonly<{
   history: HistoryControls;
   /** The request of a page: the frame, plus what the page adds. */
   request: (extra?: Partial<StatisticsRequest>) => StatisticsRequest;
+  /** The name of a provider from its key, as the window names it; the key when the window does not know it. */
+  providerName: (key: string) => string;
   /** The color index of a series name, the same everywhere in this canvas (first seen, first served). */
   colorIndex: (key: string) => number;
   /** Puts the frame back as the canvas opened. */
@@ -170,6 +173,7 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
     return index;
   }, []);
   const resetFrame = useCallback(() => dispatch({ type: "reset", frame: openRef.current }), []);
+  const providerName = useMemo(() => providerNamer(context.providers), [context.providers]);
 
   const history = useMemo<HistoryControls>(() => {
     const run = async <T,>(action: () => Promise<T>): Promise<T | null> => {
@@ -194,7 +198,7 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
   }, [api, busy, controlError, store]);
 
   const value = useMemo<StatisticsRuntime>(() => ({
-    api, context, store, frame, openFrame: open, dispatch, today, weekStart, fmt, status, visible, history, request, colorIndex, resetFrame, header, periodDays, reportQuery,
-  }), [api, context, store, frame, open, today, weekStart, fmt, status, visible, history, request, colorIndex, resetFrame, header, periodDays, reportQuery]);
+    api, context, store, frame, openFrame: open, dispatch, today, weekStart, fmt, status, visible, history, request, providerName, colorIndex, resetFrame, header, periodDays, reportQuery,
+  }), [api, context, store, frame, open, today, weekStart, fmt, status, visible, history, request, providerName, colorIndex, resetFrame, header, periodDays, reportQuery]);
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

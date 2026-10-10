@@ -102,6 +102,21 @@ The page shows the numbers of your sessions as dashboards, one tab for each ques
   <figcaption class="small text-secondary mt-2">Tools: calls by kind, then each tool with its failures and how long it takes.</figcaption>
 </figure>
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-tools-time.webp" alt="The end of the Tools page: the time of each tool as areas, the duration of the most called tools on a scale from a millisecond to hours, the programs run in the shell, the alta commands, and the tools of the MCP servers" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Tools, further down: where the time goes, how long one call takes, the programs of the shell, the <code>alta</code> commands and the MCP servers.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-projects.webp" alt="The Projects page of the Statistics tab: a table of the projects with their sessions, runs, active time, tokens, tool calls and cost, and a line of their activity" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Projects: what each project took, sorted on any column.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-statistics-sessions.webp" alt="The Sessions page of the Statistics tab: a table of sessions with their project, model and provider, runs, active time, tokens, tool calls, sub-agents and last activity" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Sessions: a click on a title opens the session.</figcaption>
+</figure>
+
 One bar at the top sets the period (today, the last 7, 30 or 90 days, this month, last month, this year, all time, or two dates), the frequency (hour, day, week, month, year, or automatic), a comparison with the period before or the same period a year before, and the filters: space, project, provider, model, reasoning effort, who started the work and the kind of tool. A click on a bar, a legend entry or a row adds the filter, a click on a day of the calendar shows that day, and a drag on the strip under the main chart narrows the period. The page opens on the space the window shows, and removing the filter shows every space.
 
 <figure class="alta-figure my-4" style="max-width: 52rem;">

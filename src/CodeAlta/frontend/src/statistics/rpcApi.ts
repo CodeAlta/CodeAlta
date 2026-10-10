@@ -19,6 +19,8 @@ export const everyDay: StatisticsDataChange = Object.freeze({ revision: 0, fromD
 export type StatisticsDirectory = Readonly<{
   spaces: readonly Readonly<{ id: string; name: string; isDefault: boolean; projectIds: readonly string[] }>[];
   projects: readonly Readonly<{ id: string; name: string }>[];
+  /** The providers of the application, with the name each is shown under. */
+  providers?: readonly Readonly<{ key: string; name: string }>[];
   /** The first day of the week a question uses when its request names none: the one of the regional settings of the computer. */
   weekStart?: string;
 }>;

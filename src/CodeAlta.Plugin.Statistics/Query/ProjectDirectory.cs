@@ -16,6 +16,11 @@ internal sealed record ProjectInfo(string Id, string Slug, string Name, IReadOnl
 /// <param name="IsDefault">Whether it is the default space, which holds every project.</param>
 internal sealed record SpaceInfo(string Id, string Name, bool IsDefault);
 
+/// <summary>A provider as the host names it.</summary>
+/// <param name="Key">The key of the provider: what a session records as its provider.</param>
+/// <param name="Name">The name to show; the key when the host gives none.</param>
+internal sealed record ProviderInfo(string Key, string Name);
+
 /// <summary>What the statistics need to know of the projects and the spaces: their names, and which projects a space has today.</summary>
 internal interface IProjectDirectory
 {
@@ -28,11 +33,16 @@ internal interface IProjectDirectory
     /// <param name="cancellationToken">A token to cancel the read.</param>
     /// <returns>The spaces.</returns>
     ValueTask<IReadOnlyList<SpaceInfo>> ListSpacesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the providers the host has, with the name it shows each under.</summary>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The providers; none when the directory does not know them.</returns>
+    ValueTask<IReadOnlyList<ProviderInfo>> ListProvidersAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult<IReadOnlyList<ProviderInfo>>([]);
 }
 
 /// <summary>
-/// The directory read through the <c>alta project</c> and <c>alta space</c> commands, which every host has. A read that fails, or finds
-/// no project or no space (the commands are not ready at the start of the host), is read again after a few seconds, not after the long time.
+/// The directory read through the <c>alta project</c>, <c>alta space</c> and <c>alta provider</c> commands, which every host has. A read that
+/// fails, or finds no project or no space (the commands are not ready at the start of the host), is read again after a few seconds, not after the long time.
 /// </summary>
 /// <param name="alta">The <c>alta</c> commands of the host.</param>
 /// <param name="timeProvider">The clock; the system clock when null.</param>
@@ -47,6 +57,17 @@ internal sealed class AltaProjectDirectory(IPluginAltaService alta, TimeProvider
     private bool _complete;
     private IReadOnlyList<ProjectInfo>? _projects;
     private IReadOnlyList<SpaceInfo>? _spaces;
+    private IReadOnlyList<ProviderInfo>? _providers;
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<ProviderInfo>> ListProvidersAsync(CancellationToken cancellationToken = default)
+    {
+        await RefreshAsync(cancellationToken).ConfigureAwait(false);
+        lock (_gate)
+        {
+            return _providers ?? [];
+        }
+    }
 
     /// <inheritdoc />
     public async ValueTask<IReadOnlyList<ProjectInfo>> ListProjectsAsync(CancellationToken cancellationToken = default)
@@ -80,11 +101,13 @@ internal sealed class AltaProjectDirectory(IPluginAltaService alta, TimeProvider
 
         var projects = await ReadAsync(["project", "list", "--all", "--include-archived", "--detailed"], "alta.project.item", ParseProject, cancellationToken).ConfigureAwait(false);
         var spaces = await ReadAsync(["space", "list"], "alta.space.item", ParseSpace, cancellationToken).ConfigureAwait(false);
+        var providers = await ReadAsync(["provider", "list", "--detailed"], "alta.provider.item", ParseProvider, cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
             // What an earlier read found stays when this one failed.
             _projects = projects ?? _projects;
             _spaces = spaces ?? _spaces;
+            _providers = providers ?? _providers;
             _complete = projects is { Count: > 0 } && spaces is { Count: > 0 };
             _readAt = _time.GetUtcNow();
         }
@@ -152,6 +175,14 @@ internal sealed class AltaProjectDirectory(IPluginAltaService alta, TimeProvider
         return id is null
             ? null
             : new SpaceInfo(id, Text(element, "name") ?? id, element.TryGetProperty("default", out var isDefault) && isDefault.ValueKind == JsonValueKind.True);
+    }
+
+    private static ProviderInfo? ParseProvider(JsonElement element)
+    {
+        var key = Text(element, "providerKey");
+        return string.IsNullOrWhiteSpace(key)
+            ? null
+            : new ProviderInfo(key, Text(element, "displayName") is { } name && !string.IsNullOrWhiteSpace(name) ? name.Trim() : key);
     }
 
     private static string? Text(JsonElement element, string name)
