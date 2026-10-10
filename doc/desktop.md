@@ -1447,6 +1447,11 @@ automatically, refreshes every ten seconds after the previous read completes, an
 notes, cleared notes and no notes event share the same empty result; a failed read is distinct.
 There is no editing, automatic mutation retry or browser persistence. This feature does not require ask opt-in.
 
+The default Notes position leaves the first message heading clear. Proposal cards sit to the left of
+Notes, or to its right if Notes was dragged left. When neither side fits, proposals use a scrollable
+bottom strip in the timeline, and Notes is temporarily clamped above it. This does not overwrite saved
+Notes geometry or change either overlay's collapsed state; removing the proposals releases that space.
+
 Selection/remount changes detach presentation but retain the original read. While it is pending,
 another local refresh is refused; after failure, the next refresh is a new read, not a recovered write
 outcome. Host identity change requires reload before further operations. Notes shares the host's

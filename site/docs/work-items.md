@@ -13,11 +13,14 @@ Work items are what is left to do in a project: the **tasks** agents propose and
 
 ## Tasks
 
-While an agent works, it can find something that is not part of what you asked: a gap, a problem, or an improvement. Before it ends its turn it proposes a follow-up task for it. The session shows the proposal at once, as a card in its top right corner:
+While an agent works, it can find something that is not part of what you asked: a gap, a problem, or an improvement. Before it ends its turn it proposes a follow-up task for it. The session shows the proposal at once, as a card beside Notes:
 
 - a title, what kind of finding it is, and a short summary;
 - **Details** opens the full description;
 - with several proposals, the arrows go from one to the next.
+
+Cards stay to the left of Notes when there is room. In a narrow pane they appear in a scrollable strip
+below Notes, so both remain readable. Your saved Notes position and each panel's open or collapsed state are kept.
 
 You decide on each card:
 

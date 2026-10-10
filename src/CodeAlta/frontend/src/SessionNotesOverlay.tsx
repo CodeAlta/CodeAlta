@@ -57,7 +57,9 @@ export function SessionNotesOverlay({ sessionId, epoch, capability, fallbackMark
   }
   const update = (value: WindowGeometry | null) => { setStored(value); saveWindowGeometry(storageKey, value); };
   const ready = area.width > 0 && area.height > 0;
-  const preferred = stored ?? { x: 0, y: 0, width: 360, height: Math.min(360, Math.round(area.height * 0.6)) };
+  // Leave the first message's heading visible. Only the default moves; a saved drag still uses
+  // the original top-right coordinate system (including when proposals reserve space below).
+  const preferred = stored ?? { x: 0, y: 36, width: 360, height: Math.min(360, Math.round(area.height * 0.6)) };
   // Convert the right-anchored placement to left/top coordinates inside the pane.
   const geometry = ready ? clampWindowGeometry({ ...preferred, x: area.width - preferred.x - preferred.width }, area, minimum) : null;
   const place = (x: number, y: number, width: number, height: number) => update({ x: Math.max(0, Math.round(area.width - x - width)), y: Math.round(y), width, height });

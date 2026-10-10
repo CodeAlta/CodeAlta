@@ -8,6 +8,7 @@ import { useShellLanguage } from "../shellLanguage";
 import { startChoices, startDetail, startIcon, startLabel, taskCategoryIcon, taskCategoryLabel, taskCategoryTone, workItemKey, workKindIcon,
   type WorkItem, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
+import { useWorkCardsPlacement } from "./useWorkCardsPlacement";
 
 /** The buttons that start the work of an item: the way the user prefers first, the others beside it. */
 export function WorkStartButtons({ preferred, here, disabled, compact = false, onStart }: {
@@ -83,6 +84,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const [selected, setSelected] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [detail, setDetail] = useState(false);
+  const [cards, setCards] = useState<HTMLElement | null>(null);
+  useWorkCardsPlacement(cards, collapsed);
   const known = useRef<ReadonlySet<string>>(new Set());
   // A proposal that just arrived is the one shown, and brings the cards back when they were put away.
   useEffect(() => {
@@ -111,7 +114,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
     {!plan && <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="close" size={14} />} title={t("This task is not worth doing.")} onClick={dismiss}>{t("Dismiss")}</Button>}
   </>;
 
-  return <aside className="work-cards" data-collapsed={collapsed || undefined} aria-label={t("Proposed work items")}>
+  return <aside ref={setCards} className="work-cards" data-collapsed={collapsed || undefined} aria-label={t("Proposed work items")}>
     {collapsed
       ? <button type="button" className="work-cards-chip" title={t("Show the proposed work items")} onClick={() => setCollapsed(false)}>
           <AppIcon name="task" size={14} />{t(items.length === 1 ? "{count} proposal" : "{count} proposals", { count: items.length })}<AppIcon name="chevronDown" size={14} /></button>
