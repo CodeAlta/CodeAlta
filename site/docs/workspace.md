@@ -91,6 +91,11 @@ Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions fro
 
 ### Welcome page (desktop)
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-landing.webp" alt="Welcome tab with recent sessions, a Statistics card and links to explore CodeAlta" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Start a session, return to recent work or explore CodeAlta from the Welcome tab.</figcaption>
+</figure>
+
 CodeAlta Desktop has a start page, in a tab titled **Welcome**. It shows:
 
 - three buttons: **New session**, **Open a project** and **Documentation**;
@@ -726,6 +731,11 @@ Open it with `/mcp`, or `Ctrl+G Ctrl+Y` in the desktop app. See the [MCP plugin]
 ## Documentation (desktop)
 
 CodeAlta Desktop ships this guide and shows it in a tab, so you can read it without a connection. Open it with the book icon at the top right of the window, or with `/documentation`.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-documentation.webp" alt="Shipped documentation open to Agent Prompts, with page navigation, an outline and Ask an agent" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Read the guide beside your work, follow its headings or ask an agent about the page.</figcaption>
+</figure>
 
 - The pages are listed on the left, in the order of the guide. **Plugins** opens with the pages of its folder.
 - The headings of the page are listed on the right. Click one to go to it.
