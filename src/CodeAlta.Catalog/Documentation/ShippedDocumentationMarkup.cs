@@ -97,6 +97,10 @@ internal static partial class ShippedDocumentationMarkup
                 continue;
             }
 
+            // The site gives the block under such a line its classes (`{.table}` above a table): the line is no text of the page.
+            // A line that says anything else, or has no block under it, stays.
+            if (index + 1 < lines.Length && !string.IsNullOrWhiteSpace(lines[index + 1]) && BlockClasses().IsMatch(line)) continue;
+
             if (Screenshot().Match(line) is { Success: true } shot)
             {
                 var image = shot.Groups[1].Value;
@@ -330,6 +334,11 @@ internal static partial class ShippedDocumentationMarkup
 
     [GeneratedRegex(@"^\s*\{\{\s*alta_shot\s+""([^""]*)""\s+""([^""]*)""\s+""([^""]*)""\s+""([^""]*)""\s*\}\}\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex Screenshot();
+
+    // The attributes Markdig reads on a line of their own, when they are classes only: `{.table}`, `{.table .table-sm}`.
+    // Indented by four spaces the line is code.
+    [GeneratedRegex(@"^ {0,3}\{(?:[ \t]*\.[A-Za-z][A-Za-z0-9_-]*)+[ \t]*\}[ \t]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex BlockClasses();
 
     // A figure starts its line, as the pages write it: a page that only names the tag in a sentence has no figure there.
     [GeneratedRegex(@"(?<=^\s*)<figure\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

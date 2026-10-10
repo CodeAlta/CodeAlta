@@ -299,6 +299,90 @@ public sealed class ShippedDocumentationTests
     }
 
     [TestMethod]
+    public void Page_LeavesOutTheClassesTheSiteGivesABlock_AndKeepsTheBlock()
+    {
+        using var guide = Guide.Create();
+        File.WriteAllText(Path.Combine(guide.Root, "orphan.md"), string.Join('\n',
+            "# Worktrees",
+            "",
+            "{.table}",
+            "| You see | What it means |",
+            "| --- | --- |",
+            "| A branch | `{.table}` is how the site styles it |",
+            "",
+            "Text before a table.",
+            "   {.table .table-sm}  ",
+            "| Choice | Folder |",
+            "| --- | --- |",
+            "",
+            "{.lead}",
+            "A paragraph the site styles.",
+            "",
+            "A sentence that ends with {.table}",
+            "and `{.table}` in a sentence stay.",
+            "",
+            "```md",
+            "{.table}",
+            "| An example | of the syntax |",
+            "```",
+            "",
+            "    {.table}",
+            "    | indented code |",
+            "",
+            "{#custom-id}",
+            "## A heading with an address of its own",
+            "",
+            "{.table key=value}",
+            "| Not only classes |",
+            "",
+            "{.table}",
+            "",
+            "{.table}"));
+        var documentation = new ShippedDocumentation(guide.Root);
+        var markdown = documentation.ReadPage("orphan.md")!.Blocks.Single().Markdown!;
+        Assert.AreEqual(string.Join('\n',
+            "# Worktrees",
+            "",
+            // The line of classes is gone, and the table under it is whole, with what it quotes.
+            "| You see | What it means |",
+            "| --- | --- |",
+            "| A branch | `{.table}` is how the site styles it |",
+            "",
+            "Text before a table.",
+            "| Choice | Folder |",
+            "| --- | --- |",
+            "",
+            "A paragraph the site styles.",
+            "",
+            "A sentence that ends with {.table}",
+            "and `{.table}` in a sentence stay.",
+            "",
+            // Code is what it is written as.
+            "```md",
+            "{.table}",
+            "| An example | of the syntax |",
+            "```",
+            "",
+            "    {.table}",
+            "    | indented code |",
+            "",
+            // Only classes are left out: anything else the line says stays to be seen.
+            "{#custom-id}",
+            "## A heading with an address of its own",
+            "",
+            "{.table key=value}",
+            "| Not only classes |",
+            "",
+            // A line of classes with no block under it styles nothing: it stays.
+            "{.table}",
+            "",
+            "{.table}"), markdown);
+        // The search and the Markdown an agent reads are the same text.
+        Assert.AreEqual(0, documentation.Search("{.lead}").Count);
+        Assert.IsFalse(documentation.ReadPage("orphan.md")!.ToMarkdown().Contains("{.table .table-sm}", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void Search_FindsATextInThePages_UnderItsHeading()
     {
         using var guide = Guide.Create();

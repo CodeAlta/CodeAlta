@@ -258,6 +258,36 @@ test("the Documentation tab shows the guide under the policy of the application:
     await expect(`${title} === 'Sessions' && ${scrollTop} === 640`);
     assert.equal(await evaluate("documentationFixture.state.calls.menu"), 1);
     assert.equal(await evaluate("documentationFixture.state.calls.page.length"), read);
+    // The window draws the content of a tab before the tab is in its pane: the content has no size when it is first drawn.
+    // The page is placed once it has one, and the place that was kept is not replaced by the top of a page nobody read.
+    await evaluate("documentationFixture.unmount(); documentationFixture.mount({ pane: true })");
+    assert.equal(await evaluate("!!document.querySelector('.fixture-pane .documentation-scroll')"), true, "The tab is in its pane.");
+    await expect(`${title} === 'Sessions' && ${scrollTop} === 640`, "A tab that is opened again in a pane shows where the page was read.");
+    await new Promise(resolve => setTimeout(resolve, 120));
+    await evaluate("documentationFixture.unmount(); documentationFixture.mount({ pane: true })");
+    await expect(`${scrollTop} === 640`, "Closing and opening twice keeps the place.");
+    // The reader goes on, closes, and comes back to where they went on to.
+    await evaluate("document.querySelector('.documentation-scroll').scrollTop = 900");
+    await expect("documentationFixture.hub.scroll.get('sessions.md') === 900", "How far the page is read is kept as the reader scrolls.");
+    await evaluate("documentationFixture.unmount(); documentationFixture.mount({ pane: true })");
+    await expect(`${scrollTop} === 900`);
+    assert.equal(await evaluate("documentationFixture.hub.scroll.get('sessions.md')"), 900);
+    // A heading that is asked for while the tab is closed is where the tab opens, in a pane too.
+    await evaluate("documentationFixture.unmount(); documentationFixture.hub.show('sessions.md', 'queue'); documentationFixture.mount({ pane: true })");
+    await expect(`Math.abs(${queueTop} - 12) < 3`, "The tab opens at the heading.");
+    assert.equal(await evaluate("documentationFixture.state.calls.page.length"), read);
+    // A tab that is drawn while its pane is hidden has no size either: it is placed when the pane is shown, and
+    // what was kept is not replaced meanwhile.
+    await expect(`documentationFixture.hub.scroll.get('sessions.md') === ${scrollTop} && ${scrollTop} > 1000`);
+    const kept = await evaluate<number>(scrollTop);
+    await evaluate("documentationFixture.unmount(); documentationFixture.mount({ hidden: true })");
+    assert.equal(await evaluate("document.querySelector('.documentation-scroll').clientHeight"), 0);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.equal(await evaluate("documentationFixture.hub.scroll.get('sessions.md')"), kept);
+    await evaluate("documentationFixture.reveal()");
+    await expect(`${scrollTop} === ${kept}`, "The page is where it was read once its pane is shown.");
+    assert.equal(await evaluate("documentationFixture.hub.scroll.get('sessions.md')"), kept);
+    await evaluate("documentationFixture.unmount()");
     // A hidden tab reads nothing; a request of the host (alta documentation open) moves the tab, shown or not.
     await evaluate("documentationFixture.unmount(); documentationFixture.hub.show('plugins/git.md', 'sign-in'); documentationFixture.mount({ visible: false })");
     await expect(`${title} === 'Git'`);

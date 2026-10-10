@@ -73,7 +73,7 @@ public sealed partial class ShippedUserGuideTests
         var documentation = new ShippedDocumentation(GuideRoot);
         var pages = documentation.ListPages();
         Assert.IsTrue(pages.Count >= 20, $"{pages.Count} pages ship.");
-        int links = 0, figures = 0, drawings = 0;
+        int links = 0, figures = 0, drawings = 0, tableRows = 0;
         foreach (var info in pages)
         {
             var page = documentation.ReadPage(info.Path);
@@ -107,6 +107,16 @@ public sealed partial class ShippedUserGuideTests
                 Assert.IsFalse(markdown.Contains("{{", StringComparison.Ordinal), $"{info.Path}: {markdown[..Math.Min(markdown.Length, 200)]}");
                 Assert.IsFalse(markdown.Contains("<figure", StringComparison.OrdinalIgnoreCase) || markdown.Contains("<style", StringComparison.OrdinalIgnoreCase)
                     || markdown.Contains("<img", StringComparison.OrdinalIgnoreCase), info.Path);
+                // Nor a line that only gives the next block its classes or its name on the site (`{.table}` above a table): outside code, it is no text of the page.
+                var fenced = false;
+                foreach (var line in markdown.Split('\n'))
+                {
+                    if (line.TrimStart().StartsWith("```", StringComparison.Ordinal) || line.TrimStart().StartsWith("~~~", StringComparison.Ordinal)) { fenced = !fenced; continue; }
+                    if (fenced) continue;
+                    Assert.IsFalse(SiteAttributes().IsMatch(line), $"{info.Path}: {line}");
+                    if (line.StartsWith('|')) tableRows++;
+                }
+
                 // A link to a page names it from the folder of the guide, and the page ships.
                 foreach (Match link in PageLink().Matches(markdown))
                 {
@@ -121,12 +131,23 @@ public sealed partial class ShippedUserGuideTests
         Assert.IsTrue(links > 100, $"{links} links between pages.");
         Assert.IsTrue(figures > 60, $"{figures} pictures.");
         Assert.AreEqual(1, drawings);
+        // The tables the site styles are all there: the files write a line of classes above each, and every row of every table is read.
+        var files = Directory.GetFiles(GuideRoot, "*.md", SearchOption.AllDirectories).Select(File.ReadAllLines).ToArray();
+        Assert.IsTrue(files.Sum(static lines => lines.Count(static line => line == "{.table}")) >= 40, "The pages style their tables with a line of classes.");
+        Assert.AreEqual(files.Sum(static lines => lines.Count(static line => line.StartsWith('|'))), tableRows);
+        var worktrees = documentation.ReadPage("worktrees.md")!.ToMarkdown();
+        StringAssert.Contains(worktrees, "\n\n| You see | What it means |\n| --- | --- |\n");
+        Assert.IsFalse(worktrees.Contains("{.table}", StringComparison.Ordinal));
         // The search reads the same pages.
         Assert.IsTrue(documentation.Search("worktree").Count > 3);
     }
 
     [GeneratedRegex(@"alta-desktop-[a-z0-9-]+\.webp")]
     private static partial Regex DesktopPicture();
+
+    // A line that is only the attributes Markdig gives the next block: classes, a name, a key.
+    [GeneratedRegex(@"^ {0,3}\{[.#:][^{}]*\}\s*$")]
+    private static partial Regex SiteAttributes();
 
     [GeneratedRegex(@"^\s*-\s*\{path:\s*([^,}\s]+)", RegexOptions.Multiline)]
     private static partial Regex MenuEntry();

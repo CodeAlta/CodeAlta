@@ -1,6 +1,6 @@
 // Disposable page: the Documentation tab over a guide the test plays, under StrictMode as in the application.
-import { StrictMode, createElement } from "react";
-import { flushSync } from "react-dom";
+import { Fragment, StrictMode, createElement, useLayoutEffect, useRef } from "react";
+import { createPortal, flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import type { DocumentationBlock, DocumentationMenuItem, DocumentationPageResponse } from "#neoastra";
 import { MarkdownLinksContext } from "../MarkdownContent";
@@ -81,6 +81,21 @@ const api: DocumentationApi = {
   },
 };
 
+/**
+ * A pane as the layout of the window makes one: the content of a tab is drawn into an element that is in no document
+ * yet, and the pane takes that element in once it is itself drawn. The content is there before it has a size.
+ */
+function Pane({ children }: { children: React.ReactNode }) {
+  const moveable = useRef<HTMLDivElement | null>(null);
+  if (!moveable.current) { moveable.current = document.createElement("div"); moveable.current.style.height = "100%"; }
+  return createElement(Fragment, null, createPortal(children, moveable.current), createElement(PaneSlot, { content: moveable.current }));
+}
+function PaneSlot({ content }: { content: HTMLElement }) {
+  const self = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => { if (self.current && content.parentElement !== self.current) self.current.appendChild(content); }, [content]);
+  return createElement("div", { ref: self, className: "fixture-pane", style: { height: "100%" } });
+}
+
 // The hub is the window's: it lasts while the tab is closed and opened again.
 const hub = createDocumentationHub(api);
 hub.connect(epoch);
@@ -88,17 +103,21 @@ hub.connect(epoch);
 const fixture = {
   state, hub,
   /** Shows the tab in a pane of a width. */
-  mount(options: { width?: number; visible?: boolean } = {}) {
+  mount(options: { width?: number; visible?: boolean; pane?: boolean; hidden?: boolean } = {}) {
     container.style.width = `${options.width ?? 1320}px`;
-    flushSync(() => root.render(createElement(StrictMode, null, createElement(MarkdownLinksContext.Provider, { value: (address: string) => { state.web.push(address); } },
+    container.style.display = options.hidden ? "none" : "";
+    const panel = createElement(MarkdownLinksContext.Provider, { value: (address: string) => { state.web.push(address); } },
       createElement(DocumentationPanel, {
         hub, visible: options.visible ?? true,
         onActivate: () => { state.activated++; },
         onOpenSession: (id: string) => { state.sessions.push(id); },
         onProviders: () => { state.providers++; },
         onNotice: (message: string) => { state.notices.push(message); },
-      })))));
+      }));
+    flushSync(() => root.render(createElement(StrictMode, null, options.pane ? createElement(Pane, null, panel) : panel)));
   },
+  /** Shows a pane that was drawn hidden. */
+  reveal() { container.style.display = ""; },
   /** Closes the tab. */
   unmount() { flushSync(() => root.render(null)); },
   /** The colors of the window. */
