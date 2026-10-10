@@ -72,7 +72,7 @@ In the desktop app, session tabs, the code editor and the Changes tab can be arr
 - drag a tab to the center of another pane to move it there;
 - or use **Split right** and **Split below** in the tab menu (`…`) of a pane.
 
-Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions from different projects stay open together, and the layout is restored at the next start. Each [space](spaces.md) has its own tabs and its own layout. `Ctrl+W` closes the current tab and `Ctrl+Shift+T` reopens the last closed one.
+Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions from different projects stay open together, and the layout is restored at the next start. Each [space](spaces.md) has its own tabs and its own layout. `Ctrl+W` closes the current tab, a middle click on a tab closes it, and `Ctrl+Shift+T` reopens the last closed one.
 
 <div class="row g-3 my-4">
   <div class="col-md-6">

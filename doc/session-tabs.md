@@ -147,6 +147,11 @@ anew, because the model is kept in memory only. See "Spaces" in
 
 - Ctrl+Alt+Left/Right (TUI tab navigation) or Ctrl+PageUp/PageDown: previous/next,
   wrapping. Ctrl+W closes; Ctrl+Shift+T reopens the last closed tab.
+- A middle click on a tab closes it as its close button does, through the same
+  action (`tabMiddleClickAction` in `sessionTabLayout.ts`, called from the
+  `onAuxMouseClick` of the dock), so a tab without a close button stays. A click
+  with a key held does not close, and a middle press on a tab does not start
+  scrolling.
 - These commands operate only in the workspace outside text editing and ignore
   IME composition, repeats and handled events. They do not override native text
   editing. Modal/Settings and non-workspace focus exclude them.
