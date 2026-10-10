@@ -88,6 +88,17 @@ test("the last use of a checkout is what its sessions record, and unknown when n
   assert.deepEqual(lastUse(row({ lastUsedAt: "2026-10-03T08:00:00+00:00", sessionCount: 9 })), { at: "2026-10-03T08:00:00+00:00", session: null });
 });
 
+test("five older running sessions do not lend a title to a newer completed session omitted from the inventory", () => {
+  const running = Array.from({ length: 5 }, (_, index) => session(`running-${index}`, `2026-10-0${index + 1}T08:00:00+00:00`, true));
+  const latest = session("completed", "2026-10-06T08:00:00+00:00");
+  const used = row({ sessions: running, sessionCount: 6, lastUsedAt: latest.updatedAt });
+  assert.deepEqual(lastUse(used), { at: latest.updatedAt, session: null });
+  // The host's timestamp retains sub-millisecond precision, which Date.parse would lose.
+  const at = "2026-10-06T08:00:00.0000002+00:00";
+  const older = { ...running[0], updatedAt: "2026-10-06T08:00:00.0000001+00:00" };
+  assert.deepEqual(lastUse({ ...used, lastUsedAt: at, sessions: [older] }), { at, session: null });
+});
+
 test("an answer to a removal is read only as the answer for the folders that were asked", () => {
   const asked = ["C:\\trees\\a", "C:\\trees\\b"];
   const results = [{ path: asked[0], status: "ok", message: null, branchKept: null, branchDeleted: "alta/a" }, { path: asked[1], status: "dirty", message: null, branchKept: null, branchDeleted: null }];
@@ -107,11 +118,11 @@ test("an answer to a removal is read only as the answer for the folders that wer
 test("a batch says what went, what holds changes and what stays for another reason", () => {
   const a = named("a"), b = named("b"), c = named("c"), d = named("d");
   const first = [outcome(a, "ok", { branchDeleted: "alta/a" }), outcome(b, "dirty"), outcome(c, "in_use"), outcome(d, "failed", { message: "fatal: unable to remove" })];
-  assert.deepEqual(removalCounts(first), { removed: 1, dirty: 1, kept: 2 });
+  assert.deepEqual(removalCounts(first), { removed: 1, dirty: 1, kept: 2, unknown: 0 });
   // The worktree that held changes was asked about by itself: what the second request said replaces what was known of it.
   const merged = mergeOutcomes(first, [outcome(b, "ok")]);
   assert.deepEqual(merged.map(value => [value.row.name, value.status]), [["a", "ok"], ["b", "ok"], ["c", "in_use"], ["d", "failed"]]);
-  assert.deepEqual(removalCounts(merged), { removed: 2, dirty: 0, kept: 2 });
+  assert.deepEqual(removalCounts(merged), { removed: 2, dirty: 0, kept: 2, unknown: 0 });
   assert.deepEqual(mergeOutcomes([], [outcome(a, "ok")]).map(value => value.row.name), ["a"]);
 
   assert.deepEqual(removalChunks([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
@@ -125,6 +136,11 @@ test("a batch says what went, what holds changes and what stays for another reas
   assert.equal(removalReason("unconfirmed", null, t), "The answer did not arrive: the list says whether it is still there.");
   assert.equal(removalReason("failed", "fatal: unable to remove", t), "fatal: unable to remove");
   assert.equal(removalReason("failed", null, t), "Git could not do it.");
+});
+
+test("unconfirmed and unreadable removal answers are counted apart from definite refusals and unstarted work", () => {
+  const outcomes = ["ok", "dirty", "in_use", "canceled", "unconfirmed", "read_failed"].map((status, index) => outcome(named(`tree-${index}`), status));
+  assert.deepEqual(removalCounts(outcomes), { removed: 1, dirty: 1, kept: 2, unknown: 2 });
 });
 
 test("what cannot be listed or opened is told in the words of the window", () => {

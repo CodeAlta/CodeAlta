@@ -97,6 +97,16 @@ test("a repository without a stale worktree shows one group, and a catalog that 
   assert.match(button(main.repository, "Remove the worktree repository"), /disabled=""/);
 });
 
+test("the last-used title is withheld when five older running sessions hide the latest completed session", () => {
+  const latest = "2026-10-06T08:00:00+00:00";
+  const html = table([row("busy-finch", { busy: true, protection: "in_use", lastUsedAt: latest, sessionCount: 6,
+    sessions: Array.from({ length: 5 }, (_, index) => ({ id: `s${index}`, title: `Older running ${index}`, updatedAt: `2026-10-0${index + 1}T08:00:00+00:00`, running: true })) })]);
+  assert.match(html, /<time dateTime="2026-10-06T08:00:00\.000Z">/);
+  assert.match(html, /<small>6 sessions<\/small>/);
+  assert.doesNotMatch(html, /<small>Older running/);
+  assert.match(html, /Running · Older running 4/, "The bounded session list remains available in the tooltip.");
+});
+
 test("removing asks first with every worktree named, and keeps every branch unless it is asked otherwise", () => {
   const review = (rows: readonly InventoryRow[], deleteBranches = false) => render(createElement(WorktreeRemovalReview, { rows, projectName: "Alpha", deleteBranches,
     onDeleteBranches: never, onCancel: never, onConfirm: never }));
@@ -159,6 +169,16 @@ test("a batch that went through in part says what became of each worktree", () =
   assert.match(results([outcome(used, "ok")]), /<h3 role="status">The worktree was removed\.<\/h3>/);
   // An answer that did not arrive concludes nothing, and what was not started says so.
   const lost = results([outcome(used, "unconfirmed"), outcome(orphan, "canceled")]);
+  assert.match(lost, /<h3 role="status">0 of 2 removed, 1 not removed, 1 unknown\.<\/h3>/);
+  assert.match(lost, /data-status="unconfirmed".*?<strong>Outcome unknown<\/strong>/s);
   assert.match(lost, /The answer did not arrive: the list says whether it is still there\./);
   assert.match(lost, /Not started\./);
+});
+
+test("a malformed removal answer says outcome unknown without counting it as definitely not removed", () => {
+  const html = render(createElement(WorktreeRemovalResults, { outcomes: [outcome(used, "read_failed"), outcome(orphan, "dirty"), outcome(stale, "ok")],
+    projectName: "Alpha", onDiscard: never, onDone: never }));
+  assert.match(html, /<h3 role="status">1 of 3 removed, 1 not removed, 1 unknown\.<\/h3>/);
+  assert.match(html, /data-status="read_failed".*?<strong>Outcome unknown<\/strong>/s);
+  assert.equal((html.match(/<strong>Not removed<\/strong>/g) ?? []).length, 1);
 });

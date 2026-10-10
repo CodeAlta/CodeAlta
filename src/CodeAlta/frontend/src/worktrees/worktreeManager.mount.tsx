@@ -25,19 +25,38 @@ const state = {
   outcomes: {} as Record<string, { status: string; message?: string; branchKept?: string; branchDeleted?: string }>,
   /** The host does not answer a removal. */
   lost: false,
+  /** The admitted removal waits until the test releases it; Stop must not abandon it. */
+  holdRemovals: false,
+  finishRemovals: [] as (() => void)[],
+  /** The host completes removal but returns an unreadable answer. */
+  malformed: false,
   editors: [] as string[], editor: "ok",
   closed: 0, changed: 0, shown: [] as string[],
   /** The projects whose worktrees the menu of a row asked for. */
   managed: [] as string[],
 };
-const reply = (rows: readonly InventoryRow[]) => ({ status: "ok", projectId: "p", worktrees: rows, sessionsKnown: true });
+// Only the inventory's ten-second clock is manual. A tick while a read is held stands for a slow host.
+const refreshTimers = new Map<number, () => void>();
+let nextRefreshTimer = -1;
+const clock: Pick<Window, "setInterval" | "clearInterval"> = window;
+const schedule = clock.setInterval.bind(window), unschedule = clock.clearInterval.bind(window);
+clock.setInterval = (handler, milliseconds, ...args) => {
+  if (milliseconds !== 10_000 || typeof handler !== "function") return schedule(handler, milliseconds, ...args);
+  const id = nextRefreshTimer--;
+  refreshTimers.set(id, () => handler(...args));
+  return id;
+};
+clock.clearInterval = id => { if (id === undefined || !refreshTimers.delete(id)) unschedule(id); };
+
+const reply = (rows: readonly InventoryRow[], projectId: string) => ({ status: "ok", projectId, worktrees: rows, sessionsKnown: true });
 const api = {
-  inventory: () => {
+  inventory: (request: { projectId: string }) => {
     state.asked++;
-    return state.hold ? new Promise(resolve => { state.questions.push(rows => resolve(reply(rows))); }) : Promise.resolve(reply(state.rows));
+    return state.hold ? new Promise(resolve => { state.questions.push(rows => resolve(reply(rows, request.projectId))); }) : Promise.resolve(reply(state.rows, request.projectId));
   },
   removeMany: async (request: Removal) => {
     state.removals.push({ paths: [...request.paths], discard: [...request.discard], deleteMergedBranches: request.deleteMergedBranches });
+    if (state.holdRemovals) await new Promise<void>(resolve => { state.finishRemovals.push(resolve); });
     if (state.lost) throw new Error("The host did not answer.");
     const results = request.paths.map(path => {
       const said = state.outcomes[name(path)] ?? { status: "ok" };
@@ -46,7 +65,7 @@ const api = {
       return { path, status, message: said.message ?? null, branchKept: said.branchKept ?? null, branchDeleted: said.branchDeleted ?? null };
     });
     state.rows = state.rows.filter(value => !results.some(result => result.path === value.path && result.status === "ok"));
-    return { status: "ok", results };
+    return { status: "ok", results: state.malformed ? [] : results };
   },
   openEditor: async (request: { path: string }) => { state.editors.push(request.path); return { status: state.editor }; },
 } as unknown as WorktreeManagerApi;
@@ -66,12 +85,13 @@ const fixture = {
     row("lost-otter", { missing: true, sessionCount: 1, lastUsedAt: "2026-09-12T08:00:00+00:00", sessions: [{ id: "s3", title: "Try the new layout", updatedAt: "2026-09-12T08:00:00+00:00", running: false }] }),
   ],
   /** The window, under StrictMode as in the application. */
-  open() {
+  open(projectId = "p") {
     flushSync(() => root.render(createElement(StrictMode, null, createElement(WorktreeManager, {
-      epoch: "epoch", project: { id: "p", name: "Alpha", path: "C:\\code\\alpha" }, api,
+      epoch: "epoch", project: { id: projectId, name: "Alpha", path: "C:\\code\\alpha" }, api,
       onClose: () => { state.closed++; }, onChanged: () => { state.changed++; }, onShowChanges: (value: InventoryRow) => { state.shown.push(value.folder); },
     }))));
   },
+  tick() { for (const tick of refreshTimers.values()) tick(); },
   /** The rows of two projects, whose menus offer the worktrees the way the Explorer does: not for an archived project. */
   projectMenu() {
     const projects: WorkspaceProject[] = [{ id: "p1", path: "/code/one", name: "One", archived: false }, { id: "p2", path: "/code/two", name: "Two", archived: true }];

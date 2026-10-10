@@ -10,7 +10,7 @@ import { browserBaseArgs, browserExecutable } from "../browserTarget";
 
 const edge = browserExecutable;
 
-test("the window of the worktrees selects, asks, removes in part and says what became of each worktree", { skip: !edge, timeout: 180_000 }, async () => {
+test("the window of the worktrees selects, asks, removes in part and says what became of each worktree", { skip: !edge, timeout: 180_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-worktrees-window-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -65,6 +65,119 @@ test("the window of the worktrees selects, asks, removes in part and says what b
     const press = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     const escape = () => evaluate("document.querySelector('dialog.worktree-manager-dialog').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))");
     const statuses = "Object.fromEntries([...document.querySelectorAll('.worktree-results-rows li')].map(item => [item.dataset.path.split('\\\\').pop(), item.dataset.status]))";
+    const reset = () => evaluate(`(async () => {
+      worktreesFixture.clear();
+      const state = worktreesFixture.state;
+      state.questions.splice(0).forEach(answer => answer([])); state.finishRemovals.splice(0).forEach(finish => finish());
+      await Promise.resolve(); await Promise.resolve();
+      Object.assign(state, { rows: [], hold: false, asked: 0, removals: [], outcomes: {}, lost: false, malformed: false,
+        holdRemovals: false, editors: [], editor: 'ok', closed: 0, changed: 0, shown: [] });
+    })()`);
+
+    await t.test("timer and focus refreshes coalesce while a slow inventory is pending", async () => {
+      try {
+        await evaluate("worktreesFixture.state.hold = true; worktreesFixture.open()");
+        const initial = await evaluate<number>("worktreesFixture.state.questions.length");
+        assert.ok(initial > 0);
+        // The read completes after the next ten-second tick, as with consistent twelve-second host reads.
+        await evaluate("worktreesFixture.tick(); window.dispatchEvent(new Event('focus')); worktreesFixture.tick()");
+        assert.equal(await evaluate("worktreesFixture.state.questions.length"), initial, "Automatic refresh must not supersede the pending answer.");
+        await evaluate("worktreesFixture.state.questions.at(-1)(worktreesFixture.repository())");
+        assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 8"), true, "The slow initial answer can finish loading.");
+        for (const count of [7, 6, 5]) {
+          const before = await evaluate<number>("worktreesFixture.state.questions.length");
+          await evaluate("worktreesFixture.tick(); worktreesFixture.tick(); window.dispatchEvent(new Event('focus'))");
+          assert.equal(await evaluate("worktreesFixture.state.questions.length"), before + 1);
+          await evaluate(`worktreesFixture.state.questions.at(-1)(worktreesFixture.repository().slice(0, ${count}))`);
+          assert.equal(await wait(`document.querySelectorAll('.worktree-line').length === ${count}`), true);
+          assert.equal(await evaluate("worktreesFixture.state.questions.length"), before + 1, "Ticks do not queue more reads after completion.");
+        }
+      } finally { await reset(); }
+    });
+
+    await t.test("project switches and closing invalidate held inventory answers without blocking a new read", async () => {
+      try {
+        await evaluate("worktreesFixture.state.hold = true; worktreesFixture.open()");
+        const oldProject = await evaluate<number>("worktreesFixture.state.questions.length - 1");
+        await evaluate("worktreesFixture.open('other')");
+        assert.equal(await evaluate("worktreesFixture.state.questions.length"), oldProject + 2);
+        await evaluate(`worktreesFixture.state.questions[${oldProject}](worktreesFixture.repository())`);
+        assert.equal(await evaluate("document.querySelectorAll('.worktree-line').length"), 0, "The old project cannot publish while the new one is still loading.");
+        await evaluate("worktreesFixture.tick(); window.dispatchEvent(new Event('focus'))");
+        assert.equal(await evaluate("worktreesFixture.state.questions.length"), oldProject + 2, "An obsolete reply cannot clear the new project's pending read.");
+        await evaluate("worktreesFixture.state.questions.at(-1)([worktreesFixture.row('new-project')])");
+        assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 1"), true);
+        assert.deepEqual(await evaluate(names), ["new-project"]);
+        await press('.worktree-manager-bar button[aria-label="Refresh"]');
+        const closedRead = await evaluate<number>("worktreesFixture.state.questions.length - 1");
+        await evaluate("worktreesFixture.clear(); worktreesFixture.tick(); window.dispatchEvent(new Event('focus'))");
+        assert.equal(await evaluate("worktreesFixture.state.questions.length"), closedRead + 1, "Closing detaches automatic refresh.");
+        await evaluate("worktreesFixture.open()");
+        assert.ok(await evaluate<number>("worktreesFixture.state.questions.length") > closedRead + 1);
+        await evaluate("worktreesFixture.state.questions.at(-1)([worktreesFixture.row('reopened')])");
+        assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 1"), true);
+        await evaluate(`worktreesFixture.state.questions[${closedRead}](worktreesFixture.repository())`);
+        assert.deepEqual(await evaluate(names), ["reopened"]);
+      } finally { await reset(); }
+    });
+
+    await t.test("the worktree count includes a protected project checkout beside its repository's main checkout", async () => {
+      try {
+        await evaluate("worktreesFixture.state.rows = [worktreesFixture.row('repository', { main: true, protection: 'main' }), worktreesFixture.repository()[0]]; worktreesFixture.open()");
+        assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 2"), true);
+        assert.equal(await evaluate("document.querySelector('.worktree-manager-count').textContent"), "1 worktree");
+        assert.equal(await evaluate("!!document.querySelector('.worktree-manager-none')"), false);
+        assert.equal(await evaluate("[...document.querySelectorAll('.worktree-cell-select input')].every(input => input.disabled)"), true);
+        // For an ordinary project in the main checkout, that checkout alone is not a linked worktree.
+        await evaluate("worktreesFixture.state.rows = [worktreesFixture.repository()[0]]");
+        await press('.worktree-manager-bar button[aria-label="Refresh"]');
+        assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 1"), true);
+        assert.equal(await evaluate("document.querySelector('.worktree-manager-count').textContent"), "0 worktrees");
+        assert.equal(await evaluate("!!document.querySelector('.worktree-manager-none')"), true);
+      } finally { await reset(); }
+    });
+
+    await t.test("Stop during the first held chunk finishes its four admitted removals and never starts the fifth", async () => {
+      try {
+        await evaluate("worktreesFixture.state.rows = worktreesFixture.repository(); worktreesFixture.state.holdRemovals = true; worktreesFixture.open()");
+        assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 8"), true);
+        await press("thead .worktree-cell-select input");
+        await evaluate(`${footer}.querySelector('button.bp6-intent-danger').click()`);
+        assert.equal(await wait("document.querySelector('.worktree-review')"), true);
+        await press(".worktree-review footer button.bp6-intent-danger");
+        assert.equal(await wait("worktreesFixture.state.finishRemovals.length === 1 && document.querySelector('.worktree-manager[data-phase=removing]')"), true);
+        assert.equal(await evaluate("document.querySelector('.worktree-manager-empty button').textContent"), "Stop");
+        await press(".worktree-manager-empty button");
+        assert.equal(await evaluate("document.querySelector('.worktree-manager').dataset.phase"), "removing");
+        assert.equal(await evaluate("worktreesFixture.state.rows.length"), 8, "The admitted request is still held, not canceled or reported complete.");
+        assert.equal(await evaluate("worktreesFixture.state.removals.length"), 1);
+        await evaluate("worktreesFixture.state.finishRemovals[0]()");
+        assert.equal(await wait("document.querySelector('.worktree-results')"), true);
+        assert.equal(await evaluate("worktreesFixture.state.removals.length"), 1, "Stop prevents the second chunk.");
+        assert.deepEqual(await evaluate("worktreesFixture.state.removals[0].paths.map(path => path.split('\\\\').pop())"), ["quiet-heron", "amber-denali", "calm-egret", "pale-wren"]);
+        assert.deepEqual(await evaluate(statuses), { "quiet-heron": "ok", "amber-denali": "ok", "calm-egret": "ok", "pale-wren": "ok", "lost-otter": "canceled" });
+        assert.equal(await evaluate("document.querySelector('.worktree-results h3').textContent"), "4 of 5 removed, 1 not removed.");
+        assert.equal(await evaluate("worktreesFixture.state.rows.length"), 4, "Every already-admitted removal finished.");
+        assert.equal(await evaluate("worktreesFixture.state.changed"), 1);
+      } finally { await reset(); }
+    });
+
+    await t.test("an unreadable result stays unknown even when the admitted removals happened", async () => {
+      try {
+        await evaluate("worktreesFixture.state.rows = worktreesFixture.repository(); worktreesFixture.state.malformed = true; worktreesFixture.open()");
+        assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 8"), true);
+        await press("thead .worktree-cell-select input");
+        await evaluate(`${footer}.querySelector('button.bp6-intent-danger').click()`);
+        assert.equal(await wait("document.querySelector('.worktree-review')"), true);
+        await press(".worktree-review footer button.bp6-intent-danger");
+        assert.equal(await wait("document.querySelector('.worktree-results')"), true);
+        assert.equal(await evaluate("worktreesFixture.state.removals.length"), 1);
+        assert.equal(await evaluate("worktreesFixture.state.rows.length"), 4);
+        assert.deepEqual(await evaluate(statuses), { "quiet-heron": "read_failed", "amber-denali": "read_failed", "calm-egret": "read_failed", "pale-wren": "read_failed", "lost-otter": "canceled" });
+        assert.equal(await evaluate("document.querySelector('.worktree-results h3').textContent"), "0 of 5 removed, 1 not removed, 4 unknown.");
+        assert.equal(await evaluate("document.querySelector('.worktree-results-rows li[data-status=read_failed] .worktree-result-text strong').textContent"), "Outcome unknown");
+      } finally { await reset(); }
+    });
 
     // The window opens on every checkout git lists: what is on disk, then what git only still lists.
     await evaluate("worktreesFixture.state.rows = worktreesFixture.repository(); worktreesFixture.open()");
@@ -195,7 +308,8 @@ test("the window of the worktrees selects, asks, removes in part and says what b
     assert.equal(await wait("document.querySelector('.worktree-results')"), true);
     assert.equal(await evaluate("worktreesFixture.state.removals.length"), sent + 1);
     assert.deepEqual(await evaluate(statuses), { "quiet-heron": "unconfirmed", "amber-denali": "unconfirmed", "calm-egret": "unconfirmed", "pale-wren": "unconfirmed", "lost-otter": "canceled" });
-    assert.equal(await evaluate("document.querySelector('.worktree-results h3').textContent"), "0 of 5 removed, 5 not removed.");
+    assert.equal(await evaluate("document.querySelector('.worktree-results h3').textContent"), "0 of 5 removed, 1 not removed, 4 unknown.");
+    assert.equal(await evaluate("document.querySelector('.worktree-results-rows li[data-status=unconfirmed] .worktree-result-text strong').textContent"), "Outcome unknown");
     assert.match(await evaluate<string>("document.querySelector('.worktree-results-rows li[data-status=\"unconfirmed\"]').textContent"), /The answer did not arrive/u);
     assert.match(await evaluate<string>("document.querySelector('.worktree-results-rows li[data-status=\"canceled\"]').textContent"), /Not started\./u);
     await evaluate("worktreesFixture.state.lost = false");
@@ -207,6 +321,7 @@ test("the window of the worktrees selects, asks, removes in part and says what b
     await evaluate("worktreesFixture.state.rows = [worktreesFixture.row('repository', { path: 'C:\\\\code\\\\repository', folder: 'C:\\\\code\\\\repository', branch: 'main', main: true, protection: 'main' }), ...worktreesFixture.repository()]");
     await press('.worktree-manager-bar button[aria-label="Refresh"]');
     assert.equal(await wait("document.querySelectorAll('.worktree-line').length === 9"), true);
+    assert.equal(await evaluate("document.querySelector('.worktree-manager-count').textContent"), "8 worktrees");
     assert.match(await evaluate<string>(`${line("repository")}.querySelector('.worktree-cell-states').textContent`), /Main checkout/u);
     assert.equal(await evaluate(`${line("repository")}.querySelector('.worktree-cell-select input').disabled`), true);
     assert.equal(await evaluate(`${line("repository")}.querySelector('button[aria-label="Remove the worktree repository"]').disabled`), true);

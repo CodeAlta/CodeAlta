@@ -113,10 +113,12 @@ export function toggleOne(selected: ReadonlySet<string>, row: InventoryRow): Rea
 /** The selected worktrees that can go, in the order of the list. */
 export const selectedRows = (selected: ReadonlySet<string>, rows: readonly InventoryRow[]) => rows.filter(row => removable(row) && selected.has(row.path));
 
-/** When a checkout was last used and by which of the sessions that are named; null when no session records it. */
+/** When a checkout was last used, naming a returned session only when its timestamp matches; null when no session records it. */
 export function lastUse(row: InventoryRow): Readonly<{ at: string; session: InventorySession | null }> | null {
   if (row.lastUsedAt === null) return null;
-  const latest = [...row.sessions].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0] ?? null;
+  // The bounded list names running sessions first, so the actual latest session may not be in it.
+  // Compare the host's original timestamp without losing its sub-millisecond precision to Date.parse.
+  const latest = row.sessions.find(session => session.updatedAt === row.lastUsedAt) ?? null;
   return { at: row.lastUsedAt, session: latest };
 }
 
@@ -133,10 +135,14 @@ export function mergeOutcomes(known: readonly RemovalOutcome[], later: readonly 
   return [...known.map(outcome => replaced.get(outcome.row.path) ?? outcome), ...later.filter(outcome => !known.some(value => value.row.path === outcome.row.path))];
 }
 
-/** How many worktrees went, how many stay because they hold changes, and how many stay for another reason. */
-export function removalCounts(outcomes: readonly RemovalOutcome[]): Readonly<{ removed: number; dirty: number; kept: number }> {
+/** No usable answer arrived: neither removal nor refusal is established. */
+export const removalUnknown = (status: string) => status === "unconfirmed" || status === "read_failed";
+
+/** How many worktrees went, stay because they hold changes, stay for another reason, or have an unknown outcome. */
+export function removalCounts(outcomes: readonly RemovalOutcome[]): Readonly<{ removed: number; dirty: number; kept: number; unknown: number }> {
   const removed = outcomes.filter(outcome => outcome.status === "ok").length, dirty = outcomes.filter(outcome => outcome.status === "dirty").length;
-  return { removed, dirty, kept: outcomes.length - removed - dirty };
+  const unknown = outcomes.filter(outcome => removalUnknown(outcome.status)).length;
+  return { removed, dirty, kept: outcomes.length - removed - dirty - unknown, unknown };
 }
 
 const reasons: Readonly<Record<string, MessageKey>> = {

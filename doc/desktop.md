@@ -2788,7 +2788,8 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
     (`worktrees.inventory`), whether a session still records it or not: a worktree whose session was
     deleted is listed like the others. Two groups: **On disk**, then **Listed by git, folder gone** for
     a worktree git still lists without its folder. A row shows the name, the folder, the branch (or the
-    commit of a detached checkout), what protects it and its last use.
+    commit of a detached checkout), what protects it and its last use. The count excludes only the
+    repository's main checkout, not a linked checkout that is protected because the project lives in it.
   - *What protects a checkout.* **Project folder** (the checkout the project lives in), **Main checkout**
     (the main one of the repository, when the project lives in a worktree), **In use** and **Locked**
     (`git worktree lock`). A protected row cannot be ticked and has no remove button, and the host
@@ -2797,11 +2798,13 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
     session recorded in the past never protects a checkout, and never releases one.
   - *Last used.* The newest update time of the sessions of the catalog that record the checkout
     (`AgentSessionMetadata.UpdatedAt`; the worktree a session records, else the folder it was created
-    in), with the title of that session and the number of sessions. A session records a checkout when
-    the folder it names is in it; a folder that is gone only counts for a worktree git lists without its
+    in), with the title of that session when it is among the returned sessions, and the number of
+    sessions. A session records a checkout when the folder it names is in it; a folder that is gone
+    only counts for a worktree git lists without its
     folder, never for the checkout around it. **Unknown** when no session records the checkout: no
     journal is read and no file time is looked at. Five sessions are named for a checkout at most, the
-    running ones first. When the catalog cannot be read the checkouts are listed without sessions
+    running ones first; a title is shown beside the last-use time only when that session's timestamp
+    matches it. When the catalog cannot be read the checkouts are listed without sessions
     (`sessionsKnown` false). An answer holds 512 checkouts at most, and the window says when git lists
     more (`truncated`); the title of a session is cut at 200 characters.
   - *Removing.* One worktree from its row, or the ticked ones (the box of the header ticks every
@@ -2809,8 +2812,9 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
     the folder of the project, and nothing is asked of the host before **Remove**. The host is asked
     four worktrees at a time (`worktrees.removeMany`) and answers for each; the window then says what
     became of each one: **Removed**, **Forgotten by git** for a folder that was gone, or **Not
-    removed** with the reason. A request the host did not answer concludes nothing (the list is read
-    again) and nothing more is asked. **Stop** ends a long removal after the request in progress.
+    removed** with the reason. A missing or malformed answer is **Outcome unknown**, counted apart
+    from definite refusals: it concludes nothing (the list is read again) and nothing more is asked.
+    **Stop** ends a long removal after the request in progress, without canceling its admitted removals.
   - *Changes that are not committed.* What counts is what `git status` lists: files that are modified,
     staged or not tracked. Files git ignores (build output, packages) go with the folder without a
     question, as with `git worktree remove`: the first confirmation says so. A worktree that holds
@@ -2840,9 +2844,10 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
     checkout. Both work for every checkout whose folder is there, the main checkout of a repository
     whose project lives in a worktree included.
   - *Reading again.* When the window opens, when the application comes back to the front, on
-    **Refresh**, after a removal, and every ten seconds while the list is shown. An answer to a question
-    that was asked before a newer one is dropped. What is ticked and can no longer go (a session
-    started to work there) is unticked.
+    **Refresh**, after a removal, and every ten seconds while the list is shown. Timer and focus
+    refreshes coalesce while a read is pending, without queuing more reads. An explicit newer read
+    supersedes an older answer; closing or switching projects invalidates old answers. What is ticked
+    and can no longer go (a session started to work there) is unticked.
   - *Keys.* `Escape` and a press beside the window close it while it lists. While it asks or shows an
     outcome they go one step back, and they do nothing while worktrees are being removed.
 - **Branches.** The branch in the composer and in the header of the Changes tab is a button: it lists

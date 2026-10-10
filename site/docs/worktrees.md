@@ -50,6 +50,7 @@ Run `/worktree`, or right-click a project in the sidebar and choose **Worktreesâ
 
 - To remove worktrees, tick one, several, or all of them with the box of the header, then click **Remove**. CodeAlta shows the list again before it removes anything.
 - A worktree with changes that are not committed stays. CodeAlta lists it afterwards and asks about it on its own. Files that git ignores are deleted with the folder.
+- **Outcome unknown** means CodeAlta could not confirm what happened. Check the refreshed list before trying again. **Stop** lets the removal in progress finish without starting the next group.
 - Branches are kept. Tick the box of the confirmation to also delete the `alta/` branches that have no commit of their own.
 - The buttons of a row open the worktree in the code editor, show its changes, and copy its path.
 

@@ -7,7 +7,7 @@ import { AppWindow } from "../AppWindow";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { editorFailure, inventoryFailure, inventoryGroups, inventoryReply, keepSelection, lastUse, mergeOutcomes, removable, removalChunks, removalChunkSize, removalCounts, removalReason,
-  removalReply, selectedRows, showsChanges, toggleAll, toggleOne, type Inventory, type InventoryRow, type RemovalOutcome } from "./worktreeInventory";
+  removalReply, removalUnknown, selectedRows, showsChanges, toggleAll, toggleOne, type Inventory, type InventoryRow, type RemovalOutcome } from "./worktreeInventory";
 
 export type WorktreeManagerApi = Pick<typeof worktreesApi, "inventory" | "removeMany" | "openEditor">;
 
@@ -170,7 +170,7 @@ export function WorktreeDiscardReview({ rows, projectName, onCancel, onConfirm }
   </section>;
 }
 
-/** What became of each worktree that was asked to go: the ones that went, and why each of the others stays. */
+/** What became of each worktree that was asked to go, separating refusals from outcomes the host did not confirm. */
 export function WorktreeRemovalResults({ outcomes, projectName, onDiscard, onDone }: {
   outcomes: readonly RemovalOutcome[]; projectName: string;
   /** Asks about the worktrees that stay because they hold changes that are not committed. */
@@ -181,14 +181,15 @@ export function WorktreeRemovalResults({ outcomes, projectName, onDiscard, onDon
   const dirty = outcomes.filter(outcome => outcome.status === "dirty").map(outcome => outcome.row);
   return <section className="worktree-results" aria-label={t("What was removed")}>
     <h3 role="status">{counts.removed === outcomes.length ? t(counts.removed === 1 ? "The worktree was removed." : "{count} worktrees were removed.", { count: counts.removed })
-      : t("{removed} of {count} removed, {kept} not removed.", { removed: counts.removed, count: outcomes.length, kept: counts.dirty + counts.kept })}</h3>
+      : t(counts.unknown ? "{removed} of {count} removed, {kept} not removed, {unknown} unknown." : "{removed} of {count} removed, {kept} not removed.",
+        { removed: counts.removed, count: outcomes.length, kept: counts.dirty + counts.kept, unknown: counts.unknown })}</h3>
     <ul className="worktree-results-rows">{outcomes.map(outcome => {
       const done = outcome.status === "ok";
       return <li key={outcome.row.path} data-path={outcome.row.path} data-status={outcome.status}>
         <span className="worktree-result-mark"><AppIcon name={done ? "check" : outcome.status === "dirty" ? "warning" : "error"} size={15} /></span>
         <Checkout row={outcome.row} projectName={projectName} />
         <span className="worktree-result-text">
-          <strong>{done ? t(outcome.row.missing ? "Forgotten by git" : "Removed") : t("Not removed")}</strong>
+          <strong>{done ? t(outcome.row.missing ? "Forgotten by git" : "Removed") : t(removalUnknown(outcome.status) ? "Outcome unknown" : "Not removed")}</strong>
           {!done && <span>{removalReason(outcome.status, outcome.message, t)}</span>}
           {outcome.branchDeleted && <span>{t("The branch {branch} was deleted.", { branch: outcome.branchDeleted })}</span>}
           {outcome.branchKept && <span>{t("The branch {branch} is kept: it holds commits of its own.", { branch: outcome.branchKept })}</span>}
@@ -205,9 +206,10 @@ export function WorktreeRemovalResults({ outcomes, projectName, onDiscard, onDon
 
 /**
  * The window of the worktrees of a project. It reads the checkouts when it opens, when the window of the
- * application comes back to the front, on demand and every ten seconds while the list is shown; an answer to a
- * question that was asked before a newer one is dropped. Removing asks first, with the worktrees named; the
- * ones that hold changes that are not committed stay, and throwing those changes away is asked by itself.
+ * application comes back to the front, on demand and every ten seconds while the list is shown. Automatic reads
+ * coalesce while a reply is pending; an explicit newer question supersedes an older answer. Removing asks first,
+ * with the worktrees named; the ones that hold changes that are not committed stay, and throwing those changes
+ * away is asked by itself.
  */
 export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChanged, api = worktreesApi }: {
   epoch: string; project: Readonly<{ id: string; name: string; path: string }>;
@@ -231,16 +233,21 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
   const [opening, setOpening] = useState(false);
   // The last question asked: an answer to an older one says what was, not what is.
   const asked = useRef(0);
+  const pending = useRef<number | null>(null);
   const alive = useRef(false);
   const stop = useRef(false);
   const changed = useRef(onChanged); changed.current = onChanged;
 
   const refresh = useCallback((shown = false) => {
+    // A slow host must be allowed to answer: timer/focus events neither supersede nor queue another read.
+    if (!shown && pending.current !== null) return;
     const ticket = ++asked.current;
+    pending.current = ticket;
     if (shown) setReading(true);
     void api.inventory({ expectedEpoch: epoch, projectId: project.id }, { timeoutMilliseconds: 30_000 })
       .then(reply => inventoryReply(reply, project.id), () => "read_failed")
       .then(value => {
+        if (pending.current === ticket) pending.current = null;
         if (!alive.current || ticket !== asked.current) return;
         setReading(false);
         if (typeof value === "string") {
@@ -256,7 +263,7 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
   useEffect(() => {
     alive.current = true;
     refresh(true);
-    return () => { alive.current = false; stop.current = true; asked.current++; };
+    return () => { alive.current = false; stop.current = true; asked.current++; pending.current = null; };
   }, [refresh]);
   const listed = phase.kind === "list";
   useEffect(() => {
@@ -315,7 +322,9 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
     else { setPhase({ kind: "list" }); setOutcomes([]); }
   }
   const chosen = inventory ? selectedRows(selected, inventory.rows) : [];
-  const total = inventory?.rows.filter(row => !row.main).length ?? 0;
+  // `main` protects both checkouts when the project lives in a linked worktree; only the repository's main one is excluded.
+  const main = inventory?.rows.find(row => row.main && !row.project) ?? inventory?.rows.find(row => row.project);
+  const total = (inventory?.rows.length ?? 0) - (main ? 1 : 0);
 
   return <AppWindow storageKey="codealta.desktop.window.worktrees.v1" className="worktree-manager-dialog" titleId={titleId}
     title={<>{t("Worktrees")}<span className="worktree-manager-project">{project.name}</span></>}
