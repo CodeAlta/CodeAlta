@@ -57,6 +57,9 @@ public sealed record GitWorktreeOutcome(string Status, string? Message = null, s
 {
     /// <summary>Gets whether the change was made.</summary>
     public bool Succeeded => Status == GitWorktreeService.Ok;
+
+    /// <summary>Gets the branch of a removed worktree that was deleted with it; null when none was.</summary>
+    public string? BranchDeleted { get; init; }
 }
 
 /// <summary>A worktree that was created, or why none was.</summary>
@@ -304,7 +307,26 @@ public sealed class GitWorktreeService
     /// <param name="cancellationToken">Stops waiting.</param>
     /// <returns>The outcome.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public async Task<GitWorktreeOutcome> RemoveAsync(string folder, string worktree, bool force, CancellationToken cancellationToken = default)
+    public Task<GitWorktreeOutcome> RemoveAsync(string folder, string worktree, bool force, CancellationToken cancellationToken = default)
+        => RemoveAsync(folder, worktree, force, deleteBranch: true, cancellationToken);
+
+    /// <summary>
+    /// Removes a worktree of the repository a folder is in, and says what becomes of its branch. Without
+    /// <paramref name="force"/> a worktree that holds changes that are not committed is left as it is, with the
+    /// status <c>dirty</c>. A worktree whose folder is gone is forgotten by its name: the other worktrees whose
+    /// folder is gone stay listed, also when git refuses to forget the one that was asked, which then fails.
+    /// </summary>
+    /// <param name="folder">A folder of the repository, usually the folder of the project.</param>
+    /// <param name="worktree">The folder of the worktree, or a folder inside it.</param>
+    /// <param name="force">Removes the worktree with the changes that are not committed, which are lost.</param>
+    /// <param name="deleteBranch">
+    /// Deletes the branch of a worktree created here with it, unless it holds commits that no other branch has;
+    /// the branch is left as it is when false.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The outcome, with the branch that was deleted or the one that was kept for its commits.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<GitWorktreeOutcome> RemoveAsync(string folder, string worktree, bool force, bool deleteBranch, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentException.ThrowIfNullOrWhiteSpace(worktree);
@@ -330,10 +352,13 @@ public sealed class GitWorktreeService
             var home = worktrees[0].Path;
             if (target.Missing)
             {
-                var prune = await _run(home, ["worktree", "prune"], ReadTimeout, cancellationToken).ConfigureAwait(false);
-                if (!prune.Succeeded)
+                // By its name, and never with a prune, which forgets every worktree whose folder is gone and not
+                // only this one. What git refuses to forget this way, such as a folder that lost its `.git`,
+                // stays listed, and what git said is the answer.
+                var forget = await _run(home, ["worktree", "remove", target.Path], ReadTimeout, cancellationToken).ConfigureAwait(false);
+                if (!forget.Succeeded)
                 {
-                    return new(StatusOf(prune), Message(prune));
+                    return new(StatusOf(forget), Message(forget));
                 }
             }
             else
@@ -360,12 +385,19 @@ public sealed class GitWorktreeService
                 }
             }
 
-            string? kept = null;
-            if (target.Branch is { } branch && branch.StartsWith(BranchPrefix, StringComparison.Ordinal))
+            string? kept = null, deleted = null;
+            if (deleteBranch && target.Branch is { } branch && branch.StartsWith(BranchPrefix, StringComparison.Ordinal))
             {
                 // Only a branch whose commits are all in another one goes: no commit is lost with a worktree.
                 var delete = await _run(home, ["branch", "-d", branch], ReadTimeout, cancellationToken).ConfigureAwait(false);
-                kept = delete.Succeeded ? null : branch;
+                if (delete.Succeeded)
+                {
+                    deleted = branch;
+                }
+                else
+                {
+                    kept = branch;
+                }
             }
 
             // The folders that only held it go with the last worktree: the one of the project, then the one of
@@ -377,7 +409,7 @@ public sealed class GitWorktreeService
                 RemoveWhenEmpty(above);
             }
 
-            return new(Ok, null, kept);
+            return new(Ok, null, kept) { BranchDeleted = deleted };
         }
         finally
         {

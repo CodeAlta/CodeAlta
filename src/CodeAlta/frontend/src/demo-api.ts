@@ -120,7 +120,8 @@ export const providerUsage = Object.freeze({ read: unavailable });
 export const projectFiles = Object.freeze({ read: unavailable, write: unavailable, list: unavailable, stat: unavailable, create: unavailable, rename: unavailable,
   delete: unavailable, image: unavailable, reveal: unavailable, search: unavailable, watch: unavailable });
 export const projectGit = Object.freeze({ status: unavailable, changes: unavailable, commits: unavailable, file: unavailable, watch: unavailable });
-export const worktrees = Object.freeze({ list: unavailable, remove: unavailable, branches: unavailable, switch: unavailable, settings: unavailable, saveSettings: unavailable });
+export const worktrees = Object.freeze({ list: unavailable, remove: unavailable, branches: unavailable, switch: unavailable, settings: unavailable, saveSettings: unavailable,
+  inventory: unavailable, removeMany: unavailable, openEditor: unavailable });
 export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable });
 export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
   open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });

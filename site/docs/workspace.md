@@ -315,7 +315,7 @@ In CodeAlta TUI, `Ctrl+E` opens a file in an editor tab with syntax highlighting
 
 The Changes tab shows what changed in the git repository of a project. Open it by clicking the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
 
-- **Worktrees**: when the project has git [worktrees](worktrees.md), they are listed above the files. Click one to see its changes.
+- **Worktrees**: when the project has git [worktrees](worktrees.md), they are listed above the files. Click one to see its changes. Run `/worktree` to see them all and remove the ones you no longer need.
 - **Files**: the changed files as a tree or a flat list, with the lines added and removed in each file. Type in the filter to narrow the list.
 - **History**: under the files. Choose **Uncommitted changes**, all the changes of the branch since its base branch, or one of the recent commits. **Load more** shows older commits.
 - **Diff**: the selected file with syntax highlighting, side by side or inline. Unchanged regions are folded, and you can expand them. `Alt+Down` and `Alt+Up` jump to the next and previous change, from the list of files as well as from the diff.

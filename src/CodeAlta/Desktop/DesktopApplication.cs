@@ -661,7 +661,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         (sessionId, token) => SessionFolderAsync(host, sessionId, token), projectFiles.RootAsync, DesktopLinks.Open,
                         roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))));
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
-                    builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch));
+                    // The window of the worktrees also names the sessions that record each checkout, and opens the code editor on one.
+                    builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch,
+                        async token => (await host.WorkspaceReads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions, diskFolders, editorView));
                     // A terminal opened from a session starts in the folder that session works in: its worktree
                     // while that folder is there, the folder of its project otherwise.
                     builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch,

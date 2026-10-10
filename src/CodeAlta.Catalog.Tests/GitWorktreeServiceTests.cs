@@ -280,6 +280,95 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
+    public async Task Remove_ForgetsOnlyTheWorktreeThatWasAsked_AmongThoseWhoseFolderIsGone()
+    {
+        using var repository = Repository.Create();
+        var asked = await repository.Service.CreateAsync(repository.Project);
+        var other = await repository.Service.CreateAsync(repository.Project);
+        Repository.Delete(asked.Root!);
+        Repository.Delete(other.Root!);
+
+        Assert.AreEqual(GitWorktreeService.Ok, (await repository.Service.RemoveAsync(repository.Root, asked.Root!, force: false)).Status);
+
+        // The other one was not asked to go: git still lists it, without its folder.
+        var listed = (await repository.Service.ListAsync(repository.Root))!;
+        CollectionAssert.AreEqual(new[] { repository.Root, other.Root }, listed.Select(static worktree => worktree.Path).ToArray());
+        Assert.IsTrue(listed[1].Missing);
+    }
+
+    [TestMethod]
+    public async Task Remove_OfAWorktreeGitCannotForget_Fails_AndLeavesTheOtherRegistrations()
+    {
+        using var repository = Repository.Create();
+        var asked = await repository.Service.CreateAsync(repository.Project);
+        var other = await repository.Service.CreateAsync(repository.Project);
+        // The folder that is asked is there and no longer says which repository it belongs to: git lists it
+        // as one to prune, and refuses to remove it by its name. The folder of the other one is gone.
+        File.Delete(Path.Combine(asked.Root!, ".git"));
+        Repository.Delete(other.Root!);
+        Assert.IsTrue((await repository.Service.ListAsync(repository.Root))!.Skip(1).All(static worktree => worktree.Missing));
+
+        foreach (var force in new[] { false, true })
+        {
+            var refused = await repository.Service.RemoveAsync(repository.Root, asked.Root!, force, deleteBranch: true);
+
+            // It is said, with what git said. Nothing is pruned: neither registration is forgotten, no folder
+            // and no branch is touched.
+            Assert.AreEqual("failed", refused.Status);
+            StringAssert.Contains(refused.Message, ".git");
+            Assert.AreEqual((null, null), (refused.BranchKept, refused.BranchDeleted));
+            var listed = (await repository.Service.ListAsync(repository.Root))!;
+            CollectionAssert.AreEquivalent(new[] { repository.Root, asked.Root, other.Root }, listed.Select(static worktree => worktree.Path).ToArray());
+            Assert.IsTrue(listed.Single(worktree => worktree.Path == other.Root).Missing);
+            Assert.IsTrue(File.Exists(Path.Combine(asked.Root!, "readme.md")));
+            StringAssert.Contains(repository.Git("branch", "--list", asked.Branch!), asked.Name!);
+            StringAssert.Contains(repository.Git("branch", "--list", other.Branch!), other.Name!);
+        }
+
+        // The one whose folder is gone is still forgotten by its name, and the one git refuses stays.
+        Assert.AreEqual(GitWorktreeService.Ok, (await repository.Service.RemoveAsync(repository.Root, other.Root!, force: false)).Status);
+        CollectionAssert.AreEquivalent(new[] { repository.Root, asked.Root }, (await repository.Service.ListAsync(repository.Root))!.Select(static worktree => worktree.Path).ToArray());
+    }
+
+    [TestMethod]
+    public async Task Remove_NeverAsksGitToPrune()
+    {
+        using var repository = Repository.Create();
+        var asked = await repository.Service.CreateAsync(repository.Project);
+        var gone = await repository.Service.CreateAsync(repository.Project);
+        var clean = await repository.Service.CreateAsync(repository.Project);
+        File.Delete(Path.Combine(asked.Root!, ".git"));
+        Repository.Delete(gone.Root!);
+        // The same git, with every command it is given written down.
+        var commands = new List<string>();
+        var watched = repository.Watched(commands);
+
+        Assert.AreEqual("failed", (await watched.RemoveAsync(repository.Root, asked.Root!, force: true)).Status);
+        Assert.AreEqual(GitWorktreeService.Ok, (await watched.RemoveAsync(repository.Root, gone.Root!, force: false, deleteBranch: false)).Status);
+        Assert.AreEqual(GitWorktreeService.Ok, (await watched.RemoveAsync(repository.Root, clean.Root!, force: false)).Status);
+
+        Assert.IsFalse(commands.Any(static command => command.Contains("prune", StringComparison.Ordinal)), string.Join(" | ", commands));
+        Assert.AreEqual(3, commands.Count(static command => command.StartsWith("worktree remove ", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task Remove_LeavesTheBranch_UnlessItIsAskedToGo()
+    {
+        using var repository = Repository.Create();
+        var kept = await repository.Service.CreateAsync(repository.Project);
+        var gone = await repository.Service.CreateAsync(repository.Project);
+
+        var left = await repository.Service.RemoveAsync(repository.Root, kept.Root!, force: false, deleteBranch: false);
+        var deleted = await repository.Service.RemoveAsync(repository.Root, gone.Root!, force: false, deleteBranch: true);
+
+        Assert.AreEqual((GitWorktreeService.Ok, null, null), (left.Status, left.BranchKept, left.BranchDeleted));
+        StringAssert.Contains(repository.Git("branch", "--list", kept.Branch!), kept.Name!);
+        Assert.IsFalse(Directory.Exists(kept.Root));
+        Assert.AreEqual((GitWorktreeService.Ok, null, gone.Branch), (deleted.Status, deleted.BranchKept, deleted.BranchDeleted));
+        Assert.AreEqual(string.Empty, repository.Git("branch", "--list", gone.Branch!).Trim());
+    }
+
+    [TestMethod]
     public async Task Branches_AreListedAndACheckoutMovesToOne()
     {
         using var repository = Repository.Create();
@@ -437,6 +526,14 @@ public sealed partial class GitWorktreeServiceTests
 
         // The same repository and configuration, with another source of names.
         public Repository WithRandom(Random random) => new(Home, Options, random, owner: false);
+
+        /// <summary>A service over the same git, which writes down every command it is given.</summary>
+        public GitWorktreeService Watched(List<string> commands)
+            => new(Options, Config, (folder, arguments, timeout, token) =>
+            {
+                commands.Add(string.Join(' ', arguments));
+                return RunAsync(folder, arguments, timeout, token);
+            });
 
         public string At(string relative) => Path.Combine(Root, relative.Replace('/', Path.DirectorySeparatorChar));
 

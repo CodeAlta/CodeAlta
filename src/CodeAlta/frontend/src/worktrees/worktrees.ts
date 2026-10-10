@@ -132,6 +132,7 @@ export function newBranchName(filter: string, branches: readonly Branch[]): stri
 const failures: Readonly<Record<string, MessageKey>> = {
   in_use: "A session is working there. Wait for it to finish, or stop it.",
   dirty: "The worktree holds changes that are not committed.",
+  locked: "Git keeps this worktree locked: unlock it with git to remove it.",
   main: "This is the folder of the project: it is not a worktree to remove.",
   not_worktree: "The worktree is no longer there.",
   worktree_missing: "The worktree is no longer there.",

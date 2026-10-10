@@ -2704,8 +2704,8 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   project, and says that the main checkout of the project is to be left as it is. The instruction files
   of the repository (`AGENTS.md` and the like) are read from the worktree; a file that only the main
   checkout has (one that git does not track) and the files above the repository apply as before.
-- **A worktree that is gone.** A worktree can be removed at any time, from the Changes tab or from a
-  terminal. The composer asks for the branch every two seconds: when the folder is gone the list of
+- **A worktree that is gone.** A worktree can be removed at any time, from the Worktrees window, from
+  the Changes tab or from a terminal. The composer asks for the branch every two seconds: when the folder is gone the list of
   sessions is read again, and the session shows its worktree struck through, as **removed**. The next
   message is then answered in the folder of the project: the session no longer records the worktree,
   and is told that the folder it worked in is gone. What waits for the session is answered the same
@@ -2731,6 +2731,72 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   `~/.alta/worktrees` once it is empty; a folder the user chose stays. The folder of the project is
   never removed. In a pane narrower than 760 pixels the checkouts are above the files, beside the
   history.
+- **Worktrees window.** **Worktrees** (`/worktree`, and **Worktrees…** in the menu of a project of the
+  Explorer) opens a window on the worktrees of one project: the project in front for the command, the
+  project of the row for the menu. It is a modal window (`WorktreeManager`), not a tab, and it has no
+  `alta` command: an agent creates a worktree with `alta session create --worktree` and does not remove
+  one.
+  - *What it lists.* Every checkout `git worktree list` names for the repository of the project
+    (`worktrees.inventory`), whether a session still records it or not: a worktree whose session was
+    deleted is listed like the others. Two groups: **On disk**, then **Listed by git, folder gone** for
+    a worktree git still lists without its folder. A row shows the name, the folder, the branch (or the
+    commit of a detached checkout), what protects it and its last use.
+  - *What protects a checkout.* **Project folder** (the checkout the project lives in), **Main checkout**
+    (the main one of the repository, when the project lives in a worktree), **In use** and **Locked**
+    (`git worktree lock`). A protected row cannot be ticked and has no remove button, and the host
+    refuses it whatever the page asks (`main`, `in_use`, `locked`). **In use** is only what the running
+    sessions say (`ListBusySessionFolders`: a run in progress or a queued message being sent). What a
+    session recorded in the past never protects a checkout, and never releases one.
+  - *Last used.* The newest update time of the sessions of the catalog that record the checkout
+    (`AgentSessionMetadata.UpdatedAt`; the worktree a session records, else the folder it was created
+    in), with the title of that session and the number of sessions. A session records a checkout when
+    the folder it names is in it; a folder that is gone only counts for a worktree git lists without its
+    folder, never for the checkout around it. **Unknown** when no session records the checkout: no
+    journal is read and no file time is looked at. Five sessions are named for a checkout at most, the
+    running ones first. When the catalog cannot be read the checkouts are listed without sessions
+    (`sessionsKnown` false). An answer holds 512 checkouts at most, and the window says when git lists
+    more (`truncated`); the title of a session is cut at 200 characters.
+  - *Removing.* One worktree from its row, or the ticked ones (the box of the header ticks every
+    worktree that can go). The window first shows them again, with the sessions that will continue in
+    the folder of the project, and nothing is asked of the host before **Remove**. The host is asked
+    four worktrees at a time (`worktrees.removeMany`) and answers for each; the window then says what
+    became of each one: **Removed**, **Forgotten by git** for a folder that was gone, or **Not
+    removed** with the reason. A request the host did not answer concludes nothing (the list is read
+    again) and nothing more is asked. **Stop** ends a long removal after the request in progress.
+  - *Changes that are not committed.* What counts is what `git status` lists: files that are modified,
+    staged or not tracked. Files git ignores (build output, packages) go with the folder without a
+    question, as with `git worktree remove`: the first confirmation says so. A worktree that holds
+    changes is answered `dirty` and stays. The
+    outcome lists it and offers **Remove it with its changes…**: a second window names those worktrees
+    alone and says that what is not committed is lost. Only that confirmation sends the folder in
+    `discard`, and the host forces the removal for a folder of `discard` only.
+  - *Branches.* Kept, unless the box of the confirmation is ticked for that removal
+    (`deleteMergedBranches`): then the `alta/<name>` branch of a removed worktree is deleted with
+    `git branch -d`, which keeps a branch that holds commits of its own. The outcome names the branch
+    that was deleted or kept. The trash button of the Changes tab is unchanged: it deletes the branch
+    that has no commit of its own.
+  - *What the host checks.* The request names full paths. For each one, right before it goes, the host
+    reads what git lists again and takes the checkout whose folder is exactly that path: a folder inside
+    a worktree, a folder of another repository and a path that is listed twice are refused
+    (`not_worktree`, `invalid_request`). A worktree whose folder is gone is forgotten by its name
+    (`git worktree remove <path>`), so the other ones whose folder is gone stay listed.
+    `git worktree prune` is never run, from this window or from the Changes tab: it forgets every such
+    worktree at once. What git refuses to forget by its name (a folder that is there and lost its `.git`)
+    stays listed, and the answer is `failed` with what git said; `git worktree prune` in a terminal is
+    then the way.
+  - *Code editor and changes.* The `</>` button asks the host (`worktrees.openEditor`), which looks the
+    folder up in what git lists: the checkout of the project opens the code editor of the project, and
+    a worktree opens the code editor on its own folder (the folder of the project inside it), in a tab
+    named after the worktree. That tab is one of a folder of the disk (`DiskFolders`): it is not
+    restored at the next start. The changes button opens the Changes tab of the project on that
+    checkout. The main checkout of a repository whose project lives in a worktree can be opened in the
+    editor, and its changes are not offered: the Changes tab shows the checkout of the project for it.
+  - *Reading again.* When the window opens, when the application comes back to the front, on
+    **Refresh**, after a removal, and every ten seconds while the list is shown. An answer to a question
+    that was asked before a newer one is dropped. What is ticked and can no longer go (a session
+    started to work there) is unticked.
+  - *Keys.* `Escape` and a press beside the window close it while it lists. While it asks or shows an
+    outcome they go one step back, and they do nothing while worktrees are being removed.
 - **Branches.** The branch in the composer and in the header of the Changes tab is a button: it lists
   the local branches, the ones with the newest commits first, then the branches of the remotes that
   have no local branch yet, and offers to create the branch that is typed. A branch another checkout is
@@ -2739,17 +2805,23 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
 - **While a session works.** A checkout a session is at work in is neither removed nor moved to another
   branch: its row has no trash button, its branches are disabled, and the host answers `in_use`
   whatever the page asks. "At work" is a run in progress or a queued message being sent; an idle session
-  does not keep its worktree.
+  does not keep its worktree. A worktree git keeps locked (`git worktree lock`) is not removed either:
+  the host answers `locked`.
 - **Code editor.** The code editor of a project shows the folder of the project, not a worktree: for a
   worktree the Changes tab has no **Open file**, and `alta editor open` refuses a session that works in
-  one (`editor.worktree`) instead of showing the project's copy of a file under the same name.
+  one (`editor.worktree`) instead of showing the project's copy of a file under the same name. The files
+  of a worktree are edited in a tab of their own, opened from the Worktrees window.
 - **Agents.** `alta session create --worktree` creates a session in a new worktree, and a session that
   works in a worktree gives it to the sessions it creates (see `doc/live-tool.md`).
 - **Host API.** `workspace.createSession` takes `worktree` and `baseBranch`, and answers
   `worktree_failed` with a `reason` (`not_repository`, `no_commit`, `invalid`, `git_unavailable`,
   `timeout`, `failed`) and the message of git. A session of `workspace.snapshot` has `worktreePath`,
   `worktreeRoot`, `worktreeName` and `worktreeMissing`. The `worktrees` service has `list`, `remove`,
-  `branches`, `switch`, `settings` and `saveSettings`. The requests of `projectGit` take a `worktree`:
+  `branches`, `switch`, `settings` and `saveSettings`, and for the Worktrees window `inventory`,
+  `removeMany` (256 folders at most; one result for each, in the order they were asked: `ok`, `dirty`,
+  `in_use`, `locked`, `main`, `not_worktree`, what git refused with its message, or `canceled` for a
+  folder that was not started because the page went away) and `openEditor` (`worktree_missing`,
+  `not_worktree`, `no_window`). The requests of `projectGit` take a `worktree`:
   only a folder of the project's own repository is read (two checkouts of one repository share their
   git folder), anything else is `worktree_missing`.
 
@@ -3259,6 +3331,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+G` then `Ctrl+V`, `Ctrl+G` then `1`…`9` | Go to Space (`/space`, opens the space switch), show the space at that place of the list (Default is 1) |
 | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` (also from a terminal) | Previous / next space (`/space_prev`, `/space_next`) |
 | No key | New Space (`/new_space`), Spaces (`/spaces`, opens Settings → Spaces) |
+| No key | Worktrees (`/worktree`), the window of the git worktrees of the project in front |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |

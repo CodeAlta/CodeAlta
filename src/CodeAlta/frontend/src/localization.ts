@@ -1,4 +1,5 @@
 import { statisticsMessages } from "./statistics/messages";
+import { worktreeMessages } from "./worktrees/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2286,6 +2287,7 @@ export const messages = dictionary({
   "More…": ["Más…", "Plus…", "Mehr …", "その他…", "更多…"],
   "Canvas: {title} ({scope})": ["Lienzo: {title} ({scope})", "Canevas : {title} ({scope})", "Canvas: {title} ({scope})", "キャンバス: {title}（{scope}）", "画布：{title}（{scope}）"],
   ...statisticsMessages,
+  ...worktreeMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

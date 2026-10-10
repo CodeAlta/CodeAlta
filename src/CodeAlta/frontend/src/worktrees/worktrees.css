@@ -90,3 +90,93 @@ button.changes-branch:hover, button.changes-branch:focus-visible, button.changes
 /* The folder belongs to the last choice: it is drawn under it. */
 .worktree-settings-folder { display: flex; gap: 8px; max-width: 720px; margin-left: 26px; }
 .worktree-settings-folder .bp6-input-group { flex: 1 1 auto; }
+
+/* The window of the worktrees of a project: every checkout git lists, what protects it, when it was last used. */
+.worktree-manager-project { margin-left: 10px; color: var(--muted); font-weight: 400; }
+/* The window fills its surface: the list scrolls inside it, and the buttons stay at its foot. */
+dialog.worktree-manager-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+dialog.worktree-manager-dialog:has(> .app-window) > .app-window > .app-window-body > .worktree-manager { flex: 1 1 auto; }
+dialog.worktree-manager-dialog:has(> .app-window) .app-window-body :is(.worktree-review, .worktree-results) h3 { margin: 0 16px; color: var(--text); font-size: 15px; font-weight: 600;
+  letter-spacing: 0; text-transform: none; }
+.worktree-manager { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; container-type: inline-size; }
+.worktree-manager-bar { display: flex; align-items: center; flex: none; gap: 8px; min-height: 36px; padding: 4px 10px 4px 16px; border-bottom: 1px solid var(--line); }
+.worktree-manager-count { color: var(--muted); font-size: 12px; }
+.worktree-manager-spacer { flex: 1 1 auto; }
+/* A callout takes the width its margins leave. */
+.worktree-manager .bp6-callout { width: auto; }
+.worktree-manager-notice { flex: none; margin: 8px 12px 0; overflow-wrap: anywhere; font-size: 12px; }
+.worktree-manager-empty { flex: 1 1 auto; min-height: 0; }
+.worktree-manager-rows { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.worktree-manager-none { margin: 0; padding: 14px 16px; color: var(--muted); font-size: 13px; }
+.worktree-manager-footer, .worktree-review > footer, .worktree-results > footer { display: flex; align-items: center; flex: none; justify-content: space-between; gap: 12px;
+  min-height: 46px; padding: 8px 12px 8px 16px; border-top: 1px solid var(--line); background: var(--panel-2); }
+.worktree-manager-footer > span:first-child { color: var(--muted); font-size: 12px; }
+.worktree-manager-footer > span:last-child { display: inline-flex; gap: 6px; }
+
+/* The columns have their widths, so that a long path shortens instead of pushing the actions out of the window. */
+.worktree-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+.worktree-table thead th { position: sticky; top: 0; z-index: 1; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
+.worktree-table td { padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); vertical-align: middle; }
+.worktree-table .worktree-cell-select { width: 34px; padding-left: 14px; padding-right: 0; }
+.worktree-table .worktree-cell-select .bp6-control { margin: 0; }
+.worktree-table .worktree-cell-actions { width: 132px; padding-right: 10px; white-space: nowrap; }
+.worktree-table .worktree-cell-states { width: 168px; }
+.worktree-table .worktree-cell-use { width: 200px; }
+.worktree-group th { padding: 10px 8px 4px 16px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-align: left; text-transform: uppercase; }
+.worktree-group-count { margin-left: 6px; font-weight: 400; }
+.worktree-table .worktree-more { padding: 10px 16px; color: var(--muted); font-size: 12px; }
+.worktree-line:hover td { background: var(--panel-2); }
+.worktree-line[data-selected] td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+.worktree-checkout { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.worktree-checkout-icon { display: inline-flex; flex: none; color: var(--worktree); }
+.worktree-checkout[data-main] .worktree-checkout-icon { color: var(--muted); }
+.worktree-checkout[data-missing] .worktree-checkout-icon { color: var(--worktree-missing); }
+.worktree-checkout-text { display: grid; flex: 1 1 auto; min-width: 0; }
+.worktree-checkout-text strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.worktree-checkout[data-missing] .worktree-checkout-text strong { text-decoration: line-through; }
+.worktree-checkout-text code { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.worktree-checkout-branch { display: inline-flex; align-items: center; flex: 0 1 auto; gap: 4px; max-width: 40%; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px;
+  text-overflow: ellipsis; white-space: nowrap; }
+
+.worktree-states { display: flex; flex-wrap: wrap; gap: 4px; }
+.worktree-states-inline { display: none; margin: 3px 0 0 23px; }
+.worktree-state { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.worktree-state[data-state="busy"] { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
+.worktree-state[data-state="locked"], .worktree-state[data-state="missing"] { border-color: color-mix(in srgb, var(--worktree-missing) 55%, transparent);
+  background: color-mix(in srgb, var(--worktree-missing) 12%, transparent); color: var(--text); }
+
+.worktree-use { display: grid; min-width: 0; }
+.worktree-use[data-unknown] { color: var(--muted); font-style: italic; }
+.worktree-use small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* What is asked before worktrees go, and what became of each. */
+.worktree-review, .worktree-results { display: flex; flex: 1 1 auto; flex-direction: column; gap: 10px; min-height: 0; padding-top: 14px; }
+.worktree-review > :not(footer, ul), .worktree-results > :not(footer, ul) { flex: none; margin: 0 16px; }
+.worktree-review p { color: var(--muted); font-size: 13px; }
+.worktree-review-note { margin-top: -6px !important; padding-left: 26px; font-size: 12px !important; }
+.worktree-review-rows, .worktree-results-rows { flex: 1 1 auto; min-height: 60px; margin: 0 16px; padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; list-style: none; }
+.worktree-review-rows li, .worktree-results-rows li { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.worktree-review-rows li:last-child, .worktree-results-rows li:last-child { border-bottom: 0; }
+.worktree-review-rows .worktree-checkout, .worktree-results-rows .worktree-checkout { flex: 1 1 50%; }
+.worktree-review-use { flex: none; color: var(--muted); font-size: 12px; }
+dialog.worktree-manager-dialog:has(> .app-window) .app-window-body .worktree-review[data-discard] h3 { color: var(--red); }
+.worktree-result-mark { display: inline-flex; flex: none; color: var(--muted); }
+.worktree-results-rows li[data-status="ok"] .worktree-result-mark { color: var(--green); }
+.worktree-results-rows li[data-status="dirty"] .worktree-result-mark { color: var(--worktree-missing); }
+.worktree-result-text { display: grid; flex: 1 1 50%; min-width: 0; font-size: 12px; }
+.worktree-result-text strong { font-size: 13px; }
+.worktree-result-text span { color: var(--muted); overflow-wrap: anywhere; }
+.worktree-results-dirty { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; font-size: 13px; }
+/* In a narrow window the state goes under the name, and the path gives way before the actions do. */
+@container (max-width: 700px) {
+  /* The column keeps its place in the table, without a width: the group headings span it. */
+  .worktree-table .worktree-cell-states { width: 0; padding: 0; overflow: hidden; font-size: 0; }
+  .worktree-table .worktree-cell-states > * { display: none; }
+  .worktree-states-inline { display: block; }
+  .worktree-states-inline:not(:has(.worktree-state)) { display: none; }
+  .worktree-table .worktree-cell-use { width: 132px; }
+  .worktree-checkout-branch { display: none; }
+  .worktree-review-rows li, .worktree-results-rows li { flex-wrap: wrap; }
+}

@@ -20,6 +20,9 @@ not select a project, import a folder, refresh the catalog or send a request.
   the revision read just before it. Archiving changes catalog metadata, not project
   files or running work. Unarchive does not start work.
 
+- **Worktrees…** opens the window of the git worktrees of that row's project (`doc/desktop.md`, Worktrees).
+  It only lists: removing a worktree is asked in that window. The line is absent for an archived project and
+  without an owned host.
 - **Open <title>** lines end the menu, after a separator, when plugins declare canvases about a project:
   the first four, then **More…**, which opens the Canvases page. Each opens that canvas for the row's project in
   the shown space, whether or not the row is the selected project, and changes no project, catalog or setting.

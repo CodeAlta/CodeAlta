@@ -37,13 +37,31 @@ The choice is kept for the project. Choose **Project folder** to go back.
 
 ## Manage worktrees
 
+Run `/worktree`, or right-click a project in the sidebar and choose **Worktrees…**. The window lists every worktree of the project that git knows, also the ones whose session you deleted.
+
+{.table}
+| You see | What it means |
+| --- | --- |
+| **Project folder** | The folder of the project. It is never removed. |
+| **In use** | A session is working there now. Wait for it to finish, or stop it. |
+| **Locked** | Git keeps this worktree. Run `git worktree unlock` to remove it. |
+| **Folder gone** | Git still lists the worktree, and its folder was deleted. Removing it makes git forget it. |
+| **Last used** | When the last session of the worktree was active. **Unknown** when none of its sessions is left. |
+
+- To remove worktrees, tick one, several, or all of them with the box of the header, then click **Remove**. CodeAlta shows the list again before it removes anything.
+- A worktree with changes that are not committed stays. CodeAlta lists it afterwards and asks about it on its own. Files that git ignores are deleted with the folder.
+- Branches are kept. Tick the box of the confirmation to also delete the `alta/` branches that have no commit of their own.
+- The buttons of a row open the worktree in the code editor, show its changes, and copy its path.
+
+You cannot remove a worktree, or change its branch, while a session is working in it.
+
+### In the Changes tab
+
 The [Changes](workspace.md#changes-desktop) tab lists the worktrees of the project above the files.
 
 - Click a worktree to see its changes and its commits.
-- Click the trash button of a worktree to remove it. CodeAlta asks first, and asks again when the worktree has changes that are not committed.
+- Click the trash button of a worktree to remove it. CodeAlta asks first, and asks again when the worktree has changes that are not committed. Its `alta/` branch goes with it when it has no commit of its own.
 - Click the branch, there or under the prompt, to switch to another branch or to create one.
-
-You cannot remove a worktree, or change its branch, while a session is working in it.
 
 ## Where worktrees are stored
 
@@ -61,8 +79,8 @@ A worktree gets a name of two words and four random characters, such as `quiet-h
 ## Good to know
 
 - When a worktree is removed, its sessions continue in the project folder.
-- The code editor shows the files of the project folder. Use the Changes tab to read the files of a worktree.
-- The branch of a removed worktree is kept when it has commits that are in no other branch.
+- The code editor of a project shows the files of the project folder. To edit the files of a worktree, open it from the Worktrees window: it gets a tab of its own, with the name of the worktree.
+- A branch that has commits that are in no other branch is always kept.
 - A session started by an agent that works in a worktree works in the same worktree.
 - An agent can start sessions in worktrees. Ask in your own words, for example:
 

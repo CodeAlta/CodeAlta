@@ -85,6 +85,7 @@ test("branches are filtered by what is typed, and a new name is offered only whe
 
 test("a refusal is told in the words of the window, and what git said is kept for what has none", () => {
   assert.equal(worktreeFailure("in_use", "ignored", t), "A session is working there. Wait for it to finish, or stop it.");
+  assert.equal(worktreeFailure("locked", null, t), "Git keeps this worktree locked: unlock it with git to remove it.");
   assert.equal(worktreeFailure("failed", " error: Your local changes would be overwritten ", t), "error: Your local changes would be overwritten");
   assert.equal(worktreeFailure("failed", null, t), "Git could not do it.");
   assert.equal(worktreeFailure("something_new", "", t), "Git could not do it.");

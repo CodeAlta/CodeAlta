@@ -163,6 +163,7 @@ import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, Window
 import { WindowZoom, zoomWindow } from "./WindowZoom";
 import { createPluginEventsRead } from "./pluginEvents";
 import { ProjectContext } from "./ProjectContext";
+import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { createSpacesHub } from "./spaces/spacesHub";
@@ -454,13 +455,16 @@ function App() {
     fewer: (id: string) => setSubAgentExtra(id, 0),
   };
   const [notesVisible, setNotesVisible] = useState(true);
-  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "reminders" | "file" | null>(null);
+  const [dialog, writeDialog] = useState<"project" | "help" | "sessions" | "reminders" | "file" | "worktrees" | null>(null);
+  // The project whose git worktrees the window of the worktrees shows; it lasts as long as that window.
+  const [worktreesProject, setWorktreesProject] = useState<Readonly<{ id: string; name: string; path: string }> | null>(null);
   // The folder chosen with "+" that the Open project window opens on; it lasts as long as that window.
   const [projectFolder, setProjectFolder] = useState<string | null>(null);
   const addingFolder = useRef(false);
   function setDialog(value: typeof dialog) {
     batchDeletion.invalidate(); invalidateCreation(); writeDialog(value);
     if (value !== "project") setProjectFolder(null);
+    if (value !== "worktrees") setWorktreesProject(null);
   }
   const helpOrigin = useRef<{ element: HTMLElement | null; view: View; sessionId: string | null; scope: string | null } | null>(null);
   // The search of the window: where it starts while it is open, and what was chosen in it, which runs once it has closed.
@@ -1374,6 +1378,12 @@ function App() {
     if (!owned || !project || currentView.current !== "workspace") return;
     openEditor(project, { path: null, line: null, column: null, explorer: true });
   }
+  // The window of the git worktrees of a project: `/worktree`, and the menu of a project.
+  function openWorktrees(project: Readonly<{ id: string; name: string; path: string }> | null = editedProject()) {
+    if (!owned || !project || dialog || searchOpen || currentView.current !== "workspace" || modalDialogOpen()) return;
+    setDialog("worktrees");
+    setWorktreesProject({ id: project.id, name: project.name, path: project.path });
+  }
   function captureTabLifetime() {
     const revision = browserRevision.current;
     const epoch = currentHostEpoch.current;
@@ -1924,7 +1934,7 @@ function App() {
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
-      case "editFile": case "projectEditor": return view === "workspace" && !!editedProject();
+      case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "automations": case "workItems": case "issues": case "canvases": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
@@ -1964,6 +1974,7 @@ function App() {
       case "openProject": setDialog("project"); break;
       case "editFile": openFilePicker(); break;
       case "projectEditor": openProjectEditor(); break;
+      case "worktrees": openWorktrees(); break;
       case "newTerminal": { const origin = terminalOrigin(); if (origin) void createTerminal(origin.projectId, origin.sessionId); break; }
       case "automations": openAutomations(); break;
       case "workItems": openWorkItems(); break;
@@ -2904,6 +2915,7 @@ function App() {
               locked: projectRenamePending.current || !!uncertainProjectRename.current || projectRenameLocked
                 || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive,
+              worktrees: owned ? project => openWorktrees(project) : undefined,
               canvases: owned ? { list: () => canvasMenuItems(canvasCatalog, "Project"), open: (item, project) => openCanvas(item, { project: { id: project.id, path: project.path }, sessionId: null }),
                 all: () => openFile(canvasesTab) } : undefined,
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
@@ -3246,6 +3258,9 @@ function App() {
       onSave={() => void saveAndLeaveSpace(leavingSpace)} onDiscard={() => showSpace(leavingSpace.spaceId, leavingSpace.target, true)}
       onCancel={() => { if (!leavingSpace.busy) setLeavingSpace(null); }} />}
     {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}
+    {dialog === "worktrees" && worktreesProject && owned && status?.hostEpoch && <WorktreeManager epoch={status.hostEpoch} project={worktreesProject}
+      onClose={() => setDialog(null)} onChanged={refreshSessionList}
+      onShowChanges={row => { const project = worktreesProject; setDialog(null); showChanges(project, null, row.project ? null : row.folder); }} />}
     {dialog === "file" && filePickerProject && <OpenFileDialog epoch={status!.hostEpoch!} project={filePickerProject}
       observe={value => mutation?.capability.observe(value)} onClose={() => setDialog(null)}
       // A file picked for a project whose editor is not open opens it on that file alone, without the files of the project.

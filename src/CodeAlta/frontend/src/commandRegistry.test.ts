@@ -110,6 +110,10 @@ test("command search ranks the slash name first, needs every word and hides inte
   assert.equal(names("/edit")[0], "edit");
   assert.equal(names("open file")[0], "edit");
   assert.equal(names("open")[0], "open");
+  // The window of the worktrees is found by its slash name, and by what one comes to do there.
+  assert.equal(names("/worktree")[0], "worktree");
+  assert.equal(names("worktrees")[0], "worktree");
+  assert.ok(names("remove checkouts").includes("worktree"));
   assert.deepEqual(names("zzz-nothing"), []);
   assert.ok(names("session").includes("session_info") && names("session").includes("new_session"));
 });

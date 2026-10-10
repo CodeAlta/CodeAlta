@@ -26,6 +26,8 @@ export type ProjectRowAuthority = {
   /** Whether archiving and unarchiving ask first, which the menu says; they do when this is absent. */
   archiveAsks?: boolean;
   sessions?: ScopeSessionActions;
+  /** Opens the window of the git worktrees of a project. Absent where they cannot be managed. */
+  worktrees?: (project: WorkspaceProject) => void;
   /**
    * The canvases of plugins that are about a project: the first few are lines of the menu, and `more` says the page has others.
    * Absent where no canvas can be opened.
@@ -112,6 +114,14 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     dismiss();
     if (item) owner.canvases.open(item, value.project); else owner.canvases.all();
   }
+  // The window of the worktrees of this project: it lists, and asks before it removes anything.
+  function worktreesAction(original: Review) {
+    const value = review.current;
+    const owner = latest.current;
+    if (!value || value !== original || value.details || !owner?.worktrees || !current(value) || modalDialogOpen() || !projectRowAccess(value.project, owner.current()).open) return;
+    dismiss();
+    owner.worktrees(value.project);
+  }
   function action(kind: "open" | "details" | "rename" | "archive", original: Review) {
     const value = review.current;
     const owner = latest.current;
@@ -164,6 +174,7 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
         ...(favorite ? [{ key: "favorite", label: t(favorite.value ? "Remove from favorites" : "Add to favorites"), icon: "star" as const,
           onSelect: () => setFavorite(visible, !favorite.value) }] : []),
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
+        ...(authority?.worktrees && !project.archived ? [{ key: "worktrees", label: `${t("Worktrees")}…`, icon: "worktree" as const, onSelect: () => worktreesAction(visible) }] : []),
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
         { key: "archive", label: t(authority?.archiveAsks === false ? project.archived ? "Unarchive project" : "Archive project" : project.archived ? "Unarchive project…" : "Archive project…"),
           icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },
