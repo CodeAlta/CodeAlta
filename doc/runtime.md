@@ -699,10 +699,12 @@ behavior, not an inferred exact-run capability. Trusted TUI registrations are un
 Admission requires an exact session and bound provider identity and an `AgentCommandPermissionRequest`
 with complete nonblank command and working directory. `ApprovalId`, `Actions`, `Network`,
 `ProposedExecPolicyAmendment` and `ProposedNetworkPolicyAmendments` must all be null (not empty
-collections). Fields are validated without truncation or normalization: well-formed UTF-16, no
-NUL, and no controls or surrounding whitespace in identity fields. Conservative limits, in UTF-16
-code units, are 128 for session/provider/interaction/run identities, 4,096 for command, 1,024 for
-directory and 1,024 for optional reason. Other typed requests and raw/generic requests deny.
+collections). Fields are validated without normalization: well-formed UTF-16, no NUL, and no
+controls or surrounding whitespace in identity fields. Conservative limits, in UTF-16 code units, are
+128 for session/provider/interaction/run identities and 1,024 for directory and grant root. A command
+longer than 4,096 units, or a reason longer than 1,024, is not denied: the snapshot keeps its start (cut
+without splitting a character) and says so (`SessionPermissionSnapshot.Shortened`), and the card warns
+that allowing it allows more than it shows. Other typed requests and raw/generic requests deny.
 Only **Allow Once**, **Deny** and **Cancel** resolve owned records; the existing trusted
 `ResolveAsync` cannot grant **Allow for Session** on them. Immutable validated scalar snapshots
 are retained rather than mutable request collections.

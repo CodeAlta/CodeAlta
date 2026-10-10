@@ -1249,6 +1249,12 @@ export const messages = dictionary({
   "Pending command permissions": ["Permisos de comandos pendientes", "Autorisations de commandes en attente", "Ausstehende Befehlsberechtigungen", "保留中のコマンド権限", "待处理命令权限"],
   "Allow this command?": ["¿Permitir este comando?", "Autoriser cette commande ?", "Diesen Befehl erlauben?", "このコマンドを許可しますか？", "允许此命令吗？"],
   "Allow file changes under this folder?": ["¿Permitir cambios de archivos en esta carpeta?", "Autoriser les modifications de fichiers dans ce dossier ?", "Dateiänderungen in diesem Ordner erlauben?", "このフォルダー内のファイル変更を許可しますか？", "允许更改此文件夹中的文件吗？"],
+  "This request is too long to show in full: allowing it allows more than what is shown here.": [
+    "Esta solicitud es demasiado larga para mostrarse completa: permitirla permite más de lo que se muestra aquí.",
+    "Cette demande est trop longue pour être affichée en entier : l'autoriser autorise plus que ce qui est affiché ici.",
+    "Diese Anfrage ist zu lang, um vollständig angezeigt zu werden: Wer sie erlaubt, erlaubt mehr als hier angezeigt wird.",
+    "このリクエストは長すぎて全体を表示できません。許可すると、ここに表示されている以上の内容が許可されます。",
+    "此请求过长，无法完整显示：允许它将允许比此处显示的更多内容。"],
   "Or deny, and tell the agent what to do instead": ["O deniega e indica al agente qué hacer en su lugar", "Ou refusez, et dites à l'agent quoi faire à la place", "Oder ablehnen und dem Agenten sagen, was er stattdessen tun soll", "または拒否して、代わりに何をするかエージェントに伝える", "或拒绝，并告诉代理改做什么"],
   "Arrow keys choose, Enter answers, Escape denies.": ["Las flechas eligen, Intro responde, Esc deniega.", "Les flèches choisissent, Entrée répond, Échap refuse.", "Pfeiltasten wählen, Eingabe antwortet, Esc lehnt ab.", "矢印キーで選択、Enter で回答、Esc で拒否。", "方向键选择，Enter 回答，Esc 拒绝。"],
   "Remote Control": ["Control remoto", "Contrôle à distance", "Fernsteuerung", "リモートコントロール", "远程控制"],

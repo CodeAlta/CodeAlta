@@ -437,6 +437,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .command-permission-panel h3 { margin: 0 0 6px; font-size: 14px; }
 .command-permission-panel pre { max-height: 8.5em; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .command-permission-panel > p { margin: 4px 0 0; }
+.command-permission-panel > p.permission-shortened { color: var(--red); font-weight: 600; }
 .command-permission-panel code { overflow-wrap: anywhere; }
 .command-permission-panel .permission-choices { display: grid; gap: 6px; margin-top: 10px; }
 /* The list can have the focus without a choice having it: the card says so. */

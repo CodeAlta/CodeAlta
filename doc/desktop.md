@@ -3435,6 +3435,8 @@ Add **`--review-owned-command-permissions`** to the complete owned-mode command 
 into manual review of supported command and file-change requests. The selected-session review shows a
 command with its complete command line, working directory and optional reason, and a file change with
 the complete root it asks to write under and its optional reason, with **Allow once / Deny** (the RPC still takes **Cancel**).
+A command longer than 4,096 characters, or a reason longer than 1,024, is shown cut (`shortened` on the wire)
+with a warning, in red, that allowing it allows more than what is shown: it is not denied unseen.
 Each kind is held to its own whole shape: a command that carries parsed actions, network access or a
 policy amendment is refused rather than shown as less than it is, and a request that arrives with the
 fields of the other kind, or without its own, is refused with the window it came in.

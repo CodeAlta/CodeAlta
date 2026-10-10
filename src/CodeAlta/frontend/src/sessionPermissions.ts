@@ -202,7 +202,8 @@ function validCommand(entry: SessionPermissionCommand, session: string): boolean
     && (h.runId === null || identity(h.runId)) && guid(h.operationId) && guid(h.runtimeInstanceId) && guid(h.attemptId)
     && typeof h.attachmentGeneration === "string" && /^[1-9][0-9]{0,18}$/.test(h.attachmentGeneration)
     && BigInt(h.attachmentGeneration) <= 9223372036854775807n && identity(entry.providerId)
-    && shaped(entry) && (entry.reason === null || text(entry.reason, 1024, false));
+    && shaped(entry) && (entry.reason === null || text(entry.reason, 1024, false))
+    && typeof entry.shortened === "boolean";
 }
 // Each kind carries its own complete shape and nothing of the other's: a command has its command line and its
 // folder, a file change has the root it asks to write under.

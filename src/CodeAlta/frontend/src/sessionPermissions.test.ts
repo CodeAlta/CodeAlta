@@ -11,7 +11,7 @@ function command(): SessionPermissionCommand {
   return { handle: { operationId: epoch, runtimeInstanceId: runtime, attachmentGeneration: "9223372036854775807",
     sessionId: "selected", runId: null, interactionId: "interaction", attemptId: epoch },
     providerId: "fake", kind: "commandExecution", command: "inert command\ncomplete", workingDirectory: "Q:\\fixture",
-    grantRoot: null, reason: null };
+    grantRoot: null, reason: null, shortened: false };
 }
 function fileChange(): SessionPermissionCommand {
   return { ...command(), kind: "fileChange", command: null, workingDirectory: null, grantRoot: "Q:\\fixture" };
@@ -199,7 +199,9 @@ test("malformed command windows are rejected whole without enabling approval", (
     // Neither kind may carry the other's fields, and neither may arrive without its own.
     page([{ ...entry, kind: "fileChange" }]), page([{ ...entry, grantRoot: "Q:\\fixture" }]),
     page([{ ...fileChange(), grantRoot: null }]), page([{ ...fileChange(), command: "inert" }]),
-    page([{ ...fileChange(), workingDirectory: "Q:\\fixture" }]), page([{ ...entry, kind: "somethingElse" }])];
+    page([{ ...fileChange(), workingDirectory: "Q:\\fixture" }]), page([{ ...entry, kind: "somethingElse" }]),
+    // Whether the request is shown cut is always said.
+    page([{ ...entry, shortened: undefined as unknown as boolean }]), page([{ ...entry, shortened: "true" as unknown as boolean }])];
   for (const result of invalid) {
     const states: PermissionReviewState[] = []; let resolutions = 0;
     const scope = f.reviewer(async () => result, async () => { resolutions++; throw Error("forbidden"); })

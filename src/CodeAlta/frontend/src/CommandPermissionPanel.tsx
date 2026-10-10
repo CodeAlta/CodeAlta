@@ -169,6 +169,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
         <p className="detail"><code data-permission-directory>{entry.workingDirectory}</code></p></>
       : <pre data-permission-grant-root>{entry.grantRoot}</pre>}
     {entry.reason !== null && entry.reason.trim() && <p className="detail" data-permission-reason>{entry.reason}</p>}
+    {entry.shortened === true && <p className="permission-shortened" role="note" data-permission-shortened>
+      {t("This request is too long to show in full: allowing it allows more than what is shown here.")}</p>}
     <div ref={choices} className="permission-choices" role="group" tabIndex={-1} aria-labelledby={`${sessionId}-permission-question`} onKeyDown={move}>
       {decisions.map(([decision, label], index) => <button key={decision} type="button" data-permission-choice data-permission-decision={decision}
         disabled={!ready} tabIndex={index === 0 ? 0 : -1}

@@ -1237,6 +1237,30 @@ public sealed class OwnedSessionCommandServiceTests
     }, reviewPermissions: true);
 
     [TestMethod]
+    public Task OwnedPermission_TooLongToShowInFull_WaitsForTheUserShortened() => Fixture.RunAsync(async f =>
+    {
+        // A long heredoc, with a long reason: the request is shown cut, says so, and waits for the user instead of
+        // being denied unseen.
+        f.Provider.RequestedCommand = "cat > notes.md <<'EOF'\n" + new string('x', 20_000) + "\nEOF";
+        f.Provider.RequestedReason = new string('r', 5_000);
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var pending = f.Track(f.Provider.SendPermission!);
+        var permissions = f.Host.RuntimeService.Permissions;
+        var entry = (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries.Single();
+        Assert.IsTrue(entry.Request.Shortened);
+        Assert.AreEqual(SessionPermissionService.OwnedCommandLimit, entry.Request.Command!.Length);
+        StringAssert.StartsWith(entry.Request.Command, "cat > notes.md <<'EOF'\nxxx");
+        Assert.AreEqual(SessionPermissionService.OwnedReasonLimit, entry.Request.Reason!.Length);
+        Assert.IsFalse(pending.IsCompleted);
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(pending)).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    }, reviewPermissions: true);
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public Task OwnedPermission_SendReturnCancelsPendingAndOldDelegateCannotJoinReusedCoordinator(bool failSend) => Fixture.RunAsync(async f =>
@@ -2259,8 +2283,10 @@ public sealed class OwnedSessionCommandServiceTests
         internal AgentSendOptions? FirstSendOptions { get; private set; }
         internal AgentSendOptions? SecondSendOptions { get; private set; }
         internal Task? AbortDependency { get; set; }
+        internal string RequestedCommand { get; set; } = "inert fixture command";
+        internal string RequestedReason { get; set; } = "fixture";
         internal AgentCommandPermissionRequest CommandRequest() => new(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
-            null, "owned-permission", null, "inert fixture command", Options!.WorkingDirectory, null, "fixture", null, null, null);
+            null, "owned-permission", null, RequestedCommand, Options!.WorkingDirectory, null, RequestedReason, null, null, null);
         internal TaskCompletionSource PreparationStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ReleasePreparation { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource SendStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

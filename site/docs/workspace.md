@@ -652,7 +652,9 @@ folder it would write under, and what the agent says it is for. Answer with **Al
 write in the last field what the agent should do instead and press Enter: the request is denied and your text
 is sent to the agent. A denied request does not stop the agent, which goes on without it: to stop it, use the
 Stop button of the prompt. The choices answer a moment after the request appears,
-so a click meant for something else does not answer it.
+so a click meant for something else does not answer it. A very long command (more than 4,096 characters, such
+as a script written in one command) is shown cut, with a warning in red: allowing it allows more than what you
+see, so deny it unless you know what it does.
 
 When you have no prompt draft, the request takes the focus: press an arrow key to reach its choices, then
 Enter answers with the chosen one; 1 and 2 answer directly, and Escape denies. A key you were typing when the

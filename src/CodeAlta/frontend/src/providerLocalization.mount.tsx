@@ -32,7 +32,7 @@ const inputPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMo
 ] }] };
 const permissionPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMore: false, entries: [{ handle, providerId: "Settings",
   kind: "commandExecution", grantRoot: null,
-  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny" }] };
+  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny", shortened: false }] };
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [sessionId, select] = useState("Settings");
