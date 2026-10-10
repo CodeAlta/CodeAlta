@@ -149,6 +149,26 @@ public sealed class ClaudeCodeTranscriptRelocationTests
     }
 
     [TestMethod]
+    public async Task ProviderRuntime_MovesTheTranscriptOfASessionItsStateNames()
+    {
+        var source = WriteTranscript(OldDirectory, "conversation");
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-code",
+            GetEnvironmentVariable = name => name == ClaudeCodeProjectFolders.ConfigDirectoryVariable ? _root : null,
+        });
+        var state = new CodeAlta.Agent.Runtime.AgentSessionState { SessionId = "codealta-session", ProviderKey = "claude-code",
+            ProtocolFamily = "claude-code", ProviderState = new ClaudeCodeProviderState(SessionId, 2, 2).ToJson(), UpdatedAt = DateTimeOffset.UtcNow };
+
+        Assert.IsNull(await runtime.RelocateSessionAsync(state, OldDirectory, NewDirectory));
+        Assert.AreEqual("conversation", File.ReadAllText(TranscriptPath(NewDirectory)));
+        Assert.IsFalse(File.Exists(source));
+        Assert.IsNull(await runtime.RelocateSessionAsync(state with { ProviderState = null }, NewDirectory, OldDirectory),
+            "A session that has no conversation of the CLI has nothing to move.");
+        Assert.IsTrue(File.Exists(TranscriptPath(NewDirectory)));
+    }
+
+    [TestMethod]
     public async Task Relocate_TakesTheOnlyCopyOfAnotherFolder()
     {
         var source = WriteTranscript(@"C:\elsewhere", "content");

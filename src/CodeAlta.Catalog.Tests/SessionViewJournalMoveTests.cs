@@ -7,6 +7,7 @@ namespace CodeAlta.Catalog.Tests;
 public sealed class SessionViewJournalMoveTests
 {
     private static readonly DateTimeOffset CreatedAt = new(2026, 10, 10, 9, 0, 0, TimeSpan.Zero);
+    private static readonly SessionViewMove Target = new("target", @"C:\code\target", null, null, null);
 
     [TestMethod]
     public async Task MoveSessionAsync_RewritesHeaderSummaryAndState_AndKeepsHistory()
@@ -19,7 +20,7 @@ public sealed class SessionViewJournalMoveTests
             AgentActivityKind.Turn, AgentActivityPhase.Started, "turn", null, "Turn", null);
         await store.AppendEventsAsync("codex", "codex", session.SessionId, [turn, turn with { Phase = AgentActivityPhase.Completed }]);
 
-        await journal.MoveSessionAsync(session, "target-project", @"C:\code\target", @"C:\code\target-tree", "Moved title");
+        await journal.MoveSessionAsync(session, new("target-project", @"C:\code\target", @"C:\code\target-tree", "Moved title", "Moved summary"));
 
         var header = await journal.ReadHeaderAsync(session.SessionId, CreatedAt);
         Assert.IsNotNull(header);
@@ -36,6 +37,7 @@ public sealed class SessionViewJournalMoveTests
         Assert.AreEqual(@"C:\code\target", summary.WorkingDirectory);
         Assert.AreEqual(@"C:\code\target-tree", summary.WorktreeDirectory);
         Assert.AreEqual("Moved title", summary.Title);
+        Assert.AreEqual("Moved summary", summary.Summary);
         Assert.AreEqual("opaque-provider", (await fresh.GetStateAsync(session.SessionId))!.ProviderSessionId,
             "The provider continuation is kept: the conversation goes on in the new folder.");
         Assert.AreEqual("acceptEdits", (await journal.ReadLatestStateAsync(session.SessionId, CreatedAt))!.PermissionMode);
@@ -50,12 +52,27 @@ public sealed class SessionViewJournalMoveTests
         var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = root.Path }).JournalStore;
         var session = await CreateSessionAsync(journal, worktree: Path.Combine(root.Path, "tree"));
 
-        await journal.MoveSessionAsync(session, "target-project", @"C:\code\target", worktreeDirectory: null, title: null);
+        await journal.MoveSessionAsync(session, new("target-project", @"C:\code\target", WorktreeDirectory: null, Title: null, Summary: null));
 
         Assert.AreEqual("Saved title", (await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!.Title);
         var summary = await journal.CreateSessionStore().GetSessionSummaryAsync(session.SessionId);
         Assert.AreEqual("Saved title", summary!.Title);
         Assert.IsNull(summary.WorktreeDirectory);
+    }
+
+    [TestMethod]
+    public async Task MoveSessionAsync_MovesASessionThatNeverRan()
+    {
+        using var root = TempDirectory.Create();
+        var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = root.Path }).JournalStore;
+        var session = await CreateSessionAsync(journal, worktree: null, ran: false);
+
+        await journal.MoveSessionAsync(session, Target);
+
+        Assert.AreEqual("target", (await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!.ProjectRef);
+        var state = await journal.CreateSessionStore().GetStateAsync(session.SessionId);
+        Assert.IsNotNull(state);
+        Assert.IsNull(state.ProviderSessionId, "A session that never ran has no conversation to continue.");
     }
 
     [TestMethod]
@@ -70,22 +87,22 @@ public sealed class SessionViewJournalMoveTests
         await journal.AppendStateAsync(session, new SessionViewLocalState { QueuedPrompts = [new()
             { QueueItemId = "keep", Kind = "prompt", Prompt = "Later", State = "queued", CreatedAt = CreatedAt }] });
         var queued = await File.ReadAllBytesAsync(path);
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, "target", @"C:\code\target", null, null));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target));
         CollectionAssert.AreEqual(queued, await File.ReadAllBytesAsync(path), "A refused move leaves the journal as it was.");
         await journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = "codex" });
 
         var turn = new AgentActivityEvent(new("codex"), session.SessionId, CreatedAt, new("run"),
             AgentActivityKind.Turn, AgentActivityPhase.Started, "turn", null, "Turn", null);
         await store.AppendEventsAsync("codex", "codex", session.SessionId, [turn]);
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, "target", @"C:\code\target", null, null));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target));
 
         var global = new SessionViewDescriptor { SessionId = session.SessionId, Kind = SessionViewKind.GlobalSession,
             ProviderId = "codex", WorkingDirectory = root.Path, CreatedAt = CreatedAt };
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(global, "target", @"C:\code\target", null, null));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(global, Target));
         Assert.AreEqual(@"C:\code\source", (await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!.WorkingDirectory);
     }
 
-    private static async Task<SessionViewDescriptor> CreateSessionAsync(SessionViewJournalStore journal, string? worktree)
+    private static async Task<SessionViewDescriptor> CreateSessionAsync(SessionViewJournalStore journal, string? worktree, bool ran = true)
     {
         var session = new SessionViewDescriptor
         {
@@ -107,7 +124,7 @@ public sealed class SessionViewJournalMoveTests
         await store.UpsertSessionAsync(new() { SessionId = session.SessionId, ProviderId = new("codex"), ProviderKey = "codex",
             ProtocolFamily = "codex", WorkingDirectory = session.WorkingDirectory, WorktreeDirectory = worktree, Title = "Saved title",
             CreatedAt = CreatedAt, UpdatedAt = CreatedAt });
-        await store.UpsertStateAsync(new() { SessionId = session.SessionId, ProviderKey = "codex", ProtocolFamily = "codex",
+        if (ran) await store.UpsertStateAsync(new() { SessionId = session.SessionId, ProviderKey = "codex", ProtocolFamily = "codex",
             ProviderSessionId = "opaque-provider", UpdatedAt = CreatedAt });
         await journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = "codex", PermissionMode = "acceptEdits" });
         return session;
