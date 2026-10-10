@@ -915,13 +915,22 @@ that is no session gets `alta.ui.error` with the code `ui.noSession`, and a sess
 reviews gets it with the code `ui.activateDenied` (exit code 4): it does not drive the window where its
 requests are answered. See `doc/desktop.md`, UI tools.
 
-The built-in statistics plugin contributes a small `statistics` root:
+The built-in statistics plugin contributes the `statistics` root: the numbers of the sessions that CodeAlta keeps (`doc/statistics.md`), and the estimate of the size of a text.
 
 ```text
+alta statistics summary --period 7d --compare previous
+alta statistics series tokens --period 90d --by week --group model
+alta statistics top tools --by time --limit 5 --project CodeAlta
+alta statistics details shell-program --period 30d --limit 10
+alta statistics session <id> --with-children
+alta statistics status
+alta statistics history read --days 90
 alta statistics estimate "Summarize this change."
 ```
 
-It returns byte, character, and approximate-token estimates without mutating state.
+Each command writes **one JSONL record**, `alta.statistics.summary`, `.series`, `.top`, `.details`, `.session`, `.status`, `.history`, `.forgotten` or `.estimate`, with the keys of the result in camelCase (`query` with the period that was used, the frequency, the compared period and `coverage`; then the tiles, the buckets and lines, or the rows). They read the same tables as the page, work without a window on any host that has the database, and are bounded: at most 5,000 buckets, 21 lines of a series, 500 rows of a table. A cost is given for each unit and never added across units. `coverage.complete` is false while the user has not chosen how much history to read, or while the period starts before the day the numbers are complete from (`alta statistics status`); `query.ignoredFilters` names a filter the numbers cannot honor. An invalid period, metric, group or filter is exit code 2 with an `alta.error` record.
+
+`history read (--days <N> | --all | --from-today)`, `history pause`, `history resume`, `history stop` and `history forget-deleted` change what CodeAlta keeps: an agent runs them only when the user asks for it. They work only where the statistics are read (CodeAlta Desktop) and say `statistics.notRunning` elsewhere. `estimate` returns byte, character, and approximate-token estimates without mutating state.
 
 ## Capability policy
 

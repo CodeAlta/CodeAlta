@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Plugin.Statistics\CodeAlta.Plugin.Statistics.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
+    <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
   </ItemGroup>
 
 </Project>

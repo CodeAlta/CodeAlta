@@ -29,6 +29,33 @@ public sealed class DesktopPluginsTests
     }
 
     [TestMethod]
+    public async Task TheJournalsOfTheStatistics_AreTheOnesOfTheStateRootOfTheInstance()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-journals-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // The developer instance shares the global root and keeps its sessions under a state root of its own.
+            var global = Path.Combine(root, "global");
+            var state = Path.Combine(global, "dev");
+            Directory.CreateDirectory(Path.Combine(global, "sessions", "2026", "10", "09"));
+            Directory.CreateDirectory(Path.Combine(state, "sessions", "2026", "10", "09"));
+            await File.WriteAllTextAsync(Path.Combine(global, "sessions", "2026", "10", "09", "normal-session.jsonl"), "{}\n");
+            await File.WriteAllTextAsync(Path.Combine(state, "sessions", "2026", "10", "09", "dev-session.jsonl"), "{}\n");
+
+            var normal = DesktopPlugins.CreateJournalCatalog(new CodeAlta.Catalog.CatalogOptions { GlobalRoot = global });
+            var developer = DesktopPlugins.CreateJournalCatalog(new CodeAlta.Catalog.CatalogOptions { GlobalRoot = global, StateRoot = state });
+
+            Assert.AreEqual("normal-session", (await normal.ListAsync().ToListAsync()).Single().SessionId);
+            Assert.AreEqual("dev-session", (await developer.ListAsync().ToListAsync()).Single().SessionId);
+            Assert.IsNull(await developer.GetAsync("normal-session"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task AltaTool_RunsTheCommandsOfTheHostsPlugins_AndPluginsCanRunAltaCommands()
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-plugins-" + Guid.NewGuid().ToString("N"));

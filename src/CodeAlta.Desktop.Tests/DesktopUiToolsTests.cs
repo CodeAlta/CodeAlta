@@ -367,6 +367,13 @@ public sealed class DesktopUiToolsTests
         var definition = DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false)[^1];
         Assert.AreEqual(typeof(DesktopUiPlugin), definition.PluginType);
         Assert.IsInstanceOfType<DesktopUiPlugin>(definition.Factory());
+
+        // With the journals of the instance the Statistics plugin keeps the statistics of the sessions, in the same place of the list.
+        var journals = DesktopPlugins.CreateJournalCatalog(new CodeAlta.Catalog.CatalogOptions { GlobalRoot = temp.Path });
+        CollectionAssert.AreEqual(new[] { "git", "jira", "mcp", "statistics", "ui" }, DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: false, journals).Select(static plugin => plugin.Id).ToArray());
+        var statistics = DesktopPlugins.ForWindow(ui, sessions, reviewsCommands: true, journals).Single(static plugin => plugin.Id == "statistics");
+        Assert.AreEqual(typeof(CodeAlta.Plugin.Statistics.StatisticsPlugin), statistics.PluginType);
+        Assert.IsNull(((CodeAlta.Plugin.Statistics.StatisticsPlugin)statistics.Factory()).Statistics, "Nothing runs before the plugin is activated.");
     }
 
     [TestMethod]

@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
@@ -59,12 +60,40 @@ internal static class DesktopPlugins
     /// Whether the user reviews the commands of the sessions. Such a host gives no session the tools that drive
     /// the window: a session could answer the review itself.
     /// </param>
+    /// <param name="journals">
+    /// The journals of the session store of this instance. The Statistics plugin of the window reads them to keep the
+    /// statistics of every session; without them it keeps the cards of the timeline and reads nothing.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="ui"/> or <paramref name="sessions"/> is null.</exception>
-    internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands)
+    internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands, ISessionJournalCatalog? journals = null)
     {
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(sessions);
-        return reviewsCommands ? BuiltIns : [.. BuiltIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
+        var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals) : definition)];
+        return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
+    }
+
+    /// <summary>The Statistics plugin that keeps the statistics of the sessions of the journals it is given.</summary>
+    /// <param name="journals">The journals of the session store of this instance.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="journals"/> is null.</exception>
+    internal static BuiltInPluginDefinition StatisticsDefinition(ISessionJournalCatalog journals)
+    {
+        ArgumentNullException.ThrowIfNull(journals);
+        return new()
+        {
+            Id = "statistics", DisplayName = "Statistics",
+            Description = "Projects transient per-turn and session statistics from normalized agent events, and keeps the statistics of every session.",
+            PluginType = typeof(StatisticsPlugin), Factory = () => StatisticsPlugin.CreateForDesktop(journals),
+        };
+    }
+
+    /// <summary>The journals of the session store of an instance: the folder its sessions are written to.</summary>
+    /// <param name="catalog">The folders of the instance; the developer instance has a state root of its own.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="catalog"/> is null.</exception>
+    internal static ISessionJournalCatalog CreateJournalCatalog(CodeAlta.Catalog.CatalogOptions catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        return new CodeAlta.Agent.Runtime.FileSystemSessionJournalCatalog(new CodeAlta.Agent.Runtime.AgentRuntimePathLayout(catalog.StateRoot));
     }
 
     /// <summary>

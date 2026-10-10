@@ -1,6 +1,6 @@
 # Statistics: the journal reader and the facts of a session
 
-This page documents the foundation of the Statistics history in `src/CodeAlta.Plugin.Statistics`: a streaming reader of session journals and a reducer that turns the records of a session into additive facts, plus the host catalog that lists the journals. It stores nothing and runs no job: the store, the job, the `alta statistics` commands and the canvas build on it.
+This page documents the foundation of the Statistics history in `src/CodeAlta.Plugin.Statistics`: a streaming reader of session journals and a reducer that turns the records of a session into additive facts, plus the host catalog that lists the journals. It stores nothing and runs no job: the store, the history job, the flow and the `alta statistics` commands, described in `doc/statistics.md`, build on it.
 
 | Piece | Where | Role |
 | --- | --- | --- |

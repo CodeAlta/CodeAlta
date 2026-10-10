@@ -10,10 +10,12 @@ using Command = XenoAtom.CommandLine.Command;
 namespace CodeAlta.Plugin.Statistics;
 
 /// <summary>
-/// Built-in plugin that projects per-turn and session statistics as transient timeline cards.
+/// Built-in plugin that projects per-turn and session statistics as transient timeline cards and, in CodeAlta Desktop, keeps
+/// the statistics of every session up to date in the application database: the history of the sessions the user chose to read,
+/// and the flow of the sessions that write now. <c>alta statistics</c> reads them.
 /// </summary>
-[Plugin("statistics", DisplayName = "Statistics", Description = "Projects transient per-turn and session statistics from normalized agent events.")]
-public sealed class StatisticsPlugin : PluginBase
+[Plugin("statistics", DisplayName = "Statistics", Description = "Projects transient per-turn and session statistics from normalized agent events, and keeps the statistics of every session.")]
+public sealed partial class StatisticsPlugin : PluginBase
 {
     private const string ProjectionName = "statistics";
     private const string RenderTarget = "codealta.statistics.turn.v1";
@@ -47,29 +49,19 @@ public sealed class StatisticsPlugin : PluginBase
     {
         yield return new PluginAltaCommandContribution
         {
-            Path = "statistics estimate",
-            Description = "Estimate text bytes and tokens using CodeAlta's current statistics approximation.",
+            Path = "statistics",
+            Description = "The statistics of the sessions: summary, series, top, session, status, history, and the estimate of the size of a text.",
             Policy = new PluginAltaCommandPolicy
             {
                 RequiresInProcessRuntime = false,
+                IsMutating = true,
                 SupportsCatalogOnlyContext = true,
             },
-            CreateCommandNode = CreateAltaStatisticsCommand,
+            CreateCommandNode = context => StatisticsCommands.Create(this, context),
         };
     }
 
-    private static Command CreateAltaStatisticsCommand(PluginAltaCommandContext context)
-    {
-        var command = new Command("statistics", "Statistics plugin commands.")
-        {
-            new CommandUsage(),
-            new HelpOption(),
-        };
-        command.Add(CreateEstimateCommand(context));
-        return command;
-    }
-
-    private static Command CreateEstimateCommand(PluginAltaCommandContext context)
+    internal static Command CreateEstimateCommand(PluginAltaCommandContext context)
     {
         string? text = null;
         var command = new Command("estimate", "Estimate UTF-8 bytes and approximate tokens for text.")

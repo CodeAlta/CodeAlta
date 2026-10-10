@@ -362,7 +362,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = false, HasInteractiveUi = true,
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
-                PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions), PluginSafeMode = DesktopPlugins.SafeMode,
+                PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, DesktopPlugins.CreateJournalCatalog(catalog)), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),

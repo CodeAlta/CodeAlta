@@ -1168,6 +1168,13 @@ records; a turn that begins further back gets no row) and returns at most 32 row
 With the Statistics plugin turned off in **Settings > Plugins**, the next read (the next turn, or
 reopening the session) returns no rows.
 
+The same plugin also keeps the statistics of all the sessions in the application database: the history job, the
+flow of the sessions that write and the `StatisticsQueries` a statistics page asks run only in this application,
+through `DesktopPlugins.StatisticsDefinition`, which hands the plugin the journals of the session store of the
+instance (`CatalogOptions.StateRoot`, so the developer instance reads its own sessions). The plugin is the owner
+(`StatisticsPlugin.Statistics`, an `IStatisticsService`: status, events, controls, queries); `doc/statistics.md`
+describes the store, the job and the commands.
+
 ### Persisted event history
 
 Selecting a session shows its latest turn: bounded pages of its persisted canonical events, up to 1,000
