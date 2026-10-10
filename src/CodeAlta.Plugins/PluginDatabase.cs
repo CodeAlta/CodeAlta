@@ -11,8 +11,15 @@ namespace CodeAlta.Plugins;
 /// The tables of one plugin in the application database: the <see cref="IPluginDatabase"/> a host gives a plugin.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The plugin is identified by its runtime key. The same plugin therefore finds the same tables after every
 /// restart, in the database of the instance it runs in. Operations end when the lifetime of the plugin ends.
+/// </para>
+/// <para>
+/// When the file of the database is replaced while the plugin runs (<see cref="IApplicationDatabase.Generation"/>
+/// changes: the file was damaged, or gone), the last migration of the plugin runs again before its next read or
+/// write: the tables exist again, empty or as the restored copy had them.
+/// </para>
 /// </remarks>
 public sealed class PluginDatabase : IPluginDatabase
 {
@@ -25,6 +32,10 @@ public sealed class PluginDatabase : IPluginDatabase
 
     private readonly IApplicationDatabase _database;
     private readonly CancellationToken _lifetime;
+
+    // The last migration the plugin asked for, and the generation of the file it ran on: a plugin migrates when it
+    // is activated, and a file that is replaced while it runs (damage) has none of its tables, or older ones.
+    private Migration? _migration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginDatabase"/> class.
@@ -116,13 +127,7 @@ public sealed class PluginDatabase : IPluginDatabase
         ArgumentOutOfRangeException.ThrowIfLessThan(version, 1);
         ArgumentNullException.ThrowIfNull(migrate);
         using var linked = Link(cancellationToken);
-        await _database.MigrateAsync(
-                Owner,
-                TablePrefix,
-                version,
-                (connection, from, to, token) => migrate(connection, from, to, token),
-                linked.Token)
-            .ConfigureAwait(false);
+        await MigrateCoreAsync(version, migrate, linked.Token).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -130,7 +135,18 @@ public sealed class PluginDatabase : IPluginDatabase
     {
         ArgumentNullException.ThrowIfNull(read);
         using var linked = Link(cancellationToken);
-        return await _database.ReadAsync(Owner, read, linked.Token).ConfigureAwait(false);
+        for (var attempt = 0; ; attempt++)
+        {
+            await MigrateAgainIfReplacedAsync(linked.Token).ConfigureAwait(false);
+            try
+            {
+                return await _database.ReadAsync(Owner, read, linked.Token).ConfigureAwait(false);
+            }
+            catch (SqliteException) when (attempt == 0 && IsReplacedSinceMigration())
+            {
+                // The file was replaced under this read, which then read a file without the tables of the plugin.
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -138,11 +154,51 @@ public sealed class PluginDatabase : IPluginDatabase
     {
         ArgumentNullException.ThrowIfNull(write);
         using var linked = Link(cancellationToken);
-        await _database.WriteAsync(Owner, write, linked.Token).ConfigureAwait(false);
+        for (var attempt = 0; ; attempt++)
+        {
+            await MigrateAgainIfReplacedAsync(linked.Token).ConfigureAwait(false);
+            try
+            {
+                await _database.WriteAsync(Owner, write, linked.Token).ConfigureAwait(false);
+                return;
+            }
+            catch (SqliteException) when (attempt == 0 && IsReplacedSinceMigration())
+            {
+                // The file was replaced under this write: it was rolled back, on a file without the tables of the plugin.
+            }
+        }
+    }
+
+    private async ValueTask MigrateCoreAsync(int version, PluginDatabaseMigration migrate, CancellationToken cancellationToken)
+    {
+        // The generation is read first: a file that is replaced while the steps run is seen as replaced, and the
+        // steps, which then do nothing, run once more.
+        var generation = _database.Generation;
+        await _database.MigrateAsync(
+                Owner,
+                TablePrefix,
+                version,
+                (connection, from, to, token) => migrate(connection, from, to, token),
+                cancellationToken)
+            .ConfigureAwait(false);
+        Volatile.Write(ref _migration, new Migration(version, migrate, generation));
+    }
+
+    private bool IsReplacedSinceMigration()
+        => Volatile.Read(ref _migration) is { } migration && migration.Generation != _database.Generation;
+
+    private async ValueTask MigrateAgainIfReplacedAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _migration) is { } migration && migration.Generation != _database.Generation)
+        {
+            await MigrateCoreAsync(migration.Version, migration.Migrate, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private CancellationTokenSource Link(CancellationToken cancellationToken)
         => CancellationTokenSource.CreateLinkedTokenSource(_lifetime, cancellationToken);
+
+    private sealed record Migration(int Version, PluginDatabaseMigration Migrate, int Generation);
 
     private static bool IsPlainWord(string id)
     {

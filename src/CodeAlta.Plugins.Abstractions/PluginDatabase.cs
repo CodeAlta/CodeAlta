@@ -14,6 +14,8 @@ namespace CodeAlta.Plugins.Abstractions;
 /// <remarks>
 /// A migration that creates a table writes <c>if (fromVersion &lt; 1) { create }</c>, then
 /// <c>if (fromVersion &lt; 2) { alter }</c>, and so on: it runs once for a plugin that is several versions behind.
+/// The host keeps the steps while the plugin runs, and runs them again when the file of the database had to be
+/// replaced (it was damaged): they depend on nothing but their arguments.
 /// </remarks>
 public delegate ValueTask PluginDatabaseMigration(
     SqliteConnection connection,
@@ -64,6 +66,12 @@ public interface IPluginDatabase
     /// <paramref name="migrate"/> once, in a write transaction, when that version is lower than
     /// <paramref name="version"/>; the version is recorded with the changes, or neither is.
     /// </summary>
+    /// <remarks>
+    /// A plugin migrates once, when it is activated. When the file of the database is replaced while the plugin
+    /// runs (it was damaged), the host runs the last migration again before the next read or write of the plugin:
+    /// the tables exist again, empty or as the restored copy had them. A plugin that keeps in memory what it wrote
+    /// reads it again from its tables when it matters.
+    /// </remarks>
     /// <param name="version">The version the plugin needs; at least 1.</param>
     /// <param name="migrate">The steps.</param>
     /// <param name="cancellationToken">A token to cancel the migration.</param>
@@ -72,8 +80,9 @@ public interface IPluginDatabase
     /// <exception cref="ArgumentNullException"><paramref name="migrate"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">
     /// The host has no database; the recorded version is higher than <paramref name="version"/> (the tables were
-    /// written by a newer build of the plugin); or the steps created, changed or dropped an object whose name does
-    /// not start with <see cref="TablePrefix"/>. The transaction is rolled back.
+    /// written by a newer build of the plugin); the steps created, changed or dropped an object whose name does
+    /// not start with <see cref="TablePrefix"/>, or an index or a trigger on a table whose name does not (the
+    /// transaction is rolled back); or the migration was started inside a write.
     /// </exception>
     /// <exception cref="SqliteException">SQLite failed.</exception>
     ValueTask MigrateAsync(int version, PluginDatabaseMigration migrate, CancellationToken cancellationToken = default);
@@ -93,13 +102,14 @@ public interface IPluginDatabase
     /// <summary>
     /// Writes in one transaction, in turn with all the other writers of the application. The transaction is
     /// committed when <paramref name="write"/> returns and rolled back when it throws. A write that is still queued
-    /// when <paramref name="cancellationToken"/> is canceled never runs.
+    /// when <paramref name="cancellationToken"/> is canceled never runs. A write does not start another write or a
+    /// migration and wait for it: it would wait for itself, so the host refuses it.
     /// </summary>
     /// <param name="write">The write.</param>
     /// <param name="cancellationToken">A token to cancel the write.</param>
     /// <returns>A task representing the write.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="write"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">The host has no database.</exception>
+    /// <exception cref="InvalidOperationException">The host has no database, or the write was started inside another write.</exception>
     /// <exception cref="SqliteException">SQLite failed, or another process held the write lock past the busy timeout.</exception>
     ValueTask WriteAsync(Func<SqliteConnection, CancellationToken, ValueTask> write, CancellationToken cancellationToken = default);
 }

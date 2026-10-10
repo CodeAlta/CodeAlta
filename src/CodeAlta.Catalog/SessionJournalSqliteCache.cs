@@ -19,7 +19,13 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _schemaGate = new(initialCount: 1, maxCount: 1);
+    // The generation of the file whose tables are known to exist; -1 when they have to be made or checked.
     private int _schemaGeneration = -1;
+
+    // The two below are written with the schema gate held. The generation of the file whose rows are trusted: a
+    // file that was never replaced is generation 0. And the number of times the tables were made or made again.
+    private int _rowsGeneration;
+    private int _schemaEpoch;
 
     public SessionJournalSqliteCache(CatalogOptions options)
         : this(ApplicationDatabase.Create(options ?? throw new ArgumentNullException(nameof(options))))
@@ -296,29 +302,56 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await _schemaGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var known = _schemaGeneration;
-            if (known == _database.Generation && File.Exists(_database.DatabasePath))
+            if (_schemaGeneration == _database.Generation && File.Exists(_database.DatabasePath))
             {
                 return;
             }
 
+            await PrepareSchemaAsync(cleared: false, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _schemaGate.Release();
+        }
+    }
+
+    // A read or a write found the tables damaged: they are dropped and made again, once for all the operations
+    // that met the same damage. The plugins that share the file keep their tables.
+    private async Task RepairSchemaAsync(int generation, int epoch, CancellationToken cancellationToken)
+    {
+        await _schemaGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_schemaEpoch != epoch)
+            {
+                return; // Another operation made the tables again since this one read them.
+            }
+
+            await ClearTablesAsync(generation, cancellationToken).ConfigureAwait(false);
+            await PrepareSchemaAsync(cleared: true, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _schemaGate.Release();
+        }
+    }
+
+    // Runs with the schema gate held. cleared: the tables were just dropped.
+    private async Task PrepareSchemaAsync(bool cleared, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
             var before = _database.Generation;
             try
             {
                 await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (SqliteException exception) when (ApplicationDatabase.IsDamaged(exception))
-            {
-                await ClearDamagedTablesAsync(exception, before, cancellationToken).ConfigureAwait(false);
-                await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
-            }
 
-            // A file that was replaced since the rows were written (restored from an older copy, or deleted and made
-            // again) says nothing about the sessions that exist: they are listed from the journals again.
-            var after = _database.Generation;
-            if (after != before || (known >= 0 && known != before))
-            {
-                try
+                // Tables that were made again, and a file that was replaced since the rows were written (restored
+                // from an older copy, or deleted and made again), say nothing about the sessions that exist: they
+                // are listed from the journals again. The mark is written, not left out: a session that is saved
+                // before the next list adds a row, and rows without a mark read as a complete list.
+                var generation = _database.Generation;
+                if (cleared || generation != _rowsGeneration)
                 {
                     await WriteCoreAsync(
                             (connection, token) => SetCacheCompleteCoreAsync(connection, complete: false, token),
@@ -326,19 +359,29 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                             cancellationToken)
                         .ConfigureAwait(false);
                 }
-                catch (SqliteException exception) when (ApplicationDatabase.IsDamaged(exception))
-                {
-                    // The tables are made again, and a new set of tables is incomplete anyway.
-                    await ClearDamagedTablesAsync(exception, _database.Generation, cancellationToken).ConfigureAwait(false);
-                    await MigrateSchemaAsync(cancellationToken).ConfigureAwait(false);
-                }
-            }
 
-            Volatile.Write(ref _schemaGeneration, _database.Generation);
-        }
-        finally
-        {
-            _schemaGate.Release();
+                _rowsGeneration = generation;
+                Volatile.Write(ref _schemaEpoch, _schemaEpoch + 1);
+                Volatile.Write(ref _schemaGeneration, generation);
+                return;
+            }
+            catch (SqliteException exception) when (attempt < 2 && ApplicationDatabase.IsDamaged(exception))
+            {
+                await ClearTablesAsync(before, cancellationToken).ConfigureAwait(false);
+                cleared = true;
+            }
+            catch (ApplicationDatabaseNewerVersionException) when (attempt < 2)
+            {
+                // A newer build wrote these tables, in a layout this one does not know, and the user came back to
+                // this build. The list is not data to protect: it is made again from the journals, in the layout
+                // of this build, and the newer build migrates it again when it returns.
+                await ClearTablesAsync(before, cancellationToken).ConfigureAwait(false);
+                cleared = true;
+            }
+            catch (SqliteException) when (attempt < 2 && _database.Generation != before)
+            {
+                // The file was replaced after the tables were made in it: they are made in the new one.
+            }
         }
     }
 
@@ -359,23 +402,34 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         {
             throw CreateLockedException(exception);
         }
+        catch (Exception exception) when (IsFileHeld(exception))
+        {
+            throw CreateHeldException(exception);
+        }
     }
 
-    // The session list is rebuilt from the journals, so a damaged table is dropped and made again; the plugins
-    // that share the file keep their tables. When the damage is not in these tables, the file itself is replaced.
-    private async Task ClearDamagedTablesAsync(SqliteException damage, int generation, CancellationToken cancellationToken)
+    // The session list is rebuilt from the journals, so its tables are dropped and made again; the plugins that
+    // share the file keep theirs. When the damage is not in these tables, the file itself is replaced.
+    private async Task ClearTablesAsync(int generation, CancellationToken cancellationToken)
     {
         try
         {
-            await _database.DropTablesAsync(Owner, TablePrefix, recoverDamagedFile: false, cancellationToken).ConfigureAwait(false);
-        }
-        catch (SqliteException again) when (ApplicationDatabase.IsDamaged(again))
-        {
-            await _database.RecoverDamagedFileAsync(again, generation, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await _database.DropTablesAsync(Owner, TablePrefix, recoverDamagedFile: false, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqliteException again) when (ApplicationDatabase.IsDamaged(again))
+            {
+                await _database.RecoverDamagedFileAsync(again, generation, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (SqliteException locked) when (ApplicationDatabase.IsLocked(locked))
         {
             throw CreateLockedException(locked);
+        }
+        catch (Exception held) when (IsFileHeld(held))
+        {
+            throw CreateHeldException(held);
         }
 
         Volatile.Write(ref _schemaGeneration, -1);
@@ -395,6 +449,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         for (var attempt = 0; ; attempt++)
         {
             var generation = _database.Generation;
+            var epoch = Volatile.Read(ref _schemaEpoch);
             try
             {
                 await _database.WriteAsync<object?>(
@@ -411,12 +466,22 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             }
             catch (SqliteException exception) when (attempt == 0 && !schemaOwned && ApplicationDatabase.IsDamaged(exception))
             {
-                await ClearDamagedTablesAsync(exception, generation, cancellationToken).ConfigureAwait(false);
+                await RepairSchemaAsync(generation, epoch, cancellationToken).ConfigureAwait(false);
                 await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
             {
                 throw CreateLockedException(exception);
+            }
+            catch (SqliteException) when (attempt == 0 && !schemaOwned && _database.Generation != generation)
+            {
+                // The file was replaced while the write ran (another owner met the damage, or the file went): the
+                // write ran on a file that has none of these tables. They are made, and the write runs once more.
+                await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (IsFileHeld(exception))
+            {
+                throw CreateHeldException(exception);
             }
         }
     }
@@ -426,18 +491,28 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
         var generation = _database.Generation;
+        var epoch = Volatile.Read(ref _schemaEpoch);
         try
         {
             return await _database.ReadAsync(Owner, read, recoverDamagedFile: false, cancellationToken).ConfigureAwait(false);
         }
         catch (SqliteException exception) when (ApplicationDatabase.IsDamaged(exception))
         {
-            await ClearDamagedTablesAsync(exception, generation, cancellationToken).ConfigureAwait(false);
+            await RepairSchemaAsync(generation, epoch, cancellationToken).ConfigureAwait(false);
             return default;
         }
         catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
         {
             throw CreateLockedException(exception);
+        }
+        catch (SqliteException) when (_database.Generation != generation)
+        {
+            // The file was replaced while the read ran: it read a file that has none of these tables.
+            return default;
+        }
+        catch (Exception exception) when (IsFileHeld(exception))
+        {
+            throw CreateHeldException(exception);
         }
     }
 
@@ -1063,6 +1138,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     private AgentSessionCacheLockedException CreateLockedException(SqliteException exception)
         => new($"The CodeAlta application database is locked: {_database.DatabasePath}", exception);
+
+    // The database could not move its damaged file aside: another process holds it. For the callers of the list it
+    // is the same as a lock that outlasts the timeout: the database cannot be used now, and can be later.
+    private static bool IsFileHeld(Exception exception)
+        => exception is IOException or UnauthorizedAccessException;
+
+    private AgentSessionCacheLockedException CreateHeldException(Exception exception)
+        => new($"The CodeAlta application database is damaged and its file is held by another process, so it cannot be replaced: {_database.DatabasePath}", exception);
 
     private static string? GetString(SqliteDataReader reader, string name)
     {

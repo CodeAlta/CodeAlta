@@ -15,12 +15,15 @@ public interface IApplicationDatabase : IAsyncDisposable
     string DatabasePath { get; }
 
     /// <summary>
-    /// Gets the number of times the file was replaced because it was damaged. An owner that keeps data in memory
-    /// about the file compares it with the one it saw to learn that the file changed under it.
+    /// Gets the number of times the file was replaced: because it was damaged, or because it was gone. An owner that
+    /// keeps data in memory about the file compares it with the one it saw to learn that the file changed under it.
     /// </summary>
     int Generation { get; }
 
-    /// <summary>Gets what happened the last time the file was found damaged, or <see langword="null"/> when it never was.</summary>
+    /// <summary>
+    /// Gets what happened the last time the file was found damaged, or missing while a copy of it existed, or
+    /// <see langword="null"/> when it never was.
+    /// </summary>
     ApplicationDatabaseRecovery? LastRecovery { get; }
 
     /// <summary>
@@ -49,6 +52,10 @@ public interface IApplicationDatabase : IAsyncDisposable
     /// <returns>A task representing the write.</returns>
     /// <exception cref="ArgumentException"><paramref name="owner"/> is empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="write"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The write was started inside another write of this database, which awaits it: it would wait for the queue
+    /// that write holds. The same holds for <see cref="MigrateAsync"/> and <see cref="DropTablesAsync"/>.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The database was disposed.</exception>
     /// <exception cref="SqliteException">SQLite failed.</exception>
     ValueTask WriteAsync(
@@ -77,9 +84,13 @@ public interface IApplicationDatabase : IAsyncDisposable
     /// <param name="migrate">The steps.</param>
     /// <param name="cancellationToken">A token to cancel the migration.</param>
     /// <returns>A task representing the migration.</returns>
+    /// <exception cref="ApplicationDatabaseNewerVersionException">
+    /// The recorded version is higher than <paramref name="version"/>: the tables were written by a newer build.
+    /// Nothing was changed.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The recorded version is higher than <paramref name="version"/>, or the steps touched an object outside
-    /// <paramref name="tablePrefix"/>. The transaction is rolled back.
+    /// The steps touched an object outside <paramref name="tablePrefix"/> (the transaction is rolled back), or the
+    /// migration was started inside a write of this database.
     /// </exception>
     ValueTask MigrateAsync(
         string owner,
@@ -103,5 +114,6 @@ public interface IApplicationDatabase : IAsyncDisposable
     /// <param name="tablePrefix">The prefix of its objects.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The names of the tables that were dropped.</returns>
+    /// <exception cref="InvalidOperationException">The operation was started inside a write of this database.</exception>
     ValueTask<IReadOnlyList<string>> DropTablesAsync(string owner, string tablePrefix, CancellationToken cancellationToken = default);
 }

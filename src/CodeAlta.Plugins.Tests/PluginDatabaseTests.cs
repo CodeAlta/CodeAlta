@@ -97,6 +97,71 @@ public sealed class PluginDatabaseTests
     }
 
     [TestMethod]
+    [DataRow("read")]
+    [DataRow("write")]
+    [DataRow("another owner")]
+    public async Task WhenTheFileIsReplacedWhileThePluginRuns_ItsTablesAreMadeAgain(string first)
+    {
+        using var temp = new TestTempDirectory();
+        await using var application = CreateApplicationDatabase(temp);
+        var database = new PluginDatabase(application, "builtin:statistics");
+        var migrations = new List<int>();
+        await database.MigrateAsync(1, (connection, from, to, token) =>
+        {
+            migrations.Add(from);
+            return ExecuteAsync(connection, "CREATE TABLE statistics_day (n INTEGER);", token);
+        });
+        await database.WriteAsync((connection, token) => ExecuteAsync(connection, "INSERT INTO statistics_day VALUES (1);", token));
+
+        // The file is damaged while the plugin runs, and there is no copy of it: the database starts empty. The
+        // plugin migrated when it was activated, and does not migrate again by itself.
+        await File.WriteAllBytesAsync(application.DatabasePath, new byte[8192].Select(static (_, index) => (byte)(index % 241)).ToArray());
+        var rows = -1L;
+        switch (first)
+        {
+            case "read":
+                rows = await database.ReadAsync((connection, token) => ScalarAsync(connection, "SELECT COUNT(*) FROM statistics_day;", token));
+                break;
+            case "write":
+                await database.WriteAsync((connection, token) => ExecuteAsync(connection, "INSERT INTO statistics_day VALUES (2);", token));
+                break;
+            default:
+                // Another owner of the database meets the damage, and the file is replaced before the plugin uses it.
+                await application.WriteAsync("other", (connection, token) => ExecuteAsync(connection, "CREATE TABLE other_rows (id INTEGER);", token));
+                break;
+        }
+
+        rows = await database.ReadAsync((connection, token) => ScalarAsync(connection, "SELECT COUNT(*) FROM statistics_day;", token));
+
+        Assert.AreEqual(first == "write" ? 1L : 0L, rows);
+        Assert.AreEqual(1, application.Generation);
+        CollectionAssert.AreEqual(new[] { 0, 0 }, migrations, "The steps ran once for each file, from nothing.");
+        Assert.AreEqual(1, await application.GetVersionAsync("plugin:statistics"));
+    }
+
+    [TestMethod]
+    public async Task WhenTheFileIsRestoredFromACopyWhileThePluginRuns_ItsRowsComeBackAndItDoesNotMigrateAgain()
+    {
+        using var temp = new TestTempDirectory();
+        await using var application = CreateApplicationDatabase(temp);
+        var database = new PluginDatabase(application, "builtin:statistics");
+        var migrations = 0;
+        await database.MigrateAsync(1, (connection, from, to, token) =>
+        {
+            migrations++;
+            return ExecuteAsync(connection, "CREATE TABLE statistics_day (n INTEGER);", token);
+        });
+        await database.WriteAsync((connection, token) => ExecuteAsync(connection, "INSERT INTO statistics_day VALUES (1);", token));
+        Assert.IsNotNull(await application.BackupAsync());
+        await File.WriteAllBytesAsync(application.DatabasePath, new byte[8192].Select(static (_, index) => (byte)(index % 241)).ToArray());
+
+        var rows = await database.ReadAsync((connection, token) => ScalarAsync(connection, "SELECT COUNT(*) FROM statistics_day;", token));
+
+        Assert.AreEqual(1L, rows);
+        Assert.AreEqual(1, migrations, "The copy records the version of the tables it holds.");
+    }
+
+    [TestMethod]
     public async Task OperationsOfAPlugin_EndWithItsLifetime()
     {
         using var temp = new TestTempDirectory();

@@ -238,6 +238,7 @@ public sealed partial class SessionViewJournalStore
             ModelId = state.ModelId,
             ReasoningEffort = state.ReasoningEffort,
             PermissionMode = state.PermissionMode,
+            AgentPromptId = state.AgentPromptId,
             Archived = state.Archived,
             MessageCount = state.MessageCount,
             ParentSessionId = state.ParentSessionId,

@@ -20,12 +20,12 @@ public delegate ValueTask ApplicationDatabaseMigration(
     CancellationToken cancellationToken);
 
 /// <summary>
-/// What the application database did when its file was found damaged.
+/// What the application database did when its file was found damaged, or missing while a copy of it existed.
 /// </summary>
 /// <param name="OccurredAt">When the file was replaced.</param>
-/// <param name="MovedAsidePath">Where the damaged file was moved to, or <see langword="null"/> when it could not be kept.</param>
+/// <param name="MovedAsidePath">Where the damaged file was moved to, or <see langword="null"/> when there was no file to keep.</param>
 /// <param name="RestoredFromCopy">The copy the new file was restored from, or <see langword="null"/> when it started empty.</param>
-/// <param name="Reason">The error of SQLite that revealed the damage.</param>
+/// <param name="Reason">The error of SQLite that revealed the damage, or that the file was missing.</param>
 public sealed record ApplicationDatabaseRecovery(
     DateTimeOffset OccurredAt,
     string? MovedAsidePath,
@@ -54,15 +54,21 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     private const int SqliteBusy = 5;
     private const int SqliteLocked = 6;
     private const int SqliteCorrupt = 11;
+    private const int SqliteCannotOpen = 14;
     private const int SqliteNotADatabase = 26;
     private const string MetaTable = "app_meta";
     private const string BackupFilePrefix = "alta-";
     private const string BackupTimestampFormat = "yyyyMMdd'T'HHmmss'Z'";
     private const int CorruptFilesToKeep = 3;
+    private const string RestoreSuffix = ".restore";
+    private static readonly TimeSpan MoveRetryDelay = TimeSpan.FromMilliseconds(25);
 
     private readonly ApplicationDatabaseOptions _options;
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Database");
     private readonly AsyncFifoLock _writeQueue = new();
+
+    // The write the calling flow runs in, if any: what it awaits cannot take the queue it holds itself.
+    private readonly AsyncLocal<WriteScope?> _currentWrite = new();
     private readonly SemaphoreSlim _initGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly string _backupDirectory;
@@ -150,18 +156,26 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentNullException.ThrowIfNull(read);
-        for (var attempt = 0; ; attempt++)
+        var recovered = false;
+        var reopened = false;
+        while (true)
         {
             ThrowIfDisposed();
             var generation = await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                await using var connection = await OpenAsync(readOnly: true, cancellationToken).ConfigureAwait(false);
+                await using var connection = await OpenAsync(readOnly: true, create: false, cancellationToken).ConfigureAwait(false);
                 return await read(connection, cancellationToken).ConfigureAwait(false);
             }
-            catch (SqliteException exception) when (recoverDamagedFile && attempt == 0 && IsDamaged(exception))
+            catch (SqliteException exception) when (recoverDamagedFile && !recovered && IsDamaged(exception))
             {
+                recovered = true;
                 await RecoverDamagedFileAsync(exception, generation, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqliteException exception) when (!reopened && IsFileGone(exception))
+            {
+                // The file went after the service saw it: the next turn makes it again, as a new generation.
+                reopened = true;
             }
         }
     }
@@ -196,6 +210,10 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     /// <returns>The result of <paramref name="write"/>.</returns>
     /// <exception cref="ArgumentException"><paramref name="owner"/> is empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="write"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The write was started inside another write of this database, which awaits it: it would wait for the queue
+    /// that write holds. What a write starts and does not await may write once that write is over.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The database was disposed.</exception>
     /// <exception cref="SqliteException">SQLite failed; a lock that outlasts the busy timeout is error 5 or 6.</exception>
     public async ValueTask<T> WriteAsync<T>(
@@ -206,18 +224,38 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         ArgumentNullException.ThrowIfNull(write);
-        for (var attempt = 0; ; attempt++)
+        ThrowIfInsideWrite($"A write of '{owner}'");
+        var recovered = false;
+        var reopened = false;
+        while (true)
         {
             ThrowIfDisposed();
             var generation = await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 using var turn = await _writeQueue.AcquireAsync(cancellationToken).ConfigureAwait(false);
-                return await RunWriteAsync(owner, write, cancellationToken).ConfigureAwait(false);
+                var scope = new WriteScope(owner);
+                _currentWrite.Value = scope;
+                try
+                {
+                    return await RunWriteAsync(owner, write, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    // What the write started and left running holds the scope still: it is told that the write is over.
+                    scope.End();
+                    _currentWrite.Value = null;
+                }
             }
-            catch (SqliteException exception) when (recoverDamagedFile && attempt == 0 && IsDamaged(exception))
+            catch (SqliteException exception) when (recoverDamagedFile && !recovered && IsDamaged(exception))
             {
+                recovered = true;
                 await RecoverDamagedFileAsync(exception, generation, cancellationToken).ConfigureAwait(false);
+            }
+            catch (SqliteException exception) when (!reopened && IsFileGone(exception))
+            {
+                // The file went after the service saw it: the next turn makes it again, as a new generation.
+                reopened = true;
             }
         }
     }
@@ -248,7 +286,8 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     /// <param name="owner">The owner, such as <c>session_cache</c> or <c>plugin:statistics</c>.</param>
     /// <param name="tablePrefix">
     /// The prefix every table, index, view and trigger the migration creates, changes or drops must start with, or
-    /// <see langword="null"/> for an owner that is part of the application and is trusted.
+    /// <see langword="null"/> for an owner that is part of the application and is trusted. An index or a trigger
+    /// must also be on a table that starts with it.
     /// </param>
     /// <param name="version">The version the owner needs; at least 1.</param>
     /// <param name="migrate">The steps. They run when the recorded version is lower than <paramref name="version"/>.</param>
@@ -256,10 +295,13 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     /// <param name="cancellationToken">A token to cancel the migration.</param>
     /// <returns>A task representing the migration.</returns>
     /// <exception cref="ArgumentException"><paramref name="owner"/> or <paramref name="tablePrefix"/> is empty, or <paramref name="version"/> is below 1.</exception>
+    /// <exception cref="ApplicationDatabaseNewerVersionException">
+    /// The recorded version is higher than <paramref name="version"/>: the tables were written by a newer build.
+    /// Nothing was changed.
+    /// </exception>
     /// <exception cref="InvalidOperationException">
-    /// The recorded version is higher than <paramref name="version"/> (the tables were written by a newer build), or
-    /// the migration touched an object that does not start with <paramref name="tablePrefix"/>. The transaction is
-    /// rolled back and the version is not recorded.
+    /// The migration touched an object that does not start with <paramref name="tablePrefix"/> (the transaction is
+    /// rolled back and the version is not recorded), or it was started inside a write of this database.
     /// </exception>
     public async ValueTask MigrateAsync(
         string owner,
@@ -289,8 +331,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
 
                     if (recorded > version)
                     {
-                        throw new InvalidOperationException(
-                            $"The tables of '{owner}' are at version {recorded}, newer than the version {version} this build knows. They were written by a newer build; nothing was changed.");
+                        throw new ApplicationDatabaseNewerVersionException(owner, recorded, version);
                     }
 
                     var before = tablePrefix is null ? null : await ReadSchemaAsync(connection, token).ConfigureAwait(false);
@@ -346,6 +387,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The names of the tables that were dropped.</returns>
     /// <exception cref="ArgumentException"><paramref name="owner"/> or <paramref name="tablePrefix"/> is empty.</exception>
+    /// <exception cref="InvalidOperationException">The operation was started inside a write of this database.</exception>
     public async ValueTask<IReadOnlyList<string>> DropTablesAsync(
         string owner,
         string tablePrefix,
@@ -360,7 +402,11 @@ public sealed class ApplicationDatabase : IApplicationDatabase
                 {
                     var objects = await ReadSchemaAsync(connection, token).ConfigureAwait(false);
                     var owned = objects.Where(item => item.Name.StartsWith(tablePrefix, StringComparison.OrdinalIgnoreCase)).ToArray();
-                    foreach (var item in owned.Where(static item => item.Type is "view" or "trigger"))
+
+                    // The indexes and triggers of a table go with it. What is dropped by name is what would stay: a
+                    // view, and an index or a trigger the owner named on a table that is not its own. An index
+                    // without SQL is the index of a key: it belongs to its table.
+                    foreach (var item in owned.Where(static item => item.Type is "view" or "trigger" || (item.Type == "index" && item.Sql.Length > 0)))
                     {
                         await ExecuteAsync(connection, $"DROP {item.Type.ToUpperInvariant()} IF EXISTS {Quote(item.Name)};", token).ConfigureAwait(false);
                     }
@@ -390,11 +436,13 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     /// <param name="cancellationToken">A token to cancel the wait for the write queue.</param>
     /// <returns>A task that completes when the file is replaced.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="failure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The operation was started inside a write of this database.</exception>
     /// <exception cref="IOException">The damaged file cannot be moved aside.</exception>
     public async ValueTask RecoverDamagedFileAsync(SqliteException failure, int observedGeneration, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(failure);
         ThrowIfDisposed();
+        ThrowIfInsideWrite("The replacement of the damaged file");
         using var turn = await _writeQueue.AcquireAsync(cancellationToken).ConfigureAwait(false);
         if (Generation != observedGeneration)
         {
@@ -404,7 +452,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         await _initGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            ReplaceDamagedFile(failure);
+            await ReplaceDamagedFileAsync(failure, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -429,7 +477,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         DeleteIfExists(temporary);
         try
         {
-            await using (var source = await OpenAsync(readOnly: true, cancellationToken).ConfigureAwait(false))
+            await using (var source = await OpenAsync(readOnly: true, create: false, cancellationToken).ConfigureAwait(false))
             {
                 await Task.Run(() =>
                 {
@@ -498,9 +546,14 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Closes the queue of writers behind the writes that were admitted, and stops the upkeep.
+    /// </summary>
+    /// <returns>A task that completes when the last admitted write ended.</returns>
+    /// <exception cref="InvalidOperationException">The database is disposed inside one of its writes, which it would wait for.</exception>
     public async ValueTask DisposeAsync()
     {
+        ThrowIfInsideWrite("The disposal");
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
             return;
@@ -561,7 +614,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         var started = _options.TimeProvider.GetTimestamp();
         try
         {
-            await using var connection = await OpenAsync(readOnly: false, cancellationToken).ConfigureAwait(false);
+            await using var connection = await OpenAsync(readOnly: false, create: false, cancellationToken).ConfigureAwait(false);
             // IMMEDIATE: the lock is taken, and waited for, up front; a deferred transaction that upgrades later fails at once.
             // The transaction is plain SQL, not a transaction object of the provider: the commands of the write do not
             // have to name it.
@@ -604,23 +657,25 @@ public sealed class ApplicationDatabase : IApplicationDatabase
                 return Generation;
             }
 
-            if (Volatile.Read(ref _ready))
-            {
-                // The file was deleted under the service: whatever is made again is a new file, and the owners say so
-                // by comparing the generation they saw.
-                Interlocked.Increment(ref _generation);
-                Volatile.Write(ref _ready, false);
-            }
-
+            // The file was deleted under the service: whatever is made again is a new file, and the owners say so
+            // by comparing the generation they saw.
+            var deleted = Volatile.Read(ref _ready);
+            Volatile.Write(ref _ready, false);
             Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
             TakeOverLegacyFile();
+            var restored = !File.Exists(DatabasePath) && RestoreMissingFile();
+            if (deleted || restored)
+            {
+                Interlocked.Increment(ref _generation);
+            }
+
             try
             {
                 await InitializeFileAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (SqliteException exception) when (IsDamaged(exception))
             {
-                ReplaceDamagedFile(exception);
+                await ReplaceDamagedFileAsync(exception, cancellationToken).ConfigureAwait(false);
                 await InitializeFileAsync(cancellationToken).ConfigureAwait(false);
             }
 
@@ -635,7 +690,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
 
     private async Task InitializeFileAsync(CancellationToken cancellationToken)
     {
-        await using var connection = await OpenAsync(readOnly: false, cancellationToken).ConfigureAwait(false);
+        await using var connection = await OpenAsync(readOnly: false, create: true, cancellationToken).ConfigureAwait(false);
         await using (var command = connection.CreateCommand())
         {
             // The mode is kept in the file: it is set once, and every later connection finds it.
@@ -693,15 +748,21 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         }
     }
 
-    private void ReplaceDamagedFile(SqliteException failure)
+    // Runs with the init gate held.
+    private async Task ReplaceDamagedFileAsync(SqliteException failure, CancellationToken cancellationToken)
     {
         var timestamp = _options.TimeProvider.GetUtcNow();
+
+        // The copy is made ready first: the damaged file is not moved before there is something to put in its
+        // place, and putting it there is one rename. A stop between the two leaves a missing file, which the next
+        // start restores from the same copy (see RestoreMissingFile).
+        var copy = PrepareRestoreCandidate();
         string? movedAside = DatabasePath + ".corrupt-" + timestamp.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture);
         try
         {
             if (File.Exists(DatabasePath))
             {
-                File.Move(DatabasePath, movedAside, overwrite: true);
+                await MoveWhenReleasedAsync(DatabasePath, movedAside, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -720,34 +781,12 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            if (copy is not null) DeleteIfExists(copy.Value.Candidate);
             if (LogManager.IsInitialized) _logger.Error($"The damaged application database {DatabasePath} could not be moved aside: {exception.Message}");
             throw;
         }
 
-        string? restored = null;
-        foreach (var backup in GetBackups())
-        {
-            var candidate = backup.Path + ".restore";
-            try
-            {
-                File.Copy(backup.Path, candidate, overwrite: true);
-                if (!IsHealthy(candidate))
-                {
-                    DeleteIfExists(candidate);
-                    continue;
-                }
-
-                File.Move(candidate, DatabasePath, overwrite: true);
-                restored = backup.Path;
-                break;
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or SqliteException)
-            {
-                DeleteIfExists(candidate);
-                if (LogManager.IsInitialized) _logger.Warn($"The copy {backup.Path} of the application database could not be restored: {exception.Message}");
-            }
-        }
-
+        var restored = copy is not null && TryPutInPlace(copy.Value) ? copy.Value.Source : null;
         Volatile.Write(ref _ready, false);
         Interlocked.Increment(ref _generation);
         var recovery = new ApplicationDatabaseRecovery(timestamp, movedAside, restored, failure.Message);
@@ -758,13 +797,113 @@ public sealed class ApplicationDatabase : IApplicationDatabase
             : $"The application database {DatabasePath} was damaged ({failure.Message}). It was moved to {movedAside} and replaced by an empty database: the list of sessions is built again from the journals, and the tables of the plugins start empty.");
     }
 
-    private async Task<SqliteConnection> OpenAsync(bool readOnly, CancellationToken cancellationToken)
+    // The file is not there, and a copy of it is: it was deleted, or the replacement of a damaged file stopped half
+    // way. The newest valid copy takes its place. An empty database here would be copied in its turn, and after two
+    // days the copies that hold the data of the plugins would be gone. Runs with the init gate held.
+    private bool RestoreMissingFile()
+    {
+        if (PrepareRestoreCandidate() is not { } copy)
+        {
+            return false;
+        }
+
+        try
+        {
+            foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
+            {
+                // What stays of the log of the file that is gone is not the log of the copy.
+                if (File.Exists(DatabasePath + suffix)) File.Delete(DatabasePath + suffix);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            DeleteIfExists(copy.Candidate);
+            if (LogManager.IsInitialized) _logger.Warn($"The copy {copy.Source} of the application database was not restored, because the log of the missing file could not be removed: {exception.Message}");
+            return false;
+        }
+
+        if (!TryPutInPlace(copy))
+        {
+            return false;
+        }
+
+        var recovery = new ApplicationDatabaseRecovery(_options.TimeProvider.GetUtcNow(), MovedAsidePath: null, copy.Source, "The database file was missing.");
+        Volatile.Write(ref _lastRecovery, recovery);
+        if (LogManager.IsInitialized) _logger.Error($"The application database {DatabasePath} was missing. It was replaced by the copy {copy.Source}: what was written since that copy is lost, and the list of sessions is built again from the journals.");
+        return true;
+    }
+
+    // The newest copy that is a valid database, copied beside the database under a name of its own; null when
+    // there is none.
+    private (string Candidate, string Source)? PrepareRestoreCandidate()
+    {
+        var candidate = DatabasePath + RestoreSuffix;
+        DeleteIfExists(candidate);
+        foreach (var backup in GetBackups())
+        {
+            try
+            {
+                File.Copy(backup.Path, candidate, overwrite: true);
+                if (IsHealthy(candidate))
+                {
+                    return (candidate, backup.Path);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                if (LogManager.IsInitialized) _logger.Warn($"The copy {backup.Path} of the application database could not be restored: {exception.Message}");
+            }
+
+            DeleteIfExists(candidate);
+        }
+
+        return null;
+    }
+
+    private bool TryPutInPlace((string Candidate, string Source) copy)
+    {
+        try
+        {
+            File.Move(copy.Candidate, DatabasePath, overwrite: true);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            DeleteIfExists(copy.Candidate);
+            if (LogManager.IsInitialized) _logger.Warn($"The copy {copy.Source} of the application database could not be restored: {exception.Message}");
+            return false;
+        }
+    }
+
+    // A connection that is finding the damage has the file open for a moment more, and on Windows an open file
+    // cannot be moved: the move waits for it, as long as a lock is waited for.
+    private async Task MoveWhenReleasedAsync(string source, string destination, CancellationToken cancellationToken)
+    {
+        var started = _options.TimeProvider.GetTimestamp();
+        while (true)
+        {
+            try
+            {
+                File.Move(source, destination, overwrite: true);
+                return;
+            }
+            catch (IOException) when (File.Exists(source) && _options.TimeProvider.GetElapsedTime(started) < _options.BusyTimeout)
+            {
+                await Task.Delay(MoveRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    // create: only the service makes the file, when it opens it (the write-ahead log, the table of the versions) and
+    // with its gate held. A connection of a read or of a write that made a file that went would leave an empty one
+    // in its place: without the log, without the versions, and in the way of the copy that replaces a damaged file.
+    private async Task<SqliteConnection> OpenAsync(bool readOnly, bool create, CancellationToken cancellationToken)
     {
         var timeout = _options.BusyTimeout;
         var builder = new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
+            Mode = create ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite,
             Cache = SqliteCacheMode.Private,
             DefaultTimeout = Math.Max(1, (int)Math.Ceiling(timeout.TotalSeconds)),
             Pooling = false,
@@ -838,47 +977,59 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     private static async ValueTask<IReadOnlyList<SchemaObject>> ReadSchemaAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT type, name, COALESCE(sql, '') FROM sqlite_master;";
+        command.CommandText = "SELECT type, name, tbl_name, COALESCE(sql, '') FROM sqlite_master;";
         var result = new List<SchemaObject>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            result.Add(new SchemaObject(reader.GetString(0), reader.GetString(1), reader.GetString(2)));
+            result.Add(new SchemaObject(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
         }
 
         return result;
     }
 
-    // What a migration created, dropped or altered outside the names of its owner. The automatic objects of SQLite
-    // (the index of a unique key, the counter of AUTOINCREMENT, the statistics) follow their table.
+    // What a migration created, dropped or altered that is not its owner's. A trigger may bear the name of a table,
+    // so an object is known by its type and its name.
     private static List<string> FindForeignChanges(IReadOnlyList<SchemaObject> before, IReadOnlyList<SchemaObject> after, string prefix)
     {
         var offending = new List<string>();
-        var previous = before.ToDictionary(static item => item.Name, StringComparer.OrdinalIgnoreCase);
-        var current = after.ToDictionary(static item => item.Name, StringComparer.OrdinalIgnoreCase);
+        var previous = before.ToDictionary(static item => (item.Type, item.Name.ToUpperInvariant()));
+        var current = after.Select(static item => (item.Type, item.Name.ToUpperInvariant())).ToHashSet();
         foreach (var item in after)
         {
-            if (previous.TryGetValue(item.Name, out var old) && old == item)
+            if (previous.TryGetValue((item.Type, item.Name.ToUpperInvariant()), out var old) && old == item)
             {
                 continue;
             }
 
-            if (!IsOwnedName(item.Name, prefix)) offending.Add(item.Name);
+            if (!IsOwned(item, prefix)) offending.Add(item.Name);
         }
 
         foreach (var item in before)
         {
-            if (!current.ContainsKey(item.Name) && !IsOwnedName(item.Name, prefix)) offending.Add(item.Name);
+            if (!current.Contains((item.Type, item.Name.ToUpperInvariant())) && !IsOwned(item, prefix)) offending.Add(item.Name);
         }
 
         return offending.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static bool IsOwnedName(string name, string prefix)
-        => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith("sqlite_autoindex_" + prefix, StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith("sqlite_sequence", StringComparison.OrdinalIgnoreCase)
-            || name.StartsWith("sqlite_stat", StringComparison.OrdinalIgnoreCase);
+    // An object is its owner's when its name starts with the prefix and, for an index or a trigger, when the table
+    // it is on does too: a name alone would let a plugin put a trigger on the table of another one. The automatic
+    // objects of SQLite follow their table (the index of a key) or belong to nobody (the counter of AUTOINCREMENT,
+    // the statistics).
+    private static bool IsOwned(SchemaObject item, string prefix)
+    {
+        if (item.Type == "table"
+            && (item.Name.StartsWith("sqlite_sequence", StringComparison.OrdinalIgnoreCase) || item.Name.StartsWith("sqlite_stat", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var onOwnTable = item.TableName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        return item.Type == "index" && item.Name.StartsWith("sqlite_autoindex_", StringComparison.OrdinalIgnoreCase)
+            ? onOwnTable
+            : onOwnTable && item.Name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static async ValueTask ExecuteAsync(SqliteConnection connection, string commandText, CancellationToken cancellationToken)
     {
@@ -974,6 +1125,16 @@ public sealed class ApplicationDatabase : IApplicationDatabase
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
+    // Writes run one at a time: one that is started by a write, and awaited by it, would wait for itself forever.
+    private void ThrowIfInsideWrite(string operation)
+    {
+        if (_currentWrite.Value is { IsRunning: true } scope)
+        {
+            throw new InvalidOperationException(
+                $"{operation} was started inside the write of '{scope.Owner}' of the application database. Writes run one at a time, so it would wait for the write it is part of: use the connection of that write, or start it after the write.");
+        }
+    }
+
     /// <summary>
     /// Gets whether SQLite reported that the file is not a database, or is malformed.
     /// </summary>
@@ -996,5 +1157,21 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         return exception.SqliteErrorCode is SqliteBusy or SqliteLocked;
     }
 
-    private readonly record struct SchemaObject(string Type, string Name, string Sql);
+    private sealed class WriteScope(string owner)
+    {
+        private int _ended;
+
+        public string Owner { get; } = owner;
+
+        public bool IsRunning => Volatile.Read(ref _ended) == 0;
+
+        public void End() => Volatile.Write(ref _ended, 1);
+    }
+
+    // TableName: the table an index or a trigger is on; the name itself for a table or a view.
+    // SQLite could not open the file (error 14) and the file is not there.
+    private bool IsFileGone(SqliteException exception)
+        => exception.SqliteErrorCode == SqliteCannotOpen && !File.Exists(DatabasePath);
+
+    private readonly record struct SchemaObject(string Type, string Name, string TableName, string Sql);
 }

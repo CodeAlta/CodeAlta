@@ -165,6 +165,211 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task ListSessionsAsync_AfterAWriteMetTheDamage_StillListsEverySession(bool withCopy)
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using var database = ApplicationDatabase.Create(options);
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        await store.UpsertSessionAsync(CreateSummary("session-before-the-copy", updatedAt: "2026-06-18T10:50:00+00:00")).ConfigureAwait(false);
+        Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        if (withCopy)
+        {
+            Assert.IsNotNull(await database.BackupAsync().ConfigureAwait(false));
+        }
+
+        await store.UpsertSessionAsync(CreateSummary("session-after-the-copy", updatedAt: "2026-06-18T10:55:00+00:00")).ConfigureAwait(false);
+        await File.WriteAllBytesAsync(options.ApplicationDatabasePath, new byte[8192].Select(static (_, index) => (byte)(index % 241)).ToArray()).ConfigureAwait(false);
+
+        // A write meets the damage first, not the list: the tables it gets (those of the copy, or new ones) hold
+        // its row and say nothing about the other sessions.
+        await store.UpsertSessionAsync(CreateSummary("session-after-the-damage", updatedAt: "2026-06-18T10:58:00+00:00")).ConfigureAwait(false);
+        var sessions = await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        CollectionAssert.AreEquivalent(
+            new[] { "session-before-the-copy", "session-after-the-copy", "session-after-the-damage" },
+            sessions.Select(static item => item.SessionId).ToArray());
+        Assert.AreEqual(withCopy, database.LastRecovery?.RestoredFromCopy is not null);
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_AfterANewerBuildWroteTheSessionTables_MakesThemAgainFromTheJournals()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using (var newer = ApplicationDatabase.Create(options))
+        {
+            var store = new SessionViewJournalStore(options, newer).CreateSessionStore();
+            await store.UpsertSessionAsync(CreateSummary("session-downgrade", updatedAt: "2026-06-18T13:00:00+00:00")).ConfigureAwait(false);
+            Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+            await newer.MigrateAsync("plugin:test", "test_", 1, async (connection, from, to, token) =>
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "CREATE TABLE test_facts (id INTEGER); INSERT INTO test_facts VALUES (5);";
+                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+
+        // What a newer build leaves behind: a higher version of the session tables, in a layout this build does not know.
+        await using (var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE app_meta SET version = 2 WHERE owner = 'session_cache';";
+            Assert.AreEqual(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
+            command.CommandText = "ALTER TABLE session_projection_cache RENAME COLUMN title TO title_of_the_newer_build;";
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        await using var database = ApplicationDatabase.Create(options);
+        var downgraded = new SessionViewJournalStore(options, database).CreateSessionStore();
+        var sessions = await downgraded.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, sessions.Length);
+        Assert.AreEqual("session-downgrade", sessions[0].SessionId);
+        Assert.AreEqual(1, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
+        await downgraded.UpsertSessionAsync(CreateSummary("session-after-the-downgrade", updatedAt: "2026-06-18T13:05:00+00:00")).ConfigureAwait(false);
+        Assert.AreEqual(2, (await downgraded.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        Assert.AreEqual(5L, await database.ReadAsync("plugin:test", async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id FROM test_facts;";
+            return (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))!;
+        }).ConfigureAwait(false), "The tables of a plugin are not those of the session list: they stay.");
+        Assert.IsNull(database.LastRecovery, "The file is not damaged: it is not replaced.");
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_WhenTheDamagedFileCannotBeMovedAside_ReportsItAsLockedAndListsOnceItCan()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("A file that another process holds open can be moved on this system.");
+        }
+
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = options.ApplicationDatabasePath,
+            BackupDirectory = options.ApplicationDatabaseBackupRoot,
+            BusyTimeout = TimeSpan.FromMilliseconds(300),
+        });
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        await store.UpsertSessionAsync(CreateSummary("session-held", updatedAt: "2026-06-18T16:00:00+00:00")).ConfigureAwait(false);
+        Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        await File.WriteAllBytesAsync(options.ApplicationDatabasePath, new byte[8192].Select(static (_, index) => (byte)(index % 241)).ToArray()).ConfigureAwait(false);
+
+        // Another process (the other instance, a scanner) holds the damaged file: it can be read, not moved.
+        await using (new FileStream(options.ApplicationDatabasePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            await Assert.ThrowsExactlyAsync<AgentSessionCacheLockedException>(async () =>
+                await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).ConfigureAwait(false);
+        }
+
+        var sessions = await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        Assert.AreEqual(1, sessions.Length);
+        Assert.AreEqual("session-held", sessions[0].SessionId);
+    }
+
+    [TestMethod]
+    public async Task ReadsAndWritesThatMeetTheSameDamageTogether_AllSucceed()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        await using var database = ApplicationDatabase.Create(options);
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        for (var index = 0; index < 4; index++)
+        {
+            await store.UpsertSessionAsync(CreateSummary($"session-together-{index}", updatedAt: $"2026-06-18T14:0{index}:00+00:00")).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(4, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        await File.WriteAllBytesAsync(options.ApplicationDatabasePath, new byte[8192].Select(static (_, index) => (byte)(index % 241)).ToArray()).ConfigureAwait(false);
+
+        // Each of them finds the file damaged: the tables are made again once, not under an operation that already
+        // found them again.
+        var operations = new List<Task>();
+        for (var index = 4; index < 12; index++)
+        {
+            var summary = CreateSummary($"session-together-{index}", updatedAt: $"2026-06-18T14:{index + 10}:00+00:00");
+            operations.Add(Task.Run(() => store.UpsertSessionAsync(summary)));
+            operations.Add(Task.Run(async () => await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)));
+        }
+
+        await Task.WhenAll(operations).WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
+
+        Assert.AreEqual(12, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+    }
+
+    [TestMethod]
+    public async Task UpsertSessionAsync_WhenTheFileIsReplacedUnderTheWrite_MakesItsTablesAgainAndListsEverySession()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var clock = new HookClock();
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = options.ApplicationDatabasePath,
+            BackupDirectory = options.ApplicationDatabaseBackupRoot,
+            TimeProvider = clock,
+        });
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        await store.UpsertSessionAsync(CreateSummary("session-before", updatedAt: "2026-06-18T17:00:00+00:00")).ConfigureAwait(false);
+        Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+
+        // The file goes after the list checked its tables, as the write starts: the database makes a new file, which
+        // has none of them.
+        clock.OnTimestamp = () => File.Delete(options.ApplicationDatabasePath);
+        await store.UpsertSessionAsync(CreateSummary("session-under-the-write", updatedAt: "2026-06-18T17:05:00+00:00")).ConfigureAwait(false);
+        var sessions = await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(1, database.Generation);
+        CollectionAssert.AreEquivalent(new[] { "session-before", "session-under-the-write" }, sessions.Select(static item => item.SessionId).ToArray());
+    }
+
+    [TestMethod]
+    public async Task ListSessionsAsync_WhenTheFileIsReplacedWhileItsTablesAreMade_MakesThemInTheNewFile()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var clock = new HookClock();
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = options.ApplicationDatabasePath,
+            BackupDirectory = options.ApplicationDatabaseBackupRoot,
+            TimeProvider = clock,
+        });
+        var store = new SessionViewJournalStore(options, database).CreateSessionStore();
+        await store.UpsertSessionAsync(CreateSummary("session-kept-in-its-journal", updatedAt: "2026-06-18T18:00:00+00:00")).ConfigureAwait(false);
+        Assert.AreEqual(1, (await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+
+        // The file goes: the next operation makes the tables in a new file, then marks the list incomplete. The
+        // file goes once more between the two, when the tables are there and the mark is not written yet.
+        File.Delete(options.ApplicationDatabasePath);
+        void DeleteOnceTheTablesAreMade()
+        {
+            if (database.Generation == 1 && HasSessionTable(options.ApplicationDatabasePath))
+            {
+                File.Delete(options.ApplicationDatabasePath);
+            }
+            else if (database.Generation < 2)
+            {
+                clock.OnTimestamp = DeleteOnceTheTablesAreMade;
+            }
+        }
+
+        clock.OnTimestamp = DeleteOnceTheTablesAreMade;
+        var sessions = await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+
+        Assert.AreEqual(2, database.Generation);
+        Assert.AreEqual(1, sessions.Length);
+        Assert.AreEqual("session-kept-in-its-journal", sessions[0].SessionId);
+    }
+
+    [TestMethod]
     public async Task ListSessionsAsync_AfterOnlyThePagesOfTheSessionTableAreDamaged_RebuildsTheListAndKeepsThePluginData()
     {
         using var temp = TestTempDirectory.Create();
@@ -453,6 +658,35 @@ public sealed class SessionJournalSqliteCacheTests
 
     private static CatalogOptions CreateOptions(string globalRoot)
         => new() { GlobalRoot = globalRoot };
+
+    private static bool HasSessionTable(string databasePath)
+    {
+        if (!File.Exists(databasePath))
+        {
+            return false;
+        }
+
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name = 'session_projection_cache';";
+        return (long)command.ExecuteScalar()! > 0;
+    }
+
+    // A clock that runs an action once, the next time the database starts the time of a write: the place of a test
+    // between the moment the database saw its file and the moment the connection of the write opens it.
+    private sealed class HookClock : TimeProvider
+    {
+        public Action? OnTimestamp { get; set; }
+
+        public override long GetTimestamp()
+        {
+            var action = OnTimestamp;
+            OnTimestamp = null;
+            action?.Invoke();
+            return base.GetTimestamp();
+        }
+    }
 
     private static AgentSessionSummary CreateSummary(string sessionId, string updatedAt)
         => new()

@@ -145,6 +145,67 @@ public sealed class ApplicationDatabaseTests
     }
 
     [TestMethod]
+    public async Task AWriteThatStartsAnotherWrite_IsRefusedInsteadOfWaitingForItself()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token));
+
+        // The inner write would wait for the queue the outer one holds: forever.
+        var nestedWrite = database.WriteAsync("outer", async (connection, token) =>
+        {
+            await ExecuteAsync(connection, "INSERT INTO t_data VALUES (1);", token);
+            await database.WriteAsync("inner", (inner, innerToken) => ExecuteAsync(inner, "INSERT INTO t_data VALUES (2);", innerToken), token);
+        }).AsTask();
+        var nestedMigration = database.WriteAsync("outer", async (connection, token) =>
+            await database.MigrateAsync("plugin:stats", "stats_", 1, (inner, from, to, innerToken) => ExecuteAsync(inner, "CREATE TABLE stats_day (id INTEGER);", innerToken), token)).AsTask();
+        var nestedDrop = database.WriteAsync("outer", async (connection, token) =>
+            await database.DropTablesAsync("plugin:stats", "stats_", token)).AsTask();
+
+        foreach (var nested in new[] { nestedWrite, nestedMigration, nestedDrop })
+        {
+            var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => nested.WaitAsync(TimeSpan.FromSeconds(10)));
+            StringAssert.Contains(failure.Message, "outer");
+        }
+
+        // The outer writes were rolled back, and the queue is free.
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "INSERT INTO t_data VALUES (3);", token)).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(3L, await database.ReadAsync("test", (connection, token) => ScalarAsync<long>(connection, "SELECT SUM(id) FROM t_data;", token)));
+        Assert.AreEqual(0, await database.GetVersionAsync("plugin:stats"));
+    }
+
+    [TestMethod]
+    public async Task AWrite_MayReadAndMayStartWhatWritesAfterIt()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER); INSERT INTO t_data VALUES (1);", token));
+        Task? later = null;
+        var outerEnded = new TaskCompletionSource();
+        var seen = -1L;
+
+        await database.WriteAsync("outer", async (connection, token) =>
+        {
+            await ExecuteAsync(connection, "INSERT INTO t_data VALUES (2);", token);
+
+            // A read has a connection of its own: it sees what is committed, and waits for nobody.
+            seen = await database.ReadAsync("outer", (reader, readToken) => ScalarAsync<long>(reader, "SELECT COUNT(*) FROM t_data;", readToken), token);
+
+            // Work the write starts, and that writes once the write is over, is not part of it.
+            later = Task.Run(async () =>
+            {
+                await outerEnded.Task;
+                await database.WriteAsync("later", (inner, innerToken) => ExecuteAsync(inner, "INSERT INTO t_data VALUES (3);", innerToken));
+            }, token);
+        });
+        outerEnded.SetResult();
+        await later!.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.AreEqual(1L, seen);
+        Assert.AreEqual(3L, await database.ReadAsync("test", (connection, token) => ScalarAsync<long>(connection, "SELECT COUNT(*) FROM t_data;", token)));
+    }
+
+    [TestMethod]
     public async Task TwoDatabasesOnTheSameFile_WriteWithoutALockedError()
     {
         using var temp = TempFolder.Create();
@@ -223,9 +284,14 @@ public sealed class ApplicationDatabaseTests
         await using var database = CreateDatabase(temp);
         await database.MigrateAsync("plugin:stats", "stats_", 3, (connection, from, to, token) => ExecuteAsync(connection, "CREATE TABLE stats_day (id INTEGER);", token));
 
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+        var failure = await Assert.ThrowsExactlyAsync<ApplicationDatabaseNewerVersionException>(async () =>
             await database.MigrateAsync("plugin:stats", "stats_", 2, (connection, from, to, token) => ExecuteAsync(connection, "DROP TABLE stats_day;", token)));
 
+        // An owner that can make its tables again tells this failure from the others; the others still catch InvalidOperationException.
+        Assert.IsInstanceOfType<InvalidOperationException>(failure);
+        Assert.AreEqual("plugin:stats", failure.Owner);
+        Assert.AreEqual(3, failure.RecordedVersion);
+        Assert.AreEqual(2, failure.RequestedVersion);
         StringAssert.Contains(failure.Message, "newer");
         Assert.AreEqual(3, await database.GetVersionAsync("plugin:stats"));
         CollectionAssert.AreEqual(new[] { "stats_day" }, (await database.ListTablesAsync("stats_")).ToArray());
@@ -280,6 +346,57 @@ public sealed class ApplicationDatabaseTests
     }
 
     [TestMethod]
+    public async Task Migrate_RefusesAnIndexOrATriggerOnATableOfAnotherOwner_WhateverItsName()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.MigrateAsync("session_cache", null, 1, (connection, from, to, token) =>
+            ExecuteAsync(connection, "CREATE TABLE session_projection_cache (id INTEGER);", token));
+        await database.MigrateAsync("plugin:git", "git_", 1, (connection, from, to, token) => ExecuteAsync(connection, "CREATE TABLE git_notes (id INTEGER);", token));
+
+        // The name starts with the prefix of the plugin, the table it is on does not.
+        foreach (var sql in new[]
+                 {
+                     "CREATE INDEX stats_ix ON git_notes(id);",
+                     "CREATE UNIQUE INDEX stats_ux ON session_projection_cache(id);",
+                     "CREATE TRIGGER stats_trg AFTER INSERT ON git_notes BEGIN DELETE FROM git_notes; END;",
+                     "CREATE TRIGGER stats_trg AFTER DELETE ON session_projection_cache BEGIN SELECT 1; END;",
+                 })
+        {
+            var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+                await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) =>
+                    ExecuteAsync(connection, "CREATE TABLE stats_day (id INTEGER); " + sql, token)), sql);
+            StringAssert.Contains(failure.Message, "stats_", sql);
+        }
+
+        Assert.AreEqual(0, await database.GetVersionAsync("plugin:stats"));
+        Assert.AreEqual(0L, await database.ReadAsync("test", (connection, token) =>
+            ScalarAsync<long>(connection, "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'stats%';", token)));
+    }
+
+    [TestMethod]
+    public async Task Migrate_AllowsIndexesAndTriggersOnItsOwnTables()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+
+        // A trigger may bear the name of a table: SQLite keeps the two apart.
+        await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) => ExecuteAsync(
+            connection,
+            """
+            CREATE TABLE stats_day (id INTEGER PRIMARY KEY, tokens INTEGER);
+            CREATE TABLE stats_log (id INTEGER);
+            CREATE INDEX stats_day_tokens ON stats_day(tokens);
+            CREATE VIEW stats_view AS SELECT id FROM stats_day;
+            CREATE TRIGGER stats_day_log AFTER INSERT ON stats_day BEGIN INSERT INTO stats_log VALUES (new.id); END;
+            CREATE TRIGGER stats_log AFTER DELETE ON stats_day BEGIN DELETE FROM stats_log WHERE id = old.id; END;
+            """,
+            token));
+
+        Assert.AreEqual(1, await database.GetVersionAsync("plugin:stats"));
+    }
+
+    [TestMethod]
     public async Task Migrate_AllowsTheAutomaticObjectsOfItsTables()
     {
         using var temp = TempFolder.Create();
@@ -309,6 +426,28 @@ public sealed class ApplicationDatabaseTests
         Assert.AreEqual(0, (await database.ListTablesAsync("stats_")).Count);
         Assert.AreEqual(1, await database.GetVersionAsync("plugin:git"));
         CollectionAssert.AreEqual(new[] { "git_notes" }, (await database.ListTablesAsync("git_")).ToArray());
+    }
+
+    [TestMethod]
+    public async Task DropTables_AlsoRemovesWhatTheOwnerNamedOnTheTablesOfAnother()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.MigrateAsync("plugin:git", "git_", 1, (connection, from, to, token) => ExecuteAsync(connection, "CREATE TABLE git_notes (id INTEGER);", token));
+        await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) => ExecuteAsync(connection, "CREATE TABLE stats_day (id INTEGER);", token));
+
+        // A migration cannot make these any more; a database written before that check may hold them.
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(
+            connection,
+            "CREATE INDEX stats_ix ON git_notes(id); CREATE TRIGGER stats_trg AFTER INSERT ON git_notes BEGIN SELECT 1; END;",
+            token));
+
+        await database.DropTablesAsync("plugin:stats", "stats_");
+
+        Assert.AreEqual(0L, await database.ReadAsync("test", (connection, token) =>
+            ScalarAsync<long>(connection, "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'stats%';", token)));
+        CollectionAssert.AreEqual(new[] { "git_notes" }, (await database.ListTablesAsync("git_")).ToArray());
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "INSERT INTO git_notes VALUES (1);", token));
     }
 
     [TestMethod]
@@ -423,6 +562,66 @@ public sealed class ApplicationDatabaseTests
         }
 
         Assert.IsTrue(File.Exists(movedAside));
+        Assert.AreEqual(0, Directory.GetFiles(Path.GetDirectoryName(path)!, "*.restore").Length, "The copy that was made ready is the database now.");
+    }
+
+    [TestMethod]
+    public async Task AMissingFile_IsRestoredFromTheNewestValidCopy()
+    {
+        using var temp = TempFolder.Create();
+        var path = Path.Combine(temp.Path, "data", "alta.sqlite3");
+        var clock = new ManualClock(new DateTimeOffset(2026, 10, 1, 8, 0, 0, TimeSpan.Zero));
+        string older;
+        string newest;
+        await using (var database = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = path, TimeProvider = clock }))
+        {
+            await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) => ExecuteAsync(
+                connection, "CREATE TABLE stats_day (id INTEGER, tokens INTEGER); INSERT INTO stats_day VALUES (1, 4200);", token));
+            older = (await database.BackupAsync())!;
+            clock.Advance(TimeSpan.FromDays(1));
+            await database.WriteAsync("plugin:stats", (connection, token) => ExecuteAsync(connection, "INSERT INTO stats_day VALUES (2, 800);", token));
+            newest = (await database.BackupAsync())!;
+        }
+
+        // The file is gone (deleted, or a replacement of the damaged file that stopped half way) and what stays of
+        // its log is not the log of the copy. The newest copy is not a database any more.
+        File.Delete(path);
+        await File.WriteAllTextAsync(path + "-wal", "the log of the file that is gone");
+        await File.WriteAllBytesAsync(newest, new byte[4096].Select(static (_, index) => (byte)(index % 251)).ToArray());
+
+        await using (var database = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = path, TimeProvider = clock }))
+        {
+            var tokens = await database.ReadAsync("plugin:stats", (connection, token) => ScalarAsync<long>(connection, "SELECT SUM(tokens) FROM stats_day;", token));
+
+            Assert.AreEqual(4200L, tokens, "An empty database here would be copied in its turn, and push the valid copies out.");
+            Assert.AreEqual(1, await database.GetVersionAsync("plugin:stats"));
+            Assert.AreEqual(1, database.Generation, "The owners learn that the rows are those of a copy.");
+            var recovery = database.LastRecovery;
+            Assert.IsNotNull(recovery);
+            Assert.AreEqual(older, recovery.RestoredFromCopy);
+            Assert.IsNull(recovery.MovedAsidePath);
+        }
+
+        Assert.AreEqual(0, Directory.GetFiles(Path.GetDirectoryName(path)!, "*.restore").Length);
+        Assert.IsTrue(File.Exists(older), "A copy is copied, not moved.");
+    }
+
+    [TestMethod]
+    public async Task AFileDeletedWhileInUse_ComesBackFromItsCopyWhenThereIsOne()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        await database.MigrateAsync("plugin:stats", "stats_", 1, (connection, from, to, token) => ExecuteAsync(
+            connection, "CREATE TABLE stats_day (id INTEGER); INSERT INTO stats_day VALUES (1);", token));
+        Assert.IsNotNull(await database.BackupAsync());
+        await database.WriteAsync("plugin:stats", (connection, token) => ExecuteAsync(connection, "INSERT INTO stats_day VALUES (2);", token));
+
+        File.Delete(database.DatabasePath);
+        var rows = await database.ReadAsync("plugin:stats", (connection, token) => ScalarAsync<long>(connection, "SELECT COUNT(*) FROM stats_day;", token));
+
+        Assert.AreEqual(1L, rows, "What was written since the copy is lost; the rest is not.");
+        Assert.AreEqual(1, database.Generation);
+        Assert.IsNotNull(database.LastRecovery?.RestoredFromCopy);
     }
 
     [TestMethod]
@@ -599,6 +798,53 @@ public sealed class ApplicationDatabaseTests
     }
 
     [TestMethod]
+    public async Task AFileThatGoesJustBeforeAWriteOpensIt_IsMadeAgainByTheServiceNotByTheConnection()
+    {
+        using var temp = TempFolder.Create();
+        var clock = new HookClock();
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
+            TimeProvider = clock,
+        });
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER);", token));
+
+        // The file goes after the service saw it, and before the connection of the write opens: a connection that
+        // made the file would leave one without the write-ahead log, without the versions, and nobody would know.
+        clock.OnTimestamp = () => File.Delete(database.DatabasePath);
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_other (id INTEGER);", token));
+
+        Assert.AreEqual(1, database.Generation, "The owners learn that the file is a new one.");
+        Assert.AreEqual("wal", await database.ReadAsync("test", (connection, token) => ScalarAsync<string>(connection, "PRAGMA journal_mode;", token)));
+        Assert.AreEqual(0, await database.GetVersionAsync("plugin:stats"));
+        Assert.AreEqual(0, (await database.ListTablesAsync("t_data")).Count);
+        Assert.AreEqual(1, (await database.ListTablesAsync("t_other")).Count);
+    }
+
+    [TestMethod]
+    public async Task AReaderOfAFileThatIsGone_FailsAndMakesNoFile()
+    {
+        using var temp = TempFolder.Create();
+        var clock = new HookClock();
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
+            TimeProvider = clock,
+        });
+        await database.WriteAsync("test", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_data (id INTEGER); INSERT INTO t_data VALUES (1);", token));
+
+        // The copy reads the database: its connection opens after the service saw the file.
+        clock.OnUtcNow = () => File.Delete(database.DatabasePath);
+        var failure = await Assert.ThrowsExactlyAsync<SqliteException>(async () => await database.BackupAsync());
+
+        Assert.AreEqual(14, failure.SqliteErrorCode, "SQLite cannot open the file.");
+        Assert.IsFalse(File.Exists(database.DatabasePath), "A reader does not make the file.");
+        Assert.AreEqual(0, database.GetBackupPaths().Count, "And an empty database is not kept as a copy.");
+        Assert.AreEqual(0, (await database.ListTablesAsync("t_data")).Count, "The service makes the file again.");
+        Assert.AreEqual(1, database.Generation);
+    }
+
+    [TestMethod]
     public async Task AReader_CannotWrite()
     {
         using var temp = TempFolder.Create();
@@ -637,6 +883,31 @@ public sealed class ApplicationDatabaseTests
         public void Advance(TimeSpan time) => _now += time;
 
         public override DateTimeOffset GetUtcNow() => _now;
+    }
+
+    // A clock that runs an action once, the next time the service asks it something: the place of a test in the
+    // middle of an operation.
+    private sealed class HookClock : TimeProvider
+    {
+        public Action? OnTimestamp { get; set; }
+
+        public Action? OnUtcNow { get; set; }
+
+        public override long GetTimestamp()
+        {
+            var action = OnTimestamp;
+            OnTimestamp = null;
+            action?.Invoke();
+            return base.GetTimestamp();
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            var action = OnUtcNow;
+            OnUtcNow = null;
+            action?.Invoke();
+            return base.GetUtcNow();
+        }
     }
 
     private sealed class TempFolder : IDisposable
