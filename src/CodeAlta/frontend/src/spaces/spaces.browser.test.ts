@@ -10,7 +10,7 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable } from "../browserTarget";
 
 const edge = browserExecutable;
-test("the window shows one space at a time: its projects, its sessions and its own tabs, which come back with it", { skip: !edge, timeout: 90_000 }, async () => {
+test("the window shows one space at a time: its projects, its sessions and its own tabs, which come back with it", { skip: !edge, timeout: 90_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), "codealta-spaces-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -30,7 +30,8 @@ test("the window shows one space at a time: its projects, its sessions and its o
         });
       } }] });
     await writeFile(join(root, "style.css"), readFileSync(new URL("../../node_modules/flexlayout-react/style/light.css", import.meta.url), "utf8")
-      + readFileSync(new URL("../style.css", import.meta.url), "utf8") + readFileSync(new URL("./spaces.css", import.meta.url), "utf8"));
+      + readFileSync(new URL("../style.css", import.meta.url), "utf8") + readFileSync(new URL("./spaces.css", import.meta.url), "utf8")
+      + readFileSync(new URL("../editor/editor.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
@@ -139,6 +140,79 @@ test("the window shows one space at a time: its projects, its sessions and its o
     assert.deepEqual(await projects(), ["Other project"]);
     assert.equal(await wait("[...document.querySelectorAll('.flexlayout__tab_button')].some(tab=>tab.textContent.includes('other-session'))"), true);
     assert.deepEqual(exceptions, []);
+
+    // Each regression starts with the real App in Work. Only the host's activity is supplied by the fixture;
+    // the toast, tabs, editors, and unsaved-edits question all belong to the mounted production components.
+    const resetWork = async () => {
+      await evaluate("localStorage.clear();localStorage.setItem('settingsFixtureOwned','true');localStorage.setItem('settingsFixtureSecondProject','true');localStorage.setItem('codealta.desktop.space.v1','work')");
+      await command("Page.reload");
+      assert.equal(await wait("document.querySelector('.space-switch-name')?.textContent==='Work' && !!document.querySelector('#project-list')"), true);
+    };
+    const captureToast = async (sessionId = "one") => {
+      const message = JSON.stringify(`${sessionId} waits for you in Default`);
+      await evaluate(`spacesFixture.sessions=${JSON.stringify([{ sessionId, projectId: "project", title: sessionId, running: false, backgroundTasks: 0, failed: false, waiting: true }])}`);
+      assert.equal(await wait(`[...document.querySelectorAll('.bp6-toast')].some(toast=>toast.textContent.includes(${message}))`), true);
+      await evaluate(`window.waitingToastShow=[...document.querySelectorAll('.bp6-toast')].find(toast=>toast.textContent.includes(${message})).querySelector('a');void 0`);
+      assert.equal(await evaluate("waitingToastShow.textContent.trim()"), "Show");
+    };
+    const clickCapturedToast = async () => {
+      assert.equal(await evaluate("waitingToastShow.isConnected"), true, "Click the original toast after later renders, not a replacement callback.");
+      await evaluate("waitingToastShow.click()");
+    };
+    const openEditor = async () => {
+      await evaluate("document.querySelector('#project-list button[title=\"Open the code editor\"]').click()");
+      assert.equal(await wait("!!document.querySelector('.project-editor')"), true);
+    };
+
+    await t.test("Show keeps a tab opened after the toast and does not restore a tab closed after it", async () => {
+      await resetWork();
+      await openSession("other-session");
+      assert.equal(await wait("[...document.querySelectorAll('.flexlayout__tab_button')].some(tab=>tab.textContent.includes('other-session'))"), true);
+      await captureToast();
+      await evaluate("[...document.querySelectorAll('.flexlayout__tab_button')].find(tab=>tab.textContent.includes('other-session')).querySelector('.flexlayout__tab_button_trailing').click()");
+      assert.equal(await wait("![...document.querySelectorAll('.flexlayout__tab_button')].some(tab=>tab.textContent.includes('other-session'))"), true);
+      await openEditor();
+      const currentTabs = await tabs();
+      await clickCapturedToast();
+      assert.equal(await wait("document.querySelector('.space-switch-name')?.textContent==='Default' && document.querySelector('.flexlayout__tab_button--selected')?.textContent.includes('one')"), true);
+      await chip("Work");
+      assert.equal(await wait("document.querySelector('.space-switch-name')?.textContent==='Work'"), true);
+      assert.deepEqual(await tabs(), currentTabs, "Returning to Work keeps the tabs from the click, not from the toast's render.");
+      assert.deepEqual(exceptions, []);
+    });
+
+    for (const lookupPending of [false, true]) await t.test(lookupPending
+      ? "Show asks about unsaved edits made while its session lookup is pending, and Cancel keeps them"
+      : "Show asks about unsaved edits in an editor opened after the toast, and Cancel keeps it", async () => {
+      await resetWork();
+      await captureToast(lookupPending ? "created" : "one");
+      if (lookupPending) {
+        await evaluate("localStorage.setItem('creationFixtureHoldSnapshot','true')");
+        await clickCapturedToast();
+        assert.equal(await wait("settingsShellFixture.snapshots.length===1"), true);
+        assert.equal(await shown(), "Work");
+      }
+      await openEditor();
+      await evaluate("document.querySelector('.project-editor .editor-new-file').click()");
+      assert.equal(await wait("!!document.querySelector('.project-editor .monaco-editor :is(.inputarea, .native-edit-context)')"), true);
+      await evaluate("document.querySelector('.project-editor .monaco-editor :is(.inputarea, .native-edit-context)').focus()");
+      await command("Input.insertText", { text: "keep these unsaved edits" });
+      assert.equal(await wait("!!document.querySelector('.project-editor .editor-tab-close[title=\"Unsaved changes\"]')"), true);
+      const currentTabs = await tabs();
+      if (lookupPending) await evaluate("localStorage.removeItem('creationFixtureHoldSnapshot');settingsShellFixture.releaseSnapshot()");
+      else await clickCapturedToast();
+      assert.equal(await wait("!!document.querySelector('.unsaved-file-dialog')"), true, "The current editor must participate in the space's dirty guard.");
+      assert.equal(await shown(), "Work");
+      assert.match(await evaluate("document.querySelector('.unsaved-file-dialog').textContent"), /Save the changes to Untitled-1 before closing/);
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.unsaved-file-dialog button')].map(button=>button.textContent.trim())"), ["Cancel", "Discard", "Save"]);
+      await evaluate("[...document.querySelectorAll('.unsaved-file-dialog button')].find(button=>button.textContent==='Cancel').click()");
+      assert.equal(await wait("!document.querySelector('.unsaved-file-dialog')"), true);
+      assert.equal(await shown(), "Work");
+      assert.deepEqual(await tabs(), currentTabs);
+      assert.equal(await evaluate("!!document.querySelector('.project-editor .editor-tab-close[title=\"Unsaved changes\"]')"), true);
+      assert.equal(await evaluate("document.querySelector('.project-editor .view-lines').textContent.replaceAll('\\u00a0',' ')"), "keep these unsaved edits");
+      assert.deepEqual(exceptions, []);
+    });
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

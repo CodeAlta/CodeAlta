@@ -749,7 +749,8 @@ run, a provider works in the background. Above the buttons, up to three lines na
 or failed in a space that is not shown (`spaceCalls`: one for each space, a session that waits before one
 that failed, named for the first space of its project); a click shows that space and opens that session.
 When a session starts to wait in another space, a toast says so once, with **Show**; what already waited
-when the window started or left a space is not said.
+when the window started or left a space is not said. **Show** keeps the current tabs and asks about unsaved
+edits when leaving, including editors opened after the toast appeared or while its session was being read.
 
 **New space.** The window (`SpaceDialog`) has a row of ready-made spaces (`spaceTemplates`: Work,
 Personal, Open source, Experiments, Learning, Clients; a name, an icon and a color in one click, the

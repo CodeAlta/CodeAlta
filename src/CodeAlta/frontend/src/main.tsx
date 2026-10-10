@@ -892,9 +892,10 @@ function App() {
         if (fresh.configured) publishWorkspaceState({ kind: "ready", snapshot: fresh });
       } catch { /* The space is shown all the same: its Explorer has the session once it is listed. */ }
     }
-    showSpace(id, catalog.current?.sessions.some(session => session.id === target.sessionId) ? target : undefined);
+    showSpaceLatest.current(id, catalog.current?.sessions.some(session => session.id === target.sessionId) ? target : undefined);
     focusPromptSoon();
   }
+  const openSpaceSessionLatest = useRef(openSpaceSession); openSpaceSessionLatest.current = openSpaceSession;
   // A project that another space has joins the one shown, and is selected there.
   async function joinShownSpace(id: string) {
     const outcome = await spacesHub.assign(id, [shownSpace.current]);
@@ -920,7 +921,7 @@ function App() {
       if (said.sessions.has(call.sessionId)) continue;
       showToast({ intent: "warning", icon: "help", timeout: 12_000,
         message: translate(shownLocale.current, "{title} waits for you in {space}", { title: call.title || translate(shownLocale.current, "A session"), space: call.space.name }),
-        action: { text: translate(shownLocale.current, "Show"), onClick: () => void openSpaceSession(call.space.id, call) } });
+        action: { text: translate(shownLocale.current, "Show"), onClick: () => void openSpaceSessionLatest.current(call.space.id, call) } });
     }
   }, [calls, spaceId]);
   // The sessions that wait for the user (a question, a command to allow, a form): marked in the Explorer and on their

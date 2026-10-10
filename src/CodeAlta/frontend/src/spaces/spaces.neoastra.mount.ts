@@ -2,6 +2,8 @@
 // that keeps two spaces in memory. No native bridge or user data is touched.
 import type { SpaceAssignRequest, SpaceItem, SpaceShownRequest, SpacesEvent } from "#neoastra";
 export * from "../projectFocus.neoastra.mount";
+// The real editor can open an in-memory file; disk and git operations remain unavailable.
+export { projectFiles, projectGit } from "../demo-api";
 
 const space = (id: string, name: string, projectIds: string[], look: Partial<SpaceItem> = {}): SpaceItem =>
   ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, ...look });
