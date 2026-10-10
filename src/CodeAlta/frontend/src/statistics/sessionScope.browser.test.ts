@@ -53,6 +53,13 @@ test("the canvas of a session asks every page for that session and its sub-agent
       const chip = call.method === "sessions" && call.request.limit === 1;
       assert.equal(call.request.filter.withChildren, chip ? undefined : true, `${call.method} ${JSON.stringify(call.request)}`);
     }
+    // The numbers that are computed when they are asked are asked inside the session too: the sessions at once (Activity), the fill of
+    // the context (Models) and the depth of the sub-agents (Agents).
+    for (const [method, name] of [["series", "sessions-at-once"], ["series", "context-fill"], ["details", "sub-agent-depth"]]) {
+      const call = asked.find(one => one.method === method && one.args[0] === name);
+      assert.ok(call, `${name} is asked`);
+      assert.deepEqual({ session: call.request.filter.session, withChildren: call.request.filter.withChildren }, { session: session.id, withChildren: true }, name);
+    }
     assert.deepEqual([...new Set(asked.map(call => call.method))].filter(method => !["summary", "series", "top", "tools", "models", "projects", "sessions", "distribution", "calendar", "weekHour", "records", "health", "details", "runs", "costEstimate"].includes(method)), []);
 
     // The table of sessions lists the session and its sub-agents, and each row opens its chat.

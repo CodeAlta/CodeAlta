@@ -153,7 +153,8 @@ public sealed partial class StatisticsQueries
 
     private static bool IsAllPeriod(string? period) => string.Equals(period?.Trim(), "all", StringComparison.OrdinalIgnoreCase);
 
-    // The days from the first record to the last record of the sessions, inside the days the period already has.
+    // The days from the first record to the last record of the sessions, and no later than the last day the period has (today).
+    // The first day is the one of the sessions, also when no day of the statistics is that old.
     private async ValueTask<DayRange> SessionLifeAsync(IReadOnlyList<string> sessionIds, DayRange range, CancellationToken cancellationToken)
     {
         var (first, last) = await _store.ReadAsync(
@@ -169,7 +170,7 @@ public sealed partial class StatisticsQueries
         }
 
         DateOnly Day(long milliseconds) => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.FromUnixTimeMilliseconds(milliseconds).UtcDateTime, Days.TimeZone));
-        var from = Day(first) > range.From ? Day(first) : range.From;
+        var from = Day(first);
         var to = Day(last) < range.To ? Day(last) : range.To;
         return to < from ? range : new DayRange(from, to);
     }
