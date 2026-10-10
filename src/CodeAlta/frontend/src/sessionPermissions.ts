@@ -30,6 +30,8 @@ type RetainedDecision = {
 export function createPermissionReviewer(
   list: (request: SessionPermissionsRequest, options: CallOptions) => Promise<SessionPermissionsPage>,
   resolve: (request: SessionPermissionResolveRequest, options: CallOptions) => Promise<SessionPermissionResolution>,
+  // The read that checks a shown entry still waits: the list itself, unless a caller tells the two apart.
+  check: (request: SessionPermissionsRequest, options: CallOptions) => Promise<SessionPermissionsPage> = list,
 ) {
   let selection = 0;
   let hostEpoch: string | null = null;
@@ -97,6 +99,21 @@ export function createPermissionReviewer(
             entries = Object.freeze(page.entries.map(entry => Object.freeze({ ...entry, handle: Object.freeze({ ...entry.handle }) })));
             publish({ kind: "ready", entries, hasMore: page.hasMore });
           } catch { if (active() && current === generation) error("read_failed"); }
+        },
+        /**
+         * Whether a shown entry still waits, read without changing what is shown: no publication, no new entries,
+         * no authority. A request answered elsewhere (on claude.ai, with Remote Control) is withdrawn by its
+         * provider. Null when nothing can be said: another selection, a failed or refused read, a decision pending.
+         */
+        async waits(entry: SessionPermissionCommand): Promise<boolean | null> {
+          if (!active() || !validSelection || reloadCode || !replaceable() || !entries.includes(entry)) return null;
+          try {
+            const page = await check(selectedRequest, { signal, timeoutMilliseconds: 8_000 });
+            if (!active() || reloadCode || !entries.includes(entry) || page.status !== "ok"
+              || page.hostEpoch !== selectedRequest.expectedHostEpoch || page.sessionId !== selectedRequest.sessionId
+              || !Array.isArray(page.entries)) return null;
+            return page.entries.some(value => value?.handle?.attemptId === entry.handle.attemptId);
+          } catch { return null; }
         },
         observeDecision(): PermissionDecisionObservation | null {
           if (!active() || retained === null) return null;

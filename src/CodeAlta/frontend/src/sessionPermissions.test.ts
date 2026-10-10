@@ -569,3 +569,26 @@ test("a new reviewer after renderer reload only performs explicit pending reads 
   assert.equal(restarted.observeDecision(), null);
   await f.wait(restarted.decide(command(), "allow_once")); assert.equal(resolves, 1);
 }));
+
+test("a shown entry is checked without changing what is shown, and the check says nothing it cannot know", () => Fixture.run(async f => {
+  const reads: SessionPermissionsPage[] = [page(), page(), page([]), { ...page(), status: "disabled" }];
+  let calls = 0; const states: PermissionReviewState[] = [];
+  const reviewer = f.reviewer(async () => reads[calls++]);
+  const controller = f.controller();
+  const selection = reviewer.forSelection(request, controller.signal, value => states.push(value));
+  await f.wait(selection.refresh());
+  const shown = ready(states).entries[0];
+  const published = states.length;
+
+  assert.equal(await f.wait(selection.waits(shown)), true, "It still waits");
+  assert.equal(await f.wait(selection.waits(shown)), false, "Answered elsewhere: it is gone");
+  assert.equal(await f.wait(selection.waits(shown)), null, "A refused read says nothing");
+  assert.equal(states.length, published, "A check publishes nothing");
+  assert.equal(ready(states).entries[0], shown, "and keeps the entry that can be decided");
+  assert.equal(await f.wait(selection.waits(command())), null, "An entry that is not shown is not checked");
+  assert.equal(calls, 4);
+
+  controller.abort();
+  assert.equal(await f.wait(selection.waits(shown)), null, "Another selection says nothing");
+  assert.equal(calls, 4, "and reads nothing");
+}));

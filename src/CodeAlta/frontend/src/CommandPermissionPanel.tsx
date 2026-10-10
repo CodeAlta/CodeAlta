@@ -80,6 +80,23 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   const entry = shown?.entries[0];
   const attempt = entry?.handle.attemptId ?? null;
   useEffect(() => {
+    // A shown request can be answered elsewhere (on claude.ai, with Remote Control), and is then withdrawn: while
+    // the run goes on, the card checks that it still waits, without touching what it shows, and reads the
+    // requests again once it no longer does.
+    const current = scope.current;
+    if (!current || !entry || !running || state !== shown) return;
+    let stopped = false, checking = false;
+    const timer = setInterval(() => {
+      if (checking) return;
+      checking = true;
+      void current.waits(entry).then(waits => {
+        checking = false;
+        if (!stopped && waits === false && scope.current === current && currentState.current === shown && canReview()) void current.refresh();
+      });
+    }, pendingReadInterval);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [entry, running, state, shown]);
+  useEffect(() => {
     // A request that comes back after it was gone is a new one on screen: it arms again.
     if (attempt === null) { setArmed(null); return; }
     const timer = setTimeout(() => setArmed(attempt), armDelay);
