@@ -85,7 +85,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     /// <summary>The most instances that stay open; at the limit the oldest hidden one is closed to make room.</summary>
     internal const int MaximumInstances = 64;
 
-    /// <summary>The most open requests kept for a page that does not watch yet.</summary>
+    /// <summary>The most requests for a tab kept for a page that does not watch yet: beyond it the oldest request is let go.</summary>
     internal const int MaximumOpenBacklog = 16;
 
     /// <summary>The most events one page can have waiting: the page reads slowly or not at all.</summary>
@@ -115,7 +115,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Instance> _instances = new(StringComparer.Ordinal);
     private readonly Dictionary<string, JsonElement> _inputs = new(StringComparer.Ordinal);
-    private readonly Queue<CanvasEvent> _openBacklog = new();
+    // What a page that does not watch missed and must still hear, in order: the requests of plugins for a tab, the last
+    // MaximumOpenBacklog of them, and the instances they closed, each once. A close is never let go: it holds the place of its instance
+    // until a page heard it (see OpenAsync), so there are never more of them than MaximumInstances.
+    private readonly List<CanvasEvent> _pageBacklog = [];
     private readonly SemaphoreSlim _reconcile = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private PluginRuntimeManager? _runtime;
@@ -274,7 +277,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
                 if (_disposed) return new("unavailable", null, declaration);
                 if (!_instances.TryGetValue(id, out instance!))
                 {
-                    if (_instances.Count >= MaximumInstances && !EvictOldestHiddenLocked()) return new("limit", null, declaration);
+                    // A close that no page has heard yet holds the place of its instance: the open instances and those closes are never
+                    // more than the limit together, so that every close can be kept for the page. A page that watches frees the places.
+                    var held = _pageBacklog.Count(static kept => kept.Kind == "closed");
+                    if (_instances.Count + held >= MaximumInstances && !EvictOldestHiddenLocked()) return new("limit", null, declaration);
                     instance = new Instance(id, named, ++_order);
                     _instances.Add(id, instance);
                 }
@@ -567,7 +573,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             replaced = _outbox;
             _outbox = outbox;
             generation = ++_watchGeneration;
-            while (_openBacklog.TryDequeue(out var missed)) outbox.Add(missed);
+            foreach (var missed in _pageBacklog) outbox.Add(missed);
+            _pageBacklog.Clear();
             // A page that starts watching may have asked for its tabs before the plugins were there (a window that restores its tabs while the host starts):
             // the tabs that wait ask again.
             if (_runtime is not null) outbox.Add(new CanvasEvent("plugins"));
@@ -640,7 +647,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             open = [.. _instances.Values];
             _instances.Clear();
             _inputs.Clear();
-            _openBacklog.Clear();
+            _pageBacklog.Clear();
             outbox = _outbox;
             _outbox = null;
         }
@@ -712,12 +719,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
                 _inputs[id] = given.Clone();
             }
 
-            if (_outbox is { } outbox) outbox.Add(request);
-            else
-            {
-                if (_openBacklog.Count == MaximumOpenBacklog) _openBacklog.Dequeue();
-                _openBacklog.Enqueue(request);
-            }
+            TellPageLocked(request);
         }
 
         return new(PluginCanvasOpenStatus.Requested, id, named.SpaceId, named.SpaceId is null || string.Equals(named.SpaceId, shown, StringComparison.Ordinal));
@@ -907,6 +909,29 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             : new CanvasEvent("update") { InstanceId = instance.Id, Html = html, Revision = instance.Revision });
     }
 
+    // Gives the page a request for a tab or the close of an instance, or keeps it for the page that watches next. Under the lock of the broker.
+    private void TellPageLocked(CanvasEvent value)
+    {
+        if (_outbox is { } outbox)
+        {
+            outbox.Add(value);
+            return;
+        }
+
+        if (value.Kind == "closed")
+        {
+            // An instance that is opened and closed again before a page watched is told once, where its last close happened.
+            _pageBacklog.RemoveAll(kept => kept.Kind == "closed" && string.Equals(kept.InstanceId, value.InstanceId, StringComparison.Ordinal));
+        }
+        else if (_pageBacklog.Count(static kept => kept.Kind != "closed") >= MaximumOpenBacklog)
+        {
+            // The requests have a limit of their own, and the closes none to share with them: the oldest request is let go.
+            _pageBacklog.RemoveAt(_pageBacklog.FindIndex(static kept => kept.Kind != "closed"));
+        }
+
+        _pageBacklog.Add(value);
+    }
+
     private async ValueTask<bool> CloseInstanceAsync(Instance instance, bool notifyPage)
     {
         await instance.Gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -923,8 +948,10 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
                 // The page is told which tab it was: the tab of a space that is not shown has nothing that listens to its instance.
                 if (notifyPage)
                 {
+                    // A page that does not watch now (it is being loaded again, or makes its channel again) still has the tab: it hears of
+                    // the close when it watches, or its tab would open the instance again.
                     var named = instance.Identity;
-                    _outbox?.Add(new CanvasEvent("closed")
+                    TellPageLocked(new CanvasEvent("closed")
                     {
                         InstanceId = instance.Id, PluginKey = named.PluginKey, CanvasId = named.CanvasId, SpaceId = named.SpaceId, ProjectId = named.ProjectId,
                         SessionId = named.SessionId, Key = named.Key,
@@ -1323,7 +1350,10 @@ internal sealed class CanvasOutbox
 
             if (_events.Count >= DesktopCanvases.MaximumPendingEvents)
             {
-                var droppable = _events.FindIndex(static candidate => candidate.Kind != "open");
+                // What a later event says again goes first, then the oldest request for a tab. A close goes last: nothing says it again,
+                // and the tab of its instance would open the instance once more.
+                var droppable = _events.FindIndex(static candidate => candidate.Kind is not ("open" or "closed"));
+                if (droppable < 0) droppable = _events.FindIndex(static candidate => candidate.Kind != "closed");
                 _events.RemoveAt(droppable >= 0 ? droppable : 0);
             }
 

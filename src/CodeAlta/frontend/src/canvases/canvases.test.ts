@@ -380,6 +380,28 @@ test("what plugins asked and closed before the window was ready is given to it i
   disconnect();
 });
 
+test("the closes kept for a window that is not ready do not take the place of the requests, and none is let go", async () => {
+  const played = host();
+  const hub = createCanvasHub(played.api, timers());
+  const disconnect = hub.connect("epoch");
+  const request = (key: string) => event("open", { pluginKey: "k", canvasId: "board", spaceId: "other", key, focus: true });
+  const closed = (key: string) => event("closed", { instanceId: `i-${key}`, pluginKey: "k", canvasId: "board", spaceId: "other", key });
+  // The host tells a page that watches again everything it missed at once: as many closes as it keeps instances, with the requests around them.
+  for (let index = 0; index < retainedLimit; index++) { played.push(closed(`c${index}`)); if (index < 20) played.push(request(`r${index}`)); }
+  // An instance that was closed twice is one tab to take away, where its last close came.
+  played.push(closed("c0"));
+  await wait(200);
+
+  const taken: string[] = [];
+  hub.onOpenRequest(value => taken.push(`open:${value.key}`), value => taken.push(`closed:${value.key}`));
+
+  const closes = taken.filter(value => value.startsWith("closed:"));
+  assert.deepEqual(closes, [...Array.from({ length: retainedLimit - 1 }, (_value, index) => `closed:c${index + 1}`), "closed:c0"], "every close, each instance once");
+  assert.deepEqual(taken.filter(value => value.startsWith("open:")), Array.from({ length: 16 }, (_value, index) => `open:r${index + 4}`), "the newest sixteen requests, as before");
+  assert.ok(taken.indexOf("closed:c7") < taken.indexOf("open:r7") && taken.indexOf("open:r7") < taken.indexOf("closed:c8"), "in the order they came");
+  disconnect();
+});
+
 test("the events of instances that no tab listens to are kept within a limit", async () => {
   const played = host();
   const hub = createCanvasHub(played.api, timers());

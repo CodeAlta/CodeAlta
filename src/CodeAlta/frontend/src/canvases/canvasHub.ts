@@ -11,8 +11,13 @@ export const reconnectMilliseconds = 2000;
 /** How many times a tab asks for its instance when the host turns the call away because too many are being served, and how long it waits before the second try. */
 export const openAttempts = 6;
 export const openRetryMilliseconds = 150;
-/** The most open requests kept for a window that has not taken them yet, and the most instances whose last events are kept for a tab that comes late. */
+/**
+ * The most instances whose last events are kept for a tab that comes late, and whose close is kept for a window that is not ready: as many
+ * as the host keeps instances, which is also the most closes it tells a page at once.
+ */
 export const retainedLimit = 64;
+/** The most requests for a tab kept for a window that has not taken them yet: beyond it the oldest is let go. */
+export const waitingOpenLimit = 16;
 
 /** A plugin asks for a tab: the canvas, where, about what, and whether to bring it to the front. */
 export type CanvasOpenRequest = Readonly<{
@@ -140,8 +145,16 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     return false;
   }
 
+  // The requests and the closes each have their limit, so that one never takes the place of the other; their order stays.
   function keep(entry: (typeof waiting)[number]) {
-    if (waiting.length === 16) waiting.shift();
+    const closes = "closed" in entry;
+    if (closes) {
+      // An instance that was closed twice is one tab to take away, where its last close came.
+      const again = waiting.findIndex(kept => "closed" in kept && kept.closed.instanceId === entry.closed.instanceId);
+      if (again >= 0) waiting.splice(again, 1);
+    }
+
+    if (waiting.filter(kept => "closed" in kept === closes).length >= (closes ? retainedLimit : waitingOpenLimit)) waiting.splice(waiting.findIndex(kept => "closed" in kept === closes), 1);
     waiting.push(entry);
   }
 

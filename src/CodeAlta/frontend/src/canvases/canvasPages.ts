@@ -1,7 +1,7 @@
 // How a canvas is found and opened: the pieces of the Canvases page, of the search, of the menus and of the requests of
 // plugins and agents that need no component. The tab itself is `fileTabs.ts`; what a tab shows is `CanvasPanel`.
 import type { CanvasItem } from "#neoastra";
-import { canvasTab, closeFileTab, emptyFileTabs, openFileTab, persistFileTabs, restoreFileTabs, sameFileTab, type FileTab, type FileTabs } from "../fileTabs";
+import { canvasTab, closeFileTab, emptyFileTabs, fileTabKey, openFileTab, persistFileTabs, restoreFileTabs, sameFileTab, type FileTab, type FileTabs } from "../fileTabs";
 import { spaceShows, type Space } from "../spaces/spaces";
 
 /** What one instance of a canvas is about. */
@@ -107,6 +107,23 @@ export function addCanvasTabToSpace(source: Readonly<{ kept: FileTabs | undefine
   tab: FileTab, focus: boolean, keep: (tab: FileTab) => boolean = () => false): FileTabs {
   const next = bringCanvasTab(source.kept ?? restoreFileTabs(source.read) ?? emptyFileTabs(), tab, focus, keep);
   persistFileTabs(source.write, next);
+  return next;
+}
+
+/**
+ * What names the status of a canvas tab: the tab and the space it is in. The same canvas can be a tab of several spaces, each with an
+ * instance of its own, and so a status of its own.
+ */
+export const canvasStatusKey = (tab: FileTab, space: string) => `${space}\n${fileTabKey(tab)}`;
+
+/**
+ * The statuses of the canvas tabs with the one a tab of a space has now; null or an empty text for none. The same map when nothing changes.
+ */
+export function withCanvasStatus(statuses: ReadonlyMap<string, string>, tab: FileTab, space: string, status: string | null): ReadonlyMap<string, string> {
+  const key = canvasStatusKey(tab, space), value = status || undefined;
+  if (statuses.get(key) === value) return statuses;
+  const next = new Map(statuses);
+  if (value) next.set(key, value); else next.delete(key);
   return next;
 }
 

@@ -354,6 +354,8 @@ public sealed class CanvasesRpcTests
 
         Assert.AreEqual(DesktopCanvases.MaximumPendingEvents, read.Length);
         Assert.IsFalse(read.Any(static value => value.Kind == "update"), "an update of an instance that changed state or closed is not told");
+        Assert.AreEqual("b", read.Single(static value => value.Kind == "closed").InstanceId, "a close is the last thing let go: its tab would come back");
+        Assert.IsFalse(read.Any(static value => value.Kind == "state"), "what a later event says again goes first");
         Assert.IsTrue(read.Any(static value => value.Kind == "open" && value.Key == "k" + (DesktopCanvases.MaximumPendingEvents + 39)), "the newest request is kept");
         outbox.Add(new CanvasEvent("plugins"));
         Assert.AreEqual(0, outbox.ReadAllAsync(default).ToBlockingEnumerable().Count(), "nothing is added to a page that is gone");
@@ -798,6 +800,92 @@ public sealed class BoardsPlugin : PluginBase
         await fixture.PluginServices.Canvases.OpenAsync("board", new PluginCanvasOpenOptions { Key = "k19", Input = JsonDocument.Parse("{\"issue\":1}").RootElement });
         await fixture.OpenAsync("board", key: "k19");
         Assert.AreEqual(42, fixture.Plugin.Contexts[opened.InstanceId!].Input!.Value.GetProperty("issue").GetInt32());
+    }
+
+    [TestMethod]
+    public async Task AnInstanceThePluginClosesWhileNoPageWatches_IsToldToThePageThatWatchesNext_InOrderWithItsRequests()
+    {
+        // The page is being loaded again, or makes its channel again: the instances of its tabs are open, and nothing watches for a moment.
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        var gone = await fixture.OpenAsync("board", space: "work", key: "gone");
+        var back = await fixture.OpenAsync("board", space: "work", key: "back");
+        var byPage = await fixture.OpenAsync("board", space: "work", key: "page");
+
+        Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(gone.InstanceId!));
+        Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(back.InstanceId!));
+        await fixture.PluginServices.Canvases.OpenAsync("board", new PluginCanvasOpenOptions { SpaceId = "work", Key = "back" });
+        // A tab that the page closes itself is nothing to tell the page.
+        Assert.AreEqual("ok", (await fixture.Service.CloseAsync(new(Epoch, byPage.InstanceId), default)).Status);
+
+        // The page that watches next hears what it missed, in the order it happened: without the closes its tabs would open the instances again.
+        using var page = fixture.Watch();
+        var heard = new List<CanvasEvent>();
+        for (var index = 0; index < 3; index++) heard.Add(await page.NextAsync());
+        CollectionAssert.AreEqual(new[] { ("closed", gone.InstanceId, "gone"), ("closed", back.InstanceId, "back"), ("open", back.InstanceId, "back") },
+            heard.Select(static value => (value.Kind, value.InstanceId, value.Key)).ToArray());
+        Assert.AreEqual((Plugin, "board", "work"), (heard[0].PluginKey, heard[0].CanvasId, heard[0].SpaceId), "a close names its tab");
+        Assert.IsFalse(page.Has("closed"), "told once, and nothing of the tab the page closed");
+
+        // What a page was told is not told to the next one.
+        using var next = fixture.Watch();
+        Assert.IsFalse(next.Has("closed"));
+    }
+
+    [TestMethod]
+    public async Task EveryInstanceClosedWhileNoPageWatches_IsToldToThePageThatWatchesNext_UpToAllTheInstancesThereCanBe()
+    {
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        // As many instances as the host keeps, every one with a tab, and no page that watches: the plugin closes them all.
+        var opened = new List<string>();
+        for (var index = 0; index < DesktopCanvases.MaximumInstances; index++) opened.Add((await fixture.OpenAsync("board", space: "work", key: "k" + index, visible: false)).InstanceId!);
+        foreach (var instance in opened) Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(instance));
+        Assert.AreEqual(0, fixture.Broker.GetOpen().Count);
+
+        // What is kept for the page counts as the instances do: while every place is taken by a close the page has not heard, a tab
+        // that asks is told there is no room, so that no close is ever let go to make room for another.
+        Assert.AreEqual("limit", (await fixture.OpenAsync("board", space: "work", key: "one-more", visible: true)).Status);
+
+        using var page = fixture.Watch();
+        var heard = new List<CanvasEvent>();
+        for (var index = 0; index < opened.Count; index++) heard.Add(await page.NextAsync());
+        Assert.IsTrue(heard.All(static value => value.Kind == "closed"));
+        CollectionAssert.AreEqual(opened, heard.Select(static value => value.InstanceId).ToList(), "every close, in the order it happened: none was let go for another");
+        Assert.IsFalse(page.Has("closed"));
+        // The page heard them: there is room again.
+        Assert.AreEqual("ok", (await fixture.OpenAsync("board", space: "work", key: "one-more", visible: true)).Status);
+    }
+
+    [TestMethod]
+    public async Task TheClosesKeptForAPage_DoNotTakeThePlaceOfTheRequestsKeptForIt_AndAnInstanceClosedTwiceIsToldOnce()
+    {
+        await using var fixture = await Fixture.CreateAsync(watch: false);
+        // More closes than requests are kept, and more requests than are kept, one after the other.
+        var closed = new List<string>();
+        for (var index = 0; index < DesktopCanvases.MaximumOpenBacklog + 4; index++)
+        {
+            var instance = (await fixture.OpenAsync("board", space: "work", key: "c" + index, visible: false)).InstanceId!;
+            closed.Add(instance);
+            Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(instance));
+            await fixture.PluginServices.Canvases.OpenAsync("board", new PluginCanvasOpenOptions { SpaceId = "work", Key = "r" + index });
+        }
+
+        // The tab of the first one asks for its instance again before the page watches, and the plugin closes it again: one close, the last.
+        var again = await fixture.OpenAsync("board", space: "work", key: "c0", visible: false);
+        Assert.AreEqual(closed[0], again.InstanceId);
+        Assert.IsTrue(await fixture.PluginServices.Canvases.CloseAsync(again.InstanceId!));
+
+        using var page = fixture.Watch();
+        var heard = new List<CanvasEvent>();
+        for (var index = 0; index < closed.Count + DesktopCanvases.MaximumOpenBacklog; index++) heard.Add(await page.NextAsync());
+        Assert.IsFalse(page.Has("closed") || page.Has("open"));
+        // Every close is there, each instance once; the requests keep their own limit, the oldest let go as before.
+        CollectionAssert.AreEqual(closed.Skip(1).Append(closed[0]).ToList(), heard.Where(static value => value.Kind == "closed").Select(static value => value.InstanceId).ToList());
+        CollectionAssert.AreEqual(Enumerable.Range(4, DesktopCanvases.MaximumOpenBacklog).Select(static index => "r" + index).ToList(),
+            heard.Where(static value => value.Kind == "open").Select(static value => value.Key).ToList());
+        // And what is left is in the order it happened: the close of an instance, then the request that followed it.
+        var order = heard.Select(static value => value.Kind == "closed" ? "closed:" + value.Key : "open:" + value.Key).ToList();
+        Assert.IsTrue(order.IndexOf("closed:c7") < order.IndexOf("open:r7") && order.IndexOf("open:r7") < order.IndexOf("closed:c8"));
+        Assert.AreEqual("closed:c0", order[^1], "the close that came last is told last");
     }
 
     [TestMethod]
@@ -1393,6 +1481,17 @@ public sealed class NotesPlugin : PluginBase
                 {
                     var value = await events.Reader.ReadAsync(timeout.Token);
                     if (value.Kind == kind) return value;
+                }
+            }
+
+            /// <summary>The next event about a tab, whatever it is: the news that plugins changed is passed over.</summary>
+            public async Task<CanvasEvent> NextAsync()
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                while (true)
+                {
+                    var value = await events.Reader.ReadAsync(timeout.Token);
+                    if (value.Kind != "plugins") return value;
                 }
             }
 

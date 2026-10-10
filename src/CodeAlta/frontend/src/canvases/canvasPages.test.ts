@@ -4,8 +4,8 @@ import type { CanvasItem } from "#neoastra";
 import { canvasTab, canvasesTab, changesTab, editorTab, emptyFileTabs, fileTabKey, isCanvasesTab, openFileTab, persistFileTabs, reconcileFileTabs, restoreFileTabs, type FileTabs } from "../fileTabs";
 import { defaultSpace, type Space } from "../spaces/spaces";
 import {
-  abandonedCanvas, addCanvasTabToSpace, bringCanvasTab, canvasCommandName, canvasCommands, canvasMenuItems, canvasRef, canvasRequestSpace, canvasScope, canvasTabOf, closedCanvasTab, defaultCanvasTarget,
-  matchesCanvasCommand, newCanvasPrompt, openCanvases, removeCanvasTabFromSpace, showsCanvas,
+  abandonedCanvas, addCanvasTabToSpace, bringCanvasTab, canvasCommandName, canvasCommands, canvasMenuItems, canvasRef, canvasRequestSpace, canvasScope, canvasStatusKey, canvasTabOf, closedCanvasTab,
+  defaultCanvasTarget, matchesCanvasCommand, newCanvasPrompt, openCanvases, removeCanvasTabFromSpace, showsCanvas, withCanvasStatus,
 } from "./canvasPages";
 
 const item = (id: string, scope: string, fields: Partial<CanvasItem> = {}): CanvasItem => ({ pluginKey: "global:tools", plugin: "Tools", package: "plugin:global:tools", id, title: id[0].toUpperCase() + id.slice(1),
@@ -189,6 +189,29 @@ test("an instance opened for a tab that went away is closed with a tab that was 
   // The tab was closed while the host opened its instance: nothing shows the instance, and nothing else would close it.
   assert.equal(abandonedCanvas([editorTab(project), run], board), "close");
   assert.equal(abandonedCanvas([], run), "close");
+});
+
+test("the status of a canvas tab is the one of its space: the same canvas in another space has its own", () => {
+  const board = canvasTab({ pluginKey: "k", canvasId: "board" }, { title: "Board" });
+  const notes = canvasTab({ pluginKey: "k", canvasId: "notes", project });
+  const status = (statuses: ReadonlyMap<string, string>, tab: typeof board, space: string) => statuses.get(canvasStatusKey(tab, space));
+
+  // The board is a tab of two spaces, with an instance in each. The plugin gives a status to the one of "work".
+  let statuses = withCanvasStatus(new Map(), board, "work", "3 of 8");
+  assert.equal(status(statuses, board, "work"), "3 of 8");
+  assert.equal(status(statuses, board, "play"), undefined, "the tab of the other space, whose plugin said nothing or does not run, shows no status");
+  statuses = withCanvasStatus(statuses, board, "play", "1 of 2");
+  statuses = withCanvasStatus(statuses, notes, "work", "saved");
+  assert.deepEqual([status(statuses, board, "work"), status(statuses, board, "play"), status(statuses, notes, "work")], ["3 of 8", "1 of 2", "saved"]);
+
+  // The tab of "work" is closed, or its plugin clears its status: the one of "play" keeps its own.
+  const closed = withCanvasStatus(statuses, board, "work", null);
+  assert.deepEqual([status(closed, board, "work"), status(closed, board, "play"), status(closed, notes, "work")], [undefined, "1 of 2", "saved"]);
+  assert.equal(status(withCanvasStatus(statuses, board, "work", ""), board, "work"), undefined, "an empty status is none");
+  // The title a tab was given is no part of what names it, and nothing changes when the status is the same.
+  assert.equal(status(statuses, canvasTab({ pluginKey: "k", canvasId: "board" }, { title: "Renamed" }), "work"), "3 of 8");
+  assert.equal(withCanvasStatus(statuses, board, "work", "3 of 8"), statuses);
+  assert.equal(withCanvasStatus(statuses, notes, "play", null), statuses);
 });
 
 test("the Canvases page is one tab, stored and restored with the others, and it lasts", () => {

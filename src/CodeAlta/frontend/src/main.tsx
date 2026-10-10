@@ -212,8 +212,9 @@ import "./pluginButtons/pluginButtons.css";
 import { CanvasPanel } from "./canvases/CanvasPanel";
 import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/hostBridge";
 import { createCanvasHub, type CanvasClosedInstance, type CanvasOpenRequest } from "./canvases/canvasHub";
+import { createCanvasInstances } from "./canvases/canvasInstances";
 import { CanvasesPanel } from "./canvases/CanvasesPanel";
-import { abandonedCanvas, addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, removeCanvasTabFromSpace, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
+import { addCanvasTabToSpace, bringCanvasTab, canvasMenuItems, canvasRequestSpace, canvasStatusKey, canvasTabOf, closedCanvasTab, defaultCanvasTarget, newCanvasPrompt, removeCanvasTabFromSpace, withCanvasStatus, type CanvasSelection, type CanvasTarget } from "./canvases/canvasPages";
 import { createCanvasPluginControl, type CanvasPluginControl } from "./canvases/canvasPlugin";
 import { PluginButtons } from "./pluginButtons/PluginButtons";
 import { usePluginMenuEntries } from "./pluginButtons/pluginMenu";
@@ -1028,17 +1029,13 @@ function App() {
   // The canvases that plugins provide. The status each gave its tab is shown beside its title; the instance each tab shows is
   // kept so that closing the tab closes it (a tab that is only taken out of the page, with its space, stays open).
   const [canvasStatuses, setCanvasStatuses] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const canvasInstances = useRef(new Map<string, string>());
-  const canvasInstanceKey = (tab: FileTab, space: string) => `${space}\n${fileTabKey(tab)}`;
-  const changeCanvasLook = useCallback((tab: FileTab, look: Readonly<{ title?: string; status?: string | null; icon?: string; plugin?: string }>) => {
+  const canvasTabsOf = useRef<(space: string) => readonly FileTab[]>(() => []);
+  canvasTabsOf.current = space => space === shownSpace.current ? fileTabs.open : spaceTabs.current.get(space)?.files.open ?? [];
+  const [canvasInstances] = useState(() => createCanvasInstances(canvasHub, space => canvasTabsOf.current(space)));
+  const changeCanvasLook = useCallback((tab: FileTab, space: string, look: Readonly<{ title?: string; status?: string | null; icon?: string; plugin?: string }>) => {
     if (look.title !== undefined || look.icon !== undefined || look.plugin !== undefined) setFileTabs(state => refreshCanvasTab(state, tab, { title: look.title, icon: look.icon, plugin: look.plugin }));
-    if (look.status !== undefined) setCanvasStatuses(current => {
-      const key = fileTabKey(tab), status = look.status || undefined;
-      if (current.get(key) === status) return current;
-      const next = new Map(current);
-      if (status) next.set(key, status); else next.delete(key);
-      return next;
-    });
+    // The same canvas in another space has an instance of its own: the status is the one of the tab of this space.
+    if (look.status !== undefined) setCanvasStatuses(current => withCanvasStatus(current, tab, space, look.status ?? null));
   }, []);
   // What a tab that shows a plugin that is not running can do: its folder is known from the tab.
   const canvasControls = useRef(new Map<string, CanvasPluginControl | null>());
@@ -1127,13 +1124,6 @@ function App() {
   const canvasProjects = useMemo(() => (snapshot?.projects ?? []).filter(value => !value.archived).map(value => ({ id: value.id, path: value.path, name: value.name })), [snapshot]);
   const openCanvasLatest = useRef(openCanvasRequest); openCanvasLatest.current = openCanvasRequest;
   const closeCanvasLatest = useRef(closeCanvasRequest); closeCanvasLatest.current = closeCanvasRequest;
-  // The host opened an instance for a tab that went away meanwhile. A tab that was closed had no instance yet to close with it: this one
-  // is closed. A tab that left the page with its space is still one of the tabs of that space: its instance is only hidden.
-  function abandonCanvas(tab: FileTab, space: string, instance: string) {
-    const open = space === shownSpace.current ? fileTabs.open : spaceTabs.current.get(space)?.files.open ?? [];
-    if (abandonedCanvas(open, tab) === "hide") void canvasHub.setVisible(instance, false); else void canvasHub.close(instance);
-  }
-  const abandonCanvasLatest = useRef(abandonCanvas); abandonCanvasLatest.current = abandonCanvas;
   // What the script of a plugin asks of the shell (`alta.host`): another canvas, and the changes of a project.
   const pluginHostBridge = useMemo<PluginHostBridge>(() => ({
     openCanvas: request => {
@@ -1158,9 +1148,9 @@ function App() {
     if (isEditorTab(tab)) setEditorRequests(current => { const next = new Map(current); next.delete(tab.projectId); return next; });
     if (isCanvasTab(tab)) {
       // The tab is closed, not only taken out of the page: the instance closes and the plugin lets go of what it held for it.
-      const instance = canvasInstances.current.get(canvasInstanceKey(tab, shownSpace.current));
-      if (instance) { canvasInstances.current.delete(canvasInstanceKey(tab, shownSpace.current)); void canvasHub.close(instance); }
-      setCanvasStatuses(current => { if (!current.has(fileTabKey(tab))) return current; const next = new Map(current); next.delete(fileTabKey(tab)); return next; });
+      const space = shownSpace.current;
+      canvasInstances.closed(tab, space);
+      setCanvasStatuses(current => withCanvasStatus(current, tab, space, null));
     }
     closedTabKinds.current = [...closedTabKinds.current, "file" as const].slice(-64);
     tabFocusPending.current = true;
@@ -3074,13 +3064,13 @@ function App() {
               const file = fileTabs.active;
               if (tabs.active && tabKey(tabs.active) === tabKey(tab)) { applyTabState(next); if (file) activateFile(file); } else setTabs(next);
             }} reopen={() => tabCommand("reopenTab")}
-            files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} fileStatus={tab => canvasStatuses.get(fileTabKey(tab))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
+            files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} fileStatus={tab => canvasStatuses.get(canvasStatusKey(tab, spaceId))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
             terminal={id => terminalList.find(terminal => terminal.id === id)}
             renderFile={(tab, visible) => isCanvasTab(tab)
               ? <CanvasPanel key={fileTabKey(tab)} tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}
-                active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} onLook={look => changeCanvasLook(tab, look)}
-                onInstance={instance => { const key = canvasInstanceKey(tab, spaceId); if (instance) canvasInstances.current.set(key, instance); }}
-                onAbandoned={(instance, space) => abandonCanvasLatest.current(tab, space ?? spaceId, instance)}
+                active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} onLook={look => changeCanvasLook(tab, spaceId, look)}
+                onInstance={instance => instance ? canvasInstances.opened(tab, spaceId, instance) : canvasInstances.released(tab, spaceId)}
+                onAbandoned={(instance, space) => canvasInstances.abandoned(tab, space ?? spaceId, instance)}
                 onClose={() => closeFile(tab)} control={canvasControl(tab)}
                 onOpenSource={folder => openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true })} />
               : isCanvasesTab(tab)
