@@ -11,15 +11,15 @@ import { browserBaseArgs, browserExecutable } from "./browserTarget";
 
 const edge = browserExecutable;
 
-type Bar = { zoom: { text: string; left: number; right: number; height: number; middle: number; color: string } | null;
+type Bar = { documentation: { left: number; right: number }; zoom: { text: string; left: number; right: number; height: number; middle: number; color: string } | null;
   theme: { left: number; right: number; height: number; middle: number; color: string }; actions: { left: number; right: number }; tabs: number; width: number };
-// The end of the title bar: the zoom, the theme switch, the box that holds them, and where the tabs must end.
+// The end of the title bar: Documentation, zoom, theme, their box, and the end of the populated tab strip.
 const bar = `(() => {
   const box = element => { const rect = element.getBoundingClientRect(); return { left: Math.round(rect.left), right: Math.round(rect.right), height: Math.round(rect.height),
     middle: Math.round(rect.top + rect.height / 2), color: getComputedStyle(element).color }; };
   const zoom = document.querySelector(".window-zoom"), actions = box(document.querySelector(".window-actions"));
-  return { zoom: zoom && { text: zoom.textContent, ...box(zoom) }, theme: box(document.querySelector(".theme-switch")), actions: { left: actions.left, right: actions.right },
-    tabs: Math.round(document.querySelector(".tabs").getBoundingClientRect().right), width: document.documentElement.clientWidth };
+  return { documentation: box(document.querySelector(".documentation-open")), zoom: zoom && { text: zoom.textContent, ...box(zoom) }, theme: box(document.querySelector(".theme-switch")), actions: { left: actions.left, right: actions.right },
+    tabs: Math.round(document.querySelector("[data-titlebar-end] .flexlayout__tab_toolbar").getBoundingClientRect().right), width: document.documentElement.clientWidth };
 })()`;
 type Steps = { out: { title: string; disabled: boolean }; value: { title: string; text: string }; in: { title: string; disabled: boolean }; top: number; right: number } | null;
 // What the zoom opens: one step out, the percentage, one step in.
@@ -31,13 +31,14 @@ const steps = `(() => {
     top: Math.round(rect.top), right: Math.round(rect.right) };
 })()`;
 
-test("the zoom of the window is in the title bar before the theme switch, and steps with the commands of the keyboard", { skip: !edge, timeout: 60_000 }, async () => {
+test("the title bar reserves Documentation, zoom and theme beside populated tabs, and zoom follows its commands", { skip: !edge, timeout: 60_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-window-zoom-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
   try {
     await build({ entryPoints: [fileURLToPath(new URL("./windowZoom.mount.tsx", import.meta.url))], outfile: join(root, "fixture.js"), bundle: true, platform: "browser", format: "iife" });
     await writeFile(join(root, "style.css"), await readFile(new URL("../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
+      + await readFile(new URL("../node_modules/flexlayout-react/style/light.css", import.meta.url), "utf8")
       + await readFile(new URL("./style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
@@ -82,16 +83,20 @@ test("the zoom of the window is in the title bar before the theme switch, and st
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await until(`window.windowZoom && document.querySelector(".window-zoom") && document.querySelector(".theme-switch")`), true);
 
-    // The zoom is written before the theme switch, at its height and in its color, in both themes. The two end
-    // where the room of the native caption buttons starts, and the tabs end before them.
-    for (const theme of ["dark", "light"]) {
+    // All three controls fit in their reservation, including the newly added Documentation button. A
+    // crowded last tab strip must stop before the controls, at both wide and narrow window sizes.
+    for (const width of [1600, 800]) for (const theme of ["dark", "light"]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 600, deviceScaleFactor: 1, mobile: false });
       await evaluate(`windowZoom.setTheme(${JSON.stringify(theme)})`);
-      const { zoom, theme: switched, actions, tabs, width } = await shown();
+      const { documentation, zoom, theme: switched, actions, tabs } = await shown();
       assert.ok(zoom, theme);
       assert.deepEqual([zoom.text, zoom.height, zoom.middle, zoom.color], ["100%", switched.height, switched.middle, switched.color], theme);
-      assert.ok(actions.left <= zoom.left && zoom.right <= switched.left && switched.right <= actions.right, `${theme}: ${JSON.stringify({ zoom, switched, actions })}`);
+      assert.ok(actions.left <= documentation.left && documentation.right <= zoom.left && zoom.right <= switched.left && switched.right <= actions.right,
+        `${width}px ${theme}: ${JSON.stringify({ documentation, zoom, switched, actions })}`);
       assert.deepEqual([actions.right, tabs <= actions.left], [width - 138, true], `${theme}: ${JSON.stringify({ actions, tabs, width })}`);
+      assert.equal(await evaluate("document.querySelectorAll('.session-tab-more').length === 2 && document.querySelectorAll('[data-titlebar-end] .flexlayout__tab_button').length === 4 && !!document.querySelector('[data-titlebar-end] .flexlayout__tab_button_overflow')"), true);
     }
+    await command("Emulation.setDeviceMetricsOverride", { width: 1100, height: 600, deviceScaleFactor: 1, mobile: false });
     await evaluate(`windowZoom.setTheme("dark")`);
     const first = await shown();
 
@@ -131,12 +136,13 @@ test("the zoom of the window is in the title bar before the theme switch, and st
     await evaluate(`windowZoom.run("resetZoom"); windowZoom.run("zoomIn")`);
     assert.equal(await until(`document.querySelector(".window-zoom").textContent === "110%" && document.querySelector(".window-zoom-value").textContent === "110%"`), true);
 
-    // Without a shell there is no zoom to show: the theme switch is alone, and the tabs get the room back.
+    // Without a shell there is no zoom: Documentation and theme remain, and the tabs get its room back.
     await evaluate(`windowZoom.setShell(false)`);
     const alone = await shown();
     assert.equal(alone.zoom, null);
-    assert.deepEqual([alone.actions.right - alone.actions.left, alone.actions.right, alone.tabs], [40, alone.width - 138, alone.width - 138 - 40]);
-    assert.equal(first.actions.right - first.actions.left, 82);
+    assert.deepEqual([alone.actions.right - alone.actions.left, alone.actions.right, alone.tabs], [70, alone.width - 138, alone.width - 138 - 70]);
+    assert.ok(alone.tabs <= alone.documentation.left && alone.documentation.right <= alone.theme.left);
+    assert.equal(first.actions.right - first.actions.left, 112);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

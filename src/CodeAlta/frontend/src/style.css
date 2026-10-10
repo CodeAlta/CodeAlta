@@ -1467,7 +1467,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 
 /* Chromeless window: the page draws the title bar. The application mark sits over the Explorer column and the
    session tab strips along the top edge continue it up to the window controls. */
-.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: calc(248px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 40px; }
+.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: calc(248px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 70px; }
 /* The developer instance says so beside the mark: its navigation needs that much more room. */
 .ide-shell:has(.window-brand-tag) { --brand-width: calc(292px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
@@ -1478,8 +1478,9 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .window-actions { position: absolute; z-index: 3; top: 0; right: var(--titlebar-inset-end); display: flex; align-items: center; justify-content: flex-end; gap: 2px; width: calc(var(--window-actions-width) + var(--space-switch-width, 0px) + var(--plugin-buttons-width, 0px)); height: var(--titlebar-height); }
 .window-actions > .bp6-button { min-width: 28px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-actions > .bp6-button:hover { color: var(--text); }
-/* The zoom of the window, before the theme switch: the tab strip leaves it its room too. */
-.ide-shell:has(.window-zoom) { --window-actions-width: 82px; }
+/* Documentation and theme take 28px each, plus their gap; zoom adds 40px and another gap. Both reservations
+   keep 12px before the controls so the last tab strip's buttons do not touch them. */
+.ide-shell:has(.window-zoom) { --window-actions-width: 112px; }
 .window-zoom.bp6-button { min-width: 40px; min-height: 28px; padding: 0 4px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .window-zoom.bp6-button:hover, .bp6-popover-open > .window-zoom.bp6-button { color: var(--text); }
 .window-zoom-steps { display: inline-flex; align-items: center; gap: 1px; padding: 3px; }
