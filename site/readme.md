@@ -181,7 +181,8 @@ alta</code></pre>
   <div class="alta-workflow-links">
     <a href="{{site.basepath}}/docs/prompts/"><i class="bi bi-signpost-split" aria-hidden="true"></i><strong>Agent prompts</strong><span>Plan, build, review - or define your own role.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
     <a href="{{site.basepath}}/docs/automations/"><i class="bi bi-lightning-charge" aria-hidden="true"></i><strong>Automations</strong><span>Start work on a schedule or a repository event.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
-    <a href="{{site.basepath}}/docs/spaces/"><i class="bi bi-collection" aria-hidden="true"></i><strong>Spaces</strong><span>Group projects and keep separate workspaces.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
+    <a href="{{site.basepath}}/docs/issues/"><i class="bi bi-git" aria-hidden="true"></i><strong>Issues &amp; pull requests</strong><span>Start a session from an issue or a pull request.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
+    <a href="{{site.basepath}}/docs/plugins/mcp/"><i class="bi bi-plug" aria-hidden="true"></i><strong>MCP servers</strong><span>Connect the tools and services you already use.</span><i class="bi bi-arrow-up-right" aria-hidden="true"></i></a>
   </div>
 </section>
 

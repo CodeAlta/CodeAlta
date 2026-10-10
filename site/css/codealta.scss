@@ -161,9 +161,10 @@
     content: "";
     position: absolute;
     z-index: -1;
-    inset: -5rem -15% 5rem;
-    background: radial-gradient(ellipse at 35% 20%, rgba(0, 209, 255, .09), transparent 55%),
-      radial-gradient(ellipse at 75% 35%, rgba(168, 85, 247, .09), transparent 55%);
+    inset: 0 0 3rem;
+    // closest-side keeps each glow inside its box: the clipped page never shows a hard edge.
+    background: radial-gradient(closest-side at 35% 30%, rgba(0, 209, 255, .10), transparent),
+      radial-gradient(closest-side at 68% 42%, rgba(168, 85, 247, .10), transparent);
     pointer-events: none;
   }
 }
@@ -896,7 +897,7 @@ a.alta-card,
   scroll-margin-top: 11rem;
 }
 .alta-story-copy {
-  h3 { font-size: clamp(1.9rem, 2.7vw, 2.8rem); font-weight: 750; line-height: 1.12; letter-spacing: -.045em; margin: 0 0 1.2rem; }
+  h3 { font-size: clamp(1.9rem, 2.5vw, 2.6rem); font-weight: 750; line-height: 1.12; letter-spacing: -.045em; margin: 0 0 1.2rem; }
   > p:not(.alta-kicker) { margin-bottom: 1.5rem; color: var(--bs-secondary-color); font-size: 1.02rem; line-height: 1.7; }
   .alta-kicker { font-size: .7rem; letter-spacing: .09em; margin-bottom: 1.25rem; }
   .alta-kicker span { margin-right: .6rem; font-family: var(--bs-font-monospace); }
@@ -907,16 +908,43 @@ a.alta-card,
 .alta-story-stage[hidden] { display: none; }
 .alta-scroll-story.is-enhanced {
   .alta-story-index { position: sticky; top: 4.5rem; z-index: 2; }
-  .alta-story-layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 8fr); gap: 2.5rem; align-items: start; }
+  // Decorative reading progress, driven by --alta-story-progress (0 to 1) from the site script.
+  .alta-story-index::after {
+    content: "";
+    position: absolute;
+    inset: auto 1.25rem -1px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--alta-gradient);
+    transform: scaleX(var(--alta-story-progress, 0));
+    transform-origin: left;
+    pointer-events: none;
+  }
+  .alta-story-layout { display: grid; grid-template-columns: minmax(0, 3.4fr) minmax(0, 7.6fr); gap: 3rem; align-items: start; }
   .alta-story-step { display: flex; align-items: center; min-height: 75svh; margin: 0; padding-block: 4rem; }
-  .alta-story-copy { transform: translateY(1rem); transition: transform .6s ease; }
+  .alta-story-copy { position: relative; padding-left: 1.5rem; transform: translateY(1rem); transition: transform .6s ease; }
+  .alta-story-copy::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(var(--alta-cyan), var(--alta-indigo) 60%, var(--alta-purple));
+    transform: scaleY(0);
+    transform-origin: top;
+    transition: transform .7s cubic-bezier(.2, .7, .2, 1);
+  }
   .is-current .alta-story-copy { transform: none; }
+  .is-current .alta-story-copy::before { transform: none; }
   // Keep the original alternatives in reading order for assistive technology.
   .alta-story-shot { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
   .alta-story-stage {
     position: sticky;
     top: 10rem;
     display: grid;
+    // The stage fills the room below the chapter index; the picture is centered in it.
+    height: calc(100svh - 11rem);
+    align-content: center;
     width: 100%;
     max-width: calc((100svh - 14rem) * 1.6);
     justify-self: center;
@@ -924,9 +952,9 @@ a.alta-card,
     &::before {
       content: "";
       position: absolute;
-      inset: -3rem;
+      inset: -3rem 0;
       z-index: -1;
-      background: radial-gradient(ellipse at 20% 40%, rgba(0, 209, 255, .12), transparent 65%), radial-gradient(ellipse at 80% 60%, rgba(168, 85, 247, .12), transparent 65%);
+      background: radial-gradient(closest-side at 25% 45%, rgba(0, 209, 255, .13), transparent), radial-gradient(closest-side at 75% 55%, rgba(168, 85, 247, .13), transparent);
       pointer-events: none;
     }
   }
@@ -960,7 +988,7 @@ a.alta-card,
 }
 .alta-workflow-links {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1rem;
   margin-top: 1.5rem;
 
@@ -1001,12 +1029,13 @@ a.alta-card,
 @media (min-width: 1000px) and (max-width: 1399.98px) {
   .alta-story-index a { font-size: .78rem; }
   .alta-story-index span { display: none; }
+  .alta-workflow-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 999.98px) {
   .alta-story-index { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .alta-story-step { grid-template-columns: 1fr; gap: 1.5rem; scroll-margin-top: 5rem; }
   .alta-story-copy { max-width: 32rem; }
-  .alta-workflow-links { grid-template-columns: 1fr; }
+  .alta-workflow-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .alta-terminal-section { grid-template-columns: 1fr; }
 }
 @media (max-width: 575.98px) {
@@ -1025,6 +1054,7 @@ a.alta-card,
   .alta-story-index span { display: none; }
   .alta-story-step { margin-bottom: 4rem; }
   .alta-highlight-grid { grid-template-columns: 1fr; }
+  .alta-workflow-links { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
   .alta-scroll-brand { animation: none; }
@@ -1036,7 +1066,8 @@ a.alta-card,
   .alta-scroll-story.is-enhanced {
     .alta-story-index { position: static; }
     .alta-story-layout, .alta-story-step { display: block; min-height: 0; padding: 0; }
-    .alta-story-copy { transform: none; }
+    .alta-story-copy { padding-left: 0; transform: none; }
+    .alta-story-copy::before, .alta-story-index::after { display: none; }
     .alta-story-shot { position: static; width: auto; height: auto; margin: 1rem 0 3rem; clip-path: none; }
   }
 }

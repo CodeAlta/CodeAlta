@@ -47,6 +47,7 @@
       return frame;
     });
     story.querySelector(".alta-story-layout").appendChild(stage);
+    var layoutBox = story.querySelector(".alta-story-chapters");
     var selected = -1;
     var scheduled = false;
     function select(index) {
@@ -67,7 +68,14 @@
       steps.forEach(function (step, i) {
         if (step.getBoundingClientRect().top <= window.innerHeight * .5) index = i;
       });
+      var bounds = layoutBox.getBoundingClientRect();
+      // Full once the middle of the last chapter reaches the middle of the window.
+      var span = bounds.height - steps[steps.length - 1].offsetHeight * .5;
       select(index);
+      if (!roomy.matches) return;
+      // A decorative progress line follows the reading position through the chapters.
+      var progress = (window.innerHeight * .5 - bounds.top) / Math.max(1, span);
+      story.style.setProperty("--alta-story-progress", Math.min(1, Math.max(0, progress)).toFixed(4));
     }
     function schedule() {
       if (scheduled) return;
