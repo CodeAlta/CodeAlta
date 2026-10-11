@@ -284,6 +284,78 @@ public sealed class PluginDatabaseTests
     }
 
     [TestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public async Task RejectedRepeatedStart_PreservesOriginalServicesAndDatabaseOwnership(bool borrowFirst, bool borrowSecond)
+    {
+        using var temp = new TestTempDirectory();
+        var firstRoot = Path.Combine(temp.Path, "first");
+        var secondRoot = Path.Combine(temp.Path, "second");
+        await using var firstBorrowed = borrowFirst ? ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = firstRoot }) : null;
+        await using var secondBorrowed = borrowSecond ? ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = secondRoot }) : null;
+        var firstServices = new NoopPluginServices(XenoAtom.Logging.LogManager.GetLogger("first"));
+        var secondServices = new NoopPluginServices(XenoAtom.Logging.LogManager.GetLogger("second"));
+        await using var runtime = new PluginRuntimeManager();
+        await runtime.StartAsync(new PluginRuntimeManagerOptions
+        {
+            GlobalRoot = temp.Path, StateRoot = firstRoot, ApplicationDatabase = firstBorrowed, Services = firstServices,
+            SafeMode = true, IsHeadless = true,
+        });
+        var original = runtime.ApplicationDatabase!;
+        try
+        {
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => runtime.StartAsync(new PluginRuntimeManagerOptions
+            {
+                GlobalRoot = temp.Path, StateRoot = secondRoot, ApplicationDatabase = secondBorrowed, Services = secondServices,
+                SafeMode = true, IsHeadless = true,
+            }).AsTask());
+
+            Assert.AreSame(firstServices, runtime.HostServices);
+            Assert.AreSame(original, runtime.ApplicationDatabase);
+            Assert.IsTrue(runtime.IsStarted);
+            await original.WriteAsync("test", (_, _) => ValueTask.CompletedTask);
+            await runtime.DisposeAsync();
+            if (borrowFirst)
+                await original.WriteAsync("test", (_, _) => ValueTask.CompletedTask);
+            else
+                await Assert.ThrowsExactlyAsync<ObjectDisposedException>(async () => await original.WriteAsync("test", (_, _) => ValueTask.CompletedTask));
+            if (secondBorrowed is not null)
+                await secondBorrowed.WriteAsync("test", (_, _) => ValueTask.CompletedTask);
+        }
+        finally
+        {
+            await runtime.DisposeAsync();
+            // Also release the original if the regression replaced the runtime's owned database.
+            if (!borrowFirst) await original.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task RejectedStart_DoesNotAcquireADatabaseOrPublishServices(bool closeBeforeFirstStart)
+    {
+        using var temp = new TestTempDirectory();
+        await using var runtime = new PluginRuntimeManager();
+        if (closeBeforeFirstStart)
+            await runtime.QuiesceAgentEventsAsync();
+        else
+            await runtime.StartAsync(new PluginRuntimeManagerOptions { GlobalRoot = temp.Path, SafeMode = true, IsHeadless = true });
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => runtime.StartAsync(new PluginRuntimeManagerOptions
+        {
+            GlobalRoot = temp.Path,
+            StateRoot = "\0", // Acquiring this database would throw ArgumentException, before the intended refusal.
+            Services = new NoopPluginServices(XenoAtom.Logging.LogManager.GetLogger("rejected")),
+        }).AsTask());
+
+        Assert.IsNull(runtime.HostServices);
+        Assert.IsNull(runtime.ApplicationDatabase);
+    }
+
+    [TestMethod]
     public async Task ARuntime_DoesNotDisposeADatabaseItWasGiven()
     {
         using var temp = new TestTempDirectory();

@@ -162,6 +162,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     /// <summary>
     /// Discovers enabled plugins, builds stale source plugins, loads assemblies, activates plugin types, and runs startup hooks.
     /// </summary>
+    /// <remarks>Only the original admitted startup may publish host services or acquire its database.</remarks>
     /// <param name="options">Startup options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The startup result.</returns>
@@ -177,16 +178,6 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         PluginAuthoringPolicy.Validate(options.AuthoringProfile);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        HostServices = options.Services;
-        if (options.ApplicationDatabase is { } applicationDatabase)
-        {
-            ApplicationDatabase = applicationDatabase;
-        }
-        else if (!string.IsNullOrWhiteSpace(options.StateRoot))
-        {
-            _ownedDatabase = ApplicationDatabase = ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = options.GlobalRoot, StateRoot = options.StateRoot });
-        }
-
         PluginRuntimeManagerStartResult? result = null;
         await RunOwnedStartAsync(async () =>
         {
@@ -195,6 +186,16 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                 protection = admission.TryProtectAll() ?? throw new InvalidOperationException("Session retirement prevents plugin startup.");
             try
             {
+                HostServices = options.Services;
+                if (options.ApplicationDatabase is { } applicationDatabase)
+                {
+                    ApplicationDatabase = applicationDatabase;
+                }
+                else if (!string.IsNullOrWhiteSpace(options.StateRoot))
+                {
+                    _ownedDatabase = ApplicationDatabase = ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = options.GlobalRoot, StateRoot = options.StateRoot });
+                }
+
                 result = await StartOwnedCoreAsync(options, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception failure) when (PluginDependencyRetention.Contains(failure))
