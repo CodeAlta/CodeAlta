@@ -3633,9 +3633,19 @@ lexical checks and the copy's `alta.lock` are not a reparse sandbox or race-free
 
 **This consent is broader than browsing:** lock/project/journal/cache/provider-state writes,
 configuration/instruction/skill reads and configured-provider registration are permitted.
-Registration can read declared credential environment variables and shipped defaults; later
-submissions can authenticate and use provider storage/network. In this explicit-root launch plugins and automatic provider probes remain off; explicit Models reads and Providers tests may probe.
+Registration can read declared credential environment variables and shipped defaults. Owned startup
+initializes registered providers automatically, just as a normal launch does; this can start provider
+processes and access credentials or the network before a prompt is sent. Plugins remain disabled in
+this explicit-root launch. Model inventory reads do not themselves probe; explicit refreshes and
+provider tests may do so too.
 Use only trusted task-owned roots, never a production profile or an untrusted copied cache.
+
+For credential-free visual checks, create a new synthetic catalog with a **preexisting empty
+`config.toml`** (no provider definitions), rather than copying a real profile or letting first-run
+defaults create providers. Launch with an allowlisted child environment without provider credentials,
+and skip the provider setup guide. The explicit roots are not a sandbox, and overriding `HOME` or
+`USERPROFILE` alone does not redirect every platform profile lookup. Normal `alta --dev` is different:
+it intentionally shares provider configuration and credentials with the normal instance.
 
 Select an existing session to send text (32,768 UTF-16 units maximum). Tool permissions are automatically
 approved by default, matching TUI AutoApprove. Commands and file writes run with the host's privileges;
