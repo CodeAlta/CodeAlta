@@ -2387,6 +2387,13 @@ and merged like any tab.
   keeps the paths that hold every word. Up/Down, PageUp/PageDown, Home and End move through the files,
   Enter goes to the diff. The width of the list and every choice of the tab are kept in
   `codealta.desktop.changes.v1`.
+- **Hide the files** / **Show the files**, the sidebar button at the left of the header, hides or restores
+  the files, worktrees, history and width splitter. It works with one file, all files, empty checkouts and
+  failed reads, including the narrow layout. `sidebarVisible` is a shared, persisted changes preference;
+  older preferences default to visible. Hiding keeps the sidebar mounted but out of layout and keyboard
+  navigation, preserving its filter, selection, checkout, comparison and width without rebuilding the diff.
+  A restored hidden tab takes keyboard focus on the toggle. `projectChanges.test.ts` and
+  `projectChangesCheckouts.browser.test.ts` cover persistence, recovery, keyboard activation and layout.
 - **History**, under the files and behind a splitter, chooses what is compared: **Uncommitted changes**,
   everything since the base of the branch when it has commits of its own, or one of the recent commits
   (**Load more** adds twenty, up to 200).

@@ -378,6 +378,7 @@ The Changes tab shows what changed in the git repository of a project. Open it b
 
 - **Worktrees**: when the project has git [worktrees](worktrees.md), they are listed above the files. Click one to see its changes. Run `/worktree` to see them all and remove the ones you no longer need.
 - **Files**: the changed files as a tree or a flat list, with the lines added and removed in each file. Type in the filter to narrow the list.
+- **More room for diffs**: click **Hide the files** at the left of the tab's header to hide the files, worktrees and history. **Show the files** brings them back at the same width, with your selection and filter kept. This works in both diff views, and CodeAlta remembers the choice.
 - **History**: under the files. Choose **Uncommitted changes**, all the changes of the branch since its base branch, or one of the recent commits. **Load more** shows older commits.
 - **Diff**: the selected file with syntax highlighting, side by side or inline. Unchanged regions are folded, and you can expand them. `Alt+Down` and `Alt+Up` jump to the next and previous change, from the list of files as well as from the diff.
 - **One file or all files**: the two buttons in the header of the diff choose between **One file at a time** and **All files in one view**. See [All files in one view](#all-files-in-one-view).

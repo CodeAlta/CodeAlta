@@ -266,11 +266,13 @@ export const changesViewLabel = (view: ChangesView) => view === "all" ? "All fil
 /** How the changes tab is laid out; kept for the next tab and the next start. */
 export type ChangesPreferences = Readonly<{ layout: "tree" | "list"; view: ChangesView; sideBySide: boolean; wrap: boolean; ignoreWhitespace: boolean;
   collapseUnchanged: boolean; autoRefresh: boolean; listWidth: number;
+  /** Whether the sidebar of files, worktrees and history is shown. */
+  sidebarVisible: boolean;
   /** The height of the history under the files. */
   historyHeight: number }>;
 export const changesPreferencesKey = "codealta.desktop.changes.v1";
 export const defaultChangesPreferences: ChangesPreferences = { layout: "tree", view: "file", sideBySide: true, wrap: false, ignoreWhitespace: false,
-  collapseUnchanged: true, autoRefresh: true, listWidth: 280, historyHeight: 220 };
+  collapseUnchanged: true, autoRefresh: true, sidebarVisible: true, listWidth: 280, historyHeight: 220 };
 export const changeListWidth = (value: number) => Math.min(560, Math.max(180, Math.round(value)));
 export const changeHistoryHeight = (value: number) => Math.min(900, Math.max(64, Math.round(value)));
 
@@ -282,7 +284,7 @@ export function restoreChangesPreferences(read: () => string | null): ChangesPre
     if (!value || typeof value !== "object") return defaultChangesPreferences;
     const flag = (name: keyof ChangesPreferences) => typeof value[name] === "boolean" ? value[name] as boolean : defaultChangesPreferences[name] as boolean;
     return { layout: value.layout === "list" ? "list" : "tree", view: value.view === "all" ? "all" : "file", sideBySide: flag("sideBySide"), wrap: flag("wrap"), ignoreWhitespace: flag("ignoreWhitespace"),
-      collapseUnchanged: flag("collapseUnchanged"), autoRefresh: flag("autoRefresh"),
+      collapseUnchanged: flag("collapseUnchanged"), autoRefresh: flag("autoRefresh"), sidebarVisible: flag("sidebarVisible"),
       listWidth: Number.isFinite(value.listWidth) ? changeListWidth(value.listWidth as number) : defaultChangesPreferences.listWidth,
       historyHeight: Number.isFinite(value.historyHeight) ? changeHistoryHeight(value.historyHeight as number) : defaultChangesPreferences.historyHeight };
   } catch { return defaultChangesPreferences; }

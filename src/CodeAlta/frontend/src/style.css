@@ -2051,6 +2051,8 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .changes-header .bp6-control.changes-auto { flex: none; margin: 0; color: var(--muted); font-size: 12px; }
 .changes-body { flex: 1 1 auto; display: flex; min-height: 0; }
 .changes-files { flex: none; display: flex; flex-direction: column; min-width: 0; background: var(--panel); }
+.changes-files[hidden] { display: none; }
+.changes-side-toggle { flex: none; }
 .changes-files-toolbar { flex: none; display: flex; align-items: center; gap: 4px; padding: 7px 6px 6px 8px; }
 .changes-filter.bp6-input-group { flex: 1 1 auto; min-width: 0; }
 .changes-rows { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 5px 8px; outline: none; }

@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import type { FileTab } from "../fileTabs";
 import type { Worktree } from "../worktrees/worktrees";
 import { ProjectChangesPanel } from "./ProjectChangesPanel";
+import type { ChangeCommit, ChangedFile, ChangeComparison } from "./projectChanges";
 
 const root = createRoot(document.getElementById("root")!);
 const row = (path: string, change: Partial<Worktree> = {}): Worktree => ({ path, name: path.split("\\").pop()!, branch: `alta/${path.split("\\").pop()}`, head: "1234567",
@@ -23,20 +24,25 @@ const state = {
   /** The checkout each list of changes was asked for; null is the folder of the project. */
   asked: [] as (string | null)[],
   lists: 0,
+  files: [] as ChangedFile[],
+  commits: [] as ChangeCommit[],
+  failure: null as string | null,
 };
-type ChangesRequest = { worktree?: string | null };
+type ChangesRequest = { worktree?: string | null; comparison?: ChangeComparison };
 const api = {
   changes: async (request: ChangesRequest) => {
     const folder = request.worktree ?? null;
     state.asked.push(folder);
+    if (state.failure) return { status: state.failure };
     const shown = folder ?? state.projectFolder;
     // The host answers for a folder of the repository, whichever checkout it is.
     if (!state.rows.some(value => value.folder === shown)) return { status: "worktree_missing" };
     return { status: "ok", projectId: "p", revision: `r:${shown}`, root: shown, prefix: "", branch: state.rows.find(value => value.folder === shown)!.branch, detached: false,
-      comparison: "head", baseReference: null, baseAhead: null, files: [], insertions: 0, deletions: 0, truncated: false };
+      comparison: request.comparison ?? "head", baseReference: null, baseAhead: null, files: state.files, insertions: 0, deletions: 0, truncated: false };
   },
-  commits: async () => ({ status: "ok", projectId: "p", revision: "c", commits: [], more: false }),
-  file: async () => ({ status: "not_changed" }),
+  commits: async () => ({ status: "ok", projectId: "p", revision: "c", commits: state.commits, more: false }),
+  file: async (request: { path: string }) => ({ status: "ok", projectId: "p", path: request.path, revision: "f", originalState: "text", modifiedState: "text",
+    original: "The original line\n", modified: "The changed line\n" }),
 };
 const trees = {
   list: async () => { state.lists++; return { status: "ok", projectId: "p", worktrees: state.rows, newFolder: null }; },
@@ -48,7 +54,7 @@ const fixture = {
   /** The tab, under StrictMode as in the application; `request` is what `alta diff show` or the window of the worktrees asks to show. */
   show(request: Readonly<{ path: string | null; worktree?: string | null }> | null = null) {
     const tab: FileTab = { projectId: "p", projectPath: state.projectFolder, view: "changes" };
-    flushSync(() => root.render(createElement(StrictMode, null, createElement("div", { style: { height: 600, display: "flex" } }, createElement(ProjectChangesPanel, {
+    flushSync(() => root.render(createElement(StrictMode, null, createElement("div", { style: { height: 600 } }, createElement(ProjectChangesPanel, {
       tab, projectName: "App", epoch: "epoch", visible: true, active: true, onActivate: () => { }, onOpenFile: () => { }, request, sessions: [],
       api: api as never, trees: trees as never,
     })))));

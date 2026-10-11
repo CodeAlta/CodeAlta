@@ -120,17 +120,18 @@ test("a changed file is opened by its path inside the project, when it is inside
 
 test("the layout of the tab is kept; a stored value that is not one restores the default", () => {
   let stored = "";
-  const value = { ...defaultChangesPreferences, layout: "list" as const, view: "all" as const, sideBySide: false, autoRefresh: false, listWidth: 333, historyHeight: 120 };
+  const value = { ...defaultChangesPreferences, layout: "list" as const, view: "all" as const, sidebarVisible: false, sideBySide: false, autoRefresh: false, listWidth: 333, historyHeight: 120 };
   assert.equal(persistChangesPreferences(text => { stored = text; }, value), true);
   assert.deepEqual(restoreChangesPreferences(() => stored), value);
   assert.equal(persistChangesPreferences(() => { throw new Error("denied"); }, value), false);
   for (const read of [() => null, () => "{", () => "null", () => "x".repeat(2000), () => { throw new Error("denied"); }])
     assert.deepEqual(restoreChangesPreferences(read), defaultChangesPreferences);
-  assert.deepEqual(restoreChangesPreferences(() => JSON.stringify({ layout: "grid", view: "every", wrap: "yes", listWidth: 5000, historyHeight: 1 })),
+  assert.deepEqual(restoreChangesPreferences(() => JSON.stringify({ layout: "grid", view: "every", sidebarVisible: "no", wrap: "yes", listWidth: 5000, historyHeight: 1 })),
     { ...defaultChangesPreferences, listWidth: 560, historyHeight: 64 });
   // One file at a time unless all of them were chosen: what was kept before the choice existed says nothing about it.
   assert.equal(defaultChangesPreferences.view, "file");
   assert.equal(restoreChangesPreferences(() => JSON.stringify({ layout: "list", sideBySide: false })).view, "file");
+  assert.equal(restoreChangesPreferences(() => JSON.stringify({ listWidth: 333 })).sidebarVisible, true, "Older preferences keep the sidebar visible.");
   assert.deepEqual(changesViews.map(view => [view, changesViewLabel(view)]), [["file", "One file at a time"], ["all", "All files in one view"]]);
   assert.deepEqual([changeListWidth(10), changeListWidth(300.4), changeHistoryHeight(5000)], [180, 300, 900]);
 });

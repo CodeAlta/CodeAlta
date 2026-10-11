@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Button, ButtonGroup, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Switch } from "@blueprintjs/core";
 import { projectGit, worktrees as worktreesApi, type WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -118,6 +118,8 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
 }) {
   const { t, locale } = useShellLanguage();
   const [preferences, update] = useChangesPreferences();
+  const sidebarId = useId();
+  const sidebarToggle = useRef<HTMLButtonElement>(null);
   const all = preferences.view === "all";
   const [list, setList] = useState<ChangeList | null>(null);
   // What the list on screen compares: while another comparison is read, the list is still the one of the previous.
@@ -304,10 +306,14 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     return next;
   }));
   useLayoutEffect(() => {
-    if (selected !== null) rows.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [selected, layout]);
-  // The active tab takes the keyboard in its list of files, unless a window is open over the workspace.
-  useEffect(() => { if (active && !modalOpen() && !root.current?.contains(document.activeElement)) rows.current?.focus(); }, [active]);
+    if (preferences.sidebarVisible && selected !== null) rows.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [selected, layout, preferences.sidebarVisible]);
+  // A hidden sidebar never takes the keyboard: the header's toggle stays within reach, also in a restored tab.
+  useEffect(() => {
+    const hiddenFocus = !preferences.sidebarVisible && root.current?.querySelector(".changes-files")?.contains(document.activeElement);
+    if (active && !modalOpen() && (hiddenFocus || !root.current?.contains(document.activeElement)))
+      (preferences.sidebarVisible ? rows.current ?? sidebarToggle.current : sidebarToggle.current)?.focus();
+  }, [active, preferences.sidebarVisible]);
 
   // The files the keyboard goes through: the rows of the list, and every file where they are all shown.
   const reachable = useMemo(() => all ? shown : fileRows.map(row => row.file), [all, shown, fileRows]);
@@ -378,7 +384,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
       refresh.current(true);
       onWorktreesChanged?.();
     }} />;
-  const splitter = <div className="changes-splitter" role="separator" aria-orientation="vertical" aria-label={t("Resize the list of files")} onPointerDown={event => resize(event)}
+  const splitter = preferences.sidebarVisible && <div className="changes-splitter" role="separator" aria-orientation="vertical" aria-label={t("Resize the list of files")} onPointerDown={event => resize(event)}
     onDoubleClick={() => update({ listWidth: 280 })} />;
   const branchTitle = list ? t(list.detached ? "Detached at {branch}" : "Branch {branch}", { branch: list.branch }) : "";
 
@@ -442,6 +448,11 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   return <section ref={root} className="changes-panel" data-active={active} aria-label={`${t("Changes")} · ${projectName ?? tab.projectPath}`}
     {...{ [changeKeysAttribute]: "" }} onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={panelKeyDown}>
     <header className="changes-header">
+      <Button ref={sidebarToggle} variant="minimal" size="small" className="changes-side-toggle" icon={<AppIcon name="sidebar" size={15} />}
+        active={preferences.sidebarVisible} aria-expanded={preferences.sidebarVisible}
+        aria-controls={worktreeRows || list && (list.files.length > 0 || historyRows) ? sidebarId : undefined}
+        aria-label={t(preferences.sidebarVisible ? "Hide the files" : "Show the files")} title={t(preferences.sidebarVisible ? "Hide the files" : "Show the files")}
+        onClick={() => update({ sidebarVisible: !preferences.sidebarVisible })} />
       <span className="changes-project" title={list?.root ?? tab.projectPath}>
         <span className="changes-project-icon"><AppIcon name="changes" size={15} /></span>
         <strong>{projectName ?? t("Unavailable project")}</strong>
@@ -470,17 +481,17 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
           title={failure ? t("No changes to show") : t("Loading…")} description={failure ? t(failureText(failure)) : undefined}
           action={failure ? <Button icon={<AppIcon name="refresh" size={15} />} disabled={!epoch} onClick={() => refresh.current(true)}>{t("Refresh")}</Button> : undefined} />;
         // The checkouts stay within reach while one of them has nothing to show.
-        return worktreeRows ? <div className="changes-body"><aside className="changes-files" style={{ width: preferences.listWidth }}>{worktreeRows}<div className="changes-rows" /></aside>
+        return worktreeRows ? <div className="changes-body"><aside id={sidebarId} className="changes-files" hidden={!preferences.sidebarVisible} style={{ width: preferences.listWidth }}>{worktreeRows}<div className="changes-rows" /></aside>
           {splitter}{state}</div> : state;
       })()
       : list.files.length === 0 ? <div className="changes-body">
-        {(historyRows || worktreeRows) && <><aside className="changes-files" style={{ width: preferences.listWidth }}>{worktreeRows}<div className="changes-rows" />{historyRows}</aside>
+        {(historyRows || worktreeRows) && <><aside id={sidebarId} className="changes-files" hidden={!preferences.sidebarVisible} style={{ width: preferences.listWidth }}>{worktreeRows}<div className="changes-rows" />{historyRows}</aside>
           {splitter}</>}
         <NonIdealState className="changes-empty" icon={<AppIcon name="checked" size={36} />} title={t("No changes")}
           description={t(list.comparison === "commit" ? "This commit changed no file." : list.comparison === "branch" ? "The work tree matches the base of the branch."
             : "The work tree matches the last commit.")} /></div>
       : <div className="changes-body">
-        <aside className="changes-files" style={{ width: preferences.listWidth }}>
+        <aside id={sidebarId} className="changes-files" hidden={!preferences.sidebarVisible} style={{ width: preferences.listWidth }}>
           {worktreeRows}
           <div className="changes-files-toolbar">
             <InputGroup className="changes-filter" size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} placeholder={t("Filter files")}

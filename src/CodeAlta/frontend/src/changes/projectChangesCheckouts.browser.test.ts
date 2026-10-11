@@ -11,7 +11,7 @@ import { browserBaseArgs, browserExecutable } from "../browserTarget";
 const edge = browserExecutable;
 
 // The real Changes tab over a played host: which checkout it asks the host for, and which row it shows as the one chosen.
-test("the Changes tab shows the checkout that was asked for, also the main one of a project that lives in a worktree", { skip: !edge, timeout: 180_000 }, async () => {
+test("the Changes tab keeps the chosen checkout and collapses its sidebar without losing the comparison", { skip: !edge, timeout: 180_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-changes-checkouts-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -140,6 +140,90 @@ test("the Changes tab shows the checkout that was asked for, also the main one o
     await press("App");
     assert.equal(await wait(`${shownRoot} === 'C:\\\\code\\\\plain'`), true);
     assert.deepEqual(await evaluate(chosen), ["App"]);
+
+    // Empty checkouts can hide the worktrees too, without losing the way back to them.
+    const toggle = "document.querySelector('.changes-side-toggle')";
+    const sidebar = "document.querySelector('.changes-files')";
+    assert.equal(await evaluate(`${toggle}?.getAttribute('aria-expanded')`), "true");
+    await evaluate(`${toggle}.focus(); ${toggle}.click()`);
+    assert.equal(await wait(`${sidebar} && !${sidebar}.checkVisibility()`), true);
+    assert.equal(await evaluate(`${toggle}.getAttribute('aria-label')`), "Show the files");
+    assert.equal(await evaluate("document.activeElement.classList.contains('changes-side-toggle')"), true);
+    // A native keyboard activation reopens it; hidden descendants must not be tab stops.
+    await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+    assert.equal(await wait(`${sidebar}.checkVisibility()`), true);
+    assert.deepEqual(await evaluate(chosen), ["App"]);
+
+    // A selected commit and file survive hiding the whole sidebar: files, worktrees and history.
+    await evaluate(`checkoutsFixture.clear();
+      localStorage.setItem('codealta.desktop.changes.v1', JSON.stringify({ autoRefresh: false, listWidth: 333 }));
+      checkoutsFixture.state.files = ['a.ts', 'src/b.ts'].map(path => ({ path, originalPath: null, status: 'modified', insertions: 1, deletions: 1, binary: false, revision: 'f' }));
+      checkoutsFixture.state.commits = [{ id: 'a'.repeat(40), shortId: 'aaaaaaa', author: 'Test', time: '2026-10-11T12:00:00Z', subject: 'A commit' }];
+      checkoutsFixture.show({ path: 'src/b.ts', worktree: checkoutsFixture.other.folder });`);
+    assert.equal(await wait("document.querySelector('.changes-file[data-path=\"src/b.ts\"][aria-selected=true]') && document.querySelector('[data-commit]')"), true);
+    await evaluate("document.querySelector('[data-commit]').click()");
+    assert.equal(await wait("document.querySelector('.changes-scope')?.textContent.includes('aaaaaaa') && document.querySelector('.changes-diff .monaco-editor')"), true);
+    await evaluate("document.querySelector('.changes-file[data-path=\"src/b.ts\"]').click()");
+    assert.equal(await wait("document.querySelector('.changes-diff-path strong')?.textContent === 'b.ts'"), true);
+    const before = await evaluate<number>("document.querySelector('.changes-diff').clientWidth");
+    await evaluate("window.keptDiff = document.querySelector('.changes-diff .monaco-editor')");
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await wait(`${sidebar} && !${sidebar}.checkVisibility()`), true);
+    assert.equal(await evaluate("document.querySelector('.changes-diff').clientWidth > " + before + " + 300"), true);
+    assert.equal(await evaluate("document.querySelector('.changes-diff .monaco-editor') === window.keptDiff"), true, "The diff is not remounted.");
+    assert.equal(await evaluate("document.querySelector('.changes-scope').textContent.includes('aaaaaaa')"), true);
+    assert.equal(await evaluate(lastAsked), "C:\\trees\\app\\other");
+    assert.equal(await evaluate("!!document.querySelector('.changes-splitter')?.checkVisibility()"), false);
+
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await wait(`${sidebar}.checkVisibility()`), true);
+    assert.equal(await evaluate("document.querySelector('.changes-file[aria-selected=true]').dataset.path"), "src/b.ts");
+    assert.deepEqual(await evaluate(chosen), ["other"]);
+    assert.equal(await evaluate("document.querySelector('[data-commit][aria-selected=true]')?.dataset.commit"), "a".repeat(40));
+    await evaluate("document.querySelector('.changes-filter input').focus()");
+    await command("Input.insertText", { text: "src/" });
+    assert.equal(await wait("document.querySelectorAll('.changes-file').length === 1"), true);
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await wait("document.activeElement.classList.contains('changes-side-toggle')"), true, "Focus is moved out of a hidden filter.");
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await wait(`${sidebar}.checkVisibility()`), true);
+    assert.equal(await evaluate("document.querySelector('.changes-filter input').value"), "src/");
+    await evaluate(`(() => { const input = document.querySelector('.changes-filter input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ''); input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    assert.equal(await wait("document.querySelectorAll('.changes-file').length === 2"), true);
+    await evaluate(`${toggle}.click()`);
+
+    // All-files mode still navigates while the sidebar is hidden, and the choice survives a new tab.
+    await evaluate("document.querySelector('[aria-label=\"All files in one view\"]').click()");
+    assert.equal(await wait("document.querySelectorAll('.changes-section').length === 2"), true);
+    assert.equal(await evaluate(`${sidebar}.checkVisibility()`), false);
+    await evaluate("document.querySelector('[aria-label=\"Previous file\"]').click()");
+    assert.equal(await wait("document.querySelector('.changes-position')?.textContent === '1 of 2'"), true);
+    await evaluate("checkoutsFixture.clear(); checkoutsFixture.show()");
+    assert.equal(await wait(`${toggle}?.getAttribute('aria-expanded') === 'false' && document.querySelector('.changes-all')`), true);
+    assert.equal(await evaluate("document.activeElement.classList.contains('changes-side-toggle')"), true, "A collapsed tab can take keyboard focus.");
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await wait(`${sidebar}.checkVisibility()`), true);
+    assert.equal(await evaluate(`${sidebar}.getBoundingClientRect().width`), 333);
+
+    // The toggle remains reachable at narrow widths, in both themes and when reading changes fails.
+    await command("Emulation.setDeviceMetricsOverride", { width: 600, height: 700, deviceScaleFactor: 1, mobile: false });
+    for (const dark of [true, false]) {
+      await evaluate(`document.body.classList.toggle('bp6-dark', ${dark})`);
+      await evaluate(`${toggle}.click()`);
+      assert.equal(await wait(`${sidebar} && !${sidebar}.checkVisibility()`), true);
+      assert.equal(await evaluate(`${toggle}.getBoundingClientRect().right <= innerWidth && document.querySelector('.changes-panel').scrollWidth <= innerWidth`), true);
+      await evaluate(`${toggle}.click()`);
+      assert.equal(await wait(`${sidebar}.checkVisibility()`), true);
+    }
+    await evaluate("checkoutsFixture.state.failure = 'not_repository'");
+    await refresh();
+    assert.equal(await wait("document.querySelector('.changes-empty')?.textContent.includes('No changes to show')"), true);
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await wait(`${sidebar} && !${sidebar}.checkVisibility()`), true);
+    await evaluate(`${toggle}.click()`);
+    assert.equal(await wait(`${sidebar}.checkVisibility()`), true);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

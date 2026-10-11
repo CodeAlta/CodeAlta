@@ -28,7 +28,7 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 
 ## ✨ Features
 
-- **A desktop app, and a terminal UI**: CodeAlta Desktop has session tabs you can drag and split, a code editor, terminals and git changes for your projects, and every setting in one window. CodeAlta TUI is a keyboard-first terminal UI. Both share the `~/.alta` profile, so a session started in one can be continued in the other. See [how they compare](https://codealta.github.io/docs/desktop-and-tui/).
+- **A desktop app, and a terminal UI**: CodeAlta Desktop has session tabs you can drag and split, a code editor, terminals and git changes for your projects, and every setting in one window. Hide the Changes sidebar to give diffs more room. CodeAlta TUI is a keyboard-first terminal UI. Both share the `~/.alta` profile, so a session started in one can be continued in the other. See [how they compare](https://codealta.github.io/docs/desktop-and-tui/).
 - **Sessions on your projects**: sessions are saved on disk. Queue prompts, steer a running turn, and let a session delegate tasks to child sessions. Agent-to-agent messages reach a running recipient through steering, like automatic child replies.
 - **Spaces**: in CodeAlta Desktop, group your projects into spaces such as Work and Personal. The window shows one space at a time, each with its own tabs.
 - **Worktrees**: a session can work in its own git worktree, on its own branch, so that several sessions change the same project at the same time.
