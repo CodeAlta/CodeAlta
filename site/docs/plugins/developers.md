@@ -27,7 +27,7 @@ Write a plugin that shows the current git branch beside the prompt, with a comma
 
 The plugin is for all your projects: the agent creates it under `~/.alta/plugins`. Ask for a plugin *for this project* to keep it in the project instead, under `.alta/plugins`. Everything on this page works the same for both.
 
-The agent reads the `codealta-plugin-runtime` skill, which ships with CodeAlta and has this guidance with sample plugins. Then it works with the `alta plugin` commands of its session:
+The agent reads the `codealta-plugin-runtime` skill, which ships with CodeAlta and has this guidance with sample plugins. Its `references/script-api.md` covers the JavaScript component props, callback arguments, hooks, theme and host methods; `alta plugin api` covers C# types, not JavaScript exports. Then it works with the `alta plugin` commands of its session:
 
 {.table}
 | Command | What it does |
