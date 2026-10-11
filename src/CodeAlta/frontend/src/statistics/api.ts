@@ -6,7 +6,7 @@ import type {
 /** What the canvas hears from the Statistics plugin without asking. */
 export type StatisticsEvent =
   | Readonly<{ kind: "status"; status: StatisticsStatus }>
-  | Readonly<{ kind: "data"; change: StatisticsDataChange }>;
+  | Readonly<{ kind: "data"; change: StatisticsDataChange; /** A transport reconnection must catch up without waiting for the display interval. */ catchUp?: boolean }>;
 
 /**
  * The questions and the controls of the Statistics plugin, as the canvas uses them: one method per question, the controls of

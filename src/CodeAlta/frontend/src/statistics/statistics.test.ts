@@ -21,6 +21,19 @@ const today = "2026-10-09";
 const fmt = createFormatter("en", { credits: amount => `${amount} AI credits`, none: "–" });
 const status = (patch: Partial<StatisticsStatus>): StatisticsStatus => ({ state: "done", sessionsTotal: 0, sessionsDone: 0, bytesTotal: 0, bytesDone: 0, skippedCount: 0, skipped: [], pendingFlow: 0, revision: 0, ...patch });
 
+test("Statistics refresh defaults to ten minutes and persists a validated per-tab interval", () => {
+  assert.equal(defaultFrame.refreshMinutes, 10);
+  for (const minutes of [1, 5, 10, 30, 60]) {
+    const changed = frameReducer(defaultFrame, { type: "refresh", minutes });
+    assert.equal(decodeFrame(encodeFrame(changed)).refreshMinutes, minutes);
+    assert.deepEqual(requestOf(changed, 1), requestOf(defaultFrame, 1), "the refresh preference is not a data query");
+  }
+  for (const invalid of ["0", "-1", "1.5", "NaN", "999999"]) {
+    assert.equal(decodeFrame(`refresh=${invalid}`).refreshMinutes, 10);
+  }
+  assert.equal(decodeFrame("page=tools").refreshMinutes, 10, "old saved tabs receive the new default");
+});
+
 test("periods resolve to local days, and the lengths the bar needs are known", () => {
   assert.deepEqual(resolvePeriod({ kind: "preset", preset: "today" }, today), { from: today, to: today });
   assert.deepEqual(resolvePeriod({ kind: "preset", preset: "7d" }, today), { from: "2026-10-03", to: today });
@@ -77,7 +90,7 @@ test("the frame changes by actions, and an action that changes nothing returns t
 });
 
 test("the frame is a short query string that a reload reads back, and damaged text keeps the defaults", () => {
-  const frame: Frame = { page: "cost", period: { kind: "custom", from: "2026-02-01", to: "2026-02-28" }, frequency: "week", comparison: "samePeriodLastYear",
+  const frame: Frame = { ...defaultFrame, page: "cost", period: { kind: "custom", from: "2026-02-01", to: "2026-02-28" }, frequency: "week", comparison: "samePeriodLastYear",
     filters: { project: { value: "proj-1", label: "Code Alta & co" }, origin: { value: "agent" }, toolKind: { value: "shell" } }, view: { stackBy: "model", unit: "time" } };
   const text = encodeFrame(frame);
   assert.ok(text.length < 300);

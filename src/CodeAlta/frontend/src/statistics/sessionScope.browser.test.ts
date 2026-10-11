@@ -78,7 +78,7 @@ test("the canvas of a session asks every page for that session and its sub-agent
     await page.clickText('.stats-frame button', 'Reset');
     await page.until(`document.querySelectorAll('.stats-chip').length === 1 && ${settled}`, "the frame put back");
     // What Reset shows was read before; a change of the numbers makes the page ask again, and it asks inside the session.
-    await page.evaluate(`statsFixture.clearCalls(); statsFixture.control.emitData()`);
+    await page.evaluate(`statsFixture.clearCalls(); statsFixture.control.emitData(); statsFixture.advance(600_000)`);
     await page.until(`statsFixture.calls().length > 0 && ${settled}`, "the page asking again");
     const afterReset = questions(await calls(page));
     assert.ok(afterReset.length > 0);

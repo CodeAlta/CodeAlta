@@ -8,6 +8,7 @@ import type { StatisticsApi, StatisticsContext } from "./api";
 import { createFixtureApi, type FixtureApi, type FixtureScenario } from "./fixtureApi";
 import { StatisticsCanvas } from "./StatisticsCanvas";
 import type { DetailsResult, SeriesResult } from "./types";
+import { installRefreshClock } from "./refreshClock.fixture";
 
 type Call = { method: string; request: unknown; args: unknown[]; signal: AbortSignal | null };
 const calls: Call[] = [];
@@ -15,6 +16,7 @@ const opened: string[] = [];
 const files = new Map<string, string>();
 const storage = { getItem: (key: string) => files.get(key) ?? null, setItem: (key: string, value: string) => { files.set(key, value); }, removeItem: (key: string) => { files.delete(key); } };
 const nothing = () => { };
+const advance = installRefreshClock();
 
 const questions = ["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "weekHour", "records", "health", "details", "runs", "costEstimate"] as const;
 const controls = ["status", "chooseHistory", "pause", "resume", "stopHere", "forgetDeleted", "resetStatistics"] as const;
@@ -85,6 +87,7 @@ function draw() {
 }
 
 const fixture = {
+  advance,
   calls: () => calls.map(call => ({ method: call.method, request: call.request, args: call.args, aborted: call.signal?.aborted ?? false })),
   clearCalls: () => { calls.length = 0; },
   opened,

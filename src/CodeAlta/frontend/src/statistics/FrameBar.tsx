@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { AppIcon } from "../AppIcon";
 import { useText } from "./text";
 import { filterChipValue, filterChoices, ignoredKinds, unsetFilters, type FilterChoice } from "./filters";
-import { allowedFrequencies, encodeFrame, filterKeys, periodPresets, resolvePeriod, resolveFrequency, type FilterKey, type PeriodChoice } from "./frame";
+import { allowedFrequencies, encodeFrame, filterKeys, periodPresets, refreshIntervals, resolvePeriod, resolveFrequency, type FilterKey, type PeriodChoice } from "./frame";
 import { readMoreChoices } from "./history";
 import { comparisonLabel, filterKindLabel, filterValueLabel, frequencyLabel, periodLabel } from "./labels";
 import { useStatistics } from "./runtime";
@@ -127,11 +127,17 @@ function SessionScope({ sessionId }: Readonly<{ sessionId: string }>) {
 /** The menu of the canvas: more history, forget the deleted, reset (which asks first). */
 function CanvasMenu() {
   const { t } = useText();
-  const { status, history } = useStatistics();
+  const { status, history, frame, dispatch } = useStatistics();
   const [confirming, setConfirming] = useState(false);
   const more = readMoreChoices(status);
   const label = (choice: HistoryChoice) => choice.kind === "all" ? t("All the history") : choice.kind === "days" ? t("Last {days} days", { days: choice.days }) : t("From today");
   const menu = <PopoverNext placement="bottom-end" content={<Menu>
+    <MenuItem text={t("Refresh every {minutes} minutes", { minutes: frame.refreshMinutes })}>
+      {refreshIntervals.map(minutes => <MenuItem key={minutes} text={minutes === 1 ? t("Every minute") : t("Every {minutes} minutes", { minutes })}
+        roleStructure="listoption" selected={frame.refreshMinutes === minutes}
+        labelElement={frame.refreshMinutes === minutes ? <AppIcon name="check" size={14} /> : undefined}
+        onClick={() => dispatch({ type: "refresh", minutes })} />)}
+    </MenuItem>
     <MenuDivider title={t("Read more history…")} />
     {more.length === 0 ? <MenuItem disabled text={status?.state === "needsChoice" ? t("Choose how much to read first") : t("All the history is read")} />
       : more.map(choice => <MenuItem key={`${choice.kind}${choice.kind === "days" ? choice.days : ""}`} text={label(choice)} disabled={history.busy || status?.state === "reading"} onClick={() => void history.choose(choice)} />)}
@@ -155,10 +161,10 @@ function CanvasMenu() {
 /** The bar. */
 export function FrameBar() {
   const { t } = useText();
-  const { frame, dispatch, resetFrame, header, openFrame, providerName, context } = useStatistics();
+  const { frame, dispatch, resetFrame, refresh, header, openFrame, providerName, context } = useStatistics();
   const ignored = ignoredKinds(header?.ignoredFilters ?? []);
   const set = filterKeys.filter(key => frame.filters[key]);
-  const changed = encodeFrame({ ...frame, page: openFrame.page, view: openFrame.view }) !== encodeFrame(openFrame);
+  const changed = encodeFrame({ ...frame, page: openFrame.page, view: openFrame.view, refreshMinutes: openFrame.refreshMinutes }) !== encodeFrame(openFrame);
   return <div className="stats-frame" role="toolbar" aria-label={t("Statistics controls")}>
     <PeriodPicker />
     <FrequencyPicker />
@@ -179,6 +185,7 @@ export function FrameBar() {
     </div>
     <span className="stats-frame-spacer" />
     {changed && <Button size="small" variant="minimal" icon={<AppIcon name="reset" size={14} />} onClick={resetFrame}>{t("Reset")}</Button>}
+    <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />} aria-label={t("Refresh statistics")} title={t("Refresh statistics")} onClick={refresh} />
     <CanvasMenu />
   </div>;
 }

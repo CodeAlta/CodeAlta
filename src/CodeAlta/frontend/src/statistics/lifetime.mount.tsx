@@ -8,6 +8,7 @@ import { createFixtureApi } from "./fixtureApi";
 import { StatisticsProvider, useStatistics, type StatisticsRuntime } from "./runtime";
 import type { StatisticsRequest, SummaryResult } from "./types";
 import { queryKey, useStatisticsQuery } from "./useQuery";
+import { installRefreshClock } from "./refreshClock.fixture";
 
 type Answer = { total: number; from: string; to: string; unknown?: boolean };
 type Options = Answer & { sessionId?: string | null; period?: string; deferFirst?: boolean };
@@ -21,6 +22,8 @@ let visible = true;
 let deferred = false;
 let release: (() => void) | null = null;
 let runtime: StatisticsRuntime;
+
+const advance = installRefreshClock();
 
 const api: StatisticsApi = {
   ...base,
@@ -42,7 +45,7 @@ function Probe() {
   runtime = useStatistics();
   const request = runtime.request({ period: options.period ?? "all" });
   const result = useStatisticsQuery(queryKey("summary", request), signal => api.summary(request, signal), true, true);
-  return <output id="answer">{JSON.stringify({ total: result.data?.tiles[0].value, header: runtime.header, periodDays: runtime.periodDays, refreshing: result.refreshing })}</output>;
+  return <output id="answer">{JSON.stringify({ total: result.data?.tiles[0].value, header: runtime.header, periodDays: runtime.periodDays, refreshing: result.refreshing, revision: runtime.status?.revision })}</output>;
 }
 
 function draw() {
@@ -61,6 +64,10 @@ Object.assign(window, { lifetimeFixture: {
     for (const listen of listeners) listen({ kind: "data", change: { revision: runtime.store.epoch + 1, fromDay, toDay, sessionIds } });
   },
   setVisible(next: boolean) { visible = next; draw(); },
+  advance,
+  refresh() { flushSync(() => runtime.refresh()); },
+  interval(minutes: number) { flushSync(() => runtime.dispatch({ type: "refresh", minutes })); },
+  status(revision: number) { for (const listen of listeners) listen({ kind: "status", status: { ...runtime.status!, revision } }); },
   resolve() { release?.(); },
   calls: () => calls.slice(),
   epoch: () => runtime.store.epoch,

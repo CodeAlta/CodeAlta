@@ -140,7 +140,7 @@ export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStat
           failures = 0;
           if (!catchUp) return;
           // The plugin may have been reloaded, or the page reconnected: the numbers on screen are stale and the status may be another.
-          listener({ kind: "data", change: everyDay });
+          listener({ kind: "data", change: everyDay, catchUp: true });
           const status = await call<StatisticsStatus>("statistics.status", {});
           if (alive && ticket === latest) listener({ kind: "status", status });
         } catch (error) {

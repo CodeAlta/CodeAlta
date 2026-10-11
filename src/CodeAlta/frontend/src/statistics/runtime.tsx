@@ -10,9 +10,6 @@ import type { HistoryChoice, QueryHeader, StatisticsRequest, StatisticsStatus } 
 // The state a canvas shares between its bar, its history bar and its pages: the frame, the state of the reading of the history,
 // the results it has read, and the controls. One provider per canvas; a page reads it with `useStatistics`.
 
-/** How long changes announced by the plugin are gathered before the pages that show those days ask again. */
-export const dataChangeDelayMs = 1000;
-
 /** What the history controls last did. */
 export type HistoryControls = Readonly<{
   /** True while one of the controls waits for the plugin. */
@@ -56,6 +53,8 @@ export type StatisticsRuntime = Readonly<{
   colorIndex: (key: string) => number;
   /** Puts the frame back as the canvas opened. */
   resetFrame: () => void;
+  /** Immediately reads current data without changing ingestion or the saved display interval. */
+  refresh: () => void;
   /** What the question of the page that is shown last said about its period: the days `all` and `auto` came to, the filters it ignored, how much was read. */
   header: QueryHeader | null;
   /** The length of that period in days; null before the first answer. */
@@ -122,27 +121,47 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
   // The state of the history, and what the plugin announces. What arrives while the canvas is hidden is kept and applied when it is shown.
   const latestStatus = useRef<StatisticsStatus | null>(null);
   const pending = useRef<{ range: DayRange | undefined; timer: ReturnType<typeof setTimeout> | null }>({ range: undefined, timer: null });
+  const refreshMinutes = useRef(frame.refreshMinutes);
+  refreshMinutes.current = frame.refreshMinutes;
+  const flush = useCallback(() => {
+    const state = pending.current;
+    if (state.timer !== null) clearTimeout(state.timer);
+    state.timer = null;
+    if (!visibleRef.current) return;
+    const range = state.range;
+    state.range = undefined;
+    if (latestStatus.current) setStatus(latestStatus.current);
+    // A scoped All-time answer must also catch new descendants outside its previously known days.
+    if (range !== undefined) store.invalidate(range, !!context.sessionId);
+  }, [store, context.sessionId]);
+  const schedule = useCallback(() => {
+    if (visibleRef.current && pending.current.timer === null) pending.current.timer = setTimeout(flush, refreshMinutes.current * 60_000);
+  }, [flush]);
+  const refresh = useCallback(() => {
+    pending.current.range = null;
+    if (!context.today) setToday(localToday());
+    flush();
+  }, [flush, context.today]);
   useEffect(() => {
     let alive = true;
     const controller = new AbortController();
     const pendingState = pending.current;
-    const flush = () => {
-      pendingState.timer = null;
-      const range = pendingState.range;
-      pendingState.range = undefined;
-      // A session's All-time answer ends at its last record, not today. New facts or a new descendant can lie outside it.
-      // Events do not identify ancestors (and their session list may be truncated), so they cannot safely exclude this scope.
-      if (range !== undefined) store.invalidate(range, !!context.sessionId);
-    };
     const listen = (event: StatisticsEvent) => {
       if (!alive) return;
       if (event.kind === "status") {
+        const previous = latestStatus.current;
         latestStatus.current = event.status;
-        if (visibleRef.current) setStatus(event.status);
+        // History progress, controls and errors stay responsive. Ordinary live-flow revisions in the
+        // completed history do not rerender the entire canvas on every turn.
+        if (event.status.state !== "done" || previous?.state !== event.status.state) {
+          if (visibleRef.current) setStatus(event.status);
+          if (previous?.state === "reading" && event.status.state === "done") flush();
+        } else schedule();
         return;
       }
       pendingState.range = joinRanges(pendingState.range, { from: event.change.fromDay, to: event.change.toDay });
-      pendingState.timer ??= setTimeout(flush, dataChangeDelayMs);
+      if (event.catchUp) flush();
+      else schedule();
     };
     const off = api.subscribe(listen);
     api.status(controller.signal).then(next => {
@@ -158,12 +177,16 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
       pendingState.timer = null;
       pendingState.range = undefined;
     };
-  }, [api, store, context.sessionId]);
+  }, [api, flush, schedule]);
 
-  // Shown again: the status the canvas missed.
+  // Shown again: immediately catch up with changes accumulated while hidden, without background queries.
   useEffect(() => {
-    if (visible && latestStatus.current) setStatus(latestStatus.current);
-  }, [visible]);
+    if (visible) flush();
+    else if (pending.current.timer !== null) { clearTimeout(pending.current.timer); pending.current.timer = null; }
+  }, [visible, flush]);
+  useEffect(() => {
+    if (pending.current.timer !== null) { clearTimeout(pending.current.timer); pending.current.timer = null; schedule(); }
+  }, [frame.refreshMinutes, schedule]);
 
   // The weeks are those of the plugin when it says where they start, so that a chart and `alta statistics` cut the same weeks.
   const weekStart = useMemo(() => context.weekStart ?? firstDayOfWeek(locale), [context.weekStart, locale]);
@@ -175,7 +198,7 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
     if (index === undefined) { index = colors.current.size; colors.current.set(key, index); }
     return index;
   }, []);
-  const resetFrame = useCallback(() => dispatch({ type: "reset", frame: openRef.current }), []);
+  const resetFrame = useCallback(() => dispatch({ type: "reset", frame: { ...openRef.current, refreshMinutes: refreshMinutes.current } }), []);
   const providerName = useMemo(() => providerNamer(context.providers), [context.providers]);
 
   const history = useMemo<HistoryControls>(() => {
@@ -201,7 +224,7 @@ export function StatisticsProvider({ api, context, children }: Readonly<{ api: S
   }, [api, busy, controlError, store]);
 
   const value = useMemo<StatisticsRuntime>(() => ({
-    api, context, store, frame, openFrame: open, dispatch, today, weekStart, fmt, status, visible, history, request, providerName, colorIndex, resetFrame, header, periodDays, reportQuery,
-  }), [api, context, store, frame, open, today, weekStart, fmt, status, visible, history, request, providerName, colorIndex, resetFrame, header, periodDays, reportQuery]);
+    api, context, store, frame, openFrame: open, dispatch, today, weekStart, fmt, status, visible, history, request, providerName, colorIndex, resetFrame, refresh, header, periodDays, reportQuery,
+  }), [api, context, store, frame, open, today, weekStart, fmt, status, visible, history, request, providerName, colorIndex, resetFrame, refresh, header, periodDays, reportQuery]);
   return <RuntimeContext.Provider value={value}>{children}</RuntimeContext.Provider>;
 }

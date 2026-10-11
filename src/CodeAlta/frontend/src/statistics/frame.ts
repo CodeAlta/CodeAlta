@@ -34,6 +34,9 @@ export type StackBy = "provider" | "project" | "model";
 /** The choices of the blocks that have a control of their own, kept with the frame. */
 export type FrameView = Readonly<{ stackBy: StackBy; unit: UsageUnit }>;
 
+/** Automatic display refresh intervals, in minutes. Recording is independent of this preference. */
+export const refreshIntervals = [1, 5, 10, 30, 60] as const;
+
 /** Everything the bar and the tabs hold. */
 export type Frame = Readonly<{
   page: PageId;
@@ -42,6 +45,7 @@ export type Frame = Readonly<{
   comparison: Comparison;
   filters: Filters;
   view: FrameView;
+  refreshMinutes: number;
 }>;
 
 /** The origins and kinds of tool a filter can take. */
@@ -51,7 +55,7 @@ export const toolKindValues: readonly ToolKind[] = ["files", "search", "shell", 
 
 /** The frame a canvas opens with: the last 30 days, the Overview, no comparison. */
 export const defaultFrame: Frame = Object.freeze<Frame>({
-  page: "overview", period: { kind: "preset", preset: "30d" }, frequency: "auto", comparison: "none", filters: {}, view: { stackBy: "provider", unit: "tokens" },
+  page: "overview", period: { kind: "preset", preset: "30d" }, frequency: "auto", comparison: "none", filters: {}, view: { stackBy: "provider", unit: "tokens" }, refreshMinutes: 10,
 });
 
 /** What changes a frame. */
@@ -62,6 +66,7 @@ export type FrameAction =
   | Readonly<{ type: "comparison"; comparison: Comparison }>
   | Readonly<{ type: "filter"; key: FilterKey; entry: FilterEntry | null }>
   | Readonly<{ type: "view"; view: Partial<FrameView> }>
+  | Readonly<{ type: "refresh"; minutes: number }>
   | Readonly<{ type: "reset"; frame: Frame }>;
 
 /**
@@ -90,6 +95,8 @@ export function frameReducer(frame: Frame, action: FrameAction): Frame {
       return { ...frame, filters: { ...frame.filters, [action.key]: action.entry } };
     }
     case "view": return { ...frame, view: { ...frame.view, ...action.view } };
+    case "refresh": return frame.refreshMinutes === action.minutes || !(refreshIntervals as readonly number[]).includes(action.minutes)
+      ? frame : { ...frame, refreshMinutes: action.minutes };
     case "reset": return action.frame;
   }
 }
@@ -247,6 +254,7 @@ export function encodeFrame(frame: Frame): string {
   }
   query.set("stack", frame.view.stackBy);
   query.set("unit", frame.view.unit);
+  query.set("refresh", String(frame.refreshMinutes));
   return query.toString();
 }
 
@@ -278,11 +286,13 @@ export function decodeFrame(text: string | null | undefined, fallback: Frame = d
     filters[key] = label ? { value, label: label.slice(0, 200) } : { value };
   }
   const stack = query.get("stack"), unit = query.get("unit");
+  const refreshMinutes = Number(query.get("refresh"));
   return {
     page: isOneOf(pageIds, page) ? page : fallback.page,
     period,
     frequency: isOneOf(["auto", "hour", "day", "week", "month", "year"] as const, frequency) ? frequency : fallback.frequency,
     comparison: isOneOf(["none", "previousPeriod", "samePeriodLastYear"] as const, comparison) ? comparison : fallback.comparison,
+    refreshMinutes: (refreshIntervals as readonly number[]).includes(refreshMinutes) ? refreshMinutes : fallback.refreshMinutes,
     filters,
     view: {
       stackBy: isOneOf(["provider", "project", "model"] as const, stack) ? stack : fallback.view.stackBy,

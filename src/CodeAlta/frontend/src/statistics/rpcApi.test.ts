@@ -163,7 +163,7 @@ test("after the connection to the plugin is made again, the listening begins aga
   await settle();
   assert.deepEqual(plugin.counts(), { subscriptions: 2, unsubscribed: 1, listening: 1, generationListeners: 1 }, "the old listening ends, a new one begins");
   assert.deepEqual(heard.map(event => event.kind), ["data", "status"]);
-  assert.deepEqual(heard[0], { kind: "data", change: everyDay });
+  assert.deepEqual(heard[0], { kind: "data", change: everyDay, catchUp: true });
   assert.equal((heard[1] as { status: StatisticsStatus }).status.revision, 9);
   plugin.emit({ kind: "status", status: status({ revision: 10 }) });
   assert.equal(heard.length, 3);
@@ -233,7 +233,7 @@ test("a listening that could not begin because the plugin was not reachable begi
 
   plugin.state.reachable = true;
   await eventually(() => plugin.listening === 1 && heard.length === 2, "it listens once the plugin is reached");
-  assert.deepEqual(heard[0], { kind: "data", change: everyDay }, "what was read while nobody listened may be stale");
+  assert.deepEqual(heard[0], { kind: "data", change: everyDay, catchUp: true }, "what was read while nobody listened may be stale");
   assert.equal((heard[1] as { status: StatisticsStatus }).status.revision, 4);
   plugin.emit({ kind: "status", status: status({ revision: 5 }) });
   assert.equal(heard.length, 3);
@@ -253,7 +253,7 @@ test("a connection that ends while the canvas only listens is made again, with e
   plugin.end();
   await eventually(() => plugin.listening === 1 && heard.length === 2, "it listens again");
   assert.equal(plugin.state.subscriptions, 2);
-  assert.deepEqual(heard[0], { kind: "data", change: everyDay });
+  assert.deepEqual(heard[0], { kind: "data", change: everyDay, catchUp: true });
   assert.equal((heard[1] as { status: StatisticsStatus }).status.revision, 7);
 
   // A canvas that went away asks for nothing more.
@@ -280,7 +280,7 @@ test("a listening that the plugin keeps refusing stops asking by itself, and ask
     plugin.state.reachable = true;
     await api.status();
     await eventually(() => plugin.listening === 1 && heard.length === 2, "it listens once a connection is open");
-    assert.deepEqual(heard[0], { kind: "data", change: everyDay });
+    assert.deepEqual(heard[0], { kind: "data", change: everyDay, catchUp: true });
     assert.equal((heard[1] as { status: StatisticsStatus }).status.revision, 9);
 
     // The count starts again with each reason to ask: the connection ends and the plugin refuses once more.

@@ -593,18 +593,21 @@ test("a change announced by the plugin makes the page ask again for those days o
     await page.evaluate(`statsFixture.clearCalls()`);
     // A change of a day six months back touches no period shown: the calendar of a year does not reach it either.
     await page.evaluate(`statsFixture.control.emitData(20250101, 20250102)`);
-    await idle(1500);
+    await page.evaluate(`statsFixture.advance(600_000)`);
+    await idle(300);
     assert.deepEqual(questions(await calls(page)), [], "no period shown holds those days");
     // The year of the calendar does hold a day of April.
     await page.evaluate(`statsFixture.control.emitData(20260420, 20260421)`);
+    await page.evaluate(`statsFixture.advance(600_000)`);
     await page.until(`statsFixture.calls().some(call => call.method === 'calendar')`, "the calendar asked again");
     await idle(300);
     assert.deepEqual(questions(await calls(page)).map(call => call.method), ["calendar"], "only what holds those days");
     await page.evaluate(`statsFixture.clearCalls()`);
-    // A burst of changes to today: one round of questions, after a second.
+    // A burst of changes to today: one round of questions at the configured interval.
     await page.evaluate(`for (let index = 0; index < 6; index++) statsFixture.control.emitData(20261009, 20261009)`);
-    await idle(400);
-    assert.deepEqual(questions(await calls(page)), [], "the burst is gathered for a second");
+    await idle(1300);
+    assert.deepEqual(questions(await calls(page)), [], "the burst does not cause a per-turn refresh");
+    await page.evaluate(`statsFixture.advance(600_000)`);
     await page.until(`statsFixture.calls().length > 0`, "the questions again");
     await page.until(settled, "settled");
     const again = questions(await calls(page));
@@ -619,13 +622,13 @@ test("a change that arrives while a question is in flight is not lost: the block
     await render(page, { scenario: "ready" });
     await page.until(settled, "the overview");
     await page.evaluate(`statsFixture.clearCalls()`);
-    // The answers take two and a half seconds from now on. A change makes the page ask, a second later, and another change of the
-    // same days arrives while those questions are in flight: their answers are older than it.
+    // An interval expires while slow answers are in flight: they must not swallow the next invalidation.
     await page.evaluate(`statsFixture.control.setLatency(2500)`);
     await page.evaluate(`statsFixture.control.emitData(20261009, 20261009)`);
+    await page.evaluate(`statsFixture.advance(600_000)`);
     await page.until(`statsFixture.calls().some(call => call.method === 'summary')`, "the first round of questions");
     await page.evaluate(`statsFixture.control.emitData(20261009, 20261009)`);
-    await idle(1300);
+    await page.evaluate(`statsFixture.advance(600_000)`);
     await page.evaluate(`statsFixture.control.setLatency(0)`);
     await page.until(`statsFixture.calls().filter(call => call.method === 'summary').length >= 2`, "the summary asked again once its stale answer came back");
     await page.until(settled, "settled");

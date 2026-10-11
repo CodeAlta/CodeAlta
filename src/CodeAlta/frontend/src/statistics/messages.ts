@@ -3,6 +3,10 @@
 type Row = readonly [string, string, string, string, string];
 
 export const statisticsMessages = {
+  "Refresh statistics": ["Actualizar estadísticas", "Actualiser les statistiques", "Statistiken aktualisieren", "統計を更新", "刷新统计"],
+  "Refresh every {minutes} minutes": ["Actualizar cada {minutes} minutos", "Actualiser toutes les {minutes} minutes", "Alle {minutes} Minuten aktualisieren", "{minutes} 分ごとに更新", "每 {minutes} 分钟刷新"],
+  "Every minute": ["Cada minuto", "Toutes les minutes", "Jede Minute", "毎分", "每分钟"],
+  "Every {minutes} minutes": ["Cada {minutes} minutos", "Toutes les {minutes} minutes", "Alle {minutes} Minuten", "{minutes} 分ごと", "每 {minutes} 分钟"],
   "1 day": ["1 día", "1 jour", "1 Tag", "1日", "1 天"],
   "1 session could not be read": ["No se pudo leer 1 sesión", "1 session n’a pas pu être lue", "1 Sitzung konnte nicht gelesen werden", "1 件のセッションを読み込めませんでした", "有 1 个会话无法读取"],
   "90th percentile": ["Percentil 90", "90e centile", "90. Perzentil", "90 パーセンタイル", "第 90 百分位"],
