@@ -50,11 +50,33 @@ public static class ConfiguredCodexAuthentication
                     var hostId = await new OpenAICodexSubscriptionHostIdProvider(getRoot()).GetOrCreateAsync(token);
                     using var login = await manager.BeginBrowserLoginAsync(hostId, token);
                     var waitForCallbackTask = manager.WaitForBrowserCallbackAsync(login, token).AsTask();
-                    report(login.AuthorizeUri);
-                    open(login.AuthorizeUri);
+                    await PresentAuthorizationAndWaitAsync(login.AuthorizeUri, waitForCallbackTask, report, open, login.Listener.Stop);
                     return Project(await waitForCallbackTask);
                 };
             }, cancellationToken);
+
+    internal static async Task PresentAuthorizationAndWaitAsync(
+        Uri authorizeUri, Task callbackWait, Action<Uri> report, Action<Uri> open, Action stopCallbackWait)
+    {
+        try
+        {
+            report(authorizeUri);
+            open(authorizeUri);
+        }
+        catch
+        {
+            // Stop the accept itself and join its original waiter before the enclosing login is disposed.
+            // It may already have closed the listener; neither that race nor its late fault replaces
+            // the presentation error that prevented the user from completing sign-in.
+            try { stopCallbackWait(); }
+            catch { }
+            try { await callbackWait; }
+            catch { }
+            throw;
+        }
+
+        await callbackWait;
+    }
 
     internal static async Task<CodexAccountMetadata> LoginWithBrowserAsync(
         CodeAltaProviderDocument definition,

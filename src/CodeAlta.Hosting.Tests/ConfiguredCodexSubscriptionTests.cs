@@ -75,6 +75,131 @@ public sealed class ConfiguredCodexSubscriptionTests
     }
 
     [TestMethod]
+    [DataRow(false, "fault", false)]
+    [DataRow(true, "fault", false)]
+    [DataRow(false, "cancel", false)]
+    [DataRow(true, "cancel", false)]
+    [DataRow(false, "success", false)]
+    [DataRow(true, "success", false)]
+    [DataRow(false, "fault", true)]
+    [DataRow(true, "fault", true)]
+    public async Task PresentationFailure_StopsAndJoinsCallbackBeforeReleasingLogin(
+        bool failOpening, string callbackOutcome, bool stopFails)
+    {
+        var callback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var presentationFailure = new InvalidOperationException("synthetic presentation failure");
+        var callbackFailure = new IOException("synthetic late callback failure");
+        var uri = new Uri("https://example.invalid/authorize");
+        var calls = new List<string>();
+        var released = false;
+
+        async Task RunAsync()
+        {
+            try
+            {
+                await ConfiguredCodexAuthentication.PresentAuthorizationAndWaitAsync(uri, callback.Task,
+                    actual =>
+                    {
+                        Assert.AreSame(uri, actual);
+                        calls.Add("report");
+                        if (!failOpening) throw presentationFailure;
+                    },
+                    actual =>
+                    {
+                        Assert.AreSame(uri, actual);
+                        calls.Add("open");
+                        throw presentationFailure;
+                    },
+                    () =>
+                    {
+                        calls.Add("stop");
+                        if (stopFails) throw new ObjectDisposedException("synthetic listener");
+                    });
+            }
+            finally { released = true; }
+        }
+
+        var operation = RunAsync();
+        try
+        {
+            CollectionAssert.AreEqual(failOpening ? new[] { "report", "open", "stop" } : ["report", "stop"], calls);
+            Assert.IsFalse(operation.IsCompleted, "Presentation failure must still join the original callback waiter.");
+            Assert.IsFalse(released, "The enclosing login scope cannot be released while its waiter is pending.");
+            switch (callbackOutcome)
+            {
+                case "fault": callback.SetException(callbackFailure); break;
+                case "cancel": callback.SetCanceled(new CancellationToken(true)); break;
+                default: callback.SetResult(); break;
+            }
+            var actual = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.AreSame(presentationFailure, actual, "Secondary stop/wait failures must not replace the presentation failure.");
+            Assert.IsTrue(released);
+        }
+        finally
+        {
+            callback.TrySetResult();
+            await Task.WhenAll(ObserveAsync(callback.Task), ObserveAsync(operation));
+        }
+
+        async Task ObserveAsync(Task task)
+        {
+            try { await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception failure) when (ReferenceEquals(failure, presentationFailure)
+                || ReferenceEquals(failure, callbackFailure) || failure is OperationCanceledException) { }
+        }
+    }
+
+    [TestMethod]
+    [DataRow("success")]
+    [DataRow("fault")]
+    [DataRow("cancel")]
+    public async Task PresentedAuthorization_PreservesOrderAndOriginalCallbackOutcome(string callbackOutcome)
+    {
+        var callback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var failure = new IOException("synthetic callback failure");
+        var token = new CancellationToken(true);
+        var uri = new Uri("https://example.invalid/authorize");
+        var calls = new List<string>();
+        var operation = ConfiguredCodexAuthentication.PresentAuthorizationAndWaitAsync(uri, callback.Task,
+            actual => { Assert.AreSame(uri, actual); calls.Add("report"); },
+            actual => { Assert.AreSame(uri, actual); calls.Add("open"); },
+            () => calls.Add("stop"));
+        try
+        {
+            CollectionAssert.AreEqual(new[] { "report", "open" }, calls);
+            Assert.IsFalse(operation.IsCompleted);
+            switch (callbackOutcome)
+            {
+                case "fault":
+                    callback.SetException(failure);
+                    Assert.AreSame(failure, await Assert.ThrowsExactlyAsync<IOException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5))));
+                    break;
+                case "cancel":
+                    callback.SetCanceled(token);
+                    var canceled = await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5)));
+                    Assert.AreEqual(token, canceled.CancellationToken);
+                    break;
+                default:
+                    callback.SetResult();
+                    await operation.WaitAsync(TimeSpan.FromSeconds(5));
+                    break;
+            }
+            CollectionAssert.AreEqual(new[] { "report", "open" }, calls, "Only failed presentation stops the waiter.");
+        }
+        finally
+        {
+            callback.TrySetResult();
+            await Task.WhenAll(ObserveAsync(callback.Task), ObserveAsync(operation));
+        }
+
+        async Task ObserveAsync(Task task)
+        {
+            try { await task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (Exception actual) when (ReferenceEquals(actual, failure) || actual is OperationCanceledException) { }
+        }
+    }
+
+    [TestMethod]
     [DataRow("login")]
     [DataRow("signout")]
     [DataRow("test")]
