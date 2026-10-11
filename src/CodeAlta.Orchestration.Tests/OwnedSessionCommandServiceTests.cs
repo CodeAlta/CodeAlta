@@ -26,7 +26,9 @@ public sealed class OwnedSessionCommandServiceTests
         var scope = new OwnedProjectReferenceScope(project.Id, project.ProjectPath);
         var search = await f.Observe(f.Host.Commands.SearchReferencesAsync(scope, f.SessionId, "reference", CancellationToken.None));
         // The index is built in the background: a caller asks again while the folder is still being read.
-        for (var attempt = 0; attempt < 100 && search.Status == "indexing"; attempt++)
+        // A deadline, not a count of attempts: a loaded machine reads the folder later, never differently.
+        var indexing = System.Diagnostics.Stopwatch.StartNew();
+        while (search.Status == "indexing" && indexing.Elapsed < TimeSpan.FromSeconds(30))
         {
             await Task.Delay(50);
             search = await f.Observe(f.Host.Commands.SearchReferencesAsync(scope, f.SessionId, "reference", CancellationToken.None));
@@ -1848,6 +1850,7 @@ public sealed class OwnedSessionCommandServiceTests
         private readonly List<Exception> _failures = [];
         private readonly List<Task> _cleanupWaits = [];
         private readonly List<Task<bool>> _cleanupWorkers = [];
+        private static readonly TimeSpan BodyTimeout = TimeSpan.FromSeconds(60);
         private Task? _setup;
         private Task? _body;
         private Task? _disposal;
@@ -1874,7 +1877,9 @@ public sealed class OwnedSessionCommandServiceTests
                 var launch = fixture.NewGate();
                 fixture._body = fixture.Track(fixture.RunBodyAsync(body, launch.Task));
                 launch.TrySetResult();
-                await fixture.Observe(fixture._body);
+                // The body is a sequence of steps, each observed within its own five seconds: one step's budget
+                // would fail a body of several steps on a loaded machine and close the host under its last step.
+                await fixture.Track(fixture._body.WaitAsync(BodyTimeout));
             }
             catch (Exception ex)
             {
