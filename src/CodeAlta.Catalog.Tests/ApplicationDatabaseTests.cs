@@ -78,6 +78,152 @@ public sealed class ApplicationDatabaseTests
     }
 
     [TestMethod]
+    public async Task RecoveryWaitsForReadersAndBlocksNewConnections()
+    {
+        using var temp = TempFolder.Create();
+        await using var database = CreateDatabase(temp);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reading = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reader = database.ReadAsync("held", async (connection, token) =>
+        {
+            await ScalarAsync<long>(connection, "SELECT COUNT(*) FROM app_meta;", token);
+            reading.SetResult();
+            await release.Task;
+            return 1;
+        }).AsTask();
+        Task? recovery = null;
+        Task<int>? next = null;
+        Task? sameDamage = null;
+        Task? write = null;
+        Task<string?>? backup = null;
+        try
+        {
+            await reading.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.AreEqual(0, await database.GetVersionAsync("concurrent-reader").AsTask().WaitAsync(TimeSpan.FromSeconds(2)),
+                "Ordinary readers remain concurrent.");
+
+            // Another operation has reported damage, but this connection has not closed yet. Unix permits the
+            // rename of its file; closing it afterwards can remove the replacement database's WAL and SHM files.
+            recovery = database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation).AsTask();
+            Assert.IsFalse(recovery.IsCompleted, "Replacement must wait for every old connection to close, also on Unix.");
+            next = database.GetVersionAsync("next").AsTask();
+            Assert.IsFalse(next.IsCompleted, "No new connection may enter while replacement waits for old readers.");
+            sameDamage = database.RecoverDamagedFileAsync(new SqliteException("same damage", 11), database.Generation).AsTask();
+            write = database.WriteAsync("writer", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_kept (id INTEGER);", token)).AsTask();
+            backup = database.BackupAsync().AsTask();
+            Assert.IsFalse(write.IsCompleted);
+            Assert.IsFalse(backup.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await reader.WaitAsync(TimeSpan.FromSeconds(10));
+            if (recovery is not null) await recovery.WaitAsync(TimeSpan.FromSeconds(10));
+            if (next is not null) await next.WaitAsync(TimeSpan.FromSeconds(10));
+            if (sameDamage is not null) await sameDamage.WaitAsync(TimeSpan.FromSeconds(10));
+            if (write is not null) await write.WaitAsync(TimeSpan.FromSeconds(10));
+            if (backup is not null) await backup.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.AreEqual(1, database.Generation);
+        Assert.AreEqual("ok", await database.ReadAsync("check", (connection, token) => ScalarAsync<string>(connection, "PRAGMA integrity_check;", token)));
+        Assert.AreEqual(1, (await database.ListTablesAsync("t_kept")).Count);
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task RecoveryCanceledOrTimedOut_DoesNotReplaceTheFileOrBlockLaterOperations(bool cancel)
+    {
+        using var temp = TempFolder.Create();
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
+            BusyTimeout = TimeSpan.FromMilliseconds(200),
+            TimeProvider = new StoppedClock(),
+        });
+        await database.WriteAsync("setup", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_kept (id INTEGER);", token));
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reader = database.ReadAsync("held", async (connection, token) =>
+        {
+            await ScalarAsync<long>(connection, "SELECT COUNT(*) FROM app_meta;", token);
+            await release.Task;
+            return 1;
+        }).AsTask();
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            var recovery = database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation, cancellation.Token).AsTask();
+            if (cancel)
+            {
+                await cancellation.CancelAsync();
+                await Assert.ThrowsAsync<OperationCanceledException>(() => recovery.WaitAsync(TimeSpan.FromSeconds(10)));
+            }
+            else
+            {
+                var failure = await Assert.ThrowsExactlyAsync<SqliteException>(() => recovery.WaitAsync(TimeSpan.FromSeconds(10)));
+                Assert.AreEqual(5, failure.SqliteErrorCode);
+            }
+
+            Assert.AreEqual(0, database.Generation);
+            Assert.IsNull(database.LastRecovery);
+            Assert.AreEqual(1, (await database.ListTablesAsync("t_kept").AsTask().WaitAsync(TimeSpan.FromSeconds(2))).Count);
+            await database.WriteAsync("after", (connection, token) => ExecuteAsync(connection, "INSERT INTO t_kept VALUES (1);", token))
+                .AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            release.TrySetResult();
+            await reader.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // Neither a failed callback nor a canceled recovery leaves a connection counted as active.
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+            await database.ReadAsync<int>("failed", (connection, token) => throw new InvalidOperationException("stop")));
+        await database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation).AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(1, database.Generation);
+    }
+
+    [TestMethod]
+    public async Task RecoveryWaitsForAnAdmittedBackupBeforeReplacingItsSource()
+    {
+        using var temp = TempFolder.Create();
+        var clock = new HookClock();
+        await using var database = new ApplicationDatabase(new ApplicationDatabaseOptions
+        {
+            DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3"),
+            TimeProvider = clock,
+        });
+        await database.WriteAsync("setup", (connection, token) => ExecuteAsync(connection, "CREATE TABLE t_kept (id INTEGER);", token));
+        var copying = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        clock.OnUtcNow = () =>
+        {
+            copying.SetResult();
+            release.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        };
+        var backup = Task.Run(async () => await database.BackupAsync());
+        Task? recovery = null;
+        try
+        {
+            await copying.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            recovery = database.RecoverDamagedFileAsync(new SqliteException("damaged", 11), database.Generation).AsTask();
+            Assert.IsFalse(recovery.IsCompleted, "An admitted backup must finish with its original source, not a replacement.");
+        }
+        finally
+        {
+            release.TrySetResult();
+            await backup.WaitAsync(TimeSpan.FromSeconds(10));
+            if (recovery is not null) await recovery.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.IsNotNull(backup.Result);
+        Assert.AreEqual(backup.Result, database.LastRecovery?.RestoredFromCopy);
+        Assert.AreEqual(1, (await database.ListTablesAsync("t_kept")).Count);
+        Assert.AreEqual(1, database.Generation);
+    }
+
+    [TestMethod]
     public async Task TwoWriters_RunOneAfterTheOtherInTheOrderTheyAsked()
     {
         using var temp = TempFolder.Create();

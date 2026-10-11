@@ -225,6 +225,17 @@ One SQLite file per instance, `<state root>/data/alta.sqlite3` (`~/.alta/data/al
 | Copies | `data/backups/alta-<UTC timestamp>.sqlite3`, made with the online backup API of SQLite while the database is in use, checked with `PRAGMA quick_check`, and written as one file. A copy says that it is one: in its table of versions the row `database:copy` holds one more than in the file it is a copy of (`ApplicationDatabase.ReadCopyNumberAsync`, 0 for a file that never was a copy), so a file that took the place of another one is known as such by what is in it, also after a restart and when nothing told the service. The host starts the upkeep (`StartMaintenance`): a first check twenty seconds after start, then hourly, and a copy when the newest one is older than a day. The last two are kept. What is lost in the worst case is what was written since the last copy; the sessions are read again from their journals. |
 | Lifetime | Disposing the database (the host does it for the one it opened) closes the queue behind the writes that were admitted, so a shutdown waits for them. |
 
+File replacement is exclusive with the service's admitted connections, including online backups. Admission closes
+while recovery waits for those connections to be disposed, on every platform: Unix permits renaming an open file,
+but the old connection could then remove the replacement's WAL/SHM files when it closes. The wait is cancellable
+and bounded by the real-time `BusyTimeout`; a timeout reports SQLite error 5 without replacing the file. New
+operations resume after replacement or a failed wait. The reader-concurrency rules above apply to ordinary
+operations on a ready database; a read that must recover or initialize the file can also report that lock error.
+Initialization after a missing file follows the same rule,
+and recovery rechecks its observed generation under the initialization gate. Ordinary readers remain concurrent
+with each other and with the writer; they are not put through the write queue. This coordinates connections owned
+by this service, not external processes or another service on the same file.
+
 `MigrateAsync` first reads the recorded version without a write lock. When it is already current, even a new
 catalog can read while another connection writes. A needed migration checks the version again inside its
 write transaction; migration calls made inside an active write are still refused, including no-op migrations.

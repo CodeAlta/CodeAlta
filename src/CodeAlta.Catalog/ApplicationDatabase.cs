@@ -73,6 +73,9 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     // The write the calling flow runs in, if any: what it awaits cannot take the queue it holds itself.
     private readonly AsyncLocal<WriteScope?> _currentWrite = new();
     private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly object _connectionsGate = new();
+    private int _activeConnections;
+    private TaskCompletionSource? _connectionsDrained;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly string _backupDirectory;
     private readonly object _maintenanceGate = new();
@@ -164,11 +167,15 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         while (true)
         {
             ThrowIfDisposed();
-            var generation = await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
+            var lease = await AcquireConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var generation = lease.Generation;
             try
             {
-                await using var connection = await OpenAsync(readOnly: true, create: false, cancellationToken).ConfigureAwait(false);
-                return await read(connection, cancellationToken).ConfigureAwait(false);
+                using (lease)
+                {
+                    await using var connection = await OpenAsync(readOnly: true, create: false, cancellationToken).ConfigureAwait(false);
+                    return await read(connection, cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (SqliteException exception) when (recoverDamagedFile && !recovered && IsDamaged(exception))
             {
@@ -233,10 +240,12 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         while (true)
         {
             ThrowIfDisposed();
-            var generation = await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
+            var generation = Generation;
             try
             {
                 using var turn = await _writeQueue.AcquireAsync(cancellationToken).ConfigureAwait(false);
+                using var lease = await AcquireConnectionAsync(cancellationToken).ConfigureAwait(false);
+                generation = lease.Generation;
                 var scope = new WriteScope(owner);
                 _currentWrite.Value = scope;
                 try
@@ -456,6 +465,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     /// <exception cref="ArgumentNullException"><paramref name="failure"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The operation was started inside a write of this database.</exception>
     /// <exception cref="IOException">The damaged file cannot be moved aside.</exception>
+    /// <exception cref="SqliteException">An active connection did not close within the busy timeout (error 5).</exception>
     public async ValueTask RecoverDamagedFileAsync(SqliteException failure, int observedGeneration, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(failure);
@@ -470,6 +480,12 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         await _initGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (Generation != observedGeneration)
+            {
+                return; // Initialization may have replaced the file while this operation waited for its gate.
+            }
+
+            await WaitForConnectionsAsync(cancellationToken).ConfigureAwait(false);
             await ReplaceDamagedFileAsync(failure, cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -487,7 +503,7 @@ public sealed class ApplicationDatabase : IApplicationDatabase
     public async ValueTask<string?> BackupAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
+        using var lease = await AcquireConnectionAsync(cancellationToken).ConfigureAwait(false);
         Directory.CreateDirectory(_backupDirectory);
         var now = _options.TimeProvider.GetUtcNow();
         var path = Path.Combine(_backupDirectory, BackupFilePrefix + now.UtcDateTime.ToString(BackupTimestampFormat, CultureInfo.InvariantCulture) + ".sqlite3");
@@ -692,64 +708,115 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         }
     }
 
-    // Opens the file when needed and returns its generation: the number of times it was replaced.
-    private async ValueTask<int> EnsureReadyAsync(CancellationToken cancellationToken)
+    // Admission and replacement share the init gate, but ordinary operations release it before opening SQLite.
+    // A lease lasts until the connection is disposed, including a failed open and an online backup.
+    private async ValueTask<ConnectionLease> AcquireConnectionAsync(CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref _ready) && File.Exists(DatabasePath))
-        {
-            return Generation;
-        }
-
         await _initGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (Volatile.Read(ref _ready) && File.Exists(DatabasePath))
+            await EnsureReadyAsync(cancellationToken).ConfigureAwait(false);
+            lock (_connectionsGate)
             {
-                return Generation;
+                if (_activeConnections++ == 0)
+                {
+                    _connectionsDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
             }
 
-            // The file was deleted under the service: whatever is made again is a new file, and the owners say so
-            // by comparing the generation they saw. It is counted now: what follows can fail, and the next call
-            // no longer knows that there was a file.
-            var deleted = Volatile.Read(ref _ready);
-            Volatile.Write(ref _ready, false);
-            if (deleted)
-            {
-                Interlocked.Increment(ref _generation);
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
-
-            // The copies come before the file of the old location: they hold the tables of the plugins, and that
-            // file holds a list of sessions that can be built again.
-            var restored = !File.Exists(DatabasePath) && RestoreMissingFile();
-            if (restored && !deleted)
-            {
-                Interlocked.Increment(ref _generation);
-            }
-
-            if (!restored)
-            {
-                TakeOverLegacyFile();
-            }
-
-            try
-            {
-                await InitializeFileAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (SqliteException exception) when (IsDamaged(exception))
-            {
-                await ReplaceDamagedFileAsync(exception, cancellationToken).ConfigureAwait(false);
-                await InitializeFileAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            Volatile.Write(ref _ready, true);
-            return Generation;
+            return new ConnectionLease(this, Generation);
         }
         finally
         {
             _initGate.Release();
         }
+    }
+
+    private void ReleaseConnection()
+    {
+        TaskCompletionSource? drained = null;
+        lock (_connectionsGate)
+        {
+            if (--_activeConnections == 0) drained = _connectionsDrained;
+        }
+
+        drained?.TrySetResult();
+    }
+
+    // Runs with the init gate held, so no new connection can enter. Unix allows renaming an open SQLite file;
+    // its last connection can then unlink the new file's WAL/SHM on close. Drain on every platform, not just Windows.
+    private async Task WaitForConnectionsAsync(CancellationToken cancellationToken)
+    {
+        Task drained;
+        lock (_connectionsGate)
+        {
+            // Admission creates the completion source before publishing any active connection.
+            drained = _activeConnections == 0 ? Task.CompletedTask : _connectionsDrained!.Task;
+        }
+
+        try
+        {
+            await drained.WaitAsync(_options.BusyTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            throw new SqliteException("The application database is still in use; its file was not replaced.", SqliteBusy);
+        }
+    }
+
+    // Runs with the init gate held. Opens the file when needed, after all old connections have closed.
+    private async ValueTask EnsureReadyAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _ready) && File.Exists(DatabasePath))
+        {
+            return;
+        }
+
+        await WaitForConnectionsAsync(cancellationToken).ConfigureAwait(false);
+
+        // The file was deleted under the service: whatever is made again is a new file, and the owners say so
+        // by comparing the generation they saw. It is counted now: what follows can fail, and the next call
+        // no longer knows that there was a file.
+        var deleted = Volatile.Read(ref _ready);
+        Volatile.Write(ref _ready, false);
+        if (deleted)
+        {
+            Interlocked.Increment(ref _generation);
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
+
+        // The copies come before the file of the old location: they hold the tables of the plugins, and that
+        // file holds a list of sessions that can be built again.
+        var restored = !File.Exists(DatabasePath) && RestoreMissingFile();
+        if (restored && !deleted)
+        {
+            Interlocked.Increment(ref _generation);
+        }
+
+        if (!restored)
+        {
+            TakeOverLegacyFile();
+        }
+
+        try
+        {
+            await InitializeFileAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (SqliteException exception) when (IsDamaged(exception))
+        {
+            await ReplaceDamagedFileAsync(exception, cancellationToken).ConfigureAwait(false);
+            await InitializeFileAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        Volatile.Write(ref _ready, true);
+    }
+
+    private readonly struct ConnectionLease(ApplicationDatabase owner, int generation) : IDisposable
+    {
+        public int Generation { get; } = generation;
+
+        public void Dispose() => owner.ReleaseConnection();
     }
 
     private async Task InitializeFileAsync(CancellationToken cancellationToken)
@@ -941,8 +1008,8 @@ public sealed class ApplicationDatabase : IApplicationDatabase
         }
     }
 
-    // A connection that is finding the damage has the file open for a moment more, and on Windows an open file
-    // cannot be moved: the move waits for it, as long as a lock is waited for. The wait is a number of tries: the
+    // Owned connections have drained, but an external process can still hold the file open on Windows and prevent
+    // its move: wait as long as a lock is waited for. The wait is a number of tries: the
     // delay between two of them is real time, whatever the clock of the options says.
     private async Task MoveWhenReleasedAsync(string source, string destination, CancellationToken cancellationToken)
     {
