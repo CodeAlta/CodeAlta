@@ -108,6 +108,83 @@ public sealed class TextFileCodecTests
     }
 
     [TestMethod]
+    public async Task TryPublishNew_ConcurrentPublicationsHaveOneWinnerAndKeepItsExactBytes()
+    {
+        using var temp = new TemporaryFile();
+        const int creators = 8;
+        const int rounds = 40;
+        var results = new bool[rounds, creators];
+        using var start = new Barrier(creators);
+        var tasks = Enumerable.Range(0, creators).Select(creator => Task.Factory.StartNew(() =>
+        {
+            for (var round = 0; round < rounds; round++)
+            {
+                var staging = Path.Combine(temp.Directory, $"stage-{round}-{creator}.tmp");
+                File.WriteAllText(staging, $"body-{creator}");
+                try
+                {
+                    // Start at publication, not directory creation or asynchronous staging. Dedicated workers
+                    // keep this barrier independent of thread-pool injection and each round uses a new target.
+                    Assert.IsTrue(start.SignalAndWait(TimeSpan.FromSeconds(10)));
+                    results[round, creator] = TextFileCodec.TryPublishNew(staging, Path.Combine(temp.Directory, $"création-{round}.txt"));
+                }
+                finally
+                {
+                    File.Delete(staging);
+                }
+            }
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+        await Task.WhenAll(tasks);
+
+        for (var round = 0; round < rounds; round++)
+        {
+            var winners = Enumerable.Range(0, creators).Where(creator => results[round, creator]).ToArray();
+            Assert.AreEqual(1, winners.Length, $"Publication round {round} must have exactly one winner.");
+            Assert.AreEqual($"body-{winners[0]}", await File.ReadAllTextAsync(Path.Combine(temp.Directory, $"création-{round}.txt")));
+        }
+
+        Assert.AreEqual(rounds, Directory.EnumerateFiles(temp.Directory).Count());
+    }
+
+    [TestMethod]
+    [DataRow("file")]
+    [DataRow("directory")]
+    [DataRow("dangling link")]
+    public void TryPublishNew_RefusesExistingEntriesWithoutConsumingTheStagedFile(string kind)
+    {
+        using var temp = new TemporaryFile();
+        var staging = Path.Combine(temp.Directory, "stage.tmp");
+        File.WriteAllText(staging, "new text");
+        switch (kind)
+        {
+            case "file": File.WriteAllText(temp.Path, "original"); break;
+            case "directory": Directory.CreateDirectory(temp.Path); break;
+            default:
+                try { File.CreateSymbolicLink(temp.Path, Path.Combine(temp.Directory, "absent")); }
+                catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522))
+                { Assert.Inconclusive("Creating a temporary symbolic link requires platform permission."); }
+                break;
+        }
+
+        Assert.IsFalse(TextFileCodec.TryPublishNew(staging, temp.Path));
+        Assert.AreEqual("new text", File.ReadAllText(staging));
+        if (kind == "file") Assert.AreEqual("original", File.ReadAllText(temp.Path));
+        if (kind == "directory") Assert.IsTrue(Directory.Exists(temp.Path));
+        if (kind == "dangling link") Assert.IsNotNull(new FileInfo(temp.Path).LinkTarget);
+    }
+
+    [TestMethod]
+    public void TryPublishNew_AStorageFailureIsNotReportedAsACollision()
+    {
+        using var temp = new TemporaryFile();
+        var staging = Path.Combine(temp.Directory, "stage.tmp");
+        File.WriteAllText(staging, "new text");
+        Assert.Throws<IOException>(() => TextFileCodec.TryPublishNew(staging, Path.Combine(temp.Directory, "absent", "new.txt")));
+        Assert.AreEqual("new text", File.ReadAllText(staging));
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Directory, "absent")));
+    }
+
+    [TestMethod]
     public async Task SaveAsync_OnlyOneConcurrentSaveOfARevisionSucceeds()
     {
         using var temp = new TemporaryFile();

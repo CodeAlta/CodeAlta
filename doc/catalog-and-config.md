@@ -309,6 +309,14 @@ UTF-8 with or without a BOM and BOM-bearing UTF-16/UTF-32 in either byte order a
 
 Saves write a uniquely created temporary file in the destination directory, recheck content identity, and replace the target only after staging succeeds and cancellation is checked. Read-only targets are rejected, Unix mode bits are retained on replacement, and file symbolic links are followed rather than replaced with regular files. Failed/cancelled pre-commit saves leave the original intact and attempt to remove only their own staging file; cancellation after commit does not turn an acknowledged save into a cancellation. This is not a crash-recovery journal or a durability guarantee across power loss.
 
+New-file publication (`TryCreateAsync` and missing-revision saves) must not overwrite another creator's file.
+Windows uses a non-overwriting move. Unix atomically hard-links the completed sibling staging file to the new
+name, then removes the staging name: the managed non-overwriting move can check for absence and then rename,
+which races with another creator. An existing entry, including a directory or dangling link, refuses publication.
+Filesystems without hard-link support report a storage error; there is no unsafe rename or partial-copy fallback.
+Failure to remove staging after publication is reported as a cleanup failure, not as a collision. Existing-file
+revision checks retain the external-writer limitations below.
+
 Unix staging starts with user-only read/write mode. On Windows, staging for an existing file is created with a copy of the original's effective discretionary ACL (DACL), protected from additional directory inheritance, before any edited bytes are written. That DACL remains in place after the write handle closes for the revision check and replacement; directory readers do not gain additional DACL permissions through staging. Failure to read or apply the DACL aborts rather than falling back to directory permissions. Windows new-file saves have no original DACL and inherit directory permissions. This is DACL preservation, not a full security-descriptor/EFS copy or protection against privileged access; concurrent external security-metadata changes are not covered by content revisions.
 
 The instance-owned save gate serializes cooperating editors only. Other processes/instances or noncooperating writers can change a file or path link between the final check and replacement; there is no portable cross-process atomic compare-and-swap guarantee. Content identity also does not distinguish a delete/recreate sequence that restores identical bytes. Atomic replacement changes file identity, so hard-linked aliases do not receive the replacement contents. Do not treat timestamps, revisions, or paths as authorization tokens.

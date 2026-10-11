@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Text;
 
@@ -18,8 +20,9 @@ public sealed class TextFileCodec
     private readonly SemaphoreSlim _saveGate = new(1, 1);
 
     /// <summary>Publishes new UTF-8 text without reading an existing destination or its revision.</summary>
-    /// <remarks>Uses the same owner gate, staging and non-overwriting move as Missing-revision saves.
-    /// False means an existing destination was observed. This is not a path-swap sandbox.</remarks>
+    /// <remarks>Uses the same owner gate, staging and create-only publication as Missing-revision saves.
+    /// False means an existing destination was observed. Unix publication requires hard-link support in the
+    /// destination filesystem and fails rather than using an overwriting fallback. This is not a path-swap sandbox.</remarks>
     /// <exception cref="ArgumentException">The path is invalid.</exception>
     /// <exception cref="ArgumentNullException">Text is null.</exception>
     /// <exception cref="EncoderFallbackException">Text contains invalid Unicode.</exception>
@@ -65,11 +68,35 @@ public sealed class TextFileCodec
         catch (DirectoryNotFoundException) { return false; }
     }
 
-    private static bool TryPublishNew(string stagingPath, string path)
+    internal static bool TryPublishNew(string stagingPath, string path)
     {
-        try { File.Move(stagingPath, path); return true; } // Never overwrite a racing creation.
-        catch (IOException) when (EntryExists(path)) { return false; }
+        if (OperatingSystem.IsWindows())
+        {
+            try { File.Move(stagingPath, path); return true; }
+            catch (IOException) when (EntryExists(path)) { return false; }
+        }
+
+        // File.Move(overwrite: false) on Unix can check for absence and then rename, overwriting a racing
+        // creator. link() publishes the fully written sibling atomically and refuses any existing entry.
+        // Do not fall back to a check/rename or a copy that would expose a partially written destination.
+        if (LinkNewFile(stagingPath, path) != 0)
+        {
+            var error = Marshal.GetLastPInvokeError();
+            if (error == 17) return false; // EEXIST, including directories and dangling symbolic links.
+            var cause = new Win32Exception(error);
+            if (error is 1 or 13) throw new UnauthorizedAccessException("Cannot publish the new text file.", cause); // EPERM, EACCES.
+            throw new IOException("Cannot publish the new text file with an atomic hard link.", cause);
+        }
+
+        // Publication succeeded: a cleanup failure must not be misreported as a collision.
+        File.Delete(stagingPath);
+        return true;
     }
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int LinkNewFile(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 
     /// <summary>Loads a workflow document through this codec, retaining its backend path policy.</summary>
     /// <exception cref="ArgumentNullException">The document is null.</exception>
