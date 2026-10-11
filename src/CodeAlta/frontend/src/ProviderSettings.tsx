@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
-import { globalConfig, providerLogin, providerUsage, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
+import { globalConfig, modelCatalog, providerLogin, providerUsage, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
+import { ProviderModelPicker } from "./ProviderModelPicker";
 import { ProviderUsagePanel } from "./UsageLimits";
 import { hasSubscriptionUsage } from "./subscriptionUsage";
 import { providerDefault } from "./providerSignIn";
@@ -40,12 +41,13 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, readRuntime, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi }: {
+export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider">;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   /** Reads the usage of the subscription of a provider that has one. */
   usage?: Pick<typeof providerUsage, "read">;
   readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
+  readModels?: typeof modelCatalog.models;
   probe: (request: ModelCatalogProbeRequest, options: CallOptions) => Promise<ModelCatalogProbeResponse>;
   onOpenModels: () => void; onOpenConfiguration: () => void; onApplied?: () => void;
   /** The application started without an enabled provider: the setup guide starts by itself, the first time. */
@@ -116,6 +118,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;
   const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
   const dirty = !!form && !!baseline && providerFormDirty(form, baseline);
+  const modelProvider = original?.enabled && form && baseline
+    && (["key", "type", "enabled", "apiUrl", "apiKeyEnv", "apiKey", "clearApiKey"] as const).every(field => form[field] === baseline[field]) ? original.key : null;
   const problem = form ? validateProviderForm(form, providers, original?.key ?? null) : null;
   const status = (key: string, enabled: boolean): { label: string; intent: Intent } => {
     if (!enabled) return { label: t("Disabled"), intent: "none" };
@@ -250,7 +254,11 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
             <FormGroup label={t("Icon color")} labelFor="provider-color">
               <ProviderColorInput id="provider-color" value={form.color} disabled={busy} onChange={color => edit({ color })} /></FormGroup>
             <FormGroup label={t("Default model")} labelFor="provider-model">
-              <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} /></FormGroup>
+              <div className="provider-model-field">
+                <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} />
+                <ProviderModelPicker key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch} providerId={modelProvider} disabled={busy || probing}
+                  value={form.model} readModels={readModels} onChange={model => edit({ model })} />
+              </div></FormGroup>
             <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
               <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>

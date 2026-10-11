@@ -9,7 +9,9 @@ A model provider is the user-facing execution target in CodeAlta: it owns creden
 The preferred workflow is the provider editor (`Ctrl+G Ctrl+R`): the **Providers** page of Settings in the desktop app, or the **Model Providers** dialog in the TUI. Advanced users can edit the same TOML file directly at `~/.alta/config.toml`.
 
 > [!IMPORTANT]
-> Use **Test** before saving provider changes. It catches missing credentials, unsupported models, endpoint mistakes, and login-flow issues before the provider becomes the active execution target.
+> In the desktop app, **Save and apply** connection changes, sign in when required, then use **Test selected provider**. The test checks provider initialization, not whether every model request will succeed. The TUI can test provider edits before saving them.
+
+In Desktop, the **Models** button beside **Default model** lists the selected provider's available models. Search by name or ID, then choose one; **Save and apply** keeps the choice. You can still type a custom model ID, or clear the field with **Use the default**. Opening the picker again reads the current inventory, including after signing in or testing the provider.
 
 ## Default configuration file
 

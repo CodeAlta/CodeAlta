@@ -36,7 +36,7 @@ export type Page = Readonly<{
 }>;
 
 /** What the browser is started with. */
-export type HarnessOptions = Readonly<{ reducedMotion?: boolean; width?: number; height?: number; ratio?: number; colorScheme?: "light" | "dark"; /** Gives the page `gc()`, to measure the heap after a collection. */ exposeGc?: boolean; /** The page the test drives, relative to this folder (default `./statistics.mount.tsx`) and the global it defines (default `statsFixture`). */ entry?: string; fixture?: string }>;
+export type HarnessOptions = Readonly<{ reducedMotion?: boolean; width?: number; height?: number; ratio?: number; colorScheme?: "light" | "dark"; /** Gives the page `gc()`, to measure the heap after a collection. */ exposeGc?: boolean; /** The page the test drives, relative to this folder (default `./statistics.mount.tsx`) and the global it defines (default `statsFixture`). */ entry?: string; fixture?: string; /** An inert RPC module for a page that normally imports the native host. */ rpcFixture?: string }>;
 
 /** Starts the browser on the canvas page, runs `body`, and checks that the page raised no error and asked for nothing outside itself. */
 export async function withCanvas(body: (page: Page) => Promise<void>, options: HarnessOptions = {}): Promise<void> {
@@ -45,6 +45,7 @@ export async function withCanvas(body: (page: Page) => Promise<void>, options: H
   try {
     const config = JSON.parse(await readFile(new URL("../../../neoastra.json", import.meta.url), "utf8")) as { assets: { csp: string } };
     const bundle = await build({ entryPoints: [fileURLToPath(new URL(options.entry ?? "./statistics.mount.tsx", import.meta.url))], bundle: true, platform: "browser", format: "iife", write: false,
+      ...(options.rpcFixture ? { alias: { "#neoastra": fileURLToPath(new URL(options.rpcFixture, import.meta.url)) } } : {}),
       loader: { ".css": "empty" }, define: { "process.env.NODE_ENV": '"development"' } });
     const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
     const style = (await read("../../node_modules/@blueprintjs/core/lib/css/blueprint.css")) + await read("../style.css") + await read("../charts/charts.css") + await read("./statistics.css") + hostCss;

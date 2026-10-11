@@ -79,6 +79,7 @@ Add a rule here when it is important enough that contributors and agents should 
 - Prefer named ports, request/response DTOs, immutable snapshots, and event streams over large callback aggregates or callback-wrapper context classes.
 - New shell/application contracts should use `ModelProvider` terminology for selectable LLM runtime and endpoint configuration. Do not introduce new `Backend` names for provider/session ownership; keep remaining backend strings limited to explicit compatibility wire/config names or real third-party terminal/backend concepts.
 - The macOS menu's `Cmd+W` sends the shell's `close-tab` notice to the page's existing tab-close path, not AppKit's `performClose:`. Keep dirty-file handling and the final prompt tab there; only Quit (`Cmd+Q`) uses the application-exit flow.
+- The provider-settings default-model picker uses the existing bounded `modelCatalog.models` read only when opened for the selected, saved connection. Keep manual IDs and the blank/default value; choosing a model edits the form without saving or probing. Abort dismissed/obsolete reads and reject a different epoch or provider. Reopening after login or an explicit provider test reads the current inventory.
 
 ### Agent runtime, sessions, and model providers
 

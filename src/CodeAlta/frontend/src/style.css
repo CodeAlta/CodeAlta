@@ -1067,6 +1067,12 @@ dialog::backdrop { background: var(--scrim); }
 .provider-settings-tags { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .provider-settings-fields.bp6-section-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 20px; }
 .provider-settings-fields .bp6-form-group { margin: 0 0 10px; }
+.provider-model-field { display: flex; gap: 6px; min-width: 0; }
+.provider-model-field > .bp6-input-group { flex: 1; min-width: 0; }
+.provider-model-picker { width: min(380px, calc(100vw - 40px)); padding: 8px; }
+.provider-model-picker .bp6-menu { max-height: 280px; overflow-y: auto; padding: 4px 0; }
+.provider-model-picker p { margin: 8px 0; color: var(--muted); }
+.provider-model-picker .bp6-menu-item-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .provider-settings-wide { grid-column: 1 / -1; }
 .provider-settings-footer.bp6-section-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .provider-settings-spacer { flex: 1 1 auto; }
