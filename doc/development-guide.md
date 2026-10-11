@@ -173,6 +173,21 @@ Rules for these sources:
 - A feature's stylesheet is imported from `main.tsx`, after `style.css`, not from its components: the tests
   import components without a bundler.
 
+### Build and test output
+
+`npm test` uses `scripts/failures-reporter.mjs`: failure details and final totals, without a line for every
+passed, skipped or TODO test. Test diagnostics, stdout/stderr, cancellations and module crashes remain
+visible, and failures still return a nonzero exit code. Use `npm run test:verbose` for the full test tree.
+`npm run build` and `npm run build:demo` run Vite with `--logLevel warn`, retaining warnings and errors
+without the asset-size listing. NeoAstra invokes the same build script from the desktop `.csproj`.
+
+The GitHub Actions .NET summary is a separate output. `src/dotnet-releaser.toml` replaces the default test
+invocation with one named run whose final `--logger` argument sets `summary-include-passed=false` and
+`summary-include-skipped=false`. GitHubActionsTestLogger 3.0.3 already supports these options; no logger
+upgrade is required. This keeps successful summaries below GitHub's 1 MiB per-step limit while retaining
+totals, failure details and annotations. A `.runsettings` logger configuration alone is insufficient:
+VSTest replaces it when dotnet-releaser supplies its bare `--logger GitHubActions` argument.
+
 ### What a render of the desktop page may cost
 
 `App` (in `main.tsx`) holds the state of the whole window, and every open session tab stays mounted with its

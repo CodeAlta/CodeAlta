@@ -3,6 +3,14 @@
 profile = "custom"
 [msbuild]
 project = "CodeAlta.slnx"
+[test]
+# Replace the default run, rather than executing the suite twice.
+run_tests = false
+[[test.runs]]
+name = "Tests (failure-only summary)"
+# VSTest's last logger wins over the bare GitHubActions logger added by dotnet-releaser.
+# Keep totals and failure details, without thousands of passed/skipped entries (GitHub's 1 MiB limit).
+args = ["--logger", "GitHubActions;summary-include-passed=false;summary-include-skipped=false"]
 [github]
 user = "CodeAlta"
 repo = "CodeAlta"

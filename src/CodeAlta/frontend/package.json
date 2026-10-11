@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --strictPort",
     "demo": "vite --mode demo --host 127.0.0.1 --strictPort --open",
-    "build": "tsc --noEmit && vite build",
-    "build:demo": "tsc --noEmit && vite build --mode demo",
+    "build": "tsc --noEmit && vite build --logLevel warn",
+    "build:demo": "tsc --noEmit && vite build --mode demo --logLevel warn",
     "icons": "node scripts/generate-brand-icons.mjs",
-    "test": "tsx --test \"src/**/*.test.ts\" \"src/**/*.test.tsx\""
+    "test": "tsx --test --test-reporter=./scripts/failures-reporter.mjs \"src/**/*.test.ts\" \"src/**/*.test.tsx\"",
+    "test:verbose": "tsx --test --test-reporter=spec \"src/**/*.test.ts\" \"src/**/*.test.tsx\""
   },
   "dependencies": {
     "@blueprintjs/core": "6.21.0",

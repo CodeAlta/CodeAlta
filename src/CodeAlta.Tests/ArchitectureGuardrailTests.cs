@@ -5,12 +5,34 @@ using System.Text.RegularExpressions;
 using CodeAlta.Tui.Frontend.Commands;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Tui.Views;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace CodeAlta.Tests;
 
 [TestClass]
 public sealed class ArchitectureGuardrailTests
 {
+    [TestMethod]
+    public void ReleaseTests_KeepOneRunWithFailureOnlyGitHubSummary()
+    {
+        var configuration = TomlSerializer.Deserialize<TomlTable>(File.ReadAllText(Path.Combine(GetSourceRoot(), "dotnet-releaser.toml")))!;
+        Assert.IsTrue(configuration.TryGetValue("test", out var testConfiguration), "Configure CI test reporting explicitly.");
+        var tests = (TomlTable)testConfiguration!;
+        Assert.IsFalse(tests.TryGetValue("enable", out var enabled) && enabled is false, "Do not disable tests.");
+        Assert.AreEqual(false, tests["run_tests"], "Replace the default invocation, rather than running tests twice.");
+        var runs = (TomlTableArray)tests["runs"];
+        Assert.HasCount(1, runs);
+        var arguments = ((TomlArray)runs[0]["args"]).Cast<string>().ToArray();
+        // dotnet-releaser adds --logger GitHubActions first. The last logger wins in VSTest;
+        // a .runsettings file alone would lose its configuration to that command-line logger.
+        CollectionAssert.AreEqual(new[]
+        {
+            "--logger",
+            "GitHubActions;summary-include-passed=false;summary-include-skipped=false",
+        }, arguments);
+    }
+
     [TestMethod]
     public void CodeAltaSource_DoesNotUseStaticMutableData()
     {

@@ -37,6 +37,8 @@ lunet build
 
 All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
 
+Frontend test output is failure-focused, with totals and emitted diagnostics retained; use `npm run test:verbose` for every test name. Vite builds print warnings and errors, not the successful asset listing. The separate GitHub .NET summary is configured in `src/dotnet-releaser.toml` to omit passed/skipped details, not failures or totals; see `doc/development-guide.md`.
+
 ### Debug or Release
 
 CodeAlta is developed with CodeAlta, so a CodeAlta that runs on this computer may be a build of this checkout: `src/CodeAlta/bin/<Configuration>/net10.0/alta` or `src/CodeAlta.Tui/bin/<Configuration>/net10.0/altatui`. Its files cannot be replaced while it runs (on Windows the build stops on a locked file), and every build of that configuration writes them: the solution, `CodeAlta.csproj`, and `dotnet test`, whose test projects build both applications.
