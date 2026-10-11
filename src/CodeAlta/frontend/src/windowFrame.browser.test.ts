@@ -156,6 +156,19 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
       }
     }
     assert.equal(await evaluate("localStorage.getItem('codealta.desktop.landing.startup.v1')"), "off", "Opening Welcome never changes startup");
+    // Cmd+W comes from the native menu, not a DOM key: close the focused tab, never the window.
+    await evaluate(`projectFocusFixture.notify({kind:'close-tab',runningSessions:0,busyTerminals:0})`);
+    assert.equal(await wait(`${welcomeTabs}.length === 0`), true, "The native close action closes Welcome");
+    await evaluate(`projectFocusFixture.notify({kind:'close-tab',runningSessions:0,busyTerminals:0})`);
+    assert.equal(await wait(`document.querySelectorAll('.flexlayout__tab_button').length === 2 && !!document.querySelector('#catalog-prompt')`), true, "Closing the session returns to a prompt");
+    await evaluate(`[...document.querySelectorAll('.flexlayout__tab_button')].find(tab => tab.textContent.trim() === 'Canvases').click()`);
+    await frames();
+    await evaluate(`projectFocusFixture.notify({kind:'close-tab',runningSessions:0,busyTerminals:0})`);
+    assert.equal(await wait(`document.querySelectorAll('.flexlayout__tab_button').length === 1 && !!document.querySelector('#catalog-prompt, #session-prompt')`), true);
+    await evaluate(`projectFocusFixture.notify({kind:'close-tab',runningSessions:0,busyTerminals:0})`);
+    await frames();
+    assert.equal(await evaluate(`document.querySelectorAll('.flexlayout__tab_button').length`), 1, "The final prompt tab stays open");
+    assert.equal(await evaluate(`!!document.querySelector('[role="alertdialog"]')`), false, "No exit or close-window question");
     await evaluate("windowFrameFixture.enabled=false; projectFocusFixture.notify({kind:'plugins-changed',runningSessions:0,busyTerminals:0})");
     assert.equal(await wait(`${home}.disabled`), true, "Home is unavailable when the built-in Landing page is disabled, not routed to another plugin");
     assert.deepEqual(exceptions, []);

@@ -78,6 +78,7 @@ Add a rule here when it is important enough that contributors and agents should 
 - Bound file-change snapshot capture and generated diffs in the shared agent runtime, before JSON serialization. Preserve explicit omission evidence and complete retained per-file diff blocks; model-visible tool-output truncation does not protect event details or `DiffUpdated` records. These inspection limits must not change file mutation or permission behavior.
 - Prefer named ports, request/response DTOs, immutable snapshots, and event streams over large callback aggregates or callback-wrapper context classes.
 - New shell/application contracts should use `ModelProvider` terminology for selectable LLM runtime and endpoint configuration. Do not introduce new `Backend` names for provider/session ownership; keep remaining backend strings limited to explicit compatibility wire/config names or real third-party terminal/backend concepts.
+- The macOS menu's `Cmd+W` sends the shell's `close-tab` notice to the page's existing tab-close path, not AppKit's `performClose:`. Keep dirty-file handling and the final prompt tab there; only Quit (`Cmd+Q`) uses the application-exit flow.
 
 ### Agent runtime, sessions, and model providers
 

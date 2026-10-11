@@ -1260,6 +1260,7 @@ function App() {
     setExiting(current => current?.busy ? current : { tabs: unsaved, busy: false });
   }
   const requestExit = useRef(exitApplication);
+  const nativeCloseTab = useRef<() => void>(() => {});
   requestExit.current = exitApplication;
   async function saveAllAndExit(unsaved: FileTab[]) {
     setExiting({ tabs: unsaved, busy: true });
@@ -1391,6 +1392,7 @@ function App() {
           if (abort.signal.aborted) return;
           if (notice.kind === "entry-added") { if (currentPlatform.current) announceEntry(currentPlatform.current); else entryPending.current = true; }
           else if (notice.kind === "exit-requested") requestExit.current();
+          else if (notice.kind === "close-tab") nativeCloseTab.current();
           else if (notice.kind === "confirm-exit") setExitQuestionFor({ sessions: notice.runningSessions, terminals: notice.busyTerminals });
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
@@ -1575,6 +1577,9 @@ function App() {
       else applyTabState({ ...valid, active: null });
     }
   }
+  // The macOS menu consumes Cmd+W before the webview. Use the current tab state and the same close path
+  // as the keyboard, including dirty-editor handling and the unclosable prompt tab. Never close behind a dialog.
+  nativeCloseTab.current = () => { if (!searchOpen && !dialog && !modalDialogOpen()) tabCommand("closeTab"); };
   // After opening a project or creating, switching or closing a tab, typing goes to the prompt now shown.
   // Two frames let the newly active pane render its prompt; a file tab focuses its own editor.
   // The operating system's folder dialog exists where a host owns the window and folders can be added.

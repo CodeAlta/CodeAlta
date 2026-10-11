@@ -20,7 +20,7 @@ public sealed class DesktopApplicationMenuTests
             "Hide CodeAlta (dev)|Meta+H", "Hide Others|Alt+Meta+H", "Show All|", "|", "Quit CodeAlta (dev)|Meta+Q",
         }, Lines(menu[0]));
         CollectionAssert.AreEqual(new[] { "Undo|Meta+Z", "Redo|Shift+Meta+Z", "|", "Cut|Meta+X", "Copy|Meta+C", "Paste|Meta+V", "Select All|Meta+A" }, Lines(menu[1]));
-        CollectionAssert.AreEqual(new[] { "Minimize|Meta+M", "Close|Meta+W" }, Lines(menu[2]));
+        CollectionAssert.AreEqual(new[] { "Minimize|Meta+M", "Close Tab|Meta+W" }, Lines(menu[2]));
         // A role item has no shortcut, and the Quit role would skip the page's questions.
         Assert.IsFalse(All(menu).Any(static item => item.Kind == NeoMenuItemKind.Role));
     }
@@ -43,15 +43,16 @@ public sealed class DesktopApplicationMenuTests
     }
 
     [TestMethod]
-    public async Task EveryItemHasARegisteredCommand_QuitIsTheShellsExitAndTheOthersSendTheirAction()
+    public async Task EveryItemHasARegisteredCommand_OnlyQuitExitsAndCloseTabDoesNotCloseTheWindow()
     {
         var menu = DesktopApplicationMenu.Build("CodeAlta", DesktopShell.ExitCommand);
         await using var commands = new NeoCommandService();
         var sent = new List<string>();
         var exits = 0;
+        var closedTabs = 0;
         // The shell registers its exit once, for the tray's menu and for this one.
         commands.Register(DesktopShell.ExitCommand, _ => { exits++; return ValueTask.CompletedTask; });
-        DesktopApplicationMenu.Register(commands, sent.Add);
+        DesktopApplicationMenu.Register(commands, sent.Add, () => closedTabs++);
 
         var items = All(menu).Where(static item => item.Kind == NeoMenuItemKind.Command).ToArray();
         Assert.AreEqual(12, items.Length);
@@ -59,11 +60,12 @@ public sealed class DesktopApplicationMenuTests
 
         Assert.AreEqual(DesktopShell.ExitCommand, items.Single(static item => item.Id == "quit").CommandId);
         Assert.AreEqual(1, exits, "Only Quit exits.");
+        Assert.AreEqual(1, closedTabs, "Cmd+W asks the page to close a tab instead of sending a native window-close action.");
         CollectionAssert.AreEqual(new[]
         {
-            "hide:", "hideOtherApplications:", "unhideAllApplications:", "undo:", "redo:", "cut:", "copy:", "paste:", "selectAll:", "performMiniaturize:", "performClose:",
+            "hide:", "hideOtherApplications:", "unhideAllApplications:", "undo:", "redo:", "cut:", "copy:", "paste:", "selectAll:", "performMiniaturize:",
         }, sent);
-        Assert.Throws<ArgumentException>(() => DesktopApplicationMenu.Register(commands, sent.Add), "A command is registered once.");
+        Assert.Throws<ArgumentException>(() => DesktopApplicationMenu.Register(commands, sent.Add, () => closedTabs++), "A command is registered once.");
     }
 
     private static string[] Lines(NeoMenuItem menu) => menu.Children.Select(static item => item.Text + "|" + item.Accelerator).ToArray();

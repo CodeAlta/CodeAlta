@@ -29,6 +29,7 @@ internal enum DesktopCloseAction
 /// A notice for the page: <c>exit-requested</c> (the tray's Exit, or a closed window that cannot stay hidden),
 /// <c>confirm-exit</c>, which carries the number of running sessions and of terminals that run a command,
 /// <c>confirm-close</c> (the window was closed, and the user has not said yet what that does),
+/// <c>close-tab</c> (the native menu asks the page to close its focused tab, not the window),
 /// <c>entry-added</c> (the application was just added to the desktop's applications) and
 /// <c>sessions-changed</c> (something outside the window may have created or changed sessions).
 /// </summary>
@@ -228,7 +229,8 @@ internal sealed class DesktopShell
         {
             RegisterCommands(services);
             // A command can be activated off the window's thread, and AppKit is called only on it.
-            DesktopApplicationMenu.Register(services.Menus.Commands, selector => OnWindowThread(() => { if (OperatingSystem.IsMacOS()) DesktopApplicationMenu.SendAction(selector); }));
+            DesktopApplicationMenu.Register(services.Menus.Commands, selector => OnWindowThread(() => { if (OperatingSystem.IsMacOS()) DesktopApplicationMenu.SendAction(selector); }),
+                () => Publish(new("close-tab", 0)));
             await services.Menus.SetMenuAsync(DesktopApplicationMenu.Target, DesktopApplicationMenu.Build(DisplayName(developer), ExitCommand)).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

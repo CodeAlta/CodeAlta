@@ -12,8 +12,8 @@ namespace CodeAlta.Desktop;
 /// <remarks>
 /// Every item is a command with its shortcut, never a role item: a role item cannot carry a shortcut, and the
 /// Quit role ends the application the way the end of the session does, without the page's questions. An item
-/// other than Quit sends the standard action of AppKit, which reaches the window or the text being edited
-/// through the responder chain; Quit is the shell's exit, as in the tray's menu.
+/// other than Quit or Close Tab sends the standard action of AppKit through the responder chain. Quit is
+/// the shell's exit; Close Tab asks the page to close its selected tab, never the native window.
 /// </remarks>
 internal static class DesktopApplicationMenu
 {
@@ -43,8 +43,6 @@ internal static class DesktopApplicationMenu
     private static readonly (string Id, string Text, string? Accelerator, string Selector)[] Window =
     [
         ("minimize", "Minimize", "Cmd+M", "performMiniaturize:"),
-        // The close button's own path: the window hides or the application exits, as the shell decides.
-        ("close", "Close", "Cmd+W", "performClose:"),
     ];
 
     /// <summary>The menu bar for an application shown under <paramref name="name"/>.</summary>
@@ -72,31 +70,34 @@ internal static class DesktopApplicationMenu
                 NeoMenuItem.Separator("edit-separator"),
                 .. Edit.Skip(2).Select(Item),
             ]),
-            NeoMenuItem.Submenu("window", "Window", [.. Window.Select(Item)]),
+            NeoMenuItem.Submenu("window", "Window", [.. Window.Select(Item), NeoMenuItem.Command("close", "Close Tab", Prefix + "close", "Cmd+W")]),
         ];
     }
 
     /// <summary>
-    /// Registers the command of every item but Quit: each hands the selector of its action to
-    /// <paramref name="send"/>, which is called on whatever thread the command is activated on.
+    /// Registers the commands other than Quit. Close Tab goes to the page; standard actions go to AppKit.
+    /// Callbacks run on whatever thread the command is activated on.
     /// </summary>
     /// <param name="commands">The command service of the menus.</param>
     /// <param name="send">Sends the action named by a selector.</param>
+    /// <param name="closeTab">Asks the page to close the focused tab, preserving its final prompt tab.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">The commands are already registered.</exception>
-    internal static void Register(NeoCommandService commands, Action<string> send)
+    internal static void Register(NeoCommandService commands, Action<string> send, Action closeTab)
     {
         ArgumentNullException.ThrowIfNull(commands);
         ArgumentNullException.ThrowIfNull(send);
+        ArgumentNullException.ThrowIfNull(closeTab);
         foreach (var item in Application.Concat(Edit).Concat(Window))
         {
             var selector = item.Selector;
             commands.Register(Prefix + item.Id, _ => { send(selector); return ValueTask.CompletedTask; });
         }
+        commands.Register(Prefix + "close", _ => { closeTab(); return ValueTask.CompletedTask; });
     }
 
     /// <summary>
-    /// Sends a standard action (<c>copy:</c>, <c>hide:</c>, <c>performClose:</c>) to the first object of the
+    /// Sends a standard action (<c>copy:</c>, <c>hide:</c>, <c>performMiniaturize:</c>) to the first object of the
     /// responder chain that takes it, as a menu item without a target does. Only on the application's thread.
     /// </summary>
     /// <param name="selector">The selector of the action.</param>
