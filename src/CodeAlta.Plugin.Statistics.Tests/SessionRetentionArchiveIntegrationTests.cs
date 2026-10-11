@@ -137,13 +137,12 @@ public sealed class SessionRetentionArchiveIntegrationTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task DisabledOrUnwritableRealArchiveRetainsJournalAndArtifacts(bool disabled)
+    public async Task DisabledOrUnwritableRealArchiveStillRetiresExpiredSession(bool disabled)
     {
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Exact-handle retirement currently fails closed outside Windows.");
         await using var harness = await StoreHarness.CreateAsync(archives: true);
         await using var fixture = await RetentionFixture.CreateAsync(harness);
         await fixture.SeedAsync();
-        var before = await File.ReadAllBytesAsync(fixture.JournalPath);
         await using var engine = fixture.CreateEngine(harness);
         await engine.InitializeAsync();
         await engine.ChooseHistoryAsync(HistoryChoice.All);
@@ -153,14 +152,13 @@ public sealed class SessionRetentionArchiveIntegrationTests
         await using (var archiveLock = disabled ? null : new FileStream(archive.DatabasePath, FileMode.Open, FileAccess.Read, FileShare.None))
         {
             var status = await fixture.Service(engine).RunOnceAsync(Now, Now.AddMonths(-1));
-            Assert.AreEqual(1, status.Examined, "An actual owned candidate must reach native retirement.");
-            Assert.AreEqual(0, status.Deleted);
-            Assert.AreEqual(1, status.Skipped);
-            Assert.AreEqual("archive_unavailable", status.Reason, "Do not pass because of an unqualified host, family or source.");
+            Assert.AreEqual(1, status.Examined);
+            Assert.AreEqual(1, status.Deleted, "Saved Statistics are best effort: they never keep an expired session.");
+            Assert.AreEqual("completed", status.State, status.Reason);
         }
-        CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(fixture.JournalPath));
-        Assert.AreEqual("synthetic attachment", await File.ReadAllTextAsync(fixture.AttachmentPath));
-        Assert.AreEqual("synthetic trace", await File.ReadAllTextAsync(fixture.TracePath));
+        Assert.IsFalse(File.Exists(fixture.JournalPath));
+        Assert.IsFalse(File.Exists(fixture.AttachmentPath));
+        Assert.IsFalse(File.Exists(fixture.TracePath));
         Assert.IsEmpty(await archive.ReadAsync());
     }
 
@@ -240,6 +238,8 @@ public sealed class SessionRetentionArchiveIntegrationTests
             await File.WriteAllTextAsync(AttachmentPath, "synthetic attachment");
             Directory.CreateDirectory(Path.GetDirectoryName(TracePath)!);
             await File.WriteAllTextAsync(TracePath, "synthetic trace");
+            // The age of a session is the last write time of its journal.
+            File.SetLastWriteTimeUtc(JournalPath, JournalBuilder.Time(4).UtcDateTime);
         }
 
         public ValueTask DisposeAsync() => _host.DisposeAsync();

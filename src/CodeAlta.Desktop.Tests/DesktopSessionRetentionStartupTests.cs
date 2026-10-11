@@ -139,18 +139,23 @@ public sealed class DesktopSessionRetentionStartupTests
     }
 
     [TestMethod]
-    public async Task MissingArchiveReportsSkippedWithoutWaitingForRenderer()
+    public async Task MissingArchiveStillRunsThePassAfterRestoration()
     {
         using var fixture = new Fixture();
         var protection = DesktopSessionRetention.CreateProtection();
         await using var host = await fixture.CreateHostAsync(protection);
-        await using var retention = new DesktopSessionRetention(host, "epoch");
+        await using var retention = new DesktopSessionRetention(host.Commands, host.RuntimeService,
+            new CodeAltaConfigStore(host.CatalogOptions), null, "epoch", host.RetentionProtection);
         var completed = new TaskCompletionSource<SessionRetentionStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var observer = retention.Service.Subscribe(status =>
         {
-            if (status.State == "skipped") completed.TrySetResult(status);
+            if (status.State is "completed" or "skipped" or "failed" or "partial") completed.TrySetResult(status);
         });
-        Assert.AreEqual("archive_unavailable", (await completed.Task.WaitAsync(TimeSpan.FromSeconds(10))).Reason);
+        // Saved Statistics are best effort: without them, expired sessions are still deleted.
+        Assert.IsTrue(protection.Publish("external-work", [], true));
+        Assert.IsTrue(protection.Publish("desktop-open-drafts", [], true));
+        var result = await completed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual("completed", result.State, result.Reason);
     }
 
     private sealed class NoCandidatesArchive : ISessionStatisticsRetirementArchive

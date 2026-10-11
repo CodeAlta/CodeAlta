@@ -2026,20 +2026,24 @@ separate line below it: running, completed with the removed count, partial with 
 or skipped/canceled. Once the pass has listed its sessions, the line and the keyed `storage-retention` toast
 add its progress: sessions checked out of the total, sessions removed and bytes freed (`total` and the Int64-string
 `freedBytes` of `StorageRetentionMaintenance`). A recent session is kept without making the pass partial.
-Known skip reasons get short localized text (not available yet, off, Saved Statistics
-unavailable, check the retention duration); unknown reasons and states never show host text, and an
+Known skip reasons get short localized text (not available yet, off, check the retention duration); unknown
+reasons and states never show host text, and an
 unknown state shows an explicit unavailable line. A broken observation stream or host-liveness outage does not erase an already-final
 outcome for the same host epoch. Unfinished outcomes become unavailable until observation resumes; an actual epoch change clears the old results.
 Automatic session deletion is a single startup pass after external producers are registered and the
 native window's authenticated lifetime/inventory handshake has protected open sessions and drafts in
-every space. Missing restoration, unavailable Statistics or unsupported storage skips cleanup; policy
+every space. Missing restoration or unsupported storage skips cleanup; policy
 editing never enables readiness or retries a pass. Manual deletion confirmations do not govern automatic retention.
-The pass reads the age of each session without any claim first; only an expired session enters the exclusive
-retirement path, and that path reserves owned commands of that session only (`OwnedSessionCommandService.Reserved`):
-sends, queues, steering, compaction and aborts of other sessions are admitted meanwhile. The family-lineage graph is
-read once per pass and a journal is parsed again only when its size or times change (`SessionRetentionPass`); before,
-every candidate re-parsed every journal, which on a profile of about 1,000 journals (11 GB) meant hours of parsing
-while every owned send was refused as busy.
+The age of a session is the last write time of its journal file, a file stat: the pass never parses a journal to
+decide it, so no record format, unknown record or damaged tail can keep an expired session. Only an expired session
+enters the exclusive retirement path, which checks that time again on the handle it holds, and that path reserves
+owned commands of that session only (`OwnedSessionCommandService.Reserved`): sends, queues, steering, compaction and
+aborts of other sessions are admitted meanwhile. Family lineage comes from the session list the pass already has
+(parent, creator, view parent): an expired session is removed once no remaining session names it, so a recent child
+keeps its family and an expired family goes leaves first in the same pass. Saved Statistics are best effort: no
+participant, a refusal, an exception or no answer within 60 seconds deletes the session anyway, and after a timeout
+the pass stops asking Statistics. Before, the age came from parsing every journal with a closed list of record types:
+on a profile of about 1,000 journals (11 GB) every session was unrecognized and kept.
 
 ### Configuration file
 

@@ -46,7 +46,7 @@ internal sealed class DesktopSessionRetention : IAsyncDisposable
         Service = new(commands, runtime, protection, archive);
         var now = DateTimeOffset.UtcNow;
         var cutoff = ReadCutoff(config, now);
-        _work = StartAfterRestorationAsync(protection, archive is not null && cutoff is not null && cutoff < now,
+        _work = StartAfterRestorationAsync(protection, cutoff is not null && cutoff < now,
             now, cutoff, restorationTimeout);
     }
 

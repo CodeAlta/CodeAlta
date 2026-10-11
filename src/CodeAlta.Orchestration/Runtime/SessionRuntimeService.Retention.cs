@@ -48,24 +48,17 @@ public sealed partial class SessionRuntimeService
     internal IAsyncEnumerable<AgentSessionMetadata> ListRetentionCandidatesAsync(CancellationToken cancellationToken)
         => _sessionViewCatalog.JournalStore.CreateSessionStore().ListSessionsAsync(cancellationToken: cancellationToken);
 
-    // Claim-free: a recent session never takes the exclusive retirement path. Retirement checks the age again.
-    internal Task<bool> IsRetentionCandidateRecentAsync(AgentSessionMetadata candidate, DateTimeOffset now, DateTimeOffset cutoff,
+    // Claim-free and read-free: a file stat. Retirement reads the age again from the handle it holds.
+    internal DateTimeOffset? GetRetentionJournalLastWriteUtc(AgentSessionMetadata candidate)
+        => _sessionViewCatalog.JournalStore.CreateSessionStore().GetRetentionJournalLastWriteUtc(candidate.SessionId, candidate.CreatedAt);
+
+    internal Task<string> RetireOwnedCatalogSessionAsync(AgentSessionMetadata candidate, DateTimeOffset cutoff,
+        SessionRetentionProtection protection, ISessionStatisticsRetirementArchive? archive, SessionRetentionPass? pass,
         CancellationToken cancellationToken)
-        => _sessionViewCatalog.JournalStore.CreateSessionStore().IsRetentionCandidateRecentAsync(candidate.SessionId, candidate.CreatedAt,
-            now, cutoff, cancellationToken);
+        => AdmitAsync(() => RetireOwnedCatalogSessionBodyAsync(candidate, cutoff, protection, archive, pass, cancellationToken), cancellationToken);
 
-    // Reads the whole family graph once, outside any exclusive retirement, so that each retirement only re-reads
-    // the journals that changed since. Its answer is not used: each retirement reads the graph again.
-    internal Task PrepareRetentionFamilyGraphAsync(SessionRetentionPass pass, CancellationToken cancellationToken)
-        => _sessionViewCatalog.JournalStore.CreateSessionStore().ReadRetentionFamilyProtectionAsync(pass, cancellationToken);
-
-    internal Task<string> RetireOwnedCatalogSessionAsync(AgentSessionMetadata candidate, DateTimeOffset now,
-        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive, SessionRetentionPass? pass,
-        CancellationToken cancellationToken)
-        => AdmitAsync(() => RetireOwnedCatalogSessionBodyAsync(candidate, now, cutoff, protection, archive, pass, cancellationToken), cancellationToken);
-
-    private async Task<string> RetireOwnedCatalogSessionBodyAsync(AgentSessionMetadata candidate, DateTimeOffset now,
-        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive, SessionRetentionPass? pass,
+    private async Task<string> RetireOwnedCatalogSessionBodyAsync(AgentSessionMetadata candidate, DateTimeOffset cutoff,
+        SessionRetentionProtection protection, ISessionStatisticsRetirementArchive? archive, SessionRetentionPass? pass,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -89,48 +82,54 @@ public sealed partial class SessionRuntimeService
                 || (await Permissions.ListAsync().ConfigureAwait(false)).Any(item => string.Equals(item.Handle.SessionId, candidate.SessionId, StringComparison.OrdinalIgnoreCase)))
                 return "interaction_pending";
             var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
-            var current = await store.GetSessionAsync(candidate.SessionId, token).ConfigureAwait(false);
-            if (current is null || current.CreatedAt != candidate.CreatedAt || current.WorkspacePath != candidate.WorkspacePath)
-                return "session_missing";
-            // Family retirement needs a multi-actor reservation. Until that exists protect both parents and leaves,
-            // including attribution lineage. A corrupt/ambiguous graph is never treated as independent sessions.
-            var graph = await store.ReadRetentionFamilyProtectionAsync(pass, token).ConfigureAwait(false);
-            if (graph is null) return "family_graph_unknown";
-            if (graph.Contains(candidate.SessionId)) return "family_protected";
-            var local = await _sessionViewCatalog.JournalStore.ReadLatestStateAsync(candidate.SessionId, candidate.CreatedAt, token).ConfigureAwait(false);
-            if (local is not null && (local.QueuedPrompts.Any(item => item.State != "submitted")
-                || !string.IsNullOrWhiteSpace(local.ParentSessionId) || !string.IsNullOrWhiteSpace(local.CreatedBy?.SourceSessionId)))
-                return "queued_work_or_family";
-
             SessionStatisticsRetirementReceipt? receipt = null;
-            var result = await store.RetireSessionAsync(candidate.SessionId, candidate.CreatedAt, now, cutoff, async (journal, archiveToken) =>
-            {
-                var prepared = await archive.PrepareAsync(journal.SessionId, archiveToken).ConfigureAwait(false);
-                receipt = prepared.Receipt;
-                return receipt is not null && !string.IsNullOrWhiteSpace(receipt.Generation)
-                    && !string.IsNullOrWhiteSpace(receipt.PayloadSha256)
-                    && string.Equals(receipt.Source.SessionId, journal.SessionId, StringComparison.Ordinal)
-                    && string.Equals(receipt.Source.Path, journal.JournalPath, StringComparison.OrdinalIgnoreCase)
-                    && receipt.Source.Length == journal.Length && receipt.Source.LastWriteUtc == journal.LastWriteUtc
-                    && string.Equals(receipt.Source.Sha256, journal.Sha256, StringComparison.OrdinalIgnoreCase)
-                    && await archive.ValidateAsync(receipt, archiveToken).ConfigureAwait(false);
-            }, delete => protection.DeleteIfReady(candidate.SessionId, delete), token).ConfigureAwait(false);
+            var result = await store.RetireSessionAsync(candidate.SessionId, candidate.CreatedAt, cutoff,
+                async (journal, saveToken) => receipt = await TrySaveStatisticsAsync(archive, journal, pass, saveToken).ConfigureAwait(false),
+                delete => protection.DeleteIfReady(candidate.SessionId, delete), token).ConfigureAwait(false);
             if (!result.Deleted) return result.Status;
             pass?.AddFreedBytes(result.FreedBytes);
             lock (_identityGate) _retiredSessionIds.Add(candidate.SessionId);
-            // A reconciliation failure never retries artifact deletion. The durable participant rehydrates the
-            // archive after restart and can reconcile its missing journal idempotently.
-            try
-            {
-                await _agentSessionCatalog.NotifySessionDeletedAsync(candidate.SessionId, CancellationToken.None).ConfigureAwait(false);
-                if (!await archive.ReconcileDeletedAsync(receipt!, result.ArtifactsRemaining, CancellationToken.None).ConfigureAwait(false))
-                    return "deleted_reconciliation_pending";
-            }
+            try { await _agentSessionCatalog.NotifySessionDeletedAsync(candidate.SessionId, CancellationToken.None).ConfigureAwait(false); }
             catch (Exception) { return "deleted_reconciliation_pending"; }
+            if (receipt is not null)
+            {
+                // Statistics marks the session deleted itself when it next finds its journal gone: a failure here loses nothing.
+                try { await archive!.ReconcileDeletedAsync(receipt, result.ArtifactsRemaining, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception) { /* Best effort. */ }
+            }
             if (result.Status == "reconciliation_pending") return "deleted_reconciliation_pending";
             return result.ArtifactsRemaining ? "deleted_partial_artifacts" : "deleted";
         // Query cancellation cancels only its reply wait, not accepted actor work. Hold every claim until the
         // original callback finishes; propagate shutdown to its body instead of canceling that ownership wait.
         }, CancellationToken.None).ConfigureAwait(false);
     }
+
+    // Saved Statistics are best effort: whatever Statistics answers, or fails to answer, the expired session is deleted.
+    // Statistics keeps the facts it has already read of a deleted session; the saved copy only survives a reset. A
+    // participant that does not answer in time is not asked again during the pass, so it can never hold the cleanup back.
+    private static async Task<SessionStatisticsRetirementReceipt?> TrySaveStatisticsAsync(ISessionStatisticsRetirementArchive? archive,
+        SessionJournalRetirementSource journal, SessionRetentionPass? pass, CancellationToken cancellationToken)
+    {
+        if (archive is null || pass?.StatisticsUnavailable == true) return null;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(StatisticsSaveTimeout);
+        try
+        {
+            var receipt = (await archive.PrepareAsync(journal.SessionId, timeout.Token).ConfigureAwait(false)).Receipt;
+            return receipt is not null && string.Equals(receipt.Source.SessionId, journal.SessionId, StringComparison.Ordinal)
+                && string.Equals(receipt.Source.Path, journal.JournalPath, StringComparison.OrdinalIgnoreCase)
+                && receipt.Source.Length == journal.Length && receipt.Source.LastWriteUtc == journal.LastWriteUtc ? receipt : null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            pass?.MarkStatisticsUnavailable();
+            return null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private static readonly TimeSpan StatisticsSaveTimeout = TimeSpan.FromSeconds(60);
 }

@@ -9,8 +9,7 @@ namespace CodeAlta.Agent;
 public sealed record SessionStatisticsSource(string SessionId, string Path, long Length, DateTimeOffset LastWriteUtc, string Sha256);
 
 /// <summary>Evidence that a particular source generation has a durable, verified Statistics archive.</summary>
-/// <remarks>This is not deletion authorization. The caller must retain session retirement ownership and revalidate age,
-/// activity, protection, lineage, paths and this receipt immediately before deleting the exact source.</remarks>
+/// <remarks>The runtime saves Statistics while it holds the source against writers, then deletes it whatever the outcome.</remarks>
 /// <param name="Source">The exact source generation.</param>
 /// <param name="Generation">The immutable archive generation.</param>
 /// <param name="PayloadSha256">The digest of the saved statistics.</param>
@@ -22,7 +21,8 @@ public sealed record SessionStatisticsRetirementReceipt(SessionStatisticsSource 
 public sealed record SessionStatisticsRetirementResult(SessionStatisticsRetirementReceipt? Receipt, string? FailureReason);
 
 /// <summary>The optional archival participant of the active Statistics engine, without any UI dependency.</summary>
-/// <remarks>No participant or a null receipt means automatic deletion is forbidden. Calls must be made under the runtime's
+/// <remarks>Saving is best effort: no participant, a null receipt, an exception or no answer in time never keeps an expired
+/// session, whose facts Statistics keeps anyway once it finds the journal gone. Calls are made under the runtime's
 /// retirement ownership, which excludes writers until deletion finishes. Implementations do not delete session artifacts.</remarks>
 public interface ISessionStatisticsRetirementArchive
 {

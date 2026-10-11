@@ -4,7 +4,6 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
-using System.Text.Json;
 
 namespace CodeAlta.Tests;
 
@@ -12,71 +11,70 @@ namespace CodeAlta.Tests;
 public sealed class SessionRetentionRuntimeTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 10, 12, 0, 0, TimeSpan.Zero);
-
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task CorruptUnprojectableChildMakesFamilyGraphUnknown(bool validHeader)
+    [DataRow("unreadable_tail")]
+    [DataRow("unknown_records")]
+    [DataRow("no_codealta_header")]
+    public async Task JournalContentNeverKeepsAnExpiredSession(string content)
     {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows exact-file retirement.");
         await using var fixture = new Fixture();
-        await fixture.SeedAsync("parent");
-        if (validHeader) await fixture.SeedAsync("child");
-        await File.AppendAllTextAsync(fixture.Journal("child"), "{broken metadata that may have referred to parent\n");
-        var archive = new FakeArchive();
-        var status = await fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1));
-        Assert.AreEqual(0, status.Deleted);
-        Assert.AreEqual(0, archive.Prepared);
-        Assert.IsTrue(File.Exists(fixture.Journal("parent")));
+        await fixture.SeedAsync("old", header: content != "no_codealta_header");
+        if (content == "unreadable_tail") await File.AppendAllTextAsync(fixture.Journal("old"), "{broken record\n");
+        if (content == "unknown_records")
+            await File.AppendAllTextAsync(fixture.Journal("old"), "{\"$type\":\"raw\",\"backendEventType\":\"local.userMessage\",\"raw\":{},\"sessionId\":\"old\"}\n{\"$type\":\"future-event\"}\n");
+        fixture.Age("old", Now.AddMonths(-2));
+        var result = await fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-1));
+        Assert.AreEqual(1, result.Deleted, result.Reason);
+        Assert.AreEqual("completed", result.State, result.Reason);
+        Assert.IsFalse(File.Exists(fixture.Journal("old")));
     }
 
     [TestMethod]
-    [DataRow("codealta.sessionHeader", "parent_session_id")]
-    [DataRow("codealta.sessionState", "parent_session_id")]
-    [DataRow("codealta.sessionHeader", "created_by")]
-    [DataRow("codealta.sessionState", "created_by")]
-    public async Task DurableHeaderAndStateLineageProtectsBothParentAndChild(string eventType, string property)
+    public async Task RecentChildKeepsItsExpiredFamily()
     {
         await using var fixture = new Fixture();
         await fixture.SeedAsync("parent");
-        await fixture.SeedAsync("child"); // The local summary has no lineage.
-        using var payload = JsonDocument.Parse(property == "parent_session_id"
-            ? "{\"session_id\":\"child\",\"parent_session_id\":\"parent\"}"
-            : "{\"session_id\":\"child\",\"created_by\":{\"Kind\":\"agent\",\"SourceSessionId\":\"parent\"}}");
-        await File.AppendAllTextAsync(fixture.Journal("child"), new AgentRawEvent(new("retention-test"), "child",
-            Now.AddMonths(-2), eventType, payload.RootElement).ToJson() + "\n");
+        await fixture.SeedAsync("child", parent: "parent", activity: Now.AddDays(-1));
         var archive = new FakeArchive();
         var result = await fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1));
+        Assert.AreEqual("completed", result.State, result.Reason);
+        Assert.AreEqual(2, result.Examined);
         Assert.AreEqual(0, result.Deleted);
+        Assert.AreEqual(2, result.Skipped);
         Assert.AreEqual(0, archive.Prepared);
         Assert.IsTrue(File.Exists(fixture.Journal("parent")));
         Assert.IsTrue(File.Exists(fixture.Journal("child")));
     }
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task DuplicateLineagePropertiesCannotHideFamilyEdges(bool outerDuplicate)
+    public async Task ExpiredFamilyIsRemovedLeavesFirstInOnePass()
     {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows exact-file retirement.");
         await using var fixture = new Fixture();
         await fixture.SeedAsync("parent");
-        await fixture.SeedAsync("child");
-        var summary = new AgentSessionSummary
-        {
-            SessionId = "child", ProviderId = new("retention-test"), ProviderKey = "retention-test", WorkingDirectory = fixture.Root,
-            CreatedAt = Now.AddYears(-1), UpdatedAt = Now, ParentSessionId = "parent",
-        };
-        var payload = JsonSerializer.Serialize(summary, AgentJsonSerializerContext.Default.AgentSessionSummary);
-        var noParent = payload.Replace("\"parentSessionId\":\"parent\"", "\"parentSessionId\":null", StringComparison.Ordinal);
-        var duplicatePayload = payload.Replace("\"parentSessionId\":\"parent\"", "\"parentSessionId\":\"parent\",\"parentSessionId\":null", StringComparison.Ordinal);
-        using var parsed = JsonDocument.Parse(outerDuplicate ? noParent : duplicatePayload);
-        var line = new AgentRawEvent(new("retention-test"), "child", Now, "local.sessionSummary", parsed.RootElement).ToJson();
-        if (outerDuplicate) line = line.Replace("\"raw\":", "\"raw\":" + payload + ",\"raw\":", StringComparison.Ordinal);
-        await File.AppendAllTextAsync(fixture.Journal("child"), line + "\n");
+        await fixture.SeedAsync("child", parent: "parent");
+        await fixture.SeedAsync("grandchild", parent: "child");
         var archive = new FakeArchive();
         var result = await fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1));
+        Assert.AreEqual(3, result.Deleted, result.Reason);
+        CollectionAssert.AreEqual(new[] { "grandchild", "child", "parent" }, archive.PreparedIds);
+        Assert.IsFalse(File.Exists(fixture.Journal("parent")));
+    }
+
+    [TestMethod]
+    public async Task ChildThatCannotBeRemovedKeepsItsParent()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows exact-file retirement.");
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync("parent");
+        await fixture.SeedAsync("child", parent: "parent");
+        Assert.IsTrue(fixture.Protection.Publish("window", ["child"], true));
+        var result = await fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-1));
         Assert.AreEqual(0, result.Deleted);
-        Assert.AreEqual(0, archive.Prepared);
-        Assert.AreEqual("family_graph_unknown", result.Reason);
+        Assert.AreEqual(2, result.Examined);
+        Assert.AreEqual("protection_unavailable", result.Reason);
+        Assert.IsTrue(File.Exists(fixture.Journal("parent")));
     }
 
     [TestMethod]
@@ -212,42 +210,25 @@ public sealed class SessionRetentionRuntimeTests
     }
 
     [TestMethod]
-    public async Task FamilyGraphOfAPassRereadsJournalsThatChanged()
-    {
-        await using var fixture = new Fixture();
-        await fixture.SeedAsync("parent");
-        await fixture.SeedAsync("child");
-        var store = fixture.Catalog.JournalStore.CreateSessionStore();
-        var pass = new SessionRetentionPass();
-        var first = await store.ReadRetentionFamilyProtectionAsync(pass, default);
-        Assert.IsNotNull(first);
-        Assert.IsFalse(first.Contains("parent"));
-        using var payload = JsonDocument.Parse("{\"session_id\":\"child\",\"parent_session_id\":\"parent\"}");
-        await File.AppendAllTextAsync(fixture.Journal("child"), new AgentRawEvent(new("retention-test"), "child",
-            Now.AddMonths(-2), "codealta.sessionState", payload.RootElement).ToJson() + "\n");
-        var second = await store.ReadRetentionFamilyProtectionAsync(pass, default);
-        Assert.IsNotNull(second);
-        Assert.IsTrue(second.Contains("parent") && second.Contains("child"), "An appended lineage edge is never hidden by the pass cache.");
-    }
-
-    [TestMethod]
+    [DataRow("none")]
     [DataRow("missing")]
     [DataRow("wrong_source")]
-    [DataRow("unverified")]
     [DataRow("throw")]
-    public async Task ArchiveFailureNeverDeletesJournal(string mode)
+    public async Task StatisticsFailureNeverKeepsAnExpiredSession(string mode)
     {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Exact-handle deletion currently fails closed on other platforms.");
         await using var fixture = new Fixture();
         await fixture.SeedAsync("old");
-        var before = await File.ReadAllBytesAsync(fixture.Journal("old"));
         var archive = new FakeArchive { Mode = mode };
-        await fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1));
-        CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(fixture.Journal("old")));
-        Assert.AreEqual(0, archive.Reconciled);
+        var result = await fixture.Service(mode == "none" ? null : archive).RunOnceAsync(Now, Now.AddMonths(-1));
+        Assert.AreEqual(1, result.Deleted, result.Reason);
+        Assert.AreEqual("completed", result.State, result.Reason);
+        Assert.IsFalse(File.Exists(fixture.Journal("old")));
+        Assert.AreEqual(0, archive.Reconciled, "Only a matching receipt is reconciled.");
     }
 
     [TestMethod]
-    public async Task VerifiedReceiptPrecedesDeletion_AndPassIsIdempotent()
+    public async Task SavedStatisticsPrecedeDeletion_AndPassIsIdempotent()
     {
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Exact-handle deletion currently fails closed on other platforms.");
         await using var fixture = new Fixture();
@@ -259,7 +240,6 @@ public sealed class SessionRetentionRuntimeTests
         var result = await first;
         Assert.AreEqual(1, result.Deleted, result.Reason);
         Assert.AreEqual(1, archive.Prepared);
-        Assert.AreEqual(1, archive.Verified);
         Assert.AreEqual(1, archive.Reconciled);
         Assert.IsFalse(File.Exists(fixture.Journal("old")));
         Assert.AreEqual("protected", await File.ReadAllTextAsync(Path.Combine(fixture.Root, "auth", "sentinel")));
@@ -281,7 +261,7 @@ public sealed class SessionRetentionRuntimeTests
     {
         await using var fixture = new Fixture();
         await fixture.SeedAsync("parent");
-        await fixture.SeedAsync("child", parent: "parent");
+        await fixture.SeedAsync("child", parent: "parent", activity: Now.AddDays(-1));
         await fixture.SeedAsync("open");
         Assert.IsTrue(fixture.Protection.Publish("window", ["open"], true));
         var archive = new FakeArchive();
@@ -293,13 +273,14 @@ public sealed class SessionRetentionRuntimeTests
     }
 
     [TestMethod]
-    public async Task ExactCutoffIsRetained_InspectionDoesNotRefreshOlderWork()
+    public async Task ExactCutoffIsRetained_ReadingDoesNotChangeTheAge()
     {
         await using var fixture = new Fixture();
         await fixture.SeedAsync("boundary", activity: Now.AddMonths(-1));
         var result = await fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-1));
         Assert.AreEqual(0, result.Deleted);
         Assert.IsTrue(File.Exists(fixture.Journal("boundary")));
+        Assert.AreEqual(Now.AddMonths(-1).UtcDateTime, File.GetLastWriteTimeUtc(fixture.Journal("boundary")));
     }
 
     [TestMethod]
@@ -332,12 +313,12 @@ public sealed class SessionRetentionRuntimeTests
         public string Mode { get; init; } = "ok";
         public Action? DuringPrepare { get; init; }
         public Func<Task>? WaitDuringPrepare { get; init; }
-        public int Prepared { get; private set; }
-        public int Verified { get; private set; }
+        public int Prepared => PreparedIds.Count;
+        public List<string> PreparedIds { get; } = [];
         public int Reconciled { get; private set; }
         public async ValueTask<SessionStatisticsRetirementResult> PrepareAsync(string sessionId, CancellationToken cancellationToken)
         {
-            Prepared++;
+            PreparedIds.Add(sessionId);
             var path = ResolvePath(sessionId);
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var digest = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancellationToken));
@@ -349,15 +330,11 @@ public sealed class SessionRetentionRuntimeTests
             if (WaitDuringPrepare is not null) await WaitDuringPrepare();
             if (Mode == "throw") throw new IOException("archive disk full");
             return new(Mode == "missing" ? null : new SessionStatisticsRetirementReceipt(
-                Mode == "wrong_source" ? source with { Sha256 = new string('0', 64) } : source,
+                Mode == "wrong_source" ? source with { Length = source.Length + 1 } : source,
                 "durable-fixture", new string('a', 64)), Mode == "missing" ? "history_incomplete" : null);
         }
         public ValueTask<bool> ValidateAsync(SessionStatisticsRetirementReceipt receipt, CancellationToken cancellationToken)
-        {
-            Verified++;
-            Assert.IsTrue(File.Exists(receipt.Source.Path));
-            return ValueTask.FromResult(Mode != "unverified");
-        }
+            => throw new AssertFailedException("Retention does not read the journal again to validate saved Statistics.");
         public ValueTask<bool> ReconcileDeletedAsync(SessionStatisticsRetirementReceipt receipt, bool artifactsRemaining, CancellationToken cancellationToken)
         {
             Assert.IsFalse(File.Exists(receipt.Source.Path));
@@ -400,22 +377,29 @@ public sealed class SessionRetentionRuntimeTests
             return new(Commands, Runtime, Protection, archive);
         }
         public string Journal(string id) => new AgentRuntimePathLayout(Root).GetSessionFilePath(id, Now.AddYears(-1));
-        public async Task SeedAsync(string id, string? parent = null, DateTimeOffset? activity = null)
+        // The age of a journal is its last write time: a seeded journal is as old as its last activity.
+        public async Task SeedAsync(string id, string? parent = null, DateTimeOffset? activity = null, bool header = true)
         {
             var created = Now.AddYears(-1);
-            await Catalog.JournalStore.EnsureHeaderAsync(new SessionViewDescriptor
-            {
-                SessionId = id, ProviderId = "retention-test", ProviderKey = "retention-test", ParentSessionId = parent,
-                Kind = SessionViewKind.GlobalSession, WorkingDirectory = Root, CreatedAt = created, Title = "Retention fixture",
-            });
-            await File.AppendAllTextAsync(Journal(id), new AgentContentCompletedEvent(new("retention-test"), id,
-                activity ?? Now.AddMonths(-2), null, AgentContentKind.User, "prompt", null, "fixture").ToJson() + "\n");
-            await Catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(new AgentSessionSummary
+            var store = Catalog.JournalStore.CreateSessionStore();
+            var summary = new AgentSessionSummary
             {
                 SessionId = id, ProviderId = new("retention-test"), ProviderKey = "retention-test", ParentSessionId = parent,
                 ProtocolFamily = "test-protocol", WorkingDirectory = Root, CreatedAt = created, UpdatedAt = Now, Title = "Retention fixture",
-            });
+            };
+            if (header)
+                await Catalog.JournalStore.EnsureHeaderAsync(new SessionViewDescriptor
+                {
+                    SessionId = id, ProviderId = "retention-test", ProviderKey = "retention-test", ParentSessionId = parent,
+                    Kind = SessionViewKind.GlobalSession, WorkingDirectory = Root, CreatedAt = created, Title = "Retention fixture",
+                });
+            else await store.UpsertSessionAsync(summary); // The format of the first versions: no CodeAlta header.
+            await File.AppendAllTextAsync(Journal(id), new AgentContentCompletedEvent(new("retention-test"), id,
+                activity ?? Now.AddMonths(-2), null, AgentContentKind.User, "prompt", null, "fixture").ToJson() + "\n");
+            await store.UpsertSessionAsync(summary);
+            Age(id, activity ?? Now.AddMonths(-2));
         }
+        public void Age(string id, DateTimeOffset lastWrite) => File.SetLastWriteTimeUtc(Journal(id), lastWrite.UtcDateTime);
         public async ValueTask DisposeAsync()
         {
             await Commands.DisposeAsync();

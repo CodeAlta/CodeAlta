@@ -19,6 +19,11 @@ public sealed class SessionRetentionService
     private SessionRetentionStatus _status = new("not_started", 0, 0, 0, null);
 
     /// <summary>Creates a coordinator without starting any work or opening a profile.</summary>
+    /// <param name="commands">The owned command service that serializes each retirement with the commands of its session.</param>
+    /// <param name="runtime">The runtime that owns the sessions.</param>
+    /// <param name="protection">The registry of the sessions that are open or have work in progress.</param>
+    /// <param name="archive">The Statistics participant that saves the statistics of a session before it is removed, or
+    /// null: saving them is best effort, and never keeps an expired session.</param>
     /// <exception cref="ArgumentNullException">An ownership dependency is null.</exception>
     public SessionRetentionService(OwnedSessionCommandService commands, SessionRuntimeService runtime,
         SessionRetentionProtection protection, ISessionStatisticsRetirementArchive? archive)
@@ -87,7 +92,6 @@ public sealed class SessionRetentionService
         var skipped = 0;
         var total = 0;
         var pass = new SessionRetentionPass();
-        var graphPrepared = false;
         string? partial = null;
         try
         {
@@ -95,41 +99,59 @@ public sealed class SessionRetentionService
             if (cutoff is null) return Set("skipped", "disabled");
             if (now.Offset != TimeSpan.Zero || cutoff.Value.Offset != TimeSpan.Zero || cutoff >= now)
                 return Set("skipped", "invalid_cutoff");
-            if (_archive is null) return Set("skipped", "archive_unavailable");
             if (!_protection.IsReady) return Set("skipped", _protection.BlockedReason ?? "protection_unavailable");
             Set("running", null);
-            // Listing is discovery, never age authority. The exact held journal is streamed again under ownership.
+            // Listing is discovery, never age authority. The exact held journal is checked again under ownership.
             var candidates = new List<CodeAlta.Agent.AgentSessionMetadata>();
             await foreach (var candidate in _runtime.ListRetentionCandidatesAsync(token).ConfigureAwait(false)) candidates.Add(candidate);
             total = candidates.Count;
             Set("running", null);
-            foreach (var candidate in candidates)
+
+            // The age of a session is the last write time of its journal: a file stat, not a read. A session is removed
+            // only once no remaining session names it as its parent or creator, so a recent child keeps its family, and
+            // an expired family goes leaves first, in this same pass.
+            var lineages = new string[candidates.Count][];
+            var references = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var expired = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < candidates.Count; index++)
             {
-                token.ThrowIfCancellationRequested();
-                examined++;
-                // Most sessions are recent: their age is read without any claim, so they never hold back the
-                // commands of the user. Only an expired session takes the exclusive path, which reads it again.
-                string result;
-                if (await _runtime.IsRetentionCandidateRecentAsync(candidate, now, cutoff.Value, token).ConfigureAwait(false))
-                    result = "not_expired";
+                var candidate = candidates[index];
+                lineages[index] = Lineage(candidate);
+                foreach (var related in lineages[index]) references[related] = references.GetValueOrDefault(related) + 1;
+                if (_runtime.GetRetentionJournalLastWriteUtc(candidate) is { } lastWrite && lastWrite < cutoff.Value)
+                    expired.TryAdd(candidate.SessionId, index);
                 else
                 {
-                    if (!graphPrepared)
-                    {
-                        await _runtime.PrepareRetentionFamilyGraphAsync(pass, token).ConfigureAwait(false);
-                        graphPrepared = true;
-                    }
-                    result = await _commands.RetireCatalogSessionAsync(candidate, now, cutoff.Value, _protection, _archive, pass, token).ConfigureAwait(false);
+                    // A recent session is kept as the policy wants: that does not make the pass partial.
+                    examined++;
+                    skipped++;
                 }
+            }
+            Set("running", null);
+
+            var ready = new Queue<int>(expired.Where(pair => references.GetValueOrDefault(pair.Key) == 0).Select(pair => pair.Value));
+            var processed = new HashSet<int>();
+            while (ready.TryDequeue(out var index))
+            {
+                token.ThrowIfCancellationRequested();
+                processed.Add(index);
+                examined++;
+                var result = await _commands.RetireCatalogSessionAsync(candidates[index], cutoff.Value, _protection, _archive, pass, token).ConfigureAwait(false);
                 if (result.StartsWith("deleted", StringComparison.Ordinal))
                 {
                     deleted++;
                     if (result != "deleted") partial = result;
+                    foreach (var related in lineages[index])
+                        if (--references[related] == 0 && expired.TryGetValue(related, out var parent) && !processed.Contains(parent))
+                            ready.Enqueue(parent);
                 }
-                // A recent session is kept as the policy wants: that does not make the pass partial.
                 else { skipped++; if (result != "not_expired") partial ??= result; }
                 Set("running", partial);
             }
+            // Expired, but named by a session that stays: kept with its family, as the policy wants.
+            var familyKept = expired.Count - processed.Count;
+            examined += familyKept;
+            skipped += familyKept;
             return Set(partial is null ? "completed" : "partial", partial);
         }
         catch (OperationCanceledException) { return Set("partial", "canceled"); }
@@ -146,4 +168,12 @@ public sealed class SessionRetentionService
             return status;
         }
     }
+
+    // The sessions a session names: the same relations manual deletion checks before removing a parent.
+    private static string[] Lineage(CodeAlta.Agent.AgentSessionMetadata session)
+        => new[] { session.ParentSessionId, session.CreatedBySessionId, session.ViewState?.ParentSessionId }
+            .Where(id => !string.IsNullOrWhiteSpace(id) && !string.Equals(id.Trim(), session.SessionId, StringComparison.OrdinalIgnoreCase))
+            .Select(id => id!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 }

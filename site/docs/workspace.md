@@ -517,19 +517,21 @@ the field, pressing Enter, stepping or choosing a unit; incomplete and invalid e
 Choose **Never** to disable session retention without forgetting the saved duration.
 
 Automatic session cleanup runs once at startup on supported local Windows storage, after open
-sessions and drafts have been restored and protected. Unavailable Statistics, incomplete restoration
-or unsupported storage skips cleanup rather than weakening its safety checks.
+sessions and drafts have been restored and protected. Incomplete restoration or unsupported storage
+skips cleanup rather than weakening its safety checks.
 
-Changes apply at the **next startup**, never immediately. Inactivity is measured since meaningful
-session activity, not creation or viewing. Open sessions, drafts and active work are protected;
-Statistics must be durably saved before expired session files can be removed. Manual deletion
+Changes apply at the **next startup**, never immediately. A session is inactive since its file was last
+written: viewing a session does not change its age, and cleanup never reads the session's contents to decide it.
+Open sessions, drafts and active work are protected, and a session is removed only with the sessions that it
+started or that continue it, once they are all inactive. Before removing a session, cleanup saves its
+Statistics when it can; a failure to save them never keeps an expired session. Manual deletion
 confirmation preferences do not control this automatic policy. The configuration-file row opens,
 copies or reveals the global `~/.alta/config.toml` using the same controls as other Settings pages.
 The latest scratchpad cleanup appears as one line in the cleanup card; open **Details** for its reasons.
 During startup, scratchpad clearing shows the number of files and folders processed, so you can follow a large cleanup.
 Session cleanup has its own line, also shown in a notification while it runs: how many sessions it has checked out
 of all of them, how many it removed and how much space it freed, or why it did not run (for example,
-when it is off, restoration is incomplete or Saved Statistics are unavailable). Sessions keep working while it runs:
+when it is off or restoration is incomplete). Sessions keep working while it runs:
 you can send prompts to them, since cleanup only ever holds back the inactive session it is removing.
 
 #### Files of the settings

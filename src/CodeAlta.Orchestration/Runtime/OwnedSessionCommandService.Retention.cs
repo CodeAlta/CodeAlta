@@ -6,8 +6,8 @@ namespace CodeAlta.Orchestration.Runtime;
 public sealed partial class OwnedSessionCommandService
 {
     // Retirement reserves the exclusive slot for one inactive session only: commands for every other session go on.
-    internal Task<string> RetireCatalogSessionAsync(AgentSessionMetadata candidate, DateTimeOffset now,
-        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive,
+    internal Task<string> RetireCatalogSessionAsync(AgentSessionMetadata candidate,
+        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive? archive,
         SessionRetentionPass? pass, CancellationToken cancellationToken)
     {
         TaskCompletionSource<string> completion;
@@ -24,18 +24,18 @@ public sealed partial class OwnedSessionCommandService
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _deleteWork = completion.Task;
             _retiringSessionId = candidate.SessionId;
-            _ = RetireCatalogSessionOwnedAsync(candidate, now, cutoff, protection, archive, pass, cancellationToken, completion);
+            _ = RetireCatalogSessionOwnedAsync(candidate, cutoff, protection, archive, pass, cancellationToken, completion);
         }
         return completion.Task;
     }
 
-    private async Task RetireCatalogSessionOwnedAsync(AgentSessionMetadata candidate, DateTimeOffset now,
-        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive,
+    private async Task RetireCatalogSessionOwnedAsync(AgentSessionMetadata candidate,
+        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive? archive,
         SessionRetentionPass? pass, CancellationToken cancellationToken, TaskCompletionSource<string> completion)
     {
         try
         {
-            completion.TrySetResult(await _runtime.RetireOwnedCatalogSessionAsync(candidate, now, cutoff, protection, archive,
+            completion.TrySetResult(await _runtime.RetireOwnedCatalogSessionAsync(candidate, cutoff, protection, archive,
                 pass, cancellationToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException) { completion.TrySetResult("canceled"); }

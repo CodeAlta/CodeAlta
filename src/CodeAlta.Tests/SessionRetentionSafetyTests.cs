@@ -14,55 +14,6 @@ public sealed class SessionRetentionSafetyTests
     private const string SessionId = "retention-fixture";
 
     [TestMethod]
-    public async Task MeaningfulActivity_InspectionDoesNotRefreshAge()
-    {
-        var work = Now.AddMonths(-2);
-        using var stream = Journal(
-            Raw("codealta.sessionHeader", work.AddDays(-1)),
-            new AgentContentCompletedEvent(new("test"), SessionId, work, null, AgentContentKind.User, "prompt", null, "hello"),
-            Raw("local.sessionSummary", Now), Raw("codealta.sessionState", Now));
-        var activity = await SessionMeaningfulActivity.ReadAsync(stream, SessionId, work.AddDays(-1), Now, default);
-        Assert.IsNull(activity.BlockedReason);
-        Assert.AreEqual(work, activity.LastMeaningfulActivityUtc);
-    }
-
-    [TestMethod]
-    public async Task MeaningfulActivity_OnlyProvenEmptyHeaderUsesCreation()
-    {
-        var creation = Now.AddYears(-1);
-        using var empty = Journal(Raw("codealta.sessionHeader", creation));
-        Assert.AreEqual(creation, (await SessionMeaningfulActivity.ReadAsync(empty, SessionId, creation, Now, default)).LastMeaningfulActivityUtc);
-        using var unknown = new MemoryStream(Encoding.UTF8.GetBytes("{\"$type\":\"future-event\"}\n"));
-        Assert.IsNotNull((await SessionMeaningfulActivity.ReadAsync(unknown, SessionId, creation, Now, default)).BlockedReason);
-        using var noHeader = new MemoryStream();
-        Assert.IsNotNull((await SessionMeaningfulActivity.ReadAsync(noHeader, SessionId, creation, Now, default)).BlockedReason);
-    }
-
-    [TestMethod]
-    public async Task MeaningfulActivity_RejectsFutureAndIncompleteTail()
-    {
-        using var future = Journal(Raw("codealta.sessionHeader", Now.AddDays(1)));
-        Assert.IsNotNull((await SessionMeaningfulActivity.ReadAsync(future, SessionId, Now, Now, default)).BlockedReason);
-        using var tail = new MemoryStream(Encoding.UTF8.GetBytes(Raw("codealta.sessionHeader", Now.AddYears(-1)).ToJson()));
-        Assert.IsNotNull((await SessionMeaningfulActivity.ReadAsync(tail, SessionId, Now.AddYears(-1), Now, default)).BlockedReason);
-    }
-
-    [TestMethod]
-    public async Task MeaningfulActivity_ProtectsQueuedAndUnfinishedWork()
-    {
-        var creation = Now.AddYears(-1);
-        var queued = Raw("codealta.sessionState", Now.AddMonths(-2)) with
-        {
-            Raw = System.Text.Json.JsonSerializer.SerializeToElement(new { queued_prompts = new[] { new { state = "queued" } } }),
-        };
-        using var queue = Journal(Raw("codealta.sessionHeader", creation), queued);
-        Assert.AreEqual("queued_work", (await SessionMeaningfulActivity.ReadAsync(queue, SessionId, creation, Now, default)).BlockedReason);
-        using var run = Journal(Raw("codealta.sessionHeader", creation), new AgentActivityEvent(new("test"), SessionId,
-            Now.AddMonths(-2), new("unfinished"), AgentActivityKind.Turn, AgentActivityPhase.Started, "turn", null, null, null));
-        Assert.AreEqual("unfinished_run", (await SessionMeaningfulActivity.ReadAsync(run, SessionId, creation, Now, default)).BlockedReason);
-    }
-
-    [TestMethod]
     public async Task JobAdmissionCannotCrossRetirementReservation()
     {
         await using var jobs = new SessionJobService(start: (_, _, _) => throw new AssertFailedException("Must not start a process."));
@@ -230,12 +181,6 @@ public sealed class SessionRetentionSafetyTests
             Directory.Delete(root, true);
         }
     }
-
-    private static AgentRawEvent Raw(string type, DateTimeOffset at)
-        => new(new("test"), SessionId, at, type, System.Text.Json.JsonSerializer.SerializeToElement(new { }), null);
-
-    private static MemoryStream Journal(params AgentEvent[] events)
-        => new(Encoding.UTF8.GetBytes(string.Join('\n', events.Select(item => item.ToJson())) + "\n"));
 
     private static Microsoft.Win32.SafeHandles.SafeFileHandle OpenReparseWriter(string directory)
         => CreateFileW(directory, 0x40000000, 7, 0, 3, 0x02200000, 0);

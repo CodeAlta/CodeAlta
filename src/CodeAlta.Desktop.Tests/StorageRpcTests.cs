@@ -169,7 +169,7 @@ public sealed class StorageRpcTests
     [TestMethod]
     [DataRow("disabled")]
     [DataRow("invalid_cutoff")]
-    [DataRow("archive_unavailable")]
+    [DataRow("protection_unavailable")]
     public async Task Retention_ReplaysHostOutcomeWithoutStartingOrCancelingIt(string reason)
     {
         var root = NewRoot();
