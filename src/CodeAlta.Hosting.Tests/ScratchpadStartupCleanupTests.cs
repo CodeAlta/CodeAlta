@@ -119,10 +119,11 @@ public sealed class ScratchpadStartupCleanupTests
         await worker;
         Assert.IsTrue(worker.IsCompletedSuccessfully);
         Assert.AreSame(worker, cleanup.RunAsync(true, true, CancellationToken.None));
-        Assert.AreEqual(expected, cleanup.Snapshot.State);
+        var diagnostic = $"Attempts: {attempts}; reasons: {string.Join(", ", cleanup.Snapshot.Reasons)}";
+        Assert.AreEqual(expected, cleanup.Snapshot.State, diagnostic);
         Assert.AreEqual((long)filesBeforeFault, cleanup.Snapshot.RemovedFiles);
         Assert.AreEqual(2 - filesBeforeFault, Directory.GetFiles(fixture.Scratchpad).Length);
-        CollectionAssert.AreEqual(new[] { "unexpected-cleanup-failure" }, cleanup.Snapshot.Reasons.ToArray());
+        CollectionAssert.AreEqual(new[] { "unexpected-cleanup-failure" }, cleanup.Snapshot.Reasons.ToArray(), diagnostic);
         Assert.IsNotNull(cleanup.Snapshot.CompletedAt);
         Assert.IsFalse(File.Exists(Path.Combine(fixture.Root, "dev", "alta.lock")));
         ScratchpadCleanupSnapshot? replayed = null;
@@ -446,17 +447,21 @@ public sealed class ScratchpadStartupCleanupTests
     }
 
     [TestMethod]
-    public async Task WritableDirectoryHandlesCannotCoexistWithPathPins()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task WritableDirectoryHandlesCannotCoexistWithPathPins(bool ancestor)
     {
         RequireWindows();
         using var fixture = new Fixture(true);
         fixture.Write("dev/scratchpad/note", "keep");
-        using (var writer = OpenWritableDirectory(fixture.Scratchpad))
+        var pinned = ancestor ? fixture.Root : fixture.Scratchpad;
+        using (var writer = OpenWritableDirectory(pinned))
         {
             Assert.IsFalse(writer.IsInvalid);
             var blocked = fixture.Cleanup();
             await blocked.RunAsync(true, true, CancellationToken.None);
             Assert.AreEqual(ScratchpadCleanupState.Skipped, blocked.Snapshot.State);
+            CollectionAssert.Contains(blocked.Snapshot.Reasons.ToArray(), "filesystem-or-ownership-unavailable");
             Assert.IsTrue(File.Exists(Path.Combine(fixture.Scratchpad, "note")));
         }
         var attemptedMutation = false;
@@ -465,7 +470,7 @@ public sealed class ScratchpadStartupCleanupTests
             BeforeEntryDelete = _ =>
             {
                 // A reparse-data mutation needs a writable handle; it cannot be acquired after pinning.
-                using var writer = OpenWritableDirectory(fixture.Scratchpad);
+                using var writer = OpenWritableDirectory(pinned);
                 Assert.IsTrue(writer.IsInvalid);
                 Assert.AreEqual(32, Marshal.GetLastWin32Error()); // ERROR_SHARING_VIOLATION
                 attemptedMutation = true;
@@ -474,6 +479,37 @@ public sealed class ScratchpadStartupCleanupTests
         await cleanup.RunAsync(true, true, CancellationToken.None);
         Assert.IsTrue(attemptedMutation);
         Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State);
+    }
+
+    [TestMethod]
+    public async Task PathPinsBlockMovesIntoSharedAncestorsButNotIsolatedFixtureDirectories()
+    {
+        RequireWindows();
+        using var fixture = new Fixture(true);
+        fixture.Write("dev/scratchpad/note", "remove");
+        fixture.Write("other-fixture/profile/session.jsonl", "keep");
+        var otherRoot = Path.Combine(fixture.Root, "other-fixture");
+        var source = Path.Combine(otherRoot, "profile", "session.jsonl");
+        var sharedDestination = Path.Combine(fixture.Root, "moved.jsonl");
+        var isolatedDestination = Path.Combine(otherRoot, "moved.jsonl");
+        var attemptedMove = false;
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            BeforeEntryDelete = _ =>
+            {
+                // MoveFileEx opens the destination directory for writing. A shared ancestor
+                // (such as the temp directory) is pinned by cleanup even for a different fixture.
+                var error = Assert.Throws<IOException>(() => File.Move(source, sharedDestination));
+                Assert.AreEqual(32, error.HResult & 0xffff); // ERROR_SHARING_VIOLATION
+                File.Move(source, isolatedDestination);
+                attemptedMove = true;
+            },
+        };
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+        Assert.IsTrue(attemptedMove, string.Join(", ", cleanup.Snapshot.Reasons));
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State);
+        Assert.AreEqual("keep", File.ReadAllText(isolatedDestination));
+        Assert.IsFalse(File.Exists(sharedDestination));
     }
 
     private static SafeFileHandle OpenWritableDirectory(string path)

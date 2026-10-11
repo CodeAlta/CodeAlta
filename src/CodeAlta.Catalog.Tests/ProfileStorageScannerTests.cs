@@ -54,12 +54,15 @@ public sealed class ProfileStorageScannerTests
     public async Task UsesEnumeratedFileMetadataWithoutReopeningPaths()
     {
         var root = NewRoot();
-        Directory.CreateDirectory(root);
-        var moved = NewRoot();
+        var scanned = Path.Combine(root, "profile");
+        Directory.CreateDirectory(scanned);
+        // Move into this fixture's own parent, not the shared temp directory. Windows MoveFileEx
+        // needs a writable destination-directory handle, which other cleanup fixtures pin read-only.
+        var moved = Path.Combine(root, "moved.jsonl");
         try
         {
-            await File.WriteAllBytesAsync(Path.Combine(root, "session.jsonl"), new byte[64]);
-            var scanner = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root })
+            await File.WriteAllBytesAsync(Path.Combine(scanned, "session.jsonl"), new byte[64]);
+            var scanner = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = scanned })
             {
                 EntryEnumerated = (path, _) =>
                 {
@@ -72,7 +75,7 @@ public sealed class ProfileStorageScannerTests
             Assert.AreEqual(64L, result.TotalBytes, "Measurement uses enumeration metadata, not another I/O for each file and ancestor.");
             Assert.IsFalse(result.IsPartial);
         }
-        finally { Directory.Delete(root, true); File.Delete(moved); }
+        finally { Directory.Delete(root, true); }
     }
 
     [TestMethod]
