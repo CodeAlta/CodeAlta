@@ -794,7 +794,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
             }
             else
             {
-                var (definitions, faults) = AutomationConfig.Read(await File.ReadAllTextAsync(source.FilePath, cancellationToken).ConfigureAwait(false), source);
+                using var reader = OpenConfigurationSnapshot(source.FilePath);
+                var (definitions, faults) = AutomationConfig.Read(await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false), source);
                 read = new(stamp, source, definitions, faults);
             }
 
@@ -807,6 +808,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return new(default, source, [], [new(source, string.Empty, "The configuration file could not be read: " + FirstLine(exception.Message))]);
         }
     }
+
+    // Refresh can overlap a save after its writer gate is released. Keep the opened version readable
+    // without preventing the next atomic replacement; in-place writes remain excluded.
+    internal static StreamReader OpenConfigurationSnapshot(string path)
+        => new(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096,
+            FileOptions.Asynchronous | FileOptions.SequentialScan));
 
     private async Task<AutomationSource?> SourceAsync(string? projectId, CancellationToken cancellationToken)
     {
@@ -856,7 +863,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
                 await stream.WriteAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(content), cancellationToken).ConfigureAwait(false);
             }
 
-            File.Move(staged, path, overwrite: true);
+            // MoveFileEx cannot overwrite a destination that is open, even with delete sharing.
+            // ReplaceFile keeps the old reader's handle valid while publishing the staged version.
+            if (OperatingSystem.IsWindows() && File.Exists(path))
+                File.Replace(staged, path, destinationBackupFileName: null);
+            else
+                File.Move(staged, path, overwrite: true);
         }
         finally
         {

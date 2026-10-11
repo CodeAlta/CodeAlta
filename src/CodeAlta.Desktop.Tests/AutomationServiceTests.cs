@@ -941,6 +941,23 @@ public sealed class AutomationServiceTests
     }
 
     [TestMethod]
+    public async Task AConfigurationSnapshot_DoesNotBlockAtomicSaves_AndKeepsTheOldText()
+    {
+        await using var fixture = new Fixture();
+        const string before = "[chat]\ndefault_provider = \"codex\"\n";
+        fixture.WriteGlobal(before);
+        await fixture.Service.RefreshAsync();
+        // Hold the exact reader used by refresh, without relying on the scheduling of a fast disk read.
+        using var snapshot = AutomationService.OpenConfigurationSnapshot(fixture.GlobalPath);
+        var definition = new AutomationDefinition(First, "Saved during refresh") { Prompt = "Review." };
+        Assert.IsNull(await fixture.Service.SaveAsync(definition, null, CancellationToken.None));
+        Assert.AreEqual(before, await snapshot.ReadToEndAsync(), "Replacement does not change an already-open snapshot.");
+        Assert.AreEqual("Saved during refresh", fixture.Service.Snapshot.Find(First)!.Definition.Name);
+        StringAssert.Contains(File.ReadAllText(fixture.GlobalPath), First);
+        Assert.AreEqual(1, Directory.GetFiles(Path.GetDirectoryName(fixture.GlobalPath)!).Length);
+    }
+
+    [TestMethod]
     public async Task ChangesMadeAtTheSameTime_AreAllWritten_AndTheSwitchChangesTheFileAsItIs()
     {
         await using var fixture = new Fixture();

@@ -3199,7 +3199,8 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   file keeps its line endings and its UTF-8 mark. Nothing is written unless the new text reads back with
   the automation in it: a file that holds `automations = { … }` on one line, or already holds the 64
   automations that are read from one file, is left as it is, with the reason. The switch of an
-  automation changes the file as it is on disk, not as it was last read.
+  automation changes the file as it is on disk, not as it was last read. Refresh readers keep their
+  opened version and allow atomic replacement, so a concurrent refresh does not deny a save on Windows.
 
 The prompt of a run is one of the commands the host keeps a receipt of, with the sends of the page and
 the reminders. A run is refused, before a session is created for it, only while as many commands are
