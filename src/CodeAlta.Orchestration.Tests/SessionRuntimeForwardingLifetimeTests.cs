@@ -1366,6 +1366,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         internal bool HoldPreparation { get { lock (_gate) return _holdPreparation; } set { lock (_gate) _holdPreparation = !_cleaning && value; } }
         internal bool HoldAbort { get { lock (_gate) return _holdAbort; } set { lock (_gate) _holdAbort = !_cleaning && value; } }
         internal Action? BeforeSubscriptionReturn { get; set; }
+        internal bool EmitIdleOnSubscribe { get; set; } = true;
         internal TaskCompletionSource PreparationStarted { get; } = NewGate();
         internal TaskCompletionSource ReplacementPreparationStarted { get; } = NewGate();
         internal TaskCompletionSource ReleasePreparation { get; } = NewGate();
@@ -1457,7 +1458,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
             public IDisposable Subscribe(Action<AgentEvent> handler)
             {
                 lock (_gate) _handler = handler;
-                EmitIdle(); // Deliberately synchronous and before the receipt is returned.
+                if (owner.EmitIdleOnSubscribe) EmitIdle(); // Deliberately synchronous and before the receipt is returned.
                 owner.BeforeSubscriptionReturn?.Invoke();
                 return new Subscription(this);
             }

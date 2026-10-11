@@ -168,6 +168,10 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
     [DataRow(true)]
     public Task ParentRetention_RetirementWinsBeforeCaptureWithoutPublication(bool tombstone) => Fixture.Run(async f =>
     {
+        // This case requires retirement to win before any notification capture. The normal fixture
+        // emits Idle during subscription; its independent tail can still own a valid lineage claim
+        // after EnsureCoordinatorSessionAsync returns. Do not race that unrelated bootstrap work.
+        f.Provider.EmitIdleOnSubscribe = false;
         var parent = f.NewSession();
         await f.Persist(parent);
         f.Session.ParentSessionId = parent.SessionId;
