@@ -1711,6 +1711,49 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    [DataRow("info", false)]
+    [DataRow("info", true)]
+    [DataRow("status", false)]
+    [DataRow("status", true)]
+    public async Task SessionDiscovery_ActiveParentReportsSameDirectChildrenAsListing(string command, bool running)
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("children");
+        var runtime = CreateRuntime(options, new StatefulProviderRuntime(providerId));
+        await using var _ = runtime.ConfigureAwait(false);
+        var execution = new SessionExecutionOptions
+        {
+            ProviderId = providerId, ProviderKey = providerId.Value, WorkingDirectory = root.Path, ProjectRoots = [],
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        };
+        var parent = await runtime.CreateGlobalSessionAsync(execution, "Parent").ConfigureAwait(false);
+        var child = await runtime.CreateGlobalSessionAsync(execution, "Child", parent.SessionId, createdBy: null).ConfigureAwait(false);
+        await runtime.CreateGlobalSessionAsync(execution, "Grandchild", child.SessionId, createdBy: null).ConfigureAwait(false);
+        await runtime.CreateGlobalSessionAsync(execution, "Unrelated").ConfigureAwait(false);
+        var sessionCatalog = new SessionViewCatalog(options);
+        var inactiveChild = await runtime.CreateGlobalSessionAsync(execution, "Inactive child", parent.SessionId, createdBy: null).ConfigureAwait(false);
+        Assert.IsTrue(await runtime.DetachRuntimeSessionAsync(inactiveChild.SessionId).ConfigureAwait(false));
+        if (running)
+            await runtime.SendAsync(parent, execution, new AgentSendOptions { Input = AgentInput.Text("keep running") }).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options).Add(new ProjectCatalog(options)).Add(sessionCatalog).Add(runtime));
+
+        var listed = await dispatcher.InvokeAsync(["session", "children", parent.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var shown = await dispatcher.InvokeAsync(["session", command, parent.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Stdout);
+        Assert.AreEqual(AltaExitCodes.Success, shown.ExitCode, shown.Stdout);
+        var children = ReadJsonLines(listed.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.item")
+            .Select(static line => line.GetProperty("sessionId").GetString()).ToArray();
+        CollectionAssert.AreEquivalent(new[] { child.SessionId, inactiveChild.SessionId }, children);
+        var record = ReadJsonLines(shown.Stdout).Single(line => line.GetProperty("type").GetString() == $"alta.session.{command}");
+        Assert.AreEqual(running ? "running" : "idle", record.GetProperty("state").GetString());
+        Assert.AreEqual(children.Length, record.GetProperty("childCount").GetInt32());
+        CollectionAssert.AreEquivalent(children, record.GetProperty("childSessionIds").EnumerateArray().Select(static item => item.GetString()).ToArray());
+    }
+
+    [TestMethod]
     public async Task SessionDiscovery_DistinguishesRunningIdleInactiveAndArchivedStates()
     {
         using var root = TempDirectory.Create();

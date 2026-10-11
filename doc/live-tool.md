@@ -302,6 +302,11 @@ what its creator asks, it has the mode of the policy of the calling session (`de
 session fail with `session.promptDenied` (exit code 4). A caller that is no session creates a session
 without a mode and sends to any session.
 
+`session info` and `session status` report `childCount` and `childSessionIds` from the same
+recoverable/live inventory as `session children`, including when the parent is active. These are
+direct children; grandchildren appear in `session children --recursive`. Relationship reporting
+loads the session inventory; sending and steering an active session do not need that scan.
+
 Control commands acknowledge submission. They do not block until the target model finishes. If a session is busy, `send --queue-if-busy` and `session queue` persist queue items with caller attribution; the runtime drains at most one queued prompt when that session becomes idle.
 
 ## Ask command

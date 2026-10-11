@@ -1831,7 +1831,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.missingSession", "Session id is required.", "alta session info");
         }
 
-        var infoResult = await ResolveSessionInfoAsync(context, sessionId, includeLocalState: recordType is "alta.session.info" or "alta.session.detail").ConfigureAwait(false);
+        var infoResult = await ResolveSessionInfoAsync(context, sessionId,
+            includeLocalState: recordType is "alta.session.info" or "alta.session.detail", includeChildren: true).ConfigureAwait(false);
         if (infoResult.ExitCode != AltaExitCodes.Success)
         {
             return infoResult.ExitCode;
@@ -3759,7 +3760,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AskAllowedRootsResult.Success(normalizedRoots.FirstOrDefault() ?? Environment.CurrentDirectory, normalizedRoots);
     }
 
-    private static async Task<SessionInfoResolutionResult> ResolveSessionInfoAsync(AltaCommandContext context, string sessionId, bool includeLocalState = false)
+    private static async Task<SessionInfoResolutionResult> ResolveSessionInfoAsync(
+        AltaCommandContext context, string sessionId, bool includeLocalState = false, bool includeChildren = false)
     {
         if (context.Services.Get<SessionRuntimeService>() is { } runtime)
         {
@@ -3777,7 +3779,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     isRunning,
                     true,
                     isRunning ? "running" : "idle");
-                return SessionInfoResolutionResult.Success(activeInfo, [activeInfo]);
+                // Reporting needs the same relationship inventory as `session children`. Delivery/control
+                // callers keep the active-session fast path and never scan unrelated session journals.
+                var relatedInfos = includeChildren ? await LoadSessionInfosAsync(context).ConfigureAwait(false) : [activeInfo];
+                return relatedInfos is null
+                    ? SessionInfoResolutionResult.Fail(AltaExitCodes.ServiceUnavailable)
+                    : SessionInfoResolutionResult.Success(activeInfo, relatedInfos);
             }
         }
 
