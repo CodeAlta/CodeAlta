@@ -192,7 +192,8 @@ public sealed class StatisticsArchiveTests
             var request = new StatisticsRequest { Period = "2026-01-01..2026-12-31", Frequency = frequency, Limit = 100 };
             foreach (var metric in new[] { "tokens", "runs", "active-time", "cost", "tool-calls", "sessions-at-once" })
                 results.Add(StatisticsJson.Serialize(await queries.SeriesAsync(request, metric)));
-            results.Add(StatisticsJson.Serialize(await queries.SummaryAsync(request)));
+            // Compare the recovered facts, not the time of the recovery write.
+            results.Add(StatisticsJson.Serialize((await queries.SummaryAsync(request)) with { DataUpdatedAt = null }));
             results.Add(StatisticsJson.Serialize(await queries.ToolsAsync(request)));
             results.Add(StatisticsJson.Serialize(await queries.ModelsAsync(request)));
             results.Add(StatisticsJson.Serialize(await queries.ProjectsAsync(request)));

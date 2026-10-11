@@ -67,6 +67,8 @@ button.stats-chip-text:focus-visible { outline: 2px solid var(--accent); outline
 .stats-page { min-width: 0; padding-bottom: 8px; }
 .stats-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; padding: 12px 14px 16px; }
 .stats-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 12px; padding: 14px 14px 0; }
+.stats-data-updated { margin: 12px 14px 0; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.stats-data-updated + .stats-tiles { padding-top: 8px; }
 .stats-tiles-inner { padding: 0; }
 .stats-tiles .stat-tile { padding: 12px 14px; border-radius: 10px; box-shadow: inset 0 2px 0 color-mix(in srgb, var(--chart-1) 55%, transparent); --sparkline-color: var(--chart-1); }
 .stats-tiles .stat-tile-value { font-size: 24px; letter-spacing: -.01em; }

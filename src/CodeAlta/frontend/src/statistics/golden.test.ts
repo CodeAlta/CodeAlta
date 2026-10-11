@@ -28,7 +28,7 @@ const modelRow = object({ provider: "string", model: "string", requests: "number
 const shapes: Readonly<Record<string, Shape>> = {
   SeriesResult: object({ query, metric: "string", unit: "string", group: optional("string"), buckets: array(bucket),
     series: array(object({ key: "string", label: "string", values: numbers, previous: optional(numbers), total: "number", previousTotal: optional("number") })) }),
-  SummaryResult: object({ query, buckets: array(bucket), tiles: array(tile), costs: array(tile) }),
+  SummaryResult: object({ query, buckets: array(bucket), tiles: array(tile), costs: array(tile), dataUpdatedAt: optional("string") }),
   TopResult: object({ query, kind: "string", by: "string", unit: "string", buckets: array(bucket), totalRows: "number", truncated: "boolean",
     rows: array(object({ key: "string", label: "string", detail: optional("string"), value: "number", share: "number", tokens: "number", timeMs: "number", calls: "number", requests: "number", failures: optional("number"), spark: numbers })) }),
   DistributionResult: object({ query, measure: "string", subject: optional("string"), unit: "string", count: "number", p50: optional("number"), p90: optional("number"),

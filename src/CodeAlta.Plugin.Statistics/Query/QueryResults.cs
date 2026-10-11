@@ -80,7 +80,12 @@ public sealed record SummaryTile(string Id, string Unit, double Value, double? P
 /// <param name="Buckets">The buckets the lines of the tiles are cut into.</param>
 /// <param name="Tiles">The tiles.</param>
 /// <param name="Costs">The costs, one for each unit: they are never added up.</param>
-public sealed record SummaryResult(QueryHeader Query, IReadOnlyList<BucketInfo> Buckets, IReadOnlyList<SummaryTile> Tiles, IReadOnlyList<SummaryTile> Costs);
+public sealed record SummaryResult(QueryHeader Query, IReadOnlyList<BucketInfo> Buckets, IReadOnlyList<SummaryTile> Tiles, IReadOnlyList<SummaryTile> Costs)
+{
+    /// <summary>Gets the last committed statistics-data update represented by this snapshot, in UTC; null when no update is known.</summary>
+    /// <remarks>This is not the query time and does not imply that history ingestion is complete.</remarks>
+    public DateTimeOffset? DataUpdatedAt { get; init; }
+}
 
 /// <summary>One row of a ranking.</summary>
 /// <param name="Key">The key: the name of a tool, the model, the project reference or the session.</param>

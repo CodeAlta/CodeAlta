@@ -4,6 +4,8 @@ type Row = readonly [string, string, string, string, string];
 
 export const statisticsMessages = {
   "Refresh statistics": ["Actualizar estadísticas", "Actualiser les statistiques", "Statistiken aktualisieren", "統計を更新", "刷新统计"],
+  "Last data update": ["Última actualización de datos", "Dernière mise à jour des données", "Letzte Datenaktualisierung", "データの最終更新", "数据最后更新"],
+  "Last stored data update shown here. History may still be catching up.": ["Última actualización guardada de los datos mostrados. El historial puede seguir cargándose.", "Dernière mise à jour enregistrée des données affichées. La lecture de l’historique peut être en cours.", "Letzte gespeicherte Aktualisierung der angezeigten Daten. Der Verlauf wird möglicherweise noch eingelesen.", "表示中のデータの最終保存日時です。履歴の読み込みが続いている場合があります。", "当前所示数据的最后保存更新时间。历史记录可能仍在读取中。"],
   "Refresh every {minutes} minutes": ["Actualizar cada {minutes} minutos", "Actualiser toutes les {minutes} minutes", "Alle {minutes} Minuten aktualisieren", "{minutes} 分ごとに更新", "每 {minutes} 分钟刷新"],
   "Every minute": ["Cada minuto", "Toutes les minutes", "Jede Minute", "毎分", "每分钟"],
   "Every {minutes} minutes": ["Cada {minutes} minutos", "Toutes les {minutes} minutes", "Alle {minutes} Minuten", "{minutes} 分ごと", "每 {minutes} 分钟"],

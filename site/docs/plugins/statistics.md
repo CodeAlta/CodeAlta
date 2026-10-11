@@ -44,6 +44,8 @@ The page of a session shows the whole life of the session, with the sessions it 
 
 Statistics are recorded as sessions run. Open tabs refresh their numbers every **10 minutes** by default, rather than after every turn. Use **Refresh statistics** in the toolbar to update them now, or choose **Refresh every…** in the Statistics menu: 1, 5, 10, 30 or 60 minutes. Each tab remembers its interval. A hidden tab catches up when you return to it; changing this setting does not slow recording.
 
+The Overview shows **Last data update** above its tiles: the date and local time, including seconds, of the stored statistics update shown on the page. Reopening or refreshing the page does not change that time unless the data changed. It says **Unavailable** when no update time is known. The history bar separately shows whether older sessions are still being read.
+
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-statistics-session-menu.webp" alt="The menu of a Markdig session in CodeAlta Desktop, with Statistics of this session below its session actions" loading="lazy">
   <figcaption class="small text-secondary mt-2">Open the statistics of one session and its sub-agents straight from the Explorer.</figcaption>

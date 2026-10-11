@@ -43,6 +43,8 @@ export type FixtureControl = Readonly<{
   /** Rejects the next `count` calls of a method (`*` for any) with `message`. */
   failNext: (method: string, message?: string, count?: number) => void;
   setLatency: (milliseconds: number) => void;
+  /** Sets the persisted update time returned by subsequent summaries, without publishing a change. */
+  setDataUpdatedAt: (value: string | undefined) => void;
   listenerCount: () => number;
 }>;
 
@@ -134,6 +136,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     "stopped-skipped": () => ({ ...scenarios.stopped(), skippedCount: 3, skipped: skippedSessions() }),
   };
   let status = scenarios[options.scenario ?? "ready"]();
+  let dataUpdatedAt: string | undefined = status.state === "needsChoice" || status.state === "failed" ? undefined : `${today}T12:34:56Z`;
 
   const emit = (event: StatisticsEvent) => { for (const listener of [...listeners]) listener(event); };
   const setStatus = (patch: Partial<StatisticsStatus>) => { status = { ...status, ...patch, revision }; emit({ kind: "status", status }); };
@@ -614,7 +617,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
         const value = round(sum(line.values)), previous = line.previous ? round(sum(line.previous)) : undefined;
         costs.push({ id: unit, unit, value, ...(previous !== undefined ? { previous } : {}), ...(previous ? { change: (value - previous) / previous } : {}), spark: line.values.map(round) });
       }
-      return { query: header(resolved, ["activity", "usage", "tools", "content"]), buckets: resolved.plan.buckets, tiles, costs };
+      return { query: header(resolved, ["activity", "usage", "tools", "content"]), buckets: resolved.plan.buckets, tiles, costs, ...(dataUpdatedAt ? { dataUpdatedAt } : {}) };
     }),
     series: (request, metric, group, signal) => guard("series", signal, (): SeriesResult => {
       const resolved = resolve(request);
@@ -858,6 +861,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     emitData: (fromDay = dayNumber(today), toDay = dayNumber(today)) => emit({ kind: "data", change: { revision: ++revision, fromDay, toDay, sessionIds: [] } }),
     failNext: (method, message = "The plugin could not answer.", count = 1) => { failures.push({ method, message, count }); },
     setLatency: milliseconds => { latency = milliseconds; },
+    setDataUpdatedAt: value => { dataUpdatedAt = value; },
     listenerCount: () => listeners.size,
   };
   return Object.assign(api, { control }) as FixtureApi;

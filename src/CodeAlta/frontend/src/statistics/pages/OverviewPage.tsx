@@ -17,24 +17,29 @@ import type { StackBy, UsageUnit } from "../frame";
 const stackMetric: Record<UsageUnit, string> = { tokens: "tokens", requests: "requests", time: "active-time" };
 
 /** The tiles at the top of a page: a number, its change against the compared period, and its line. */
-export function SummaryTiles({ ids }: Readonly<{ ids: readonly string[] }>) {
+export function SummaryTiles({ ids, showUpdatedAt = false }: Readonly<{ ids: readonly string[]; showUpdatedAt?: boolean }>) {
   const { t } = useText();
   const { fmt, frame } = useStatistics();
   const summary = useSummary({ main: true });
+  const updatedAt = summary.data?.dataUpdatedAt;
   const costs = summary.data?.costs ?? [];
   const tiles = summary.data ? ids.flatMap(id => summary.data!.tiles.filter(tile => tile.id === id)) : [];
   const phrase = comparisonPhrase(t, frame.comparison);
   const show = (tile: SummaryTile, label: string, value: string, key = tile.id) => <StatTile key={key} label={label} value={value} current={tile.value} compared={tile.previous ?? null}
     comparedLabel={phrase} goodWhen={tile.id === "errors" || tile.id === "tool-failures" ? "down" : "neutral"} trend={tile.spark} />;
-  if (summary.error || summary.loading) return <div className="stats-tiles" aria-busy={summary.loading || undefined}>
-    {summary.error ? <Block title={t("Summary")} span={12} minHeight={60} query={summary} /> : ids.map(id => <div key={id} className="stat-tile stats-tile-skeleton bp6-skeleton" aria-hidden="true" />)}
-  </div>;
-  return <div className="stats-tiles" data-refreshing={summary.refreshing || summary.placeholder || undefined}>
-    {tiles.map(tile => show(tile, tileLabel(t, tile.id), fmt.value(tile.unit, tile.value)))}
-    {ids.includes("cost") && (costs.length === 0
-      ? <StatTile key="cost" label={t("Cost")} value="–" />
-      : costs.map(cost => show(cost, `${t("Cost")} · ${unitLabel(t, cost.unit)}`, fmt.costShort(cost.unit, cost.value), `cost-${cost.unit}`)))}
-  </div>;
+  return <>
+    {showUpdatedAt && <p className="stats-data-updated" title={t("Last stored data update shown here. History may still be catching up.")}>
+      <span>{t("Last data update")}</span>{" · "}
+      {updatedAt && Number.isFinite(Date.parse(updatedAt)) ? <time dateTime={updatedAt}>{fmt.dateTime(updatedAt)}</time> : <span>{t("Unavailable")}</span>}
+    </p>}
+    {summary.error || summary.loading ? <div className="stats-tiles" aria-busy={summary.loading || undefined}>
+      {summary.error ? <Block title={t("Summary")} span={12} minHeight={60} query={summary} /> : ids.map(id => <div key={id} className="stat-tile stats-tile-skeleton bp6-skeleton" aria-hidden="true" />)}
+    </div> : <div className="stats-tiles" data-refreshing={summary.refreshing || summary.placeholder || undefined}>
+      {tiles.map(tile => show(tile, tileLabel(t, tile.id), fmt.value(tile.unit, tile.value)))}
+      {ids.includes("cost") && (costs.length === 0
+        ? <StatTile key="cost" label={t("Cost")} value="–" />
+        : costs.map(cost => show(cost, `${t("Cost")} · ${unitLabel(t, cost.unit)}`, fmt.costShort(cost.unit, cost.value), `cost-${cost.unit}`)))}
+    </div>}</>;
 }
 
 /** The rows of a ranking as the list draws them: label and detail write the name of a row and what stands under it. */
@@ -89,7 +94,7 @@ export function OverviewPage() {
   const unitOptions = [{ value: "tokens", label: t("Tokens") }, { value: "requests", label: t("Requests") }, { value: "time", label: t("Time") }] as const;
   const stackOptions = [{ value: "provider", label: t("Provider") }, { value: "project", label: t("Project") }, { value: "model", label: t("Model") }] as const;
   return <>
-    <SummaryTiles ids={["sessions", "runs", "active-time", "your-prompts", "tokens", "cost"]} />
+    <SummaryTiles ids={["sessions", "runs", "active-time", "your-prompts", "tokens", "cost"]} showUpdatedAt />
     <div className="stats-grid">
       <Block title={t("Activity over time")} span={12} minHeight={300} query={stacked}
         actions={<><Choice label={t("Show")} value={unit} onChange={value => dispatch({ type: "view", view: { unit: value } })} options={unitOptions} />

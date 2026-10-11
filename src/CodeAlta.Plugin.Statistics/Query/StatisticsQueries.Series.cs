@@ -375,11 +375,18 @@ public sealed partial class StatisticsQueries
     {
         ArgumentNullException.ThrowIfNull(request);
         var query = await ResolveAsync(request, cancellationToken).ConfigureAwait(false);
-        return await _store.ReadAsync(sql => BuildSummary(sql, query), cancellationToken).ConfigureAwait(false);
+        return await _store.ReadAsync(sql =>
+        {
+            // Keep the freshness marker and all the overview totals in the same committed read snapshot.
+            sql.Execute("BEGIN");
+            try { return BuildSummary(sql, query); }
+            finally { sql.Execute("ROLLBACK"); }
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private SummaryResult BuildSummary(SqlSession sql, ResolvedQuery query)
     {
+        var updatedAt = _store.ReadDataUpdatedAt(sql);
         var tiles = new List<SummaryTile>();
 
         void Add(string id, string unit, double[] current, double[]? previous)
@@ -449,7 +456,7 @@ public sealed partial class StatisticsQueries
             costs.Add(new SummaryTile(unit, unit, current.Sum(), previous?.Sum(), Change(current.Sum(), previous?.Sum()), current));
         }
 
-        return new SummaryResult(Header(query), BucketInfos(query.Plan), tiles, costs);
+        return new SummaryResult(Header(query), BucketInfos(query.Plan), tiles, costs) { DataUpdatedAt = updatedAt };
     }
 
     private double DistinctActiveSessions(SqlSession sql, ResolvedQuery query, BucketPlan plan)

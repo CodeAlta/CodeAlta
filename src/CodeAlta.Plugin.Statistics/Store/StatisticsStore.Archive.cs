@@ -172,14 +172,14 @@ internal sealed partial class StatisticsStore
                 var currentGeneration = sql.ScalarLong($"SELECT COUNT(*) FROM {Table("archive")} WHERE session_id=@p0 AND generation=@p1", entry.SessionId, entry.Generation) != 0;
                 if (!journalExists || imported || !currentGeneration || (present is not null && !present.Contains(entry.SessionId)))
                 {
-                    ImportArchive(sql, entry, payload);
+                    ImportArchive(sql, entry, payload, unchanged: journalExists && imported && currentGeneration);
                 }
             }
         }, token).ConfigureAwait(false);
         SavedSessions = archives.Count;
     }
 
-    private void ImportArchive(SqlSession sql, StatisticsArchiveEntry entry, StatisticsArchivePayload payload)
+    private void ImportArchive(SqlSession sql, StatisticsArchiveEntry entry, StatisticsArchivePayload payload, bool unchanged = false)
     {
         var quarters = new HashSet<int>();
         RemoveSession(sql, entry.SessionId, quarters);
@@ -198,11 +198,14 @@ internal sealed partial class StatisticsStore
         }
 
         // No reducer checkpoint is archived. A returning journal MUST be read from zero and replace, never append to these facts.
+        // Replaying an already effective generation on startup does not make its data fresher, including the legacy fallback.
+        long? updatedMilliseconds = unchanged ? sql.ScalarLong($"SELECT updated_ms FROM {Table("journal")} WHERE session_id=@p0", entry.SessionId) : null;
         WriteJournal(sql, new ApplyRequest { SessionId = entry.SessionId, Batch = new FactBatch(entry.SessionId), Cursor = JournalCursor.Start,
-            FactsVersion = payload.FactsVersion, FileLength = payload.SourceLength, FloorQuarter = payload.FloorQuarter });
+            FactsVersion = payload.FactsVersion, FileLength = payload.SourceLength, FloorQuarter = payload.FloorQuarter }, updatedMilliseconds);
         sql.Execute($"UPDATE {Table("journal")} SET deleted=1 WHERE session_id=@p0", entry.SessionId);
         ProtectArchive(sql, entry, payload, effective: true);
         RecomputeRollups(sql, quarters);
+        if (!unchanged) RecordDataUpdate(sql);
     }
 
     private void ProtectArchive(SqlSession sql, StatisticsArchiveEntry entry, StatisticsArchivePayload payload, bool effective)

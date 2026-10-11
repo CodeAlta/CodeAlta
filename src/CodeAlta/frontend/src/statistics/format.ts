@@ -29,6 +29,8 @@ export type Formatter = Readonly<{
   day(date: string): string;
   /** A day with its year: `12 Apr 2026`. */
   dayLong(date: string): string;
+  /** An instant in the user's local time, including the date, year and seconds. */
+  dateTime(instant: string): string;
   /** A range of days, the year written once when it is the same. */
   range(from: string, to: string): string;
   /** A value in the unit a result names: `count`, `ms`, `tokens`, `bytes`, `lines`, `cost`, `usd`, `AI credits`, `ratio`. */
@@ -55,6 +57,7 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
   const oneDecimal = new Intl.NumberFormat(safe, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const dayFormat = new Intl.DateTimeFormat(safe, { day: "numeric", month: "short", timeZone: "UTC" });
   const dayLongFormat = new Intl.DateTimeFormat(safe, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  const dateTimeFormat = new Intl.DateTimeFormat(safe, { dateStyle: "medium", timeStyle: "medium" });
   const monthFormat = new Intl.DateTimeFormat(safe, { month: "short", timeZone: "UTC" });
   const monthLongFormat = new Intl.DateTimeFormat(safe, { month: "short", year: "numeric", timeZone: "UTC" });
   const usd = new Intl.NumberFormat(safe, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
@@ -62,6 +65,7 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
   const asDate = (date: string) => new Date(`${date.slice(0, 10)}T00:00:00Z`);
   const dayText = (date: string) => dayFormat.format(asDate(date));
   const dayLongText = (date: string) => dayLongFormat.format(asDate(date));
+  const dateTime = (instant: string) => Number.isFinite(Date.parse(instant)) ? dateTimeFormat.format(new Date(instant)) : words.none;
 
   const number = (value: number) => !Number.isFinite(value) ? words.none : Math.abs(value) < 100 && !Number.isInteger(value) ? small.format(value) : grouped.format(value);
   const compact = (value: number) => !Number.isFinite(value) ? words.none : Math.abs(value) < 1000 ? small.format(Math.round(value * 10) / 10) : compactFormat.format(value);
@@ -156,7 +160,7 @@ export function createFormatter(locale: string, words: FormatterWords): Formatte
     if (from === to) return dayLongText(from);
     return from.slice(0, 4) === to.slice(0, 4) ? `${dayText(from)} – ${dayLongText(to)}` : `${dayLongText(from)} – ${dayLongText(to)}`;
   };
-  return { locale: safe, number, compact, percent, duration, durationMark, bytes, cost, costShort, day: dayText, dayLong: dayLongText, range, value, axis, bucket, bucketLong };
+  return { locale: safe, number, compact, percent, duration, durationMark, bytes, cost, costShort, day: dayText, dayLong: dayLongText, dateTime, range, value, axis, bucket, bucketLong };
 }
 
 /** A text with its first letter in capitals, for a phrase that starts a sentence ("about 40 seconds left."). */

@@ -100,7 +100,11 @@ export type SeriesResult = Readonly<{
 export type SummaryTile = Readonly<{ id: string; unit: string; value: number; previous?: number; change?: number; spark: readonly number[] }>;
 
 /** The tiles of the Overview. */
-export type SummaryResult = Readonly<{ query: QueryHeader; buckets: readonly BucketInfo[]; tiles: readonly SummaryTile[]; costs: readonly SummaryTile[] }>;
+export type SummaryResult = Readonly<{
+  query: QueryHeader; buckets: readonly BucketInfo[]; tiles: readonly SummaryTile[]; costs: readonly SummaryTile[];
+  /** Last committed data update represented by this snapshot, not the query time; absent when unknown. */
+  dataUpdatedAt?: string;
+}>;
 
 /** One row of a ranking. */
 export type RankedRow = Readonly<{

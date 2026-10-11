@@ -260,7 +260,8 @@ public sealed class StatisticsPluginTests
                 continue;
             }
 
-            Assert.AreEqual(property.Value.GetRawText(), value.GetRawText(), property.Name);
+            // The command may escape a string differently (for example '+' in a UTC offset); compare JSON values.
+            Assert.IsTrue(JsonElement.DeepEquals(property.Value, value), $"{property.Name}: expected {property.Value.GetRawText()}, actual {value.GetRawText()}");
             properties++;
         }
 

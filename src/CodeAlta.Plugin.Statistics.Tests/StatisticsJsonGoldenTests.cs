@@ -37,7 +37,7 @@ public sealed class StatisticsJsonGoldenTests
         {
             ["SeriesResult"] = StatisticsJson.Serialize(new SeriesResult(Header, "tokens", "tokens", "provider", Buckets,
                 [new SeriesLine("claude", "claude", [10, 20], [8, 9], 30, 17), new SeriesLine("other", "other", [1, 2], null, 3, null)])),
-            ["SummaryResult"] = StatisticsJson.Serialize(new SummaryResult(Header, Buckets, [Tile, Tile with { Previous = null, Change = null }], [new SummaryTile("usd", "usd", 3.5, null, null, [1, 2.5])])),
+            ["SummaryResult"] = StatisticsJson.Serialize(new SummaryResult(Header, Buckets, [Tile, Tile with { Previous = null, Change = null }], [new SummaryTile("usd", "usd", 3.5, null, null, [1, 2.5])]) { DataUpdatedAt = new DateTimeOffset(2026, 10, 9, 12, 34, 56, TimeSpan.Zero) }),
             ["TopResult"] = StatisticsJson.Serialize(new TopResult(Header, "tools", "calls", "count", Buckets,
                 [new RankedRow("shell_command", "shell_command", "shell", 12, 0.4, 0, 34567, 12, 0, 2, [3, 9]), new RankedRow("a/b", "b", null, 5, 0.1, 100, 0, 0, 4, null, [1])], 9, true)),
             ["DistributionResult"] = StatisticsJson.Serialize(new DistributionResult(Header, "run-duration", null, "ms", 10, 90463, 387472,

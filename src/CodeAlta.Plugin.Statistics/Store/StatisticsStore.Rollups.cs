@@ -53,7 +53,11 @@ internal sealed partial class StatisticsStore
         for (var index = 0; index < days.Length; index += RebuildDaysPerTransaction)
         {
             var block = days.Skip(index).Take(RebuildDaysPerTransaction).ToArray();
-            await WriteAsync(sql => AddUpDays(sql, block), cancellationToken).ConfigureAwait(false);
+            await WriteAsync(sql =>
+            {
+                AddUpDays(sql, block);
+                RecordDataUpdate(sql);
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         var stale = existing.Except(days).ToArray();
@@ -77,6 +81,7 @@ internal sealed partial class StatisticsStore
                     [RollupVersionKey] = RollupVersion.ToString(CultureInfo.InvariantCulture),
                     [RollupTimeZoneKey] = Days.TimeZone.Id,
                 });
+                if (days.Length > 0 || stale.Length > 0) RecordDataUpdate(sql);
             },
             cancellationToken).ConfigureAwait(false);
     }

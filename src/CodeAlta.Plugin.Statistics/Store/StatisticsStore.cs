@@ -35,6 +35,7 @@ internal sealed partial class StatisticsStore
     /// <summary>The key of the time zone of the roll-ups in the <c>meta</c> table.</summary>
     public const string RollupTimeZoneKey = "rollup.timezone";
 
+    private const string DataUpdatedKey = "data.updated_ms";
     private readonly IPluginDatabase _database;
 
     /// <summary>Initializes the store over the database of the plugin.</summary>
@@ -137,6 +138,19 @@ internal sealed partial class StatisticsStore
         return WriteAsync(sql => SetMeta(sql, values), cancellationToken);
     }
 
+    /// <summary>Reads the last committed data update in the caller's snapshot; older databases retain their journal catch-up time.</summary>
+    internal DateTimeOffset? ReadDataUpdatedAt(SqlSession sql)
+    {
+        var milliseconds = sql.ScalarLong($"SELECT COALESCE((SELECT CAST(value AS INTEGER) FROM {Table("meta")} WHERE key=@p0), (SELECT MAX(updated_ms) FROM {Table("journal")}))", DataUpdatedKey);
+        return milliseconds > 0 && milliseconds <= DateTimeOffset.MaxValue.ToUnixTimeMilliseconds()
+            ? DateTimeOffset.FromUnixTimeMilliseconds(milliseconds) : null;
+    }
+
+    // Called inside the same write transaction as the data, never on a query, status publication or page open.
+    private void RecordDataUpdate(SqlSession sql)
+        => sql.Execute($"INSERT INTO {Table("meta")} (key, value) VALUES (@p0, @p1) ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+            DataUpdatedKey, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
+
     /// <summary>Runs a read on a connection of its own.</summary>
     /// <typeparam name="T">The result type.</typeparam>
     /// <param name="read">The read.</param>
@@ -194,11 +208,14 @@ internal sealed partial class StatisticsStore
             : WriteAsync(
                 sql =>
                 {
+                    var changed = 0;
                     foreach (var id in sessionIds)
                     {
-                        sql.Execute($"UPDATE {Table("journal")} SET deleted = 1 WHERE session_id = @p0", id);
+                        changed += sql.Execute($"UPDATE {Table("journal")} SET deleted = 1 WHERE session_id = @p0 AND deleted = 0", id);
                         sql.Execute($"UPDATE {Table("session")} SET deleted = 1 WHERE session_id = @p0", id);
                     }
+
+                    if (changed > 0) RecordDataUpdate(sql);
                 },
                 cancellationToken);
     }
@@ -269,6 +286,7 @@ internal sealed partial class StatisticsStore
 
                 sessions = ids.Count;
                 days = RecomputeRollups(sql, quarters);
+                if (sessions > 0) RecordDataUpdate(sql);
             },
             cancellationToken).ConfigureAwait(false);
         return (sessions, days);
@@ -305,6 +323,7 @@ internal sealed partial class StatisticsStore
                 }
 
                 SetMeta(sql, new Dictionary<string, string?> { [RollupVersionKey] = RollupVersion.ToString(CultureInfo.InvariantCulture), [RollupTimeZoneKey] = Days.TimeZone.Id });
+                RecordDataUpdate(sql);
             },
             cancellationToken).ConfigureAwait(false);
         SavedSessions = archives.Count;
@@ -367,6 +386,7 @@ internal sealed partial class StatisticsStore
         WriteRuns(sql, session, batch, floor);
         WriteSession(sql, batch);
         WriteJournal(sql, request);
+        RecordDataUpdate(sql);
         sql.Execute($"UPDATE {Table("archive")} SET effective=0,source_seen=@p1 WHERE session_id=@p0", session, request.VerifiedArchiveReplacement ? 1L : 0L);
         if (request.Meta is { Count: > 0 } meta)
         {
@@ -471,7 +491,7 @@ internal sealed partial class StatisticsStore
             row.LastRecord?.ToUnixTimeMilliseconds());
     }
 
-    private void WriteJournal(SqlSession sql, ApplyRequest request)
+    private void WriteJournal(SqlSession sql, ApplyRequest request, long? updatedMilliseconds = null)
     {
         var cursor = request.Cursor;
         sql.Execute(
@@ -486,7 +506,7 @@ internal sealed partial class StatisticsStore
             cursor.State.ToUtf8Json(),
             (long)request.FactsVersion,
             (long)request.FloorQuarter,
-            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            updatedMilliseconds ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             (long)cursor.State.OpenRuns.Count);
     }
 
