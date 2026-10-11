@@ -162,8 +162,6 @@ public sealed class DesktopSessionRetentionStartupTests
     {
         public ValueTask<SessionStatisticsRetirementResult> PrepareAsync(string sessionId, CancellationToken cancellationToken = default)
             => throw new AssertFailedException("An empty synthetic host has no retirement candidate.");
-        public ValueTask<bool> ValidateAsync(SessionStatisticsRetirementReceipt receipt, CancellationToken cancellationToken = default)
-            => throw new AssertFailedException("No receipt was issued.");
         public ValueTask<bool> ReconcileDeletedAsync(SessionStatisticsRetirementReceipt receipt, bool artifactsRemaining, CancellationToken cancellationToken = default)
             => throw new AssertFailedException("No deletion was authorized.");
     }

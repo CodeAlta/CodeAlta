@@ -319,13 +319,11 @@ public sealed class SessionRetentionRuntimeTests
         public async ValueTask<SessionStatisticsRetirementResult> PrepareAsync(string sessionId, CancellationToken cancellationToken)
         {
             PreparedIds.Add(sessionId);
-            var path = ResolvePath(sessionId);
-            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            var digest = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancellationToken));
-            var source = new SessionStatisticsSource(sessionId, path, stream.Length, File.GetLastWriteTimeUtc(path), digest);
+            // Like Statistics, the fake describes the journal without reading it.
+            var file = new FileInfo(ResolvePath(sessionId));
+            var source = new SessionStatisticsSource(sessionId, file.FullName, file.Length, file.LastWriteTimeUtc, Sha256: null);
             Assert.IsTrue(File.Exists(source.Path));
             Assert.IsTrue(source.Length > 0);
-            Assert.AreEqual(64, source.Sha256.Length);
             DuringPrepare?.Invoke();
             if (WaitDuringPrepare is not null) await WaitDuringPrepare();
             if (Mode == "throw") throw new IOException("archive disk full");
@@ -333,8 +331,6 @@ public sealed class SessionRetentionRuntimeTests
                 Mode == "wrong_source" ? source with { Length = source.Length + 1 } : source,
                 "durable-fixture", new string('a', 64)), Mode == "missing" ? "history_incomplete" : null);
         }
-        public ValueTask<bool> ValidateAsync(SessionStatisticsRetirementReceipt receipt, CancellationToken cancellationToken)
-            => throw new AssertFailedException("Retention does not read the journal again to validate saved Statistics.");
         public ValueTask<bool> ReconcileDeletedAsync(SessionStatisticsRetirementReceipt receipt, bool artifactsRemaining, CancellationToken cancellationToken)
         {
             Assert.IsFalse(File.Exists(receipt.Source.Path));

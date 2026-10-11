@@ -27,6 +27,19 @@ public sealed class StatisticsArchiveStoreTests
     }
 
     [TestMethod]
+    public async Task SourceDescribedWithoutDigest_RoundTrips_AndAnInvalidDigestIsStillRejected()
+    {
+        using var fixture = new Fixture();
+        // Retention describes the journal by its length and write time, without reading it.
+        var source = new SessionStatisticsSource("s", Path.Combine(fixture.Root, "sessions", "s.jsonl"), 42, DateTimeOffset.UnixEpoch, Sha256: null);
+        var saved = await fixture.Store.SaveAsync("s", [1, 2, 3], source);
+        Assert.AreEqual(source, saved.Source);
+        Assert.AreEqual(source, (await new StatisticsArchiveStore(fixture.Root).ReadAsync()).Single().Source);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(async () => await fixture.Store.SaveAsync("s", [4], source with { Sha256 = "not-a-digest" }));
+        await Assert.ThrowsExactlyAsync<ArgumentException>(async () => await fixture.Store.SaveAsync("s", [4], source with { Length = -1 }));
+    }
+
+    [TestMethod]
     [DataRow("UPDATE archive SET payload=x'0000'")]
     [DataRow("PRAGMA user_version=999")]
     [DataRow("DELETE FROM effective")]

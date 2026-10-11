@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
@@ -24,6 +23,23 @@ public sealed class StatisticsArchiveTests
         .Assistant(JournalBuilder.Time(3), "r1", "PRIVATE ANSWER")
         .Idle(JournalBuilder.Time(4), "r1");
 
+    // The same journal with more runs appended, the way a journal grows.
+    private static JournalBuilder Journal(long input, params long[] laterInputs)
+    {
+        var journal = Journal(input);
+        for (var index = 0; index < laterInputs.Length; index++)
+        {
+            var run = "r" + (index + 2);
+            var minute = 5 + (4 * index);
+            journal.User(JournalBuilder.Time(minute), run, "PRIVATE PROMPT")
+                .Usage(JournalBuilder.Time(minute + 1), run, input: laterInputs[index], cost: 1.25, costUnit: "usd")
+                .Assistant(JournalBuilder.Time(minute + 2), run, "PRIVATE ANSWER")
+                .Idle(JournalBuilder.Time(minute + 3), run);
+        }
+
+        return journal;
+    }
+
     private static async Task<(StatisticsEngine Engine, string Path)> EngineAsync(StoreHarness harness, byte[] bytes)
     {
         var layout = new AgentRuntimePathLayout(harness.Root);
@@ -36,16 +52,24 @@ public sealed class StatisticsArchiveTests
     }
 
     [TestMethod]
-    public async Task FullSourceReceipt_IsBoundToEveryByte_AndDoesNotSaveTextOrCheckpoint()
+    public async Task RetentionSave_KeepsWhatStatisticsRead_WithoutReadingTheJournal_AndDoesNotSaveTextOrCheckpoint()
     {
         await using var harness = await StoreHarness.CreateAsync(archives: true);
         var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
+
+        // Same length and write time, other bytes: a save that read the journal would fail on them or save other numbers.
+        var stamp = File.GetLastWriteTimeUtc(path);
+        var length = new FileInfo(path).Length;
+        await File.WriteAllBytesAsync(path, Enumerable.Repeat((byte)'x', checked((int)length)).ToArray());
+        File.SetLastWriteTimeUtc(path, stamp);
         var prepared = await engine.PrepareAsync(SessionId);
         Assert.IsNotNull(prepared.Receipt, prepared.FailureReason);
-        Assert.IsTrue(await engine.ValidateAsync(prepared.Receipt));
-        Assert.AreEqual(Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(path))), prepared.Receipt.Source.Sha256);
+        Assert.IsNull(prepared.Receipt.Source.Sha256, "The journal is described, not read.");
+        Assert.AreEqual(length, prepared.Receipt.Source.Length);
+        Assert.AreEqual(stamp, prepared.Receipt.Source.LastWriteUtc.UtcDateTime);
         var archive = (await new StatisticsArchiveStore(harness.Root).ReadAsync()).Single();
         var text = System.Text.Encoding.UTF8.GetString(archive.Payload);
         Assert.DoesNotContain("PRIVATE PROMPT", text);
@@ -55,12 +79,12 @@ public sealed class StatisticsArchiveTests
         var again = await engine.PrepareAsync(SessionId);
         Assert.AreEqual(prepared.Receipt, again.Receipt, again.FailureReason);
 
-        // Same length and mtime, unchanged header: the incremental prefix fingerprint would miss this edit.
-        var stamp = File.GetLastWriteTimeUtc(path);
-        var mutated = (await File.ReadAllTextAsync(path)).Replace("1234", "4321", StringComparison.Ordinal);
-        await File.WriteAllTextAsync(path, mutated);
-        File.SetLastWriteTimeUtc(path, stamp);
-        Assert.IsFalse(await engine.ValidateAsync(prepared.Receipt));
+        File.Delete(path);
+        await engine.ResetAsync();
+        Assert.AreEqual(1234L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT SUM(input_tokens) FROM {harness.Store.Table("usage_q")}")));
+        var coverage = await engine.Queries.CoverageAsync(new StatisticsRequest { Period = "all" });
+        Assert.AreEqual(1, coverage.SavedSessions);
+        Assert.AreEqual(0, coverage.UnverifiedSavedSessions, "A session Statistics had read to the end is saved in full.");
     }
 
     [TestMethod]
@@ -70,6 +94,7 @@ public sealed class StatisticsArchiveTests
         var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
         var prepared = await engine.PrepareAsync(SessionId);
         Assert.IsNotNull(prepared.Receipt, prepared.FailureReason);
         Assert.IsFalse(await engine.ReconcileDeletedAsync(prepared.Receipt, artifactsRemaining: false));
@@ -91,6 +116,7 @@ public sealed class StatisticsArchiveTests
         var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await engine.PrepareAsync(SessionId, cancellation.Token));
@@ -110,47 +136,34 @@ public sealed class StatisticsArchiveTests
     }
 
     [TestMethod]
-    [DataRow(3, false)]
-    [DataRow(4, true)]
-    public async Task SourceMutationAroundCommit_InvalidatesReceiptWithoutDiscardingCommittedFacts(int lookup, bool committed)
+    [DataRow("longer")]
+    [DataRow("touched")]
+    public async Task JournalChangedSinceStatisticsRead_IsNotSaved_UntilStatisticsReadsItAgain(string change)
     {
         await using var harness = await StoreHarness.CreateAsync(archives: true);
-        var layout = new AgentRuntimePathLayout(harness.Root);
-        var path = layout.GetSessionFilePath(SessionId, JournalBuilder.Time(0));
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllBytesAsync(path, Journal().ToBytes());
-        var catalog = new ChangingCatalog(new FileSystemSessionJournalCatalog(layout));
-        await using var engine = new StatisticsEngine(harness.Store, catalog);
-        await engine.InitializeAsync();
+        var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
+        await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
-        var reads = 0;
-        catalog.BeforeLookup = () =>
+        await engine.DrainAsync();
+        if (change == "longer")
         {
-            if (++reads != lookup) return;
-            var stamp = File.GetLastWriteTimeUtc(path);
-            File.WriteAllBytes(path, Journal(4321).ToBytes());
-            File.SetLastWriteTimeUtc(path, stamp);
-        };
+            await File.WriteAllBytesAsync(path, Journal(1234, 3000).ToBytes());
+        }
+        else
+        {
+            File.SetLastWriteTimeUtc(path, File.GetLastWriteTimeUtc(path).AddSeconds(5));
+        }
+
         var result = await engine.PrepareAsync(SessionId);
         Assert.IsNull(result.Receipt);
         Assert.IsNotNull(result.FailureReason);
-        Assert.AreEqual(committed ? 1 : 0, (await new StatisticsArchiveStore(harness.Root).ReadAsync()).Count);
+        Assert.IsEmpty(await new StatisticsArchiveStore(harness.Root).ReadAsync());
         Assert.IsTrue(File.Exists(path));
-        catalog.BeforeLookup = null;
-        Assert.IsNotNull((await engine.PrepareAsync(SessionId)).Receipt, "A later stable attempt can commit without duplicate effective facts.");
-        Assert.AreEqual(4321L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT SUM(input_tokens) FROM {harness.Store.Table("usage_q")}")));
-    }
-
-    private sealed class ChangingCatalog(ISessionJournalCatalog inner) : ISessionJournalCatalog
-    {
-        public Action? BeforeLookup { get; set; }
-        public IAsyncEnumerable<SessionJournalFile> ListAsync(CancellationToken cancellationToken = default) => inner.ListAsync(cancellationToken);
-        public ValueTask<Stream?> OpenAsync(string sessionId, long offset = 0, CancellationToken cancellationToken = default) => inner.OpenAsync(sessionId, offset, cancellationToken);
-        public ValueTask<SessionJournalFile?> GetAsync(string sessionId, CancellationToken cancellationToken = default)
-        {
-            BeforeLookup?.Invoke();
-            return inner.GetAsync(sessionId, cancellationToken);
-        }
+        engine.Signal(SessionId);
+        await engine.DrainAsync();
+        var saved = await engine.PrepareAsync(SessionId);
+        Assert.IsNotNull(saved.Receipt, saved.FailureReason);
+        Assert.AreEqual(change == "longer" ? 4234L : 1234L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT SUM(input_tokens) FROM {harness.Store.Table("usage_q")}")));
     }
 
     [TestMethod]
@@ -271,34 +284,22 @@ public sealed class StatisticsArchiveTests
     }
 
     [TestMethod]
+    [DataRow("unread")]
     [DataRow("pending")]
-    [DataRow("malformed")]
-    [DataRow("semantic")]
-    [DataRow("late-payload")]
-    [DataRow("unknown")]
-    [DataRow("foreign-session")]
-    [DataRow("open-run")]
-    [DataRow("oversized")]
-    public async Task UncertainSource_NeverIssuesAReceipt(string problem)
+    public async Task SessionNotReadToTheEnd_IsNotSaved(string problem)
     {
         await using var harness = await StoreHarness.CreateAsync(archives: true);
-        var journal = Journal();
-        var text = System.Text.Encoding.UTF8.GetString(journal.ToBytes());
-        text = problem switch
-        {
-            "pending" => text + "{\"$type\":",
-            "malformed" => text + "not-json\n",
-            "semantic" => text.Replace("\"inputTokens\":1234", "\"inputTokens\":\"1234\"", StringComparison.Ordinal),
-            "late-payload" => text.Replace("\"backendId\":\"codex\"", "\"backendId\":\"codex\",\"usage\":{}", StringComparison.Ordinal),
-            "unknown" => text + "{\"$type\":\"future\"," + journal.Envelope(JournalBuilder.Time(5), null) + "\n",
-            "foreign-session" => text.Replace(SessionId, "22222222-2222-2222-2222-222222222222", StringComparison.Ordinal),
-            "open-run" => string.Join('\n', journal.Lines.SkipLast(1)) + "\n",
-            "oversized" => text + new JournalBuilder(SessionId).LocalSnapshot(JournalBuilder.Time(5), 4 * 1024 * 1024 + 1).Lines.Single() + "\n",
-            _ => throw new InvalidOperationException(),
-        };
+        var text = System.Text.Encoding.UTF8.GetString(Journal().ToBytes());
+        // A line still being written is not read: Statistics stops before it.
+        if (problem == "pending") text += "{\"$type\":";
         var (engine, _) = await EngineAsync(harness, System.Text.Encoding.UTF8.GetBytes(text));
         await using var lifetime = engine;
-        await engine.ChooseHistoryAsync(HistoryChoice.All);
+        if (problem != "unread")
+        {
+            await engine.ChooseHistoryAsync(HistoryChoice.All);
+            await engine.DrainAsync();
+        }
+
         var result = await engine.PrepareAsync(SessionId);
         Assert.IsNull(result.Receipt);
         Assert.IsNotNull(result.FailureReason);
@@ -306,25 +307,22 @@ public sealed class StatisticsArchiveTests
     }
 
     [TestMethod]
-    public async Task DisabledLimitedAndPausedHistory_FailClosedUnlessCandidateWasAlreadyComplete()
+    public async Task UnreadOrLimitedHistory_IsNotSaved_AndAPausedHistoryKeepsWhatItRead()
     {
         await using var harness = await StoreHarness.CreateAsync(archives: true);
         var (engine, _) = await EngineAsync(harness, Journal().ToBytes());
         await using var lifetime = engine;
         Assert.IsNull((await engine.PrepareAsync(SessionId)).Receipt, "No history choice.");
         await engine.ChooseHistoryAsync(HistoryChoice.FromToday);
-        Assert.IsNull((await engine.PrepareAsync(SessionId)).Receipt, "Limited history cannot be silently extended.");
+        await engine.DrainAsync();
+        Assert.IsNull((await engine.PrepareAsync(SessionId)).Receipt, "A limited history did not read the old session.");
         await engine.ChooseHistoryAsync(HistoryChoice.All);
-        await engine.PauseAsync();
-        Assert.IsNull((await engine.PrepareAsync(SessionId)).Receipt, "A paused unfinished history must stay paused.");
-        await engine.ResumeAsync();
         await engine.DrainAsync();
         await engine.PauseAsync();
         var ready = await engine.PrepareAsync(SessionId);
         Assert.IsNotNull(ready.Receipt, ready.FailureReason);
         await engine.DisposeAsync();
         Assert.IsNull((await engine.PrepareAsync(SessionId)).Receipt);
-        Assert.IsFalse(await engine.ValidateAsync(ready.Receipt));
         Assert.IsNull(StatisticsPlugin.CreateForDesktop(new FileSystemSessionJournalCatalog(new AgentRuntimePathLayout(harness.Root))).RetirementArchive);
     }
 
@@ -335,6 +333,7 @@ public sealed class StatisticsArchiveTests
         var (engine, _) = await EngineAsync(harness, Journal().ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
         var result = await engine.PrepareAsync(SessionId);
         Assert.IsNotNull(result.Receipt, result.FailureReason);
         var before = await harness.DumpAsync();
@@ -349,7 +348,6 @@ public sealed class StatisticsArchiveTests
         await Assert.ThrowsAsync<InvalidDataException>(async () => await engine.ResetAsync());
         Assert.AreEqual(before, await harness.DumpAsync());
         Assert.AreEqual("all", engine.Status.Choice);
-        Assert.IsFalse(await engine.ValidateAsync(result.Receipt));
         Assert.IsNull((await engine.PrepareAsync(SessionId)).Receipt);
     }
 
@@ -385,6 +383,7 @@ public sealed class StatisticsArchiveTests
         var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
         var prepared = await engine.PrepareAsync(SessionId);
         Assert.IsNotNull(prepared.Receipt, prepared.FailureReason);
         var before = await harness.DumpAsync("archive");
@@ -394,8 +393,7 @@ public sealed class StatisticsArchiveTests
         var result = await engine.PrepareAsync(SessionId);
         Assert.IsNull(result.Receipt);
         Assert.IsNotNull(result.FailureReason);
-        Assert.IsFalse(await engine.ValidateAsync(prepared.Receipt));
-        // Preparation can record a verified reread of the surviving source, but must neither lose facts nor issue a receipt.
+        // Saving fails without losing facts or issuing a receipt.
         Assert.AreEqual(before, await harness.DumpAsync("archive"));
         Assert.IsTrue(File.Exists(path));
         Assert.IsFalse(Directory.Exists(directory));
@@ -408,6 +406,7 @@ public sealed class StatisticsArchiveTests
         var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
         Assert.IsNotNull((await engine.PrepareAsync(SessionId)).Receipt);
         File.Delete(path);
         await engine.ResetAsync();
@@ -434,11 +433,14 @@ public sealed class StatisticsArchiveTests
         var (engine, path) = await EngineAsync(harness, Journal(1000).ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
         Assert.IsNotNull((await engine.PrepareAsync(SessionId)).Receipt);
         using var oldReader = new SessionCatchUp();
         using var oldBytes = new MemoryStream(Journal(1000).ToBytes());
         var old = oldReader.CatchUp(SessionId, oldBytes, null, long.MaxValue, CancellationToken.None);
-        await File.WriteAllBytesAsync(path, Journal(9000).ToBytes());
+        await File.WriteAllBytesAsync(path, Journal(1000, 8000).ToBytes());
+        engine.Signal(SessionId);
+        await engine.DrainAsync();
         Assert.IsNotNull((await engine.PrepareAsync(SessionId)).Receipt);
         File.Delete(path);
         // The recovered database predates the durable generation and its provenance table.
@@ -463,17 +465,20 @@ public sealed class StatisticsArchiveTests
         var (engine, path) = await EngineAsync(harness, Journal(1000).ToBytes());
         await using var lifetime = engine;
         await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
         var first = (await engine.PrepareAsync(SessionId)).Receipt!;
         using var oldReader = new SessionCatchUp();
         using var oldBytes = new MemoryStream(Journal(1000).ToBytes());
         var old = oldReader.CatchUp(SessionId, oldBytes, null, long.MaxValue, CancellationToken.None);
-        await File.WriteAllBytesAsync(path, Journal(9000).ToBytes());
+        await File.WriteAllBytesAsync(path, Journal(1000, 8000).ToBytes());
+        engine.Signal(SessionId);
+        await engine.DrainAsync();
         Assert.IsNotNull((await engine.PrepareAsync(SessionId)).Receipt);
         await harness.Store.ApplyAsync(new ApplyRequest { SessionId = SessionId, Batch = old.Batch, Cursor = old.Cursor, Replace = true });
         await harness.Store.WriteAsync(sql => sql.Execute(oldMarker
             ? $"UPDATE {harness.Store.Table("archive")} SET generation=@p0"
             : $"DELETE FROM {harness.Store.Table("archive")} WHERE @p0 IS NOT NULL", first.Generation));
-        await File.WriteAllBytesAsync(path, Journal(12000).ToBytes(trailingNewline: completeSource));
+        await File.WriteAllBytesAsync(path, Journal(1000, 8000, 3000).ToBytes(trailingNewline: completeSource));
         await harness.ReopenAsync();
         await using var recovered = new StatisticsEngine(harness.Store, new FileSystemSessionJournalCatalog(new AgentRuntimePathLayout(harness.Root)));
         await recovered.InitializeAsync();

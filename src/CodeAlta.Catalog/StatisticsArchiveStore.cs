@@ -9,7 +9,7 @@ namespace CodeAlta.Catalog;
 /// <param name="Generation">The immutable archive generation.</param>
 /// <param name="PayloadSha256">The payload digest.</param>
 /// <param name="Payload">The versioned, sanitized base facts, not a reducer checkpoint or journal.</param>
-/// <param name="Source">Full-source evidence; null for facts migrated after the source disappeared.</param>
+/// <param name="Source">The source generation the facts cover in full; null for facts migrated after the source disappeared.</param>
 public sealed record StatisticsArchiveEntry(string SessionId, string Generation, string PayloadSha256, byte[] Payload, SessionStatisticsSource? Source);
 
 /// <summary>The dedicated, irreplaceable Statistics archive of one StateRoot.</summary>
@@ -73,7 +73,7 @@ public sealed class StatisticsArchiveStore
     /// <summary>Commits immutable facts and their effective-generation intent, then reopens and verifies the committed bytes.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="payload">The versioned Statistics payload.</param>
-    /// <param name="source">The verified full source, or null for legacy deleted-session migration.</param>
+    /// <param name="source">The source generation the facts cover in full, or null for legacy deleted-session migration.</param>
     /// <param name="cancellationToken">Cancels before writing.</param>
     /// <returns>The reopened committed generation. Repeating identical content is idempotent.</returns>
     /// <exception cref="InvalidDataException">The archive is missing, corrupt or unsupported.</exception>
@@ -82,7 +82,7 @@ public sealed class StatisticsArchiveStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(payload);
-        if (payload.Length == 0 || (source is not null && (source.SessionId != sessionId || source.Length < 0 || !IsDigest(source.Sha256))))
+        if (payload.Length == 0 || (source is not null && (source.SessionId != sessionId || !IsValid(source))))
         {
             throw new ArgumentException("Invalid Statistics archive payload or source identity.");
         }
@@ -109,12 +109,12 @@ public sealed class StatisticsArchiveStore
                 transaction.Commit();
             }
 
-            // A success from SQLite alone is not a retirement receipt: reopen and verify what survived the commit.
+            // A success from SQLite alone is not a receipt: reopen and verify what survived the commit.
             using var verify = Open();
             var saved = ReadAndVerify(verify)[generation];
             if (saved.PayloadSha256 != digest || saved.Source != source || !saved.Payload.AsSpan().SequenceEqual(payload))
             {
-                throw new InvalidDataException("Statistics archive verification failed after commit; do not retire the session.");
+                throw new InvalidDataException("Statistics archive verification failed after commit.");
             }
 
             return saved;
@@ -246,8 +246,9 @@ public sealed class StatisticsArchiveStore
                 throw new InvalidDataException("Statistics archive payload digest mismatch; repair/restore it before continuing.");
             }
 
-            var source = reader.IsDBNull(4) ? null : new SessionStatisticsSource(reader.GetString(1), reader.GetString(4), reader.GetInt64(5), new DateTimeOffset(reader.GetInt64(6), TimeSpan.Zero), reader.GetString(7));
-            if (source is not null && (source.Length < 0 || !IsDigest(source.Sha256)))
+            var source = reader.IsDBNull(4) ? null : new SessionStatisticsSource(reader.GetString(1), reader.GetString(4), reader.GetInt64(5),
+                new DateTimeOffset(reader.GetInt64(6), TimeSpan.Zero), reader.IsDBNull(7) ? null : reader.GetString(7));
+            if (source is not null && !IsValid(source))
             {
                 throw new InvalidDataException("Statistics archive source evidence is invalid.");
             }
@@ -278,6 +279,9 @@ public sealed class StatisticsArchiveStore
     }
 
     private static bool IsDigest(string value) => value.Length == 64 && value.All(char.IsAsciiHexDigit);
+
+    // A source saved at retention is described, not read: it has no digest.
+    private static bool IsValid(SessionStatisticsSource source) => source.Length >= 0 && (source.Sha256 is null || IsDigest(source.Sha256));
 
     private static object? Scalar(SqliteConnection connection, string text)
     {

@@ -43,6 +43,9 @@ internal sealed partial class StatisticsEngine : ISessionStatisticsRetirementArc
         => read.ReachedEnd && !read.Scan.Canceled && read.Scan.PendingBytes == 0 && read.Scan.EndOffset == length && read.Scan.SourceSha256 is not null
             && read.Scan.MalformedLines == 0 && read.Scan.UnknownLines == 0 && read.Scan.OversizeRecords == 0 && read.Cursor.State.OpenRuns.Count == 0 && read.Batch.Session is not null;
 
+    // Saves what the tables already hold, without opening the journal: retention must never read old sessions. Only a session
+    // that Statistics has read to the end of the file as it is now (same length and write time) is saved; any other is
+    // deleted without a saved copy, which loses its numbers only after a reset of Statistics.
     public async ValueTask<SessionStatisticsRetirementResult> PrepareAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         if (!_store.HasArchive || Volatile.Read(ref _disposed) != 0)
@@ -63,47 +66,16 @@ internal sealed partial class StatisticsEngine : ISessionStatisticsRetirementArc
 
                 var row = await _store.GetJournalAsync(sessionId, cancellationToken).ConfigureAwait(false);
                 var file = await _journals.GetAsync(sessionId, cancellationToken).ConfigureAwait(false);
-                var complete = row is not null && file is not null && row.FactsVersion == SessionFactsState.CurrentVersion && row.FloorQuarter == int.MinValue
-                    && row.Offset == file.Length && row.FileLength == file.Length && row.FileStampTicks == file.LastWriteUtc.UtcTicks;
-                lock (_gate)
+                if (row is null || file is null || row.Deleted || row.FactsVersion != SessionFactsState.CurrentVersion || row.FloorQuarter != int.MinValue
+                    || row.Offset != file.Length || row.FileLength != file.Length || row.FileStampTicks != file.LastWriteUtc.UtcTicks)
                 {
-                    if (!complete && (_choice?.Kind != HistoryChoiceKind.All || _paused || _stopped || _floorQuarter != int.MinValue))
-                    {
-                        return new(null, "Complete current-version Statistics history is required; choose and finish reading all history before retirement.");
-                    }
+                    return new(null, "Statistics has not read the whole session; it is deleted without saved Statistics.");
                 }
 
-                await using var source = await StatisticsArchiveSource.OpenAsync(_journals, sessionId, cancellationToken).ConfigureAwait(false);
-                if (source is null)
-                {
-                    return new(null, "The source journal is absent; no deletion receipt can be issued.");
-                }
-
-                using var reader = new SessionCatchUp(new JournalScanOptions { RetirementSessionId = sessionId });
-                var read = reader.CatchUp(sessionId, source.Stream, null, long.MaxValue, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!IsCompleteSource(read, source.Stream.Length))
-                {
-                    return new(null, "Full-source Statistics verification failed (incomplete, malformed, unsupported, oversized, or open-run journal); retain the session.");
-                }
-
-                var identity = await source.VerifyAsync(read.Scan.SourceSha256, cancellationToken).ConfigureAwait(false);
-                if (identity is null)
-                {
-                    return new(null, "The journal changed during full-source Statistics verification.");
-                }
-
-                // The exact full scan replaces any limited/incremental projection before export. No checkpoint enters the archive.
-                var applied = await _store.ApplyAsync(new ApplyRequest { SessionId = sessionId, Batch = read.Batch, Cursor = read.Cursor, Replace = true, VerifiedArchiveReplacement = true,
-                    FileLength = identity.Length, FileStampTicks = identity.LastWriteUtc.UtcTicks }, cancellationToken).ConfigureAwait(false);
-                var entry = await _store.SaveArchiveAsync(sessionId, identity, cancellationToken).ConfigureAwait(false);
-                if (await source.VerifyAsync(identity.Sha256, cancellationToken).ConfigureAwait(false) != identity)
-                {
-                    return new(null, "The source changed after archive commit; the saved generation remains but does not authorize retirement.");
-                }
-
-                RaiseDataChanged(applied.ChangedDays, [sessionId]);
-                return new(new SessionStatisticsRetirementReceipt(identity, entry.Generation, entry.PayloadSha256), null);
+                // The file is only described, never read: its length and write time are what Statistics has read.
+                var source = new SessionStatisticsSource(sessionId, file.Path, file.Length, file.LastWriteUtc, Sha256: null);
+                var entry = await _store.SaveArchiveAsync(sessionId, source, cancellationToken).ConfigureAwait(false);
+                return new(new SessionStatisticsRetirementReceipt(source, entry.Generation, entry.PayloadSha256), null);
             }
             finally
             {
@@ -112,36 +84,7 @@ internal sealed partial class StatisticsEngine : ISessionStatisticsRetirementArc
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return new(null, "Statistics preservation failed; retain the session and repair/restore the archive if necessary: " + exception.Message);
-        }
-    }
-
-    public async ValueTask<bool> ValidateAsync(SessionStatisticsRetirementReceipt receipt, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(receipt);
-        if (!_store.HasArchive || Volatile.Read(ref _disposed) != 0)
-        {
-            return false;
-        }
-
-        await _stepGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (Volatile.Read(ref _disposed) != 0 || !await _store.VerifyArchiveAsync(receipt, cancellationToken).ConfigureAwait(false))
-            {
-                return false;
-            }
-
-            await using var source = await StatisticsArchiveSource.OpenAsync(_journals, receipt.Source.SessionId, cancellationToken).ConfigureAwait(false);
-            return source is not null && await source.VerifyAsync(receipt.Source.Sha256, cancellationToken).ConfigureAwait(false) == receipt.Source;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            return false;
-        }
-        finally
-        {
-            _stepGate.Release();
+            return new(null, "Saving Statistics failed; the session is deleted without saved Statistics: " + exception.Message);
         }
     }
 

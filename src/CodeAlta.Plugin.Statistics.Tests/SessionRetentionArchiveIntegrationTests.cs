@@ -22,25 +22,26 @@ public sealed class SessionRetentionArchiveIntegrationTests
         await using var harness = await StoreHarness.CreateAsync(archives: true);
         await using var fixture = await RetentionFixture.CreateAsync(harness);
         await fixture.SeedAsync();
-        var bytes = await File.ReadAllBytesAsync(fixture.JournalPath);
-        var source = new SessionStatisticsSource(SessionId, fixture.JournalPath, bytes.Length,
-            File.GetLastWriteTimeUtc(fixture.JournalPath), Convert.ToHexString(SHA256.HashData(bytes)));
+        // Retention describes the journal without reading it: no digest.
+        var source = new SessionStatisticsSource(SessionId, fixture.JournalPath, new FileInfo(fixture.JournalPath).Length,
+            File.GetLastWriteTimeUtc(fixture.JournalPath), Sha256: null);
         StatisticsArchiveEntry? committedBeforeDeletion = null;
         var productionAdmissionsRefused = false;
         string? factsBeforeDeletion = null;
         string factsAfterDeletion;
 
-        // The service receives the real engine directly, not a fabricated receipt or archive substitute.
+        // The service receives the real engine, observed after it saves, not a fabricated receipt or archive substitute.
         await using (var engine = fixture.CreateEngine(harness))
         {
             await engine.InitializeAsync();
             await engine.ChooseHistoryAsync(HistoryChoice.All);
+            await engine.DrainAsync();
             Assert.IsEmpty(await new StatisticsArchiveStore(harness.Root).ReadAsync());
-            engine.DataChanged += _ =>
+            var observed = new ObservingArchive(engine, () =>
             {
-                if (!File.Exists(fixture.JournalPath)) return; // Reconciliation publishes again after deletion.
+                Assert.IsTrue(File.Exists(fixture.JournalPath));
                 Assert.IsNull(committedBeforeDeletion);
-                // This synchronous observation must finish before PrepareAsync returns to native retirement.
+                // This observation finishes before PrepareAsync returns to native retirement.
                 // A separately opened store proves committed bytes, not the engine's in-memory projection.
                 committedBeforeDeletion = new StatisticsArchiveStore(harness.Root).ReadAsync().AsTask().GetAwaiter().GetResult().Single();
                 Assert.AreEqual(source, committedBeforeDeletion.Source);
@@ -55,9 +56,10 @@ public sealed class SessionRetentionArchiveIntegrationTests
                 Assert.ThrowsExactly<InvalidOperationException>(() => fixture.ResumeAsync().GetAwaiter().GetResult());
                 Assert.ThrowsExactly<InvalidOperationException>(() => fixture.ModelsAsync().GetAwaiter().GetResult());
                 productionAdmissionsRefused = true;
-            };
+            });
 
-            var status = await fixture.Service(engine).RunOnceAsync(Now, Now.AddMonths(-1));
+            var status = await fixture.Service(observed).RunOnceAsync(Now, Now.AddMonths(-1));
+            Assert.IsNull(observed.Failure, observed.Failure?.ToString());
             Assert.AreEqual("completed", status.State, status.Reason);
             Assert.AreEqual(1, status.Examined);
             Assert.AreEqual(1, status.Deleted, status.Reason);
@@ -203,7 +205,7 @@ public sealed class SessionRetentionArchiveIntegrationTests
         public StatisticsEngine CreateEngine(StoreHarness harness) => new(harness.Store, _host.SessionJournals,
             new StatisticsEngineOptions { StartDelay = TimeSpan.Zero, FlowDebounce = TimeSpan.Zero });
 
-        public SessionRetentionService Service(StatisticsEngine engine) => new(_host.Commands, _host.RuntimeService, Protection, engine);
+        public SessionRetentionService Service(ISessionStatisticsRetirementArchive archive) => new(_host.Commands, _host.RuntimeService, Protection, archive);
 
         public Task<AgentSessionHandle> ResumeAsync() => _host.AgentHub.ResumeSessionAsync(SessionId, new()
         {
@@ -243,5 +245,27 @@ public sealed class SessionRetentionArchiveIntegrationTests
         }
 
         public ValueTask DisposeAsync() => _host.DisposeAsync();
+    }
+
+    // Runs an observation once the real engine has saved, before retirement deletes the journal. Retention swallows the
+    // errors of Statistics, so a failed observation is kept for the test to report.
+    private sealed class ObservingArchive(ISessionStatisticsRetirementArchive inner, Action afterPrepare) : ISessionStatisticsRetirementArchive
+    {
+        public Exception? Failure { get; private set; }
+
+        public async ValueTask<SessionStatisticsRetirementResult> PrepareAsync(string sessionId, CancellationToken cancellationToken = default)
+        {
+            var result = await inner.PrepareAsync(sessionId, cancellationToken);
+            try
+            {
+                Assert.IsNotNull(result.Receipt, result.FailureReason);
+                afterPrepare();
+            }
+            catch (Exception exception) { Failure ??= exception; }
+            return result;
+        }
+
+        public ValueTask<bool> ReconcileDeletedAsync(SessionStatisticsRetirementReceipt receipt, bool artifactsRemaining, CancellationToken cancellationToken = default)
+            => inner.ReconcileDeletedAsync(receipt, artifactsRemaining, cancellationToken);
     }
 }
