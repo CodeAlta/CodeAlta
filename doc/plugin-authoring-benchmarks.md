@@ -64,6 +64,37 @@ Verification before retaining the change: Release desktop build passed; full .NE
 
 ## Experiment 2: C# project context and HTML
 
-Next, test a separate project-scoped fixture report: C# reads `metrics.json` for the canvas's project (not the selected project or plugin directory), exposes the same data through detached `Describe`, and renders escaped HTML with Refresh and readable file/JSON errors. Two fixture projects have distinct values; one note contains literal `<b>not bold</b> & safe`. The baseline must finish before any context API candidate is implemented or shipped. This tests project resolution and C#/HTML authoring rather than the script component reference.
+The second task is a separate project-scoped fixture report: C# reads `metrics.json` for the canvas's project (not the selected project or plugin directory), exposes the same data through detached `Describe`, and renders escaped HTML with Refresh and readable file/JSON errors. Two fixture projects have distinct values; one note contains literal `<b>not bold</b> & safe`. The baseline finished before any context API candidate was implemented or shipped. This tests project resolution and C#/HTML authoring rather than the script component reference.
+
+Baseline session `01a12ce6-3bd7-745d-bfd2-a32a203b9204` completed in **319.183 seconds, 56 tool calls**, with 2,168,502 aggregate input tokens (2,070,784 cached) and 6,691 output tokens. First reload succeeded. Eight context/catalog discovery calls included `PluginCanvasContext`, the guessed `IPluginWorkspace`, `Project`, `IPluginServices`, project command/schema exploration and `IPluginAltaService`. The implementation resolves the canvas project through `Services.Alta.InvokeAsync(["project", "show", canvas.ProjectId])`, scans its JSONL records and extracts `projectPath`: correct, but unnecessary authoring work for a common operation.
+
+Independent checks passed: detached Describe for both projects, literal HTML-looking note without a `<b>` element, Refresh after changing the driver's disposable fixture, inline missing-file and invalid-JSON errors, and recovery after restoring it. The other project retained its own data throughout. Both fixture hashes were restored and the browser console was clean.
+
+**Prompt caveat:** this experiment mistakenly requests `canvas read`, but the supported command is `canvas show`. The baseline made three unsuccessful `read` calls (including help) before using `show`. It also corrected one qualified canvas reference and one disallowed UI snapshot path. The candidate received the same prompt; these differences are reported separately, not attributed to a project-path API.
+
+**Candidate tested, not retained:** `PluginCanvasContext.GetProjectPathAsync` resolved the context's catalog project directly, including detached handlers. It returned null for no project or a missing catalog entry, never fell back to the selected UI project, and did not claim to return a session worktree. A short skill paragraph explained the method. No layout, process, persistence or JavaScript API changes were bundled with it.
+
+| Measurement | Baseline | With project-path API |
+| --- | ---: | ---: |
+| Wall time | 319.183 s | 369.268 s |
+| Tool calls | 56 | 57 |
+| Aggregate input tokens | 2,168,502 | 1,689,129 |
+| Cached input tokens | 2,070,784 | 1,589,888 |
+| Output tokens | 6,691 | 8,306 |
+| First plugin reload | Passed | Passed |
+
+Candidate session: `01a12cf8-98fc-7038-96b3-c3fc9854f83a`, completed at 22:03:53.672 UTC.
+
+**Discovery and correctness.** The candidate used the method directly and eliminated project-command discovery and JSONL parsing. However, it explored other canvas types: eight plugin API calls in total versus five in the baseline, which additionally made three project-command discovery calls. Both delivered correct plugins. Independent candidate checks repeated detached Describe for both projects, literal HTML, changed-file Refresh, missing/invalid JSON, recovery and fixture-hash restoration; all passed, with a clean console. The candidate also created standalone C# tests and corrected its test harness, work the baseline did not do. Its one failed `canvas read` call versus the baseline's three is a prompt-recovery difference, not evidence for the new API. Both hit a disallowed snapshot path once.
+
+**Decision: remove the runtime candidate.** Aggregate input fell **22.1%** and the path lookup became simpler, but end-to-end time rose **15.7%** (50.085 seconds) and tool calls rose from 56 to 57. Extra testing and different exploration make the overall results mixed; this pair proves neither a general slowdown nor an end-to-end efficiency gain. Under the request to retain only demonstrated improvements, the runtime API, its tests and its skill/documentation additions were removed. The rejected patch remains with local experiment artifacts, not in the product. No API addition is justified solely because its implementation passed tests.
+
+The candidate itself passed a red-then-green regression check, all 53 canvas tests, the full .NET solution suite and the website build before the benchmark. Neither arm overlapped other build/test jobs. The provider's reported context-window limit changed from 272,000 to 500,000 between arms despite the same model/effort; actual contexts were well below either limit, but this is another limitation of a single pair.
+
+## Outcome
+
+Retained: the bundled JavaScript contract reference, with **seven fewer tool calls and no bundle-inspection detours** in its paired dashboard run. Rejected: the project-path runtime API, pending stronger end-to-end evidence. These outcomes are not a measured speedup of the original 13-minute session: its task and model differ. No aggregate percentage across the two different challenges is meaningful.
+
+The original session also exposed private-DOM layout workarounds and reported process/state/concurrency friction. Those were not benchmarked and no speculative APIs were added. The shared short-range heatmap month-label clipping was recorded as a separate deferred task. Final retained changes are documentation/skill content only; existing runtime behavior is unchanged. After removing the candidate, the source matched the previously verified retained state and the Release desktop rebuilt with zero warnings/errors. The task-owned developer instance was stopped; the user's normal instance was left running.
 
 Local experiment prompts, tool indexes and screenshots are under `C:/temp/codealta-plugin-bench-1c8344`; this report records the portable results. Raw conversation reasoning and credentials are not checked in.
