@@ -543,6 +543,7 @@ Paths are relative to the plugin folder. The resources of a project plugin apply
 Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `DisposeAsync` only when the plugin owns something to set up or release.
 
 - Start background work with `Tasks.Run(...)` so CodeAlta can cancel it when the plugin is reloaded or unloaded. Do not use an untracked `Task.Run`.
+  Tasks normally protect sessions from automatic retention until their original work and cancellation cleanup finish. Explicit retained-dependency failures (even nested in another exception) keep that protection: a failed release is not proof that dependent work terminated. The same rule applies to runtime startup, desktop commands and dialog actions. Use `PluginTaskOptions.SessionRetentionIndependent = true` only for work that never starts, resumes, queues or changes sessions or their lineage, nor hands off such work. Any journal reads must tolerate concurrent retirement and missing sources. This is an explicit safety contract, not a scheduling hint; leave it false when uncertain. Starting ordinary work can throw `InvalidOperationException` if retirement already owns a session.
 - `Services.State` keeps the data of the plugin as JSON, between runs and reloads:
 
   ```csharp

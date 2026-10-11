@@ -155,9 +155,15 @@ import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollap
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
-import { themeIcons } from "./GeneralSettings";
+import { AppearanceSettings, themeIcons } from "./AppearanceSettings";
+import { StorageSettings } from "./storage/StorageSettings";
+import { useStorageMaintenance } from "./storage/useStorageMaintenance";
+import { storage } from "#neoastra";
 import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
+import { collectSessionRetention, createSessionRetention } from "./sessionRetention";
+import { publishSessionRetention, watchSessionRetention } from "./sessionRetentionRpc";
+import { SessionRetentionGate } from "./SessionRetentionGate";
 import { reloadsAfterClose, rpcSessionClosed, sessionRecoveryKey } from "./sessionRecovery";
 import { installKeyboardClickGuard } from "./keyboardClickGuard";
 import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
@@ -234,7 +240,7 @@ type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; e
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
-type View = "workspace" | "appearance" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions";
+type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "storage";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App() {
@@ -332,8 +338,29 @@ function App() {
   }, []);
   const [projectId, writeProjectId] = useState<string | null>(null);
   const [sessionId, writeSessionId] = useState<string | null>(null);
+  const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
+  // Read ALL persisted spaces before presentation restoration can reconcile or overwrite any of them.
+  const [retention] = useState(() => createSessionRetention(publishSessionRetention,
+    () => collectSessionRetention(() => localStorage, submissions.imageDrafts.retentionKeys())));
+  useSyncExternalStore(retention.subscribe, retention.getSnapshot);
+  const [retentionLifetime, setRetentionLifetime] = useState<string | null>(null);
   const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, spaceId))));
-  const [tabs, setTabs] = useState(restoredTabs ?? emptySessionTabs);
+  const [tabs, writeTabs] = useState(emptySessionTabs);
+  const retentionNavigation = useRef(0);
+  // All shell routes, including recovery callbacks, use these admission boundaries. A newer navigation
+  // invalidates an older held acknowledgement; a catalog/host/lifetime change cannot revive it either.
+  function protectNavigation(ids: readonly string[], expose: () => void): boolean {
+    const generation = ++retentionNavigation.current;
+    const epoch = currentHostEpoch.current;
+    if (!currentHostAvailable.current) { if (status && !status.hostAvailable) { expose(); return true; } return false; }
+    if (!epoch || hostSilent || !creationAlive.current) return false;
+    if (ids.every(id => retention.hasClaim(epoch, id))) { expose(); return true; }
+    const revision = browserRevision.current, catalog = currentSnapshot.current;
+    void retention.admit(epoch, ids, () => generation === retentionNavigation.current && creationAlive.current
+      && currentHostEpoch.current === epoch && browserRevision.current === revision && currentSnapshot.current === catalog, expose);
+    return false;
+  }
+  function setTabs(next: SessionTabsState) { protectNavigation(next.open.map(tab => tab.sessionId), () => writeTabs(next)); }
   const [tabsReady, setTabsReady] = useState(false);
   // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
   // which stays as it is; selecting a session, a project or the new-session tab leaves the file.
@@ -380,7 +407,11 @@ function App() {
   }
   const tabFocusPending = useRef(false);
   function setProjectId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeProjectId(value); activateFile(null); }
-  function setSessionId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeSessionId(value); activateFile(null); }
+  function setSessionId(value: string | null) {
+    protectNavigation(value ? [value] : [], () => {
+      advanceBrowserRevision(); invalidateCreation(); selectedSessionId.current = value; writeSessionId(value); activateFile(null);
+    });
+  }
   const [composerHeights, setComposerHeights] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [view, setView] = useState<View>("workspace");
   const currentView = useRef<View>(view);
@@ -495,6 +526,7 @@ function App() {
     void connect().then(connection => {
       if (lifetime.signal.aborted) return;
       const closed = () => {
+        retention.invalidate();
         console.warn("[CodeAlta RPC] connection closed; inspect receipts before any explicit retry. No automatic replay.", { reason: connection.closeReason ?? null });
         // The host closed this document's session and nothing answers any more: only a reload opens a new one.
         if (connection.closeReason !== rpcSessionClosed) return;
@@ -506,10 +538,9 @@ function App() {
       };
       if (connection.closed.aborted) closed();
       else connection.closed.addEventListener("abort", closed, { once: true, signal: lifetime.signal });
-    }).catch(error => { if (!lifetime.signal.aborted) console.warn("[CodeAlta RPC] connection unavailable", { code: rpcFailureCode(error) }); });
+    }).catch(error => { if (!lifetime.signal.aborted) { retention.invalidate(); console.warn("[CodeAlta RPC] connection unavailable", { code: rpcFailureCode(error) }); } });
     return () => { lifetime.abort(); unsubscribe(); };
   }, []);
-  const [submissions] = useState(() => createOwnedSubmissions(sessionOperations.send, sessionOperations.abort));
   const [timelineImages] = useState(() => createTimelineImageCache(promptImages.read));
   const [toolRecords] = useState(() => ({ records: createToolCallCache(toolCalls.read), outputs: createToolOutputStore(toolCalls.observe) }));
   const reminderCapability = useRef<ReturnType<typeof createMutationCapability> | undefined>(undefined);
@@ -699,6 +730,38 @@ function App() {
   // The spaces are read once the host answered, and again each time it says they changed.
   const spacesEpoch = status?.hostAvailable ? status.hostEpoch ?? null : null;
   useEffect(() => {
+    retention.invalidate();
+    setRetentionLifetime(null);
+    if (!spacesEpoch || hostSilent) { retention.invalidate(); return; }
+    const lifetime = new AbortController();
+    void (async () => {
+      try {
+        for await (const reply of await watchSessionRetention({ expectedEpoch: spacesEpoch, pageId: retention.pageId }, lifetime.signal)) {
+          if (lifetime.signal.aborted || !reply.accepted) break;
+          // Keep reading the lifetime while publication is held: stream closure must revoke the
+          // owner immediately, not wait for that unrelated RPC to settle and expose stale work.
+          void retention.connect(spacesEpoch).then(accepted => {
+            if (accepted && !lifetime.signal.aborted) setRetentionLifetime(spacesEpoch);
+          });
+        }
+      } catch { /* An unknown transport lifetime cannot authorize restoration or further edits. */ }
+      finally {
+        if (!lifetime.signal.aborted) { lifetime.abort(); retention.invalidate(); setRetentionLifetime(null); }
+      }
+    })();
+    const refresh = () => { void retention.publish(spacesEpoch); };
+    // Native window registration owns disconnect safety; an unload RPC is never a release.
+    const leaving = () => { lifetime.abort(); retention.invalidate(); setRetentionLifetime(null); };
+    window.addEventListener("storage", refresh);
+    window.addEventListener("pagehide", leaving);
+    const unsubscribeImages = submissions.imageDrafts.subscribe(refresh);
+    const unsubscribeDrafts = draftIndicators.subscribe(refresh);
+    return () => {
+      window.removeEventListener("storage", refresh); window.removeEventListener("pagehide", leaving);
+      unsubscribeImages(); unsubscribeDrafts(); lifetime.abort(); retention.invalidate();
+    };
+  }, [retention, spacesEpoch, hostSilent, submissions, draftIndicators]);
+  useEffect(() => {
     if (spacesEpoch) return spacesHub.connect(spacesEpoch);
     if (hostAnswered) spacesHub.unavailable();
     return undefined;
@@ -745,26 +808,32 @@ function App() {
     for (const id of [...spaceTabs.current.keys()]) if (!spacesState.spaces.some(space => space.id === id)) { spaceTabs.current.delete(id); spaceLayouts.current.delete(id); void canvasHub.closeSpace(id); }
   }, [spacesState.loaded, spacesState.available, spacesState.spaces, spaceId, tabsReady]);
   useEffect(() => {
-    if (!snapshot || initialSelectionMade.current) return;
-    initialSelectionMade.current = true;
-    setTabsReady(true);
-    try {
-      if (restoredTabs) {
-        applyTabState(reconcileSessionTabs(restoredTabs, snapshot));
-        return;
-      }
-      const firstSession = snapshot.sessions[0];
-      if (!firstSession) return;
-      const project = snapshot.projects.find(value => value.path === firstSession.workspacePath);
-      selectedScope.current = project?.id ?? null;
-      setProjectId(project?.id ?? null);
-      setSessionId(firstSession.id);
-      selectedSessionId.current = firstSession.id;
-    } finally {
-      // After the session selection above, which leaves any file: the restored file tab stays active.
+    if (!snapshot || !status || hostSilent || status.hostAvailable && (!spacesEpoch || retentionLifetime !== spacesEpoch)) return;
+    let current = true;
+    const initial = !initialSelectionMade.current;
+    // Initial restoration is the mount-time intent, not a new intent when its prerequisites finally
+    // answer. A row/space selection made even before this effect first runs must win over saved state.
+    const navigation = initial ? 0 : retentionNavigation.current, revision = browserRevision.current;
+    const first = snapshot.sessions[0];
+    const next = initial ? restoredTabs ? reconcileSessionTabs(restoredTabs, snapshot)
+      : first ? openSessionTab(emptySessionTabs(), { sessionId: first.id,
+        projectId: snapshot.projects.find(project => project.path === first.workspacePath)?.id ?? null, path: first.workspacePath })
+        : emptySessionTabs() : tabs;
+    const expose = () => {
+      if (!initial) return;
+      initialSelectionMade.current = true;
+      setTabsReady(true);
+      // Restoration is allowed to finish protection after the user navigates, but never to undo that
+      // newer selection/settings action merely because its original acknowledgement arrived late.
+      if (navigation !== retentionNavigation.current || revision !== browserRevision.current) return;
+      applyTabState(next);
       if (restoredFileTabs) setFileTabs(reconcileFileTabs(restoredFileTabs, snapshot));
-    }
-  }, [snapshot]);
+    };
+    if (spacesEpoch) void retention.restore(spacesEpoch, next.open.map(tab => tab.sessionId),
+      () => current && creationAlive.current && snapshot === currentSnapshot.current, expose);
+    else expose();
+    return () => { current = false; };
+  }, [snapshot, spacesEpoch, hostSilent, retentionLifetime]);
 
   useEffect(() => {
     if (!snapshot || !tabsReady) return;
@@ -800,11 +869,14 @@ function App() {
   }, [projectId, tabsReady]);
 
   function applyTabState(next: SessionTabsState) {
-    setTabs(next);
+    protectNavigation(next.open.map(tab => tab.sessionId), () => applyAdmittedTabState(next));
+  }
+  function applyAdmittedTabState(next: SessionTabsState) {
+    writeTabs(next);
     const target = next.active;
     setMenuTarget(null);
     if (target && selectedScope.current !== target.projectId) selectProject(target.projectId, target.sessionId);
-    else { selectedSessionId.current = target?.sessionId ?? null; setSessionId(target?.sessionId ?? null); }
+    else setSessionId(target?.sessionId ?? null);
   }
   function selectSessionTab(tab: SessionTab) {
     if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
@@ -831,6 +903,15 @@ function App() {
    * and the window asks what to do with them).
    */
   function showSpace(id: string, target?: SpaceTarget, discard = false): boolean {
+    const next = findSpace(spacesHub.getSnapshot().spaces, id).id;
+    const entering = spaceTabs.current.get(next)?.tabs ?? restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, next)));
+    const ids = entering?.open.map(tab => tab.sessionId) ?? [];
+    if (target?.sessionId) ids.push(target.sessionId);
+    let shown = false;
+    protectNavigation(ids, () => { shown = showAdmittedSpace(id, target, discard); });
+    return shown;
+  }
+  function showAdmittedSpace(id: string, target?: SpaceTarget, discard = false): boolean {
     const known = spacesHub.getSnapshot().spaces;
     const next = findSpace(known, id).id;
     if (next === shownSpace.current) {
@@ -1611,6 +1692,7 @@ function App() {
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
+  const storageMaintenance = useStorageMaintenance(storage, owned ? status!.hostEpoch : null, language.locale, !hostSilent);
   // The terminals belong to the application: this window lists them, and shows in tabs those it was asked to.
   // A terminal runs with or without a tab, and its tab goes when it does.
   const [terminalWorkspace] = useState(() => createTerminalWorkspace(address => {
@@ -1714,6 +1796,11 @@ function App() {
     const key = workItemKey(item);
     setWorkBusy(value => new Set(value).add(key));
     try {
+      if (session) {
+        const epoch = currentHostEpoch.current, revision = browserRevision.current;
+        if (!epoch || !await retention.admit(epoch, [session.id], () => currentHostEpoch.current === epoch
+          && currentHostAvailable.current && revision === browserRevision.current, () => {})) return false;
+      }
       return await startWorkItem({ hub: workHub, composer: (kind, id, text, agent) => askPluginComposer(kind, id, text ?? null, agent ?? null),
         openSession: id => void openAutomationSession(id),
         refuse: (message, detail) => showToast({ message: message ? t(message) : detail ?? t("The work did not start."), intent: "danger", icon: "error", timeout: 8000 }) }, item, start, session, runsWith);
@@ -2189,7 +2276,6 @@ function App() {
       setMenuTarget(null);
       const index = Math.max(0, visibleSessions.findIndex(session => session.id === sessionId));
       const next = visibleSessions[(index + (action === "nextSession" ? 1 : -1) + visibleSessions.length) % visibleSessions.length].id;
-      selectedSessionId.current = next;
       setSessionId(next);
     }
   }
@@ -2248,6 +2334,9 @@ function App() {
   }
 
   function selectProject(nextProjectId: string | null, selectedId?: string | null) {
+    protectNavigation(selectedId ? [selectedId] : [], () => selectAdmittedProject(nextProjectId, selectedId));
+  }
+  function selectAdmittedProject(nextProjectId: string | null, selectedId?: string | null) {
     setMenuTarget(null);
     projectRenameGeneration.current++;
     setProjectRenameTarget(null);
@@ -2257,7 +2346,6 @@ function App() {
     setProjectId(nextProjectId);
     const nextSessionId = selectedId ?? null;
     setSessionId(nextSessionId);
-    selectedSessionId.current = nextSessionId;
     setRenamingId(null);
     setRenamingMessage("");
     setDeletingId(null);
@@ -2279,8 +2367,10 @@ function App() {
     setRemoteControlAsk(ask);
   }
   function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction) {
-    pendingSessionAction.current = { projectId: scope, sessionId: session.id, action };
-    selectProject(scope, session.id);
+    protectNavigation([session.id], () => {
+      pendingSessionAction.current = { projectId: scope, sessionId: session.id, action };
+      selectProject(scope, session.id);
+    });
   }
   useLayoutEffect(() => {
     const pending = pendingSessionAction.current;
@@ -2359,6 +2449,9 @@ function App() {
 
   // Delete on the row of a session does what **Delete** of its menu does.
   function deleteSessionFromRow(row: WorkspaceSession) {
+    protectNavigation([row.id], () => deleteAdmittedSessionFromRow(row));
+  }
+  function deleteAdmittedSessionFromRow(row: WorkspaceSession) {
     if (snapshot?.sessions.filter(session => session.id === row.id).length !== 1 || currentSnapshot.current !== snapshot
       || settingsVisible.current || dialog || modalDialogOpen()) return;
     if (!sessionActionAccess(row, { id: row.id, projectId, hostEpoch: status?.hostEpoch ?? null }, row.id,
@@ -2366,12 +2459,15 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current).delete) return;
     setMenuTarget(null);
-    if (selectedSessionId.current !== row.id) { selectedSessionId.current = row.id; setSessionId(row.id); setRenamingMessage(""); }
+    if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); }
     setRenamingId(null);
     beginSessionDelete(row);
   }
 
   function runSessionMenuAction(action: SessionAction, row: WorkspaceSession, target: SessionMenuTarget) {
+    protectNavigation([row.id], () => runAdmittedSessionMenuAction(action, row, target));
+  }
+  function runAdmittedSessionMenuAction(action: SessionAction, row: WorkspaceSession, target: SessionMenuTarget) {
     if (!activeMenu || activeMenu !== target || currentSnapshot.current !== menuSnapshot.current
       || snapshot?.sessions.filter(session => session.id === row.id).length !== 1
       || snapshot.sessions.find(session => session.id === row.id) !== row
@@ -2384,7 +2480,7 @@ function App() {
     if (!access.open) return;
     if (action === "rename" && !access.rename || action === "delete" && !access.delete) return;
     const switching = selectedSessionId.current !== row.id;
-    if (switching) { selectedSessionId.current = row.id; setSessionId(row.id); }
+    if (switching) setSessionId(row.id);
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
     if (action === "remote-control") { dismissSessionMenu(false); if (access["remote-control"]) askRemoteControl(row.id); return; }
     dismissSessionMenu(false);
@@ -2607,6 +2703,9 @@ function App() {
         const candidate = fresh && createdSessionSelection(fresh, result);
         const selection = candidate && fresh && selectedTab(fresh, candidate.projectId, candidate.sessionId) ? candidate : undefined;
         if (fresh && selection && isCurrent()) {
+          if (!await retention.admit(epoch!, [selection.sessionId], isCurrent, () => {}) || !isCurrent()) {
+            setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); return;
+          }
           if (handoff) {
             // Revalidate preferences against this newly verified session's choices, never
             // manufacture session authority from the pre-creation catalog DTOs.
@@ -2772,7 +2871,6 @@ function App() {
         const recovered = fresh && deletedSessionRecovery(fresh, result);
         if (recovered && capability.canMutate()) {
           if (deleteSelectionCurrent(result, selectedScope.current, selectedSessionId.current)) {
-            selectedSessionId.current = recovered.sessionId;
             setSessionId(recovered.sessionId);
           }
           setDeletingId(null);
@@ -2801,7 +2899,6 @@ function App() {
       uncertainDelete.current = null;
       setDeleteLocked(false);
       if (deleteSelectionCurrent(captured, selectedScope.current, selectedSessionId.current)) {
-        selectedSessionId.current = recovered.sessionId;
         setSessionId(recovered.sessionId);
       }
       setDeletingId(null);
@@ -3066,7 +3163,7 @@ function App() {
                 }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-expanded={twist && !twist.collapsed} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
-                onClick={() => { setMenuTarget(null); selectedSessionId.current = session.id; setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); }}>
+                onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}>
                 <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
@@ -3113,13 +3210,18 @@ function App() {
               if (!row) return <NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")}
                 description={t("This session is no longer in the catalog. Close the tab or refresh the projects.")} />;
               const ownerKey = JSON.stringify([status?.hostEpoch, tabKey(tab), row.createdAt]);
+              const admitted = () => !!status && (currentHostAvailable.current
+                ? !!status.hostEpoch && currentHostEpoch.current === status.hostEpoch && retention.hasClaim(status.hostEpoch, row.id)
+                : !status.hostAvailable);
               let owners = sessionPaneOwners.get(ownerKey);
               if (!owners) { owners = createSessionPaneOwners(); sessionPaneOwners.set(ownerKey, owners); }
-              return <ProjectReferenceContext.Provider key={ownerKey} value={owned && status?.hostEpoch && tab.projectId !== null
+              return <SessionRetentionGate key={ownerKey} available={admitted()}
+                fallback={<NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")} />}>
+                <ProjectReferenceContext.Provider value={admitted() && owned && status?.hostEpoch && tab.projectId !== null
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace session={row} remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
+              <SessionWorkspace session={row} canAdmit={admitted} remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
                 origin={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
@@ -3131,7 +3233,7 @@ function App() {
                 active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
-                  && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
+                  && admitted() && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
                 preferredComposerHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, tab.projectId, row.id))}
                 onComposerHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, tab.projectId, row.id), height))}
                 onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
@@ -3141,7 +3243,7 @@ function App() {
                 submissions={submissions} timelineImages={timelineImages} toolRecords={toolRecords} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                 askActions={askActions} display={owners.display} scrollMemory={scrollMemory} runtimeReader={owners.runtimeReader}
                 permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
-                selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider>;
+                selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider></SessionRetentionGate>;
             }}
             capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions}
             onSessionTabClick={focusPromptSoon}
@@ -3244,10 +3346,11 @@ function App() {
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
-        sessionWidth, setSessionWidth, confirms: { ...confirms, set: setConfirm },
-        remoteControl: owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null,
-        closing: shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null }} />
-      : settingsSection === "permissions" ? <PermissionSettings
+        sessionWidth, setSessionWidth }} />
+      : settingsSection === "general" ? <GeneralSettings
+        remoteControl={owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null}
+        closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null} />
+      : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
@@ -3266,6 +3369,8 @@ function App() {
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
+      : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
+          maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject}
         onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} />
@@ -3329,7 +3434,6 @@ function App() {
         selectedScope.current = id;
         setProjectId(id);
         const nextSession = sessionsForProject(fresh, id)[0]?.id ?? null;
-        selectedSessionId.current = nextSession;
         setSessionId(nextSession);
         navigate("workspace");
         focusPromptSoon();
@@ -3381,8 +3485,11 @@ function App() {
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
       onClose={dismissSearch} />}
     <PluginUiHost epoch={pluginEpoch}
-      onPrompt={request => ["send", "enqueue", "steer", "compact"].includes(request.mode ?? "")
-        && askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null).result}
+      onPrompt={(request, signal) => {
+        if (!["send", "enqueue", "steer", "compact"].includes(request.mode ?? "") || signal.aborted) return false;
+        const command = askPluginComposer(request.mode as PluginComposerRequest["kind"], request.sessionId ?? null, request.text ?? null, null, signal);
+        return command.completion ?? command.result;
+      }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
   </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></ShellLanguageContext.Provider>;
 }
@@ -3396,12 +3503,12 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const { t } = useShellLanguage();
   const composingEscape = useRef(false);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
-    ["Personalization", [["appearance", "Appearance", "palette"], ["spaces", "Spaces", "space"]]],
+    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["spaces", "Spaces", "space"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
       ["permissions", "Permissions", "shield"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
-    ["Advanced", [["config", "Configuration file", "config"], ["mcpHost", "CodeAlta MCP", "remote"]]],
+    ["Advanced", [["config", "Configuration file", "config"], ["storage", "Storage", "database"], ["mcpHost", "CodeAlta MCP", "remote"]]],
     ["Diagnostics", [["logs", "Application Logs", "logs"], ["about", "About", "info"]]],
   ];
   return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}
@@ -3514,7 +3621,8 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
+  canAdmit: () => boolean;
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
@@ -3667,7 +3775,7 @@ function SessionWorkspace({ remoteControlRequest = null, session, snapshot, sele
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo} />;
   // A relative link of a message, of the notes or of a tool window of this session starts from the folder it works in.
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -3716,7 +3824,7 @@ function SessionWorkspace({ remoteControlRequest = null, session, snapshot, sele
         <div className="ask-form-slot" ref={setAskFormSlot} hidden={askMode === "none"} />
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={chrome}
           epoch={ownedHost ? status!.hostEpoch! : null}
-          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel observing={observing} active={active} onRunActivity={(value, background) => {
+          owned={status?.hostEpoch && mutation ? <OwnedSessionPanel canAdmit={canAdmit} observing={observing} active={active} onRunActivity={(value, background) => {
             setRunning(value);
             const calls = backgroundCalls(background ?? []);
             setBackgroundCallStates(current => current.size === calls.size && [...calls].every(([call, state]) => current.get(call) === state) ? current : calls);
@@ -3765,11 +3873,11 @@ function DemoConversation({ session }: { session: WorkspaceSession }) {
   </section>;
 }
 
-function ConfigurationPanel({ preferences }: { preferences: Parameters<typeof GeneralSettings>[0] }) {
+function ConfigurationPanel({ preferences }: { preferences: Parameters<typeof AppearanceSettings>[0] }) {
   const { t } = useShellLanguage();
   return <div className="configuration-page settings-card-page">
     <header className="page-heading"><span className="eyebrow">{t("Personalization")}</span><h1>{t("Appearance")}</h1></header>
-    <div className="settings-grid"><GeneralSettings {...preferences} /></div>
+    <div className="settings-grid"><AppearanceSettings {...preferences} /></div>
   </div>;
 }
 

@@ -77,6 +77,7 @@ internal static class DesktopAltaTools
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
+            .Add<ISessionRetentionAdmission>(host.RetentionProtection)
             .Add(host.CatalogOptions)
             .Add(host.SessionViewCatalog.TextFiles)
             .Add(host.ProjectCatalog)

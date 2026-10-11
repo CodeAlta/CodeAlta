@@ -68,6 +68,7 @@ public interface IPluginTaskService
     /// <returns>A handle that exposes task completion and cancellation.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="name"/> is null, empty, or whitespace.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="work"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">Session retirement already owns work that this task could affect.</exception>
     PluginTaskHandle Run(string name, Func<CancellationToken, ValueTask> work, PluginTaskOptions? options = null);
 
     /// <summary>
@@ -88,6 +89,15 @@ public sealed record PluginTaskOptions
 
     /// <summary>Gets a value indicating whether the work is expected to run for a long time.</summary>
     public bool LongRunning { get; init; }
+
+    /// <summary>Gets whether this task is independent of session retention.</summary>
+    /// <remarks>
+    /// This is an explicit promise, not a scheduling hint: the task never starts, resumes, queues or mutates
+    /// sessions, publishes session lineage or hands such work to another owner. Any journal reads must tolerate
+    /// concurrent retirement and must not require the source to remain present. The default is false and protects
+    /// all sessions for the original task lifetime, including cancellation cleanup.
+    /// </remarks>
+    public bool SessionRetentionIndependent { get; init; }
 }
 
 /// <summary>

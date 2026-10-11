@@ -50,18 +50,21 @@ function usePageTabsEdges(root: RefObject<HTMLElement | null>, page: PageId, sho
 
 function Canvas() {
   const { t } = useText();
-  const { frame, dispatch, status, visible } = useStatistics();
+  const { frame, dispatch, status, visible, header } = useStatistics();
   const view = historyView(status);
+  const showCharts = view !== "choice" || (status?.savedSessions ?? 0) > 0;
   const root = useRef<HTMLDivElement>(null);
   // Several canvases stay mounted in one window (the one of the application, the one of a project): the ids of the tabs are per canvas.
   const tabsId = useId();
-  usePageTabsEdges(root, frame.page, view !== "choice");
+  usePageTabsEdges(root, frame.page, showCharts);
   return <div className="statistics-canvas" ref={root} data-visible={visible} data-history={view}>
     <FrameBar />
     <HistoryBar />
-    {view === "choice" && status
-      ? <div className="stats-page stats-page-first"><FirstTimeCard status={status} /></div>
-      : <Tabs id={tabsId} className="stats-tabs" selectedTabId={frame.page} onChange={next => dispatch({ type: "page", page: next as PageId })} renderActiveTabPanelOnly animate={false}
+    {(header?.coverage.unavailableSavedMetrics?.length ?? 0) > 0 && <p role="status" className="stats-page">
+      {t("Some saved sessions predate current metric definitions. Unrecorded metrics are unavailable, not observed zeros.")}
+    </p>}
+    {view === "choice" && status && <div className="stats-page stats-page-first"><FirstTimeCard status={status} /></div>}
+    {showCharts && <Tabs id={tabsId} className="stats-tabs" selectedTabId={frame.page} onChange={next => dispatch({ type: "page", page: next as PageId })} renderActiveTabPanelOnly animate={false}
         aria-label={t("Statistics pages")}>
         {pageIds.map(page => <Tab key={page} id={page} disabled={false} title={pageLabel(t, page)} panel={<div className="stats-page" data-page={page}>{pages[page]()}</div>} />)}
       </Tabs>}

@@ -160,7 +160,7 @@ public sealed class SessionPluginDerivedEventProjectorTests
             new ModelProviderId("provider-1"),
             "session-1",
             DateTimeOffset.UtcNow,
-            "diagnostic");
+            "diagnostic", (Exception?)null);
 
     private static IReadOnlyList<AgentEvent> CreateStatsEvents(AgentRunId runId, DateTimeOffset startedAt)
         =>

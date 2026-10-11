@@ -200,7 +200,7 @@ A space is a group of projects you work on together, such as **Work** or **Perso
 
 ### One Settings window
 
-The TUI opens a dialog for each area. The desktop app groups them as pages of one window: **Appearance**, **Spaces**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**.
+The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page; General follows it before Spaces in the Personalization group.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page with the list of pages on the left" loading="lazy">
@@ -215,7 +215,7 @@ The window of a tool call follows the call while it runs. A command shows its ou
 
 ### Runs in the background
 
-Closing the window can keep CodeAlta running in the notification area, with its sessions. CodeAlta asks whether to keep running or to exit, and remembers the answer if you tick **Remember my choice**. Use the tray icon to open the window again or to exit. On Windows, the taskbar button shows indeterminate progress while a session runs or queued prompts are being sent. On macOS, CodeAlta started from the Applications folder, Launchpad, Spotlight or the Dock has no icon in the menu bar: it stays in the Dock, and its Dock icon opens the window again. **Settings > Appearance > When the window is closed** changes the choice. Exiting while sessions are running asks for confirmation first.
+Closing the window can keep CodeAlta running in the notification area, with its sessions. CodeAlta asks whether to keep running or to exit, and remembers the answer if you tick **Remember my choice**. Use the tray icon to open the window again or to exit. On Windows, the taskbar button shows indeterminate progress while a session runs or queued prompts are being sent. On macOS, CodeAlta started from the Applications folder, Launchpad, Spotlight or the Dock has no icon in the menu bar: it stays in the Dock, and its Dock icon opens the window again. **Settings > General > Startup and closing > When the window is closed** changes the choice. Exiting while sessions are running asks for confirmation first.
 
 On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (⌘Q), **Hide** (⌘H), **Minimize** (⌘M), **Close** (⌘W), and **Undo**, **Redo**, **Cut**, **Copy**, **Paste** and **Select All** in the **Edit** menu. ⌘W closes the window as its close button does, with the same choice between keeping CodeAlta running and exiting; ⌘Q exits.
 

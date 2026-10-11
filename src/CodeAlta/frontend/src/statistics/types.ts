@@ -48,6 +48,11 @@ export type Coverage = Readonly<{
   historyState: string;
   /** The first local day (`yyyy-MM-dd`) from which the numbers are complete. */
   completeFrom?: string;
+  savedSessions?: number;
+  savedFactsVersions?: readonly number[];
+  /** Metrics not recorded with current definitions in at least one saved session, never observed zeros. */
+  unavailableSavedMetrics?: readonly string[];
+  unverifiedSavedSessions?: number;
 }>;
 
 /** What a query echoes of its request; every result starts with it. */
@@ -316,6 +321,8 @@ export type StatisticsStatus = Readonly<{
   skipped: readonly SkippedSession[];
   pendingFlow: number;
   revision: number;
+  /** Saved charts remain visible while surviving-journal history awaits a choice. */
+  savedSessions?: number;
   error?: string;
   isComplete?: boolean;
 }>;

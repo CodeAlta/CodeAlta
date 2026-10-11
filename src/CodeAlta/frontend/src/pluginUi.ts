@@ -52,6 +52,9 @@ export type PluginComposerRequest = {
   kind: "state" | "send" | "enqueue" | "steer" | "compact" | "draft";
   sessionId: string | null; text: string | null; agentPromptId?: string | null;
   handled: boolean; result: boolean;
+  /** Downstream owner acknowledgement; null is uncertain and must not release a host handoff claim. */
+  completion?: Promise<boolean | null>;
+  signal?: AbortSignal;
   state: { sessionId: string; draftText: string; busy: boolean } | null;
 };
 export const pluginComposerEvent = "codealta:plugin";
@@ -59,8 +62,8 @@ export const pluginComposerEvent = "codealta:plugin";
 export const pluginsChangedEvent = "codealta:plugins-changed";
 
 /** Sends a request to the composer it names and returns it with the composer's answer. */
-export function askPluginComposer(kind: PluginComposerRequest["kind"], sessionId: string | null, text: string | null = null, agentPromptId: string | null = null): PluginComposerRequest {
-  const request: PluginComposerRequest = { kind, sessionId, text, agentPromptId, handled: false, result: false, state: null };
+export function askPluginComposer(kind: PluginComposerRequest["kind"], sessionId: string | null, text: string | null = null, agentPromptId: string | null = null, signal?: AbortSignal): PluginComposerRequest {
+  const request: PluginComposerRequest = { kind, sessionId, text, agentPromptId, signal, handled: false, result: false, state: null };
   window.dispatchEvent(new CustomEvent(pluginComposerEvent, { detail: request }));
   return request;
 }

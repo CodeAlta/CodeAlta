@@ -2,6 +2,7 @@ using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Tui.App;
 using CodeAlta.Catalog;
+using CodeAlta.Hosting;
 using CodeAlta.Plugins;
 using CodeAlta.Tui.ViewModels;
 using XenoAtom.Terminal;
@@ -23,6 +24,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     private readonly TerminalImageGraphicsPresenter _graphicsPresenter;
     private readonly CodeAltaUpdateService _updateService = new();
     private readonly PluginRuntimeManager? _prestartedPluginRuntime;
+    private readonly CodeAltaSingleInstanceGuard? _instanceGuard;
     private readonly Lazy<Task> _disposeTask;
     private CancellationTokenSource? _startupCancellation;
     private CancellationToken _startupToken;
@@ -39,8 +41,12 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
     private bool _stopRequested;
 
     public DeferredCodeAltaApp(PluginRuntimeManager? prestartedPluginRuntime = null)
+        : this(prestartedPluginRuntime, null) { }
+
+    internal DeferredCodeAltaApp(PluginRuntimeManager? prestartedPluginRuntime, CodeAltaSingleInstanceGuard? instanceGuard)
     {
         _prestartedPluginRuntime = prestartedPluginRuntime;
+        _instanceGuard = instanceGuard;
         var sixelOptions = new TerminalSixelEncoderOptions();
         _graphicsPresenter = new TerminalImageGraphicsPresenter(new TerminalImageGraphicsPresenterOptions
         {
@@ -148,7 +154,7 @@ internal sealed class DeferredCodeAltaApp : IAsyncDisposable
                 ref _ownedServicesTask,
                 _startupToken,
                 token => CodeAltaOwnedServices.CreateAsync(
-                    token, _prestartedPluginRuntime)))
+                    token, _prestartedPluginRuntime, _instanceGuard)))
         {
             return TerminalLoopResult.Stop;
         }

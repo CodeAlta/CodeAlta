@@ -67,7 +67,9 @@ export function sendFailureMessage(status: string, reason?: string): string {
   }
 }
 
-export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null }: {
+  /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
+  canAdmit?: () => boolean;
   active?: boolean;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
   remoteControlRequest?: RemoteControlOpenRequest | null;
@@ -120,6 +122,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId, epoch]);
   function editText(value: string) {
+    if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
     setSendFailure("");
     recall.current = noPromptRecall;
     inputRevision.current++;
@@ -129,6 +132,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   }
   const recall = useRef(noPromptRecall);
   function recallSentPrompt(direction: -1 | 1) {
+    if (!canAdmit() || !scope.current || scope.current.signal.aborted) return false;
     const next = recallPrompt(promptHistory.list(sessionId), recall.current, direction, latestText.current);
     if (!next) return false;
     const state = next.state;
@@ -137,6 +141,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     return true;
   }
   function clearText() {
+    if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
     latestText.current = "";
     restoredText.current = "";
     draftIndicators.clear(sessionId);
@@ -219,6 +224,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const [abortRunMessage, setAbortRunMessage] = useState("Refresh runtime state explicitly before targeting cancellation.");
   const [queueText, setQueueText] = useState(() => queue.draft(epoch, sessionId));
   function editQueueText(value: string) {
+    if (!canAdmit() || !scope.current || scope.current.signal.aborted) return;
     queue.editDraft(epoch, sessionId, value);
     setQueueText(value);
   }
@@ -248,7 +254,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const runtimeScope = useRef<ReturnType<typeof runtimeReader.forSelection> | null>(null);
   const [observedInvalidEpoch, setInvalidEpoch] = useState(!capability.canMutate());
   const canMutate = useSyncExternalStore(capability.subscribe, capability.canMutate);
-  const invalidEpoch = observedInvalidEpoch || !canMutate;
+  const invalidEpoch = observedInvalidEpoch || !canMutate || !canAdmit();
   const reminderOperation = useSyncExternalStore(reminderActions?.subscribe ?? capability.subscribe,
     useCallback(() => reminderActions?.get({ epoch, sessionId }), [reminderActions, epoch, sessionId]));
   const [reminderReload, setReminderReload] = useState(0);
@@ -436,7 +442,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   // Above the composer and never refused: a queued prompt waits for the session to be idle, a steering prompt
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
-    if (pending || invalidEpoch) return false;
+    if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
     if (!queue.composer.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
     if (value === latestText.current) {
       inputRevision.current++; clearText();
@@ -457,7 +463,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       const accepted = result.status === "accepted" || result.status === "replay";
       if (!accepted || result.receipt?.state === "terminal") setSubmittedThinking(current => current?.key === key ? null : current);
       if (accepted) { queue.composer.sent(id); void runtimeScope.current?.refresh(true); }
-      else if (result.status === "uncertain") queue.composer.uncertain(id, "reason" in result && result.reason ? result.reason : "uncertain");
+      else if (result.status === "uncertain" || result.status === "stale_epoch") queue.composer.uncertain(id, "reason" in result && result.reason ? result.reason : result.status);
       // The session was working after all: the prompt keeps its place and leaves at the next idle moment.
       else if (result.status === "busy" || result.status === "capacity") { queue.composer.release(id); retryLater(); }
       else queue.composer.fail(id, result.status);
@@ -494,7 +500,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   }
   const liveTexts = liveConnected ? currentLive.snapshot?.session?.text : undefined;
   useEffect(() => {
-    if (invalidEpoch || runtimeState?.kind !== "ready") return;
+    if (invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted || runtimeState?.kind !== "ready") return;
     const target = runtimeState.snapshot;
     if (target.status !== "ok" || target.hostEpoch !== epoch) return;
     const entry = target.entry;
@@ -532,7 +538,10 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     // The prompt leaves as a Send of this moment: the selection, the project references and the images of one.
     const chosen = selections.current(epoch, sessionId) ?? selection;
     const usable = chosen && activeChoices && validSelection(activeChoices, chosen) ? chosen : null;
-    const sendSelection = usable ?? (next.images ? activeChoices?.current ?? null : null);
+    const sendSelection = next.selection ?? usable ?? (next.images ? activeChoices?.current ?? null : null);
+    if (next.selection && (!activeChoices || !validSelection(activeChoices, next.selection))) {
+      queue.composer.fail(next.id, "invalid_selection"); return;
+    }
     if (next.images && (!sendSelection || activeChoices?.models.find(model => model.id === sendSelection.modelId)?.imageInput !== true)) {
       queue.composer.fail(next.id, "image_unsupported"); return;
     }
@@ -551,6 +560,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
   function submit() {
+    if (!canAdmit()) return;
     const signal = scope.current?.signal;
     sendDiagnostics.info("composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
@@ -592,7 +602,8 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       const unchanged = (inputRevision.current === revision || latestText.current === request.text) && imageOwner.get(imageKey) === capturedImages;
       // The session started working between the keystroke and the host: the prompt joins the queue instead,
       // without a failed message in the timeline.
-      if (result.status === "busy" && !retained && queue.composer.add("Queue", epoch, sessionId, request.text, request.images?.length ? request.images : null)) {
+      if (result.status === "busy" && !retained && canAdmit() && !signal.aborted
+        && queue.composer.add("Queue", epoch, sessionId, request.text, request.images?.length ? request.images : null)) {
         submissions.acknowledgeOutgoing([outgoingKey(request)]);
         if (!signal.aborted && unchanged) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
         return;
@@ -602,7 +613,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
       // The prompt stays in the composer and the status line says why: a prompt is never answered with a toast.
       setSendFailure(failure ?? "");
       if (result.status === "accepted" || result.status === "replay") void runtimeScope.current?.refresh(true);
-      if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted
+      if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && canAdmit()
         // The composer still holds exactly what was sent (a choices refresh alone also bumps the revision).
         && (inputRevision.current === revision || latestText.current === request.text)
         && imageOwner.get(imageKey) === capturedImages) { clearText(); imageOwner.replace(imageKey, capturedImages, []); }
@@ -613,7 +624,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     if (!active) return;
     const run = (event: Event) => {
       const command = (event as CustomEvent<string>).detail;
-      if (invalidEpoch) return;
+      if (invalidEpoch || !canAdmit()) return;
       if (command === "send") submit();
       else if (command === "abort") { if (composerBusy || availableAbortRun || pendingAbortRun) abortRun(); }
       else if (command === "clearQueue") queue.composer.clear(epoch, sessionId);
@@ -627,14 +638,61 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     return () => window.removeEventListener("codealta:composer", run);
   });
   // What a plugin asks of this composer: the shell names the session, or none for the focused pane.
-  const [pluginSend, setPluginSend] = useState<string | null>(null);
+  async function submitPlugin(request: PluginComposerRequest): Promise<boolean | null> {
+    const lifetime = scope.current?.signal;
+    if (!lifetime || lifetime.aborted || request.signal?.aborted || !canAdmit() || !capability.canMutate()) return false;
+    const signal = request.signal ? AbortSignal.any([lifetime, request.signal]) : lifetime;
+    const value = request.text ?? "";
+    let result: boolean | null = null;
+    const received = (reply: SubmissionResult) => {
+      observeEpoch(reply);
+      result = reply.status === "accepted" || reply.status === "replay" ? true
+        : reply.status === "uncertain" || reply.status === "stale_epoch" ? null : false;
+      if (result) void runtimeScope.current?.refresh(true);
+    };
+    // Do not acknowledge a React state update or a page-local queue as downstream ownership. These
+    // helpers latch before dispatch and settle the original command's receipt. An aborted transport is
+    // uncertain, not cancellation of host work; the plugin handoff keeps its claim in that case.
+    if (request.kind === "compact") {
+      const command = captureCompaction(epoch, sessionId, observedTarget, crypto.randomUUID());
+      if (!command || compaction.pending(sessionId)) return false;
+      await compaction.submit(command, signal, capability, received);
+    } else if (request.kind === "steer" && composerBusy) {
+      const command = captureSteering(epoch, sessionId, observedTarget, value, crypto.randomUUID());
+      if (!command || steering.pending(sessionId)) return false;
+      await steering.submit(command, signal, capability, received);
+    } else if (request.kind === "enqueue" || composerBusy || enqueue
+      || queue.composer.list(epoch, sessionId).some(item => item.kind === "Queue" && item.state !== "failed")) {
+      const chosen = selections.current(epoch, sessionId) ?? selected;
+      if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
+      // Enqueue has always meant a deferred Send, including when this saved session is unattached.
+      // Keep the requested next-send selection and await the row's original downstream receipt.
+      return await queue.composer.admit(epoch, sessionId, value, signal, chosen);
+    } else {
+      const chosen = selections.current(epoch, sessionId) ?? selected;
+      if (chosen && (!activeChoices || !validSelection(activeChoices, chosen))) return false;
+      const references = referenceScope?.expectedEpoch === epoch && referenceScope.sessionId === sessionId
+        ? { projectId: referenceScope.projectId, projectPath: referenceScope.projectPath } : null;
+      const command = captureSubmission(epoch, sessionId, value, crypto.randomUUID(), chosen, references);
+      if (!command || submissions.pending(sessionId)) return false;
+      let becameBusy = false;
+      await submissions.submit(command, signal, capability, reply => { becameBusy = reply.status === "busy"; received(reply); });
+      // Preserve ordinary Send's busy-race behavior, but still await actual downstream admission of
+      // the deferred Send. Close/unmount after the refusal conclusively prevents the new attempt.
+      if (becameBusy && !signal.aborted && canAdmit() && capability.canMutate()) {
+        submissions.acknowledgeOutgoing([outgoingKey(command)]);
+        return await queue.composer.admit(epoch, sessionId, value, signal, chosen);
+      }
+    }
+    return result;
+  }
   useEffect(() => {
     const run = (event: Event) => {
       const request = (event as CustomEvent<PluginComposerRequest>).detail;
       if (request.handled || (request.sessionId ? request.sessionId !== sessionId : !active)) return;
       request.handled = true;
       if (request.kind === "state") { request.state = { sessionId, draftText: latestText.current, busy: composerBusy }; request.result = true; return; }
-      if (invalidEpoch || pending) return;
+      if (invalidEpoch || pending || !canAdmit() || !scope.current || scope.current.signal.aborted || request.signal?.aborted) return;
       const value = request.text ?? "";
       // A prompt that names its agent prompt goes with it or not at all: a plan is carried out by the default one.
       if (request.agentPromptId && (request.kind === "send" || request.kind === "enqueue") && selected?.agentPromptId !== request.agentPromptId) {
@@ -642,29 +700,15 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
         select("agentPromptId", request.agentPromptId);
       }
       if (request.kind === "draft") { editText(value); request.result = true; }
-      else if (request.kind === "enqueue") request.result = stagePrompt("Queue", value, []);
-      else if (request.kind === "steer" && composerBusy) request.result = stagePrompt("Steer", value, []);
-      else if (request.kind === "compact") { if (!composerBusy && capability.canMutate()) { compact(); request.result = true; } }
-      // Steering an idle session is a Send, as it is from the keyboard.
-      else if ((request.kind === "send" || request.kind === "steer") && value.trim() && capability.canMutate()) {
-        // The prompt goes through this composer's own Send, once the editor holds it.
-        editText(value); setPluginSend(value); request.result = true;
-      }
+      else if (request.kind === "compact" || value.trim()) { request.completion = submitPlugin(request); request.result = true; }
     };
     window.addEventListener(pluginComposerEvent, run);
     return () => window.removeEventListener(pluginComposerEvent, run);
   });
-  useEffect(() => {
-    if (pluginSend === null) return;
-    if (text !== pluginSend) { setPluginSend(null); return; } // The user changed the text: it is theirs to send.
-    if (pending || invalidEpoch || !scope.current || scope.current.signal.aborted) return;
-    setPluginSend(null);
-    submit();
-  }, [pluginSend, text, pending, invalidEpoch]);
   // One shot per mounted composer: the parent's marker is a ref, so this prop outlives its consumption.
   const autoSent = useRef(false);
   useEffect(() => {
-    if (!autoSend || autoSent.current || text !== autoSend.text || pending || invalidEpoch || !scope.current || scope.current.signal.aborted
+    if (!autoSend || autoSent.current || text !== autoSend.text || pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted
       || !choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId) return;
     const latest = selections.current(epoch, sessionId);
     if ((latest || selection) && (!validSelection(choices, latest ?? selection!) || latest && selection !== latest)) return;
@@ -722,6 +766,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     stagePrompt(images.length ? "Queue" : "Steer");
   }
   function steer(fromComposer = false) {
+    if (!canAdmit()) return;
     if (images.length || pending?.request.images?.length) { setImageNotice("Steer refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -752,6 +797,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     });
   }
   function compact() {
+    if (!canAdmit()) return;
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = compaction.pending(sessionId);
@@ -773,6 +819,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     });
   }
   function abortRun() {
+    if (!canAdmit()) return;
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = abortRuns.pending(sessionId);
@@ -788,6 +835,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     });
   }
   function queueTextInHost(fromComposer: boolean) {
+    if (!canAdmit()) return;
     if (images.length || pending?.request.images?.length) { setImageNotice("Queue refuses image attachments. Use normal Send or remove attachments first."); return; }
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
@@ -812,6 +860,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     }, source);
   }
   function cancelQueued(row?: SessionReceiptView, retainedOperationId?: string) {
+    if (!canAdmit()) return;
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = queue.cancelPending(retainedOperationId ?? row?.operationId ?? "");
@@ -826,6 +875,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     });
   }
   function abort(row?: SessionReceiptView, retainedOperationId?: string) {
+    if (!canAdmit()) return;
     const signal = scope.current?.signal;
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = submissions.abortPending(retainedOperationId ?? row?.operationId ?? "");
@@ -841,7 +891,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
-    if (!activeChoices || !selected || selectionDisabled) return;
+    if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
     const next = changeSelection(activeChoices, selected, field, value);
     if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
     if (!selections.set(epoch, sessionId, activeChoices, next)) return;
@@ -865,7 +915,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     const selectionVersion = selectionRevision.current; const lifetime = inputLifetime;
     const signal = scope.current?.signal;
     const current = () => !signal?.aborted && inputRevision.current === revision && selectionRevision.current === selectionVersion
-      && origin.isConnected && !origin.closest("[inert]") && (!lifetime || lifetime.current()) && capability.canMutate()
+      && canAdmit() && origin.isConnected && !origin.closest("[inert]") && (!lifetime || lifetime.current()) && capability.canMutate()
       && imageOwner.get(imageKey) === original && !submissions.pending(sessionId);
     if (!current()) return;
     const finish = imageOwner.beginRead(imageKey);
@@ -881,7 +931,7 @@ export function OwnedSessionPanel({ onRunActivity, toolOutputs, sessionId, epoch
     finally { finish(); }
   }
   function canEditImages() {
-    return !!scope.current && !scope.current.signal.aborted && !submissions.pending(sessionId)
+    return canAdmit() && !!scope.current && !scope.current.signal.aborted && !submissions.pending(sessionId)
       && capability.canMutate() && (inputLifetime?.current() ?? true) && imageOwner.get(imageKey) === images;
   }
   const attachmentStrip = <PromptImageAttachments images={pending?.request.images ?? images}

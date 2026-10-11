@@ -421,7 +421,7 @@ internal partial class Program
         // Defer async app startup until the terminal loop is already running so XenoAtom keeps the UI
         // bound to the process main thread. Awaiting service creation before Terminal.RunAsync can move
         // the actual UI bootstrap onto a worker continuation instead.
-        var app = new DeferredCodeAltaApp(prestartedPluginRuntime);
+        var app = new DeferredCodeAltaApp(prestartedPluginRuntime, owner.AdmissionLease as CodeAltaSingleInstanceGuard);
         owner.App = app;
         Exception? bodyFailure = null;
         try

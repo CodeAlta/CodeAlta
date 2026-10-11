@@ -16,10 +16,11 @@ const edge = browserExecutable;
 // a name or a control that leaves the card. `arrangement` is, for each row, whether its control is beside
 // its name ("beside") or below it ("below").
 const inspect = `(() => {
-  const card = document.querySelector(".appearance-settings"), style = getComputedStyle(card), box = card.getBoundingClientRect();
+  const problems = [], arrangement = {};
+  for (const card of document.querySelectorAll(".appearance-settings")) {
+  const style = getComputedStyle(card), box = card.getBoundingClientRect();
   const left = box.left + parseFloat(style.paddingLeft) + parseFloat(style.borderLeftWidth);
   const right = box.right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
-  const problems = [], arrangement = {};
   for (const row of card.querySelectorAll(".settings-field")) {
     const name = row.querySelector(":scope > label, :scope > .settings-field-label");
     const range = document.createRange(); range.selectNodeContents(name);
@@ -31,6 +32,7 @@ const inspect = `(() => {
       if (rect.left < text.right - 1 && rect.right > text.left + 1 && rect.top < text.bottom - 1 && rect.bottom > text.top + 1) problems.push(name.textContent + ": its control covers its name");
     }
     arrangement[row.querySelector(":scope > .settings-field-control [id]")?.id ?? "theme"] = controls.every(rect => rect.top >= text.bottom - 1) ? "below" : "beside";
+  }
   }
   return { problems, arrangement, scrolls: document.documentElement.scrollWidth > document.documentElement.clientWidth };
 })()`;
@@ -51,7 +53,7 @@ const inspectEditor = `(() => {
   return [...new Set(problems)];
 })()`;
 
-test("the rows of the Appearance card stay readable from the narrowest Settings window to a wide one, in every language", { skip: !edge, timeout: 120_000 }, async () => {
+test("the Appearance, General and Permissions sections stay readable from the narrowest Settings window to a wide one, in every language", { skip: !edge, timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-appearance-layout-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -95,6 +97,8 @@ test("the rows of the Appearance card stay readable from the narrowest Settings 
       await evaluate(`appearanceLayout.setLocale(${JSON.stringify(locale)}); appearanceLayout.setWidth(${width}); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
       return await evaluate(inspect) as { problems: string[]; arrangement: Record<string, string>; scrolls: boolean };
     };
+    for (const page of ["general", "permissions", "appearance"]) {
+    await evaluate(`appearanceLayout.setPage(${JSON.stringify(page)}); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
     // From what the Settings window leaves the card at its smallest size (270) to a wide window.
     for (const locale of locales) for (const width of [270, 300, 340, 380, 420, 460, 500, 540, 580, 620, 700, 900]) {
       const { problems, scrolls } = await laidOut(locale, width);
@@ -108,8 +112,13 @@ test("the rows of the Appearance card stay readable from the narrowest Settings 
     }
     // Narrow: a list or a group goes below its name, and a switch is small enough to stay beside it.
     const narrow = (await laidOut("en", 270)).arrangement;
-    for (const id of ["settings-language", "theme", "settings-color-scheme", "settings-project-sort", "settings-recent-count", "settings-changes-view", "settings-on-close"]) assert.equal(narrow[id], "below", id);
-    for (const id of ["settings-darker", "settings-rail-collapsed"]) assert.equal(narrow[id], "beside", id);
+    const lists = page === "general" ? ["settings-language", "settings-on-close"] : page === "permissions" ? ["settings-permission-mode", "settings-permission-created"]
+      : ["theme", "settings-color-scheme", "settings-project-sort", "settings-recent-count", "settings-sub-agent-count", "settings-changes-view"];
+    const switches = page === "general" ? ["settings-landing-startup", "settings-landing-animation", "settings-reconnect-remote-control"]
+      : page === "permissions" ? ["settings-confirm-session-delete", "settings-confirm-project-archive"] : ["settings-darker", "settings-rail-collapsed"];
+    for (const id of lists) assert.equal(narrow[id], "below", id);
+    for (const id of switches) assert.equal(narrow[id], "beside", id);
+    }
 
     // The editor of a color scheme, opened on a copy of the selected scheme, at the same sizes.
     await evaluate(`document.querySelector(".scheme-customize").click(); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);

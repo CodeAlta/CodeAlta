@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading.Channels;
+using CodeAlta.Catalog.Storage;
 
 namespace CodeAlta.Hosting.Tests;
 
@@ -21,6 +22,74 @@ namespace CodeAlta.Hosting.Tests;
 [TestCategory("LockProcessQualification")]
 public sealed class CodeAltaSingleInstanceGuardProcessTests
 {
+    [TestMethod]
+    public Task Scratchpad_LegacyDeveloperProcessPreventsNormalCleanup()
+        => RunScenarioAsync(async scenario =>
+        {
+            if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows scratchpad qualification.");
+            var dev = Directory.CreateDirectory(Path.Combine(scenario.Root, "dev")).FullName;
+            var scratchpad = Directory.CreateDirectory(Path.Combine(scenario.Root, "scratchpad")).FullName;
+            var note = Path.Combine(scratchpad, "note");
+            File.WriteAllText(note, "keep");
+            var legacy = scenario.Start("guard", root: dev);
+            await legacy.ReadyAsync();
+            await legacy.BeginAsync();
+            Assert.IsTrue(await legacy.AdmissionAsync());
+            try
+            {
+                var profile = CodeAltaInstanceProfile.Create(scenario.Root, false);
+                using var guard = CodeAltaSingleInstanceGuard.Acquire(profile.LockFilePath);
+                var cleanup = new ScratchpadStartupCleanup(profile, guard);
+                await cleanup.RunAsync(true, true, CancellationToken.None);
+                Assert.AreEqual(ScratchpadCleanupState.Skipped, cleanup.Snapshot.State);
+                Assert.AreEqual("keep", File.ReadAllText(note));
+                legacy.AssertRunning();
+            }
+            finally { await legacy.ReleaseAsync(); File.Delete(note); Directory.Delete(scratchpad); Directory.Delete(dev); }
+        });
+
+    [TestMethod]
+    public Task Scratchpad_TemporaryGateRejectsIndependentLegacyStartupUntilWorkerTerminates()
+        => RunScenarioAsync(async scenario =>
+        {
+            if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows scratchpad qualification.");
+            var dev = Directory.CreateDirectory(Path.Combine(scenario.Root, "dev")).FullName;
+            var scratchpad = Directory.CreateDirectory(Path.Combine(scenario.Root, "scratchpad")).FullName;
+            var note = Path.Combine(scratchpad, "note");
+            File.WriteAllText(note, "remove");
+            var contender = scenario.Start("guard", root: dev);
+            await contender.ReadyAsync();
+            var profile = CodeAltaInstanceProfile.Create(scenario.Root, false);
+            using var guard = CodeAltaSingleInstanceGuard.Acquire(profile.LockFilePath);
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var cleanup = new ScratchpadStartupCleanup(profile, guard)
+            {
+                BeforeEntryDelete = _ => { entered.Set(); Assert.IsTrue(release.Wait(TimeSpan.FromSeconds(10))); },
+            };
+            var worker = cleanup.RunAsync(true, true, CancellationToken.None);
+            try
+            {
+                Assert.IsTrue(entered.Wait(TimeSpan.FromSeconds(10)));
+                await contender.BeginAsync();
+                // Legacy guard startup cannot acquire a delete-pending name; it exits on AccessDenied.
+                await contender.ExpectExitAsync(1);
+                StringAssert.Contains(await contender.ErrorAsync(), "UnauthorizedAccessException");
+                Assert.IsFalse(worker.IsCompleted);
+            }
+            finally { release.Set(); await worker; }
+            try
+            {
+                Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State);
+                var successor = scenario.Start("guard", root: dev);
+                await successor.ReadyAsync();
+                await successor.BeginAsync();
+                Assert.IsTrue(await successor.AdmissionAsync());
+                await successor.ReleaseAsync();
+            }
+            finally { File.Delete(note); Directory.Delete(scratchpad); Directory.Delete(dev); }
+        });
+
     /// <summary>Rejects malformed explicit arguments without admission or lock creation.</summary>
     [TestMethod]
     [DataRow("missing")]
@@ -180,10 +249,10 @@ public sealed class CodeAltaSingleInstanceGuardProcessTests
             }
         }
 
-        public OwnedProbe Start(string mode, string? invalid = null)
+        public OwnedProbe Start(string mode, string? invalid = null, string? root = null)
         {
             _deadline.Token.ThrowIfCancellationRequested();
-            var probe = new OwnedProbe(apphost, Root, mode, _deadline.Token, invalid);
+            var probe = new OwnedProbe(apphost, root ?? Root, mode, _deadline.Token, invalid);
             _probes.Add(probe); // Ownership precedes Process.Start and every subsequent fallible operation.
             probe.Start();
             _deadline.Token.ThrowIfCancellationRequested();

@@ -12,7 +12,7 @@ const optional = (shape: Shape): Shape => ({ optional: shape });
 const array = (shape: Shape): Shape => ({ array: shape });
 const object = (fields: Record<string, Shape>): Shape => ({ object: fields });
 
-const coverage = object({ complete: "boolean", historyState: "string", completeFrom: optional("string") });
+const coverage = object({ complete: "boolean", historyState: "string", completeFrom: optional("string"), savedSessions: optional("number"), savedFactsVersions: optional(array("number")), unavailableSavedMetrics: optional(array("string")), unverifiedSavedSessions: optional("number") });
 const query = object({ period: "string", from: "string", to: "string", frequency: "string", timeZone: "string", compareFrom: optional("string"), compareTo: optional("string"), coverage, ignoredFilters: array("string"), notes: array("string") });
 const bucket = object({ index: "number", start: "string", label: "string" });
 const numbers = array("number");
@@ -52,7 +52,7 @@ const shapes: Readonly<Record<string, Shape>> = {
       toolFailures: "number", inputTokens: "number", outputTokens: "number", answerChars: "number", answerWords: "number", provider: "string", model: "string", effort: "string" })) }),
   StatisticsStatus: object({ state: "string", reason: optional("string"), choice: optional("string"), floorDay: optional("number"), sessionsTotal: "number", sessionsDone: "number", bytesTotal: "number", bytesDone: "number",
     oldestDateReached: optional("number"), completeFromDay: optional("number"), bytesPerSecond: optional("number"), etaSeconds: optional("number"), currentSessionId: optional("string"), skippedCount: "number",
-    skipped: array(object({ sessionId: "string", reason: "string" })), pendingFlow: "number", revision: "number", error: optional("string"), isComplete: "boolean" }),
+    skipped: array(object({ sessionId: "string", reason: "string" })), pendingFlow: "number", revision: "number", savedSessions: optional("number"), error: optional("string"), isComplete: "boolean" }),
 };
 
 /** Returns what is wrong with `value` against `shape`, as paths; empty when it fits. */

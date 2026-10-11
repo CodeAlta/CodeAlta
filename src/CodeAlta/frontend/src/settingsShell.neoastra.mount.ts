@@ -23,6 +23,13 @@ if (localStorage.getItem("ideFixtureLongLabels") === "true") {
   session.title = session.fullTitle = "Literal Sitzung 日本語 <session> ".repeat(6);
 }
 const unavailable = async () => { throw new Error("test bridge unavailable"); };
+export const storage = {
+  readSettings: async () => ({ status: "ok", rootPath: "/fixture/.alta", error: null,
+    settings: { clearScratchpadOnStartup: true, retentionEnabled: true, retentionAmount: 3, retentionUnit: "months" } }),
+  saveSettings: unavailable,
+  scan: async () => ({ status: "ok", snapshot: { rootPath: "/fixture/.alta", totalBytes: "0", completedAt: "2026-10-10T00:00:00Z",
+    categories: [], skippedLinks: "0", skippedEntries: "0", isPartial: false } }),
+};
 const permissionReads: Array<{ request: SessionPermissionsRequest; resolve: (value: unknown) => void }> = [];
 const permissionDecisions: Array<{ request: SessionPermissionResolveRequest; resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
 type InputRequest = Parameters<Parameters<typeof createUserInputReviewer>[1]>[0];

@@ -10,6 +10,60 @@ const steer = (key: string, text = "steer text"): SessionSteerRequest => ({ expe
 const receipt = (key: string, kind: string, outcome: string | null = "Completed"): SessionReceiptView => ({ clientRequestId: key, sessionId: "session",
   operationId: "operation", targetOperationId: null, kind, state: outcome ? "terminal" : "pending", outcome, code: null, runId: "run", queueInsertion: null });
 
+test("programmatic enqueue preserves its selection and awaits downstream ownership, not local insertion", async () => {
+  const owner = createComposerQueue();
+  const selection = { providerId: "provider", providerKey: "key", modelId: "model", agentPromptId: "default", reasoningEffort: null, permissionMode: null };
+  const outcome = owner.admit("epoch", "session", "Do the plan", new AbortController().signal, selection);
+  let settled = false; void outcome.then(() => { settled = true; });
+  await Promise.resolve(); assert.equal(settled, false);
+  const item = owner.list("epoch", "session")[0];
+  assert.equal(item.selection?.agentPromptId, "default");
+  assert.notEqual(item.selection, selection);
+  owner.claim(item, { ...send("original"), selection: item.selection ?? null });
+  await Promise.resolve(); assert.equal(settled, false);
+  owner.sent(item.id);
+  assert.equal(await outcome, true);
+});
+
+test("canceling queued work before dispatch removes it, but cancellation cannot release an original in flight", async () => {
+  const owner = createComposerQueue(), waiting = new AbortController();
+  const canceled = owner.admit("epoch", "session", "Not started", waiting.signal);
+  waiting.abort(); assert.equal(await canceled, false);
+  assert.deepEqual(owner.list("epoch", "session"), []);
+  for (const accepted of [true, false]) {
+    const lifetime = new AbortController();
+    const pending = owner.admit("epoch", "session", "Captured", lifetime.signal);
+    const item = owner.list("epoch", "session")[0];
+    owner.claim(item, send("original"));
+    let settled = false; void pending.then(() => { settled = true; });
+    lifetime.abort(); await Promise.resolve(); assert.equal(settled, false);
+    if (accepted) owner.sent(item.id); else owner.release(item.id); // Busy refusal cannot requeue after Close.
+    assert.equal(await pending, accepted);
+    assert.deepEqual(owner.list("epoch", "session"), []);
+  }
+});
+
+test("uncertain queued admission stays protected after close until its original receipt is known", async () => {
+  const owner = createComposerQueue(), lifetime = new AbortController();
+  const pending = owner.admit("epoch", "session", "Original", lifetime.signal);
+  const item = owner.list("epoch", "session")[0];
+  owner.claim(item, send("original")); owner.uncertain(item.id, "transport");
+  let settled = false; void pending.then(() => { settled = true; });
+  lifetime.abort(); await Promise.resolve(); assert.equal(settled, false);
+  assert.equal(owner.remove(owner.list("epoch", "session")[0]), false);
+  owner.sent(item.id); assert.equal(await pending, true);
+});
+
+test("close during an admitted repeated Send never schedules a fresh repeat", async () => {
+  const owner = createComposerQueue(), lifetime = new AbortController();
+  const pending = owner.admit("epoch", "session", "Original", lifetime.signal);
+  owner.edit(owner.list("epoch", "session")[0], "Original", 2);
+  const item = owner.list("epoch", "session")[0];
+  owner.claim(item, send("original")); lifetime.abort(); owner.sent(item.id);
+  assert.equal(await pending, true, "the original still has a conclusive owner receipt");
+  assert.deepEqual(owner.list("epoch", "session"), [], "Close cancels any not-yet-started repeats");
+});
+
 test("queued prompts belong to their host and session, and are editable until they leave", () => {
   const owner = createComposerQueue();
   const added = owner.add("Queue", "epoch", "session", "queued text");

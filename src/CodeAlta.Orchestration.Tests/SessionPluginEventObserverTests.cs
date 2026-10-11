@@ -27,7 +27,7 @@ public sealed class SessionPluginEventObserverTests
             new ModelProviderId("provider-1"),
             "session-1",
             DateTimeOffset.UtcNow,
-            "diagnostic");
+            "diagnostic", (Exception?)null);
 
         var diagnostics = await observer.ObserveAsync(context, agentEvent);
 
@@ -44,7 +44,7 @@ public sealed class SessionPluginEventObserverTests
             new ModelProviderId("provider-1"),
             "session-1",
             DateTimeOffset.UtcNow,
-            "diagnostic");
+            "diagnostic", (Exception?)null);
 
         Assert.ThrowsExactly<ArgumentNullException>(() => observer.ObserveAsync(null!, agentEvent).AsTask().GetAwaiter().GetResult());
     }

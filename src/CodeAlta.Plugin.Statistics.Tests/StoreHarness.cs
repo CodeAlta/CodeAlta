@@ -11,6 +11,7 @@ namespace CodeAlta.Plugin.Statistics.Tests;
 internal sealed class StoreHarness : IAsyncDisposable
 {
     private bool _initialize = true;
+    private bool _archives;
 
     private StoreHarness(string root, TimeZoneInfo timeZone)
     {
@@ -29,11 +30,11 @@ internal sealed class StoreHarness : IAsyncDisposable
     public StatisticsStore Store { get; private set; } = null!;
 
     /// <summary>Makes the database and the store. With <paramref name="initialize"/> false the tables of the statistics are not created: the database of a first start.</summary>
-    public static async Task<StoreHarness> CreateAsync(TimeZoneInfo? timeZone = null, string? root = null, bool initialize = true)
+    public static async Task<StoreHarness> CreateAsync(TimeZoneInfo? timeZone = null, string? root = null, bool initialize = true, bool archives = false)
     {
         root ??= Path.Combine(Path.GetTempPath(), "CodeAlta.Plugin.Statistics.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        var harness = new StoreHarness(root, timeZone ?? TimeZoneInfo.Utc) { _initialize = initialize };
+        var harness = new StoreHarness(root, timeZone ?? TimeZoneInfo.Utc) { _initialize = initialize, _archives = archives };
         await harness.OpenAsync();
         return harness;
     }
@@ -209,7 +210,7 @@ internal sealed class StoreHarness : IAsyncDisposable
     {
         Application = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = Path.Combine(Root, "data", "alta.sqlite3") });
         Database = new PluginDatabase(Application, "builtin:statistics");
-        Store = new StatisticsStore(Database, new LocalDays(TimeZone));
+        Store = new StatisticsStore(Database, new LocalDays(TimeZone), _archives ? new StatisticsArchiveStore(Root) : null);
         if (_initialize)
         {
             await Store.InitializeAsync();

@@ -56,7 +56,7 @@ internal sealed class StatisticsEngineOptions
 /// </para>
 /// <para>All the members are thread-safe; <see cref="RunAsync"/> is the one loop and must be called once.</para>
 /// </remarks>
-internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
+internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDisposable
 {
     private const string ChoiceKey = "history.choice";
     private const string FloorKey = "history.floor_day";
@@ -182,6 +182,10 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             // Everything that can fail is read first: the engine is started only when all of it is known, so that a start that
             // failed, at whatever step, is a start that can be tried again.
             await _store.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            if (_store.HasArchive)
+            {
+                await ReconcileArchivesAsync(cancellationToken).ConfigureAwait(false);
+            }
             var meta = await _store.GetAllMetaAsync(cancellationToken).ConfigureAwait(false);
             var projectNames = await _store.GetProjectNamesAsync(cancellationToken).ConfigureAwait(false);
             foreach (var (reference, name) in projectNames)
@@ -529,13 +533,21 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
     public async ValueTask<int> ForgetDeletedAsync(CancellationToken cancellationToken = default)
     {
         await InitializeAsync(cancellationToken).ConfigureAwait(false);
-        var (sessions, days) = await _store.ForgetDeletedAsync(cancellationToken).ConfigureAwait(false);
-        if (sessions > 0 && days.Count > 0)
+        await _stepGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            RaiseDataChanged(days, []);
-        }
+            var (sessions, days) = await _store.ForgetDeletedAsync(cancellationToken).ConfigureAwait(false);
+            if (sessions > 0 && days.Count > 0)
+            {
+                RaiseDataChanged(days, []);
+            }
 
-        return sessions;
+            return sessions;
+        }
+        finally
+        {
+            _stepGate.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -552,6 +564,9 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
         long revision;
         try
         {
+            await ReconcileArchivesAsync(cancellationToken).ConfigureAwait(false);
+            // Validation/migration/reseed must succeed before changing the readable engine state or the user's history choice.
+            await _store.ResetAsync(cancellationToken).ConfigureAwait(false);
             lock (_gate)
             {
                 _phase = HistoryPhase.NeedsChoice;
@@ -575,7 +590,6 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             _projectNames.Clear();
             _projectNamesStale = true;
             _lastProjectRefresh = DateTimeOffset.MinValue;
-            await _store.ResetAsync(cancellationToken).ConfigureAwait(false);
             revision = Interlocked.Increment(ref _revision);
         }
         finally
@@ -956,6 +970,11 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
 
     private async Task CatchUpCoreAsync(SessionJournalFile file, JournalRow? row, bool restart, bool history, CancellationToken cancellationToken)
     {
+        if (await _store.HasArchivedGenerationAsync(file.SessionId, cancellationToken).ConfigureAwait(false))
+        {
+            await ReplaceArchivedProjectionAsync(file.SessionId, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         var sessionId = file.SessionId;
         var cursor = restart || row is null ? null : row.ToCursor();
         FactBatch? accumulated = null;
@@ -1184,6 +1203,7 @@ internal sealed class StatisticsEngine : IStatisticsService, IAsyncDisposable
             double? eta = speed is > 0 && _bytesTotal > _bytesDone ? (_bytesTotal - _bytesDone) / speed.Value : null;
             status = new StatisticsStatus
             {
+                SavedSessions = _store.SavedSessions,
                 State = _phase switch
                 {
                     HistoryPhase.Starting => HistoryState.Starting,

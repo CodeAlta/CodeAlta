@@ -105,7 +105,7 @@ CodeAlta keeps an icon in the notification area (the menu bar on macOS, the syst
 with **Open CodeAlta** and **Exit**; selecting the icon opens the window too. Closing the window can
 hide it and leave the application running there, so sessions keep running. What closing does is the
 user's choice, kept in `preferences.json` in the application data directory (`onClose`: `ask`,
-`keep` or `exit`) and shown by Settings → Appearance → **When the window is closed**:
+`keep` or `exit`) and shown by Settings → General → Startup and closing → **When the window is closed**:
 
 - **Ask each time**, the choice of a new profile. The page asks **Keep CodeAlta running?**, saying
   where CodeAlta stays, with **Keep running**, **Exit CodeAlta**, **Cancel** and a **Remember my
@@ -461,7 +461,8 @@ in the popover. **Do not ask again** makes the next ones run at once, and their 
 ellipsis; what is refused is then said in a notice. The two answers are kept in this WebView's local
 storage (`codealta.desktop.confirm.sessionDelete.v1`, `codealta.desktop.confirm.projectArchive.v1`) and
 taken back with **Ask before deleting a session** and **Ask before archiving a project** of
-**Settings → Appearance**. Nothing is typed to delete a session: the request still names the session by
+**Settings → Permissions → Confirmations**. These manual-action confirmations do not control automatic
+session retention. Nothing is typed to delete a session: the request still names the session by
 its id and the title it is listed with (`confirmedTitle`), and the host refuses a session whose title
 is no longer that one. After a deletion the row that takes the place of the deleted one has the focus,
 so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
@@ -623,7 +624,7 @@ one SVG path, 128 px, dark on white in both themes, which phone cameras read bes
 - A send that attaches the session again (another model, effort or agent prompt) ends the bridge with the old
   attachment; the runtime turns Remote Control on again in the new one (see `doc/providers.md`, "Remote Control").
 - The host remembers the sessions that have it on (`preferences.json`, `remoteControlSessions`, the last
-  turned on first, at most 32). **Settings > Appearance > Turn Remote Control back on when CodeAlta starts**
+  turned on first, at most 32). **Settings > General > Startup and closing > Turn Remote Control back on when CodeAlta starts**
   (`reconnectRemoteControl`, written only as `true`, `desktopShell.setReconnectRemoteControl`) has them
   connected again when the host starts (`DesktopRemoteControl.Reconnect`, one after the other, in the
   background; an unknown session is forgotten). Off by default: otherwise Remote Control is off after a restart,
@@ -1548,7 +1549,7 @@ The landing page is the start page of the window: a tab titled **Welcome**. It i
 - **Cards of plugins.** The page reads them with `pluginUi.landingCards` for the space it is shown in (see "Landing cards" in [Plugins](plugins.md)): each card has the title and the icon its plugin declared, a status text, an HTML fragment drawn with the `PluginHtml` component (sanitized, as every fragment of a plugin), and up to three actions that run a command of the plugin or open one of its canvases. A `data-alta-command` element of the fragment runs a command of the plugin of the card, looked up among the commands the host sent with the card and run with `pluginUi.invokeCommand` for the project of the card: never a command of another plugin, and not only when that project is the selected one. An action opens a canvas of the application without a project, as the Canvases page does, and a canvas of a project for the project of the card. The card of a plugin of a project names its project, and is shown only in the spaces that have that project, never for an archived one: nothing of a project reaches the page of a space it is not in. A card that failed is drawn with its title and one line that says it could not be loaded; an error while a card is drawn is caught for that card. The Statistics overview is such a card: without the Statistics plugin there is none.
 - **Reading.** The page reads the cards and the state of the providers when it is shown and each time it comes back in front; again when `pluginUi.watch` says a plugin invalidated its cards (`landing`) or a command of a plugin ended (`refresh`), and when plugins start, are reloaded or stop. A burst of events is one read, a read that changed nothing leaves the cards as they are, and a read that failed keeps them. A page that is hidden reads nothing; nothing is read on a timer, except the state of the providers every four seconds while they are still being looked for.
 - **The accent.** A field of pixels in the colors of the Alta logo, at the right of the hero and faded toward the text: a `<canvas>` of one pixel for each cell (96 by 40 at most), stretched without smoothing, painted about nine times a second by a timer that the page owns. It is a part of the hero, not the background of the page, and nothing of React is drawn again for a frame. It does not move, and no timer runs, when the animation is turned off, when the system asks for less motion (`prefers-reduced-motion`), when the tab is not in front, when the window is hidden (`document.hidden`) or when the hero is scrolled away: one still frame is drawn. It is hidden in forced colors. It needs no library and no change of the content security policy.
-- **Preferences.** Two switches at the bottom of the page, kept in the window on this computer (`localStorage`, so the developer instance has its own): **Show at startup** (`codealta.desktop.landing.startup.v1`, on by default) and **Animation** (`codealta.desktop.landing.animation.v1`, on by default). The same two are on the first page of Settings, Appearance (**Show the welcome page at startup**, **Animate the welcome page**, `LandingSettings`), so the page can be turned back on after its tab was closed; both places read one store and follow each other at once.
+- **Preferences.** Two switches at the bottom of the page, kept in the window on this computer (`localStorage`, so the developer instance has its own): **Show at startup** (`codealta.desktop.landing.startup.v1`, on by default) and **Animation** (`codealta.desktop.landing.animation.v1`, on by default). The same two are in Settings → General → Welcome page (**Show the welcome page at startup**, **Animate the welcome page**, `LandingSettings`), so the page can be turned back on after its tab was closed; both places read one store and follow each other at once.
 - **At startup.** When **Show at startup** is on, the page is opened in front once, when the application starts, in the space the window shows then (`useLandingAtStartup`): after the tabs are restored and once the plugins declare the canvas, within twenty seconds. It does not open again in the same run: not when another space is shown, not when the switch is turned on later, and not after the user closed the tab. A tab of the page that was left open is restored like any tab, whatever the switch. With the plugin `landing` turned off nothing opens.
 - **Settings > Plugins.** The page has a row among the plugins that ship with CodeAlta, **Landing page**, with its description, its canvas (Welcome, Application) and the switch of every such plugin: off writes `[plugins.landing] enabled = false`, and the page is gone at the next start (no tab, no command, `alta landing open` answers `landing.unavailable`).
 
@@ -1636,11 +1637,29 @@ packages. The script refuses a file that holds anything but a drawing.
 
 ## Settings
 
+Settings still opens on Appearance. The Personalization group lists Appearance, General and Spaces in
+that order. This organization changes no preference keys, defaults or state owners.
+
+### General
+
+**Settings → General** contains **Language**, **Welcome page** (the startup and animation switches
+together in `LandingSettings`, sharing the welcome page's preference store), and **Startup and closing** (restore
+Remote Control at startup and choose what closing the window does). Language and welcome preferences
+remain WebView-local; startup and closing preferences remain shell-backed.
+
+### Permissions
+
+**Settings → Permissions** keeps the existing **Agent permissions** modes and adds **Confirmations**:
+**Ask before deleting a session** and **Ask before archiving a project**. These WebView-local switches
+stay synchronized with **Do not ask again** and remain available when host-backed agent permissions
+are unavailable. They govern manual actions, not automatic session retention.
+
 ### Appearance
 
-**Settings → Appearance** manages the language, the theme (Dark, Light, or Auto, which follows the
-operating system), a darker dark theme, the color scheme, project sorting, the recent-session count and
-desktop project-rail collapse. The button before the window controls at the top right switches between the
+**Settings → Appearance** has three sections: **Theme and colors** (Dark, Light, or Auto, which follows
+the operating system; a darker dark theme; and the color-scheme editor), **Explorer** (project sorting,
+recent-session and sub-agent counts, and desktop project-rail collapse), and **Conversation and changes**
+(conversation width/reset and the one-file/all-changes view). The button before the window controls at the top right switches between the
 three themes; the percentage before it is the zoom of the window. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
 saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
@@ -1792,7 +1811,7 @@ The command approval policy is edited in **Settings → Configuration file**.
 
 ### Spaces
 
-**Settings → Spaces** (group Personalization, after Appearance; `/spaces`, or **Organize spaces…** in the
+**Settings → Spaces** (group Personalization, after General; `/spaces`, or **Organize spaces…** in the
 space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSettings.tsx`, see "Spaces").
 
 - On the left, the Default space with the list of every project, each with the icons of the other spaces
@@ -1972,6 +1991,46 @@ provider key.
 - `logout` removes the stored credential and reports `removed` (false when the provider was not
   signed in). It is refused with `busy` while a sign-in runs; other codes are those of `status` plus
   `unsupported` and `logout_failed`.
+
+### Storage
+
+**Settings → Advanced → Storage** is two compact cards: **Automatic cleanup** first, so its controls
+stay visible without scrolling in a small Settings window, then **File sizes** below it, at every
+width. Explanations sit behind the info buttons of the card headings
+(a `PopoverNext` that the keyboard opens), not in paragraphs on the page. The sizes card measures the
+host-owned profile without offering deletion actions: its heading holds the total, **Refresh** and,
+while a scan runs, **Cancel scan**. The permanent category table comes first, at most 600 px wide,
+with a color swatch per row, and stays available to keyboard and screen-reader users; the
+shared lazy-loaded `Chart` draws a donut beside it, centered in the rest of the card (below it on a
+page narrower than 600 px), with no legend of its own
+(`option.legend` is omitted): the table is its legend. Rows are sorted by size while each category keeps the color of
+its fixed position, including separately measured developer data; percentages always use the
+complete measured total, and a non-empty category never reads as 0%. Logical file sizes are not allocated disk usage: compression,
+sparse files and hard links can differ. Skipped links and inaccessible/changing entries produce
+an explicit partial result. Empty, failed and canceled scans are visible rather than shown as zero
+successes. Refresh supersedes older results; closing the page aborts only its scan, never startup
+maintenance. Measurement has a separate ten-minute RPC timeout, not the settings-read timeout.
+
+The global `config.toml` uses the existing file-location controls at the foot of the cleanup card. Cleanup changes apply at the
+next startup, not when an editor changes. Scratchpad clearing defaults to on, and session retention
+defaults to three calendar months. Blueprint `NumericInput` supplies manual input, arrow keys and
+visible step buttons, alongside days/weeks/months/years and **After / Never** on the
+**Delete inactive sessions** row. Invalid
+or incomplete string drafts are never persisted or clamped to a shorter duration. **Never** can
+be saved independently of an invalid draft: it preserves a valid current amount, or visibly restores
+the last saved amount when the draft is invalid, and keeps the unit. Host
+validation remains authoritative for calendar bounds and safe cleanup eligibility. App-owned subscriptions replay
+the host's latest outcomes even when Settings was closed. The scratchpad maintenance summary is one line of bounded running/completed/partial/skipped/canceled feedback from the host
+in the cleanup card, with its reasons under **Details**. The optional session retention summary is a
+separate line below it: running, completed with the removed count, partial with removed and kept counts,
+or skipped/canceled. Known skip reasons get short localized text (not available yet, off, Saved Statistics
+unavailable, check the retention duration); unknown reasons and states never show host text, and an
+unknown state shows an explicit unavailable line. A broken observation stream or host-liveness outage does not erase an already-final
+outcome for the same host epoch. Unfinished outcomes become unavailable until observation resumes; an actual epoch change clears the old results.
+Automatic session deletion is a single startup pass after external producers are registered and the
+native window's authenticated lifetime/inventory handshake has protected open sessions and drafts in
+every space. Missing restoration, unavailable Statistics or unsupported storage skips cleanup; policy
+editing never enables readiness or retries a pass. Manual deletion confirmations do not govern automatic retention.
 
 ### Configuration file
 

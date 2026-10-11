@@ -677,6 +677,14 @@ public static class AgentBuiltInToolFactory
             return Failure($"shell_command failed to start: {ex.Message}");
         }
 
+        // A child may retain the redirected pipes after the shell exits. Keep the same
+        // deadline alive until both streams finish, not merely until WaitForExitAsync.
+        using var executionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        if (timeout is > 0)
+        {
+            executionCts.CancelAfter(timeout.Value);
+        }
+
         var stdoutBuilder = new StringBuilder();
         var stderrBuilder = new StringBuilder();
         var stdoutTask = PumpProcessStreamAsync(
@@ -684,31 +692,34 @@ public static class AgentBuiltInToolFactory
             "stdout",
             stdoutBuilder,
             invocation.Progress,
-            cancellationToken);
+            executionCts.Token);
         var stderrTask = PumpProcessStreamAsync(
             process.StandardError,
             "stderr",
             stderrBuilder,
             invocation.Progress,
-            cancellationToken);
+            executionCts.Token);
+        var outputTask = Task.WhenAll(stdoutTask, stderrTask);
 
         try
         {
-            if (timeout is > 0)
-            {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(timeout.Value);
-                await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
-            }
-            else
-            {
-                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            }
+            await process.WaitForExitAsync(executionCts.Token).ConfigureAwait(false);
+            await outputTask.ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (executionCts.IsCancellationRequested)
         {
             TryKill(process);
-            return Failure(timeout is > 0
+            // Join both canceled readers before disposing their process/stream owners.
+            // Do not try to rediscover orphaned children by PID after the shell has exited.
+            try
+            {
+                await outputTask.ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+            {
+            }
+
+            return Failure(!cancellationToken.IsCancellationRequested && timeout is > 0
                 ? $"shell_command timed out after {timeout.Value} ms."
                 : "shell_command was canceled.");
         }
@@ -1650,7 +1661,7 @@ public static class AgentBuiltInToolFactory
               "properties": {
                 "command": { "type": "string", "description": "Shell command or short shell script to execute." },
                 "workdir": { "type": "string", "description": "Optional working directory override. Defaults to the session working directory." },
-                "timeoutMs": { "type": "integer", "description": "Optional timeout in milliseconds.", "minimum": 1 },
+                "timeoutMs": { "type": "integer", "description": "Optional timeout in milliseconds, covering shell execution and output collection. Omit for no deadline.", "minimum": 1 },
                 "login": { "type": "boolean", "description": "Whether to use login-shell semantics on Unix shells that support it. Ignored on Windows, where pwsh always runs with -NoProfile for predictable output." }
               },
               "required": ["command"],
@@ -1775,7 +1786,7 @@ public static class AgentBuiltInToolFactory
                 process.Kill(entireProcessTree: true);
             }
         }
-        catch (InvalidOperationException)
+        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
         {
         }
     }

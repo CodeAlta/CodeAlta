@@ -26,6 +26,21 @@ public sealed class CodeAltaSingleInstanceGuard : IDisposable
     /// <summary>Gets the absolute path of the acquired lock file.</summary>
     public string LockFilePath { get; }
 
+    internal CleanupHandleReference HoldForScratchpadCleanup()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var handle = _lockStream.SafeFileHandle;
+        var held = false;
+        handle.DangerousAddRef(ref held);
+        return new CleanupHandleReference(handle);
+    }
+
+    internal sealed class CleanupHandleReference(Microsoft.Win32.SafeHandles.SafeFileHandle handle) : IDisposable
+    {
+        internal Microsoft.Win32.SafeHandles.SafeFileHandle Handle => handle;
+        public void Dispose() => handle.DangerousRelease();
+    }
+
     /// <summary>Acquires the existing guard under the default user-profile .alta directory.</summary>
     /// <returns>The caller-owned guard.</returns>
     /// <exception cref="InvalidOperationException">The user profile directory is unavailable.</exception>

@@ -898,7 +898,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("prompt-id=", "Agent prompt id for this send/session, as shown by `alta prompt list`. Defaults unchanged when omitted.", value => options.PromptId = value);
         command.Add("queue-if-busy", "Queue instead of failing when the target is busy, if a queue service is available.", value => options.QueueIfBusy = value is not null);
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Send).ConfigureAwait(false));
-        AddHelpText(command, "Examples: `alta session send <session-id> --message \"Summarize status\"`; prefer `--stdin` for multi-line prompts.", "Use `--prompt-id <id>` to select an agent prompt from `alta prompt list`; omit it to keep the current/default prompt selection.");
+        AddHelpText(command, "Examples: `alta session send <session-id> --message \"Summarize status\"`; prefer `--stdin` for multi-line prompts.", "An agent sending to another running session steers its active turn; an idle session starts a new turn. Use --queue-if-busy to explicitly wait instead.", "Use `--prompt-id <id>` to select an agent prompt from `alta prompt list`; omit it to keep the current/default prompt selection.");
         return command;
     }
 
@@ -977,6 +977,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AddMessageOptions(command, options);
         command.Add("kind=", "Message kind: note, request, handoff, or answer.", value => options.MessageKind = ValidateMessageKind(value));
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Message).ConfigureAwait(false));
+        AddHelpText(command, "Agent-to-agent messages steer a running recipient and start a new turn when it is idle. If live steering is unsupported, the message is durably queued.");
         return command;
     }
 
@@ -989,7 +990,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AddMessageOptions(command, options);
         command.Add("reply-requested", "Annotate the request as expecting a reply.", value => options.ReplyRequested = value is not null);
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Request).ConfigureAwait(false));
-        AddHelpText(command, "Example: `alta session request <session-id> --reply-requested --stdin` for coordinator-to-agent requests.");
+        AddHelpText(command, "Example: `alta session request <session-id> --reply-requested --stdin` for coordinator-to-agent requests.", "Agent-to-agent requests steer a running recipient and start a new turn when it is idle. If live steering is unsupported, the request is durably queued.");
         return command;
     }
 
@@ -1589,6 +1590,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.missingSession", "A target session id is required outside a session caller. Use --session <session-id>.", "alta ask");
         }
 
+        context.ClaimSessionWork(targetSessionId);
         if (!TryGetAskService(context, out var askService))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -1631,7 +1633,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.invalidPayload", ex.Message, "alta ask");
         }
 
-        var result = await askService.QueueAsync(normalized, targetSessionId, context.Caller, context.CancellationToken).ConfigureAwait(false);
+        var result = await context.ObserveOriginalAsync(askService.QueueAsync(normalized, targetSessionId, context.Caller, context.CancellationToken)).ConfigureAwait(false);
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
             type = "alta.ask.queued",
@@ -2473,6 +2475,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.invalidBase", "--base names the branch or commit a new worktree starts from: use it with --worktree.", "alta session create");
         }
 
+        // Project/model inheritance may discover an existing parent only during preparation.
+        context.ClaimSessionWork(null);
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime) ||
             !context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
@@ -2496,11 +2500,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return parentResolution.ExitCode;
         }
 
-        var modelSelection = await ResolveModelSelectionAsync(context, options.Model, "alta session create", project?.ProjectPath).ConfigureAwait(false);
+        var modelSelection = await ResolveModelSelectionAsync(context, options.Model, "alta session create", project?.ProjectPath, sessionPreparation: true).ConfigureAwait(false);
         if (modelSelection.ExitCode != AltaExitCodes.Success)
         {
             return modelSelection.ExitCode;
         }
+
+        if (parentResolution.ParentSessionId is { } parentId) context.ClaimSessionWork(parentId);
+        // The invocation retains preparation and parent claims through original-fault
+        // classification, including unconfirmed dependencies during creation.
 
         var promptId = NormalizeOptionalText(options.Model.PromptId) ?? AgentPromptCatalog.DefaultPromptName;
         var promptValidationExitCode = await ValidateAgentPromptIdAsync(context, project, promptId).ConfigureAwait(false);
@@ -2617,6 +2625,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var targetSessionId = sessionId.Trim();
+        context.ClaimSessionWork(targetSessionId);
         var targetsCallingAgentSession = IsTargetingCallingAgentSession(context, targetSessionId);
         if (targetsCallingAgentSession && kind != PromptDispatchKind.Queue && !options.QueueIfBusy)
         {
@@ -2699,16 +2708,45 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             agentInput = augmentation.Input;
             executionOptions = augmentation.ExecutionOptions;
 
-            if (kind == PromptDispatchKind.Steer)
+            // Inter-session communication must reach the recipient's current turn, just like
+            // automatic child notifications. An ordinary SendAsync waits behind the whole run;
+            // its detached acknowledgement is not evidence that this new input was delivered.
+            var steerPeer = IsAgentCaller(context) && !targetsCallingAgentSession
+                && await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false);
+            if (kind == PromptDispatchKind.Steer || steerPeer)
             {
-                var runId = await runtime.SteerAsync(
-                    info.Session,
-                    executionOptions,
-                    new AgentSteerOptions { Input = agentInput },
-                    context.CancellationToken).ConfigureAwait(false);
-                await PersistPromptProvenanceAsync(context, info.Session, runId.Value, queued: false, kind, inputText).ConfigureAwait(false);
-                WritePromptResult(context, "alta.session.steered", info.Session, runId.Value, null, queued: false, kind, inputText);
-                return AltaExitCodes.Success;
+                AgentRunId? steeredRunId = null;
+                try
+                {
+                    steeredRunId = await context.ObserveOriginalAsync(runtime.SteerAsync(
+                        info.Session,
+                        executionOptions,
+                        new AgentSteerOptions { Input = agentInput },
+                        context.CancellationToken)).ConfigureAwait(false);
+                }
+                catch (Exception failure) when (kind != PromptDispatchKind.Steer
+                    && failure is InvalidOperationException or NotSupportedException
+                    && !AltaRetentionAdmission.ContainsRetainedDependency(failure))
+                {
+                    // The turn can finish between the active check and steering. Send normally
+                    // in that case; a provider that cannot steer a still-running turn gets an
+                    // explicit durable queue item rather than a hidden detached send waiter.
+                    if (await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false))
+                    {
+                        var queueItem = await runtime.QueuePromptAsync(info.Session, inputText,
+                            kind.ToString().ToLowerInvariant(), CreateProvenance(context), context.CancellationToken).ConfigureAwait(false);
+                        WritePromptResult(context, "alta.session.queued", info.Session, null, queueItem.QueueItemId, queued: true, kind, inputText);
+                        return AltaExitCodes.Success;
+                    }
+                }
+
+                // Receipt/provenance failure after accepted steering must not deliver the input again.
+                if (steeredRunId is { } acceptedRunId)
+                {
+                    await PersistPromptProvenanceAsync(context, info.Session, acceptedRunId.Value, queued: false, kind, inputText).ConfigureAwait(false);
+                    WritePromptResult(context, "alta.session.steered", info.Session, acceptedRunId.Value, null, queued: false, kind, inputText);
+                    return AltaExitCodes.Success;
+                }
             }
 
             var sendTask = runtime.SendAsync(
@@ -2726,7 +2764,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 return AltaExitCodes.Success;
             }
 
-            var submittedRunId = await sendTask.ConfigureAwait(false);
+            var submittedRunId = await context.ObserveOriginalAsync(sendTask).ConfigureAwait(false);
             await runtime.PersistSessionLocalStateAsync(info.Session, context.CancellationToken).ConfigureAwait(false);
             await PersistPromptProvenanceAsync(context, info.Session, submittedRunId.Value, queued: false, kind, inputText).ConfigureAwait(false);
             WritePromptResult(context, kind is PromptDispatchKind.Message or PromptDispatchKind.Request ? "alta.session.message.sent" : "alta.session.submitted", info.Session, submittedRunId.Value, null, queued: false, kind, inputText);
@@ -2740,6 +2778,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleSessionSetAgentAsync(AltaCommandContext context, string? sessionId, string? promptId)
     {
+        context.ClaimSessionWork(sessionId);
         if (string.IsNullOrWhiteSpace(sessionId))
         {
             return UsageError(context, "usage.missingSession", "Session id is required outside a session caller.", "alta session set_agent");
@@ -2789,6 +2828,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleSessionAbortAsync(AltaCommandContext context, string? sessionId, string? reason)
     {
+        context.ClaimSessionWork(sessionId);
         if (string.IsNullOrWhiteSpace(sessionId))
         {
             return UsageError(context, "usage.missingSession", "Session id is required.", "alta session abort");
@@ -2828,6 +2868,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleSessionCompactAsync(AltaCommandContext context, string? sessionId, bool submit)
     {
+        context.ClaimSessionWork(sessionId);
         if (submit)
         {
             return Unsupported(context, "session.compactSubmitUnsupported", "--submit after compaction is not supported by the current runtime.");
@@ -2865,6 +2906,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleReminderCreateAsync(AltaCommandContext context, ReminderCreateOptions options)
     {
+        context.ClaimSessionWork(FirstNonEmpty(options.SessionId, context.Caller.SourceSessionId));
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out _))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -3297,6 +3339,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.missingSession", "--session <session-id> is required outside a session.", "alta skill activate");
         }
 
+        context.ClaimSessionWork(sessionId);
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -3531,6 +3574,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleNotesSetAsync(AltaCommandContext context, bool useStdin)
     {
+        context.ClaimSessionWork(context.Caller.SourceSessionId);
         _ = useStdin;
         if (!TryGetNotesService(context, out var notesService))
         {
@@ -3541,7 +3585,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             var caller = notesService.CaptureCaller(context.Caller);
             var markdown = await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false);
-            await notesService.SetMarkdownAsync(markdown, caller, context.CancellationToken).ConfigureAwait(false);
+            await context.ObserveOriginalAsync(notesService.SetMarkdownAsync(markdown, caller, context.CancellationToken).AsTask()).ConfigureAwait(false);
             WriteNotesRecord(context, "alta.notes.updated", markdown);
             return AltaExitCodes.Success;
         }
@@ -3553,6 +3597,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleNotesClearAsync(AltaCommandContext context)
     {
+        context.ClaimSessionWork(context.Caller.SourceSessionId);
         if (!TryGetNotesService(context, out var notesService))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -3560,7 +3605,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         try
         {
-            await notesService.ClearAsync(context.Caller, context.CancellationToken).ConfigureAwait(false);
+            await context.ObserveOriginalAsync(notesService.ClearAsync(context.Caller, context.CancellationToken).AsTask()).ConfigureAwait(false);
             WriteNotesRecord(context, "alta.notes.updated", string.Empty);
             return AltaExitCodes.Success;
         }
@@ -3606,10 +3651,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         queryService ??= new AltaSessionQueryService();
         var infos = new List<AltaSessionInfo>();
-        await foreach (var info in queryService.LoadAsync(context).ConfigureAwait(false))
+        var enumerator = queryService.LoadAsync(context).GetAsyncEnumerator();
+        try
         {
-            infos.Add(info);
+            while (await context.ObserveOriginalAsync(enumerator.MoveNextAsync().AsTask()).ConfigureAwait(false))
+                infos.Add(enumerator.Current);
         }
+        finally { await context.ObserveOriginalAsync(enumerator.DisposeAsync().AsTask()).ConfigureAwait(false); }
 
         return infos;
     }
@@ -3852,7 +3900,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         SessionExecutionOptions executionOptions,
         AgentInput input)
         => context.Services.Get<PluginOrchestrationBridge>() is { } pluginBridge
-            ? await pluginBridge.AugmentRunAsync(executionOptions, input, info.Session.ProjectRef, info.Session.SessionId, context.CancellationToken).ConfigureAwait(false)
+            ? await context.ObserveOriginalAsync(pluginBridge.AugmentRunAsync(executionOptions, input, info.Session.ProjectRef, info.Session.SessionId, context.CancellationToken)).ConfigureAwait(false)
             : new PluginAugmentedRun(executionOptions, input);
 
     private static IReadOnlyList<AgentToolDefinition>? CreateAltaSessionTools(
@@ -3892,10 +3940,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     }
 
     private static Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath = "alta model resolve")
-        => ResolveModelSelectionAsync(context, request, commandPath, projectRoot: null);
+        => ResolveModelSelectionAsync(context, request, commandPath, projectRoot: null, sessionPreparation: false);
 
     // projectRoot: the folder of the project a session is created in, whose configuration names the default provider first.
-    private static async Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath, string? projectRoot)
+    private static async Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath, string? projectRoot, bool sessionPreparation)
     {
         if (!string.IsNullOrWhiteSpace(request.ModelRef))
         {
@@ -3904,7 +3952,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 return ModelResolutionResult.Fail(UsageError(context, "usage.invalidModelRef", error!, commandPath));
             }
 
-            return await ValidateAndCompleteModelSelectionAsync(context, parsed, requestedReasoning: parsed.ReasoningEffort, commandPath).ConfigureAwait(false);
+            return await ValidateAndCompleteModelSelectionAsync(context, parsed, requestedReasoning: parsed.ReasoningEffort, commandPath, sessionPreparation).ConfigureAwait(false);
         }
 
         AltaModelSelection? inherited = null;
@@ -3947,7 +3995,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ReasoningEffort = reasoning,
             ModelRef = AltaModelRef.Format(providerKey, modelId, reasoning),
         };
-        return await ValidateAndCompleteModelSelectionAsync(context, selection, request.ReasoningEffort, commandPath).ConfigureAwait(false);
+        return await ValidateAndCompleteModelSelectionAsync(context, selection, request.ReasoningEffort, commandPath, sessionPreparation).ConfigureAwait(false);
     }
 
     private static bool HasCompleteModelSelection(AltaModelSelectionOptions request)
@@ -3955,7 +4003,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
            !string.IsNullOrWhiteSpace(request.ModelId) &&
            request.ReasoningEffort is not null;
 
-    private static async Task<ModelResolutionResult> ValidateAndCompleteModelSelectionAsync(AltaCommandContext context, AltaModelSelection selection, AgentReasoningEffort? requestedReasoning, string commandPath)
+    private static async Task<ModelResolutionResult> ValidateAndCompleteModelSelectionAsync(AltaCommandContext context, AltaModelSelection selection, AgentReasoningEffort? requestedReasoning, string commandPath, bool sessionPreparation)
     {
         if (context.Services.Get<IModelProviderInitializationService>() is not { } providerInitializationService)
         {
@@ -3965,7 +4013,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         IReadOnlyList<AgentModelInfo> models;
         try
         {
-            models = await providerInitializationService.GetModelsAsync(new ModelProviderId(selection.ProviderKey), context.CancellationToken).ConfigureAwait(false);
+            models = sessionPreparation
+                ? await GetPreparationModelsAsync(context, providerInitializationService, new ModelProviderId(selection.ProviderKey)).ConfigureAwait(false)
+                : await providerInitializationService.GetModelsAsync(new ModelProviderId(selection.ProviderKey), context.CancellationToken).ConfigureAwait(false);
         }
         catch (KeyNotFoundException)
         {
@@ -4053,13 +4103,24 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         try
         {
-            var models = await providerInitializationService.GetModelsAsync(new ModelProviderId(providerKey), context.CancellationToken).ConfigureAwait(false);
+            var models = await GetPreparationModelsAsync(context, providerInitializationService, new ModelProviderId(providerKey)).ConfigureAwait(false);
             return StartingModel(models, FindProviderDescriptor(context, providerKey), effort);
         }
         catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or NotSupportedException)
         {
             return (null, effort);
         }
+    }
+
+    private static async Task<IReadOnlyList<AgentModelInfo>> GetPreparationModelsAsync(
+        AltaCommandContext context, IModelProviderInitializationService providers, ModelProviderId providerId)
+    {
+        context.CancellationToken.ThrowIfCancellationRequested();
+        // Model initialization shares a refresh worker and normally returns a cancelable waiter.
+        // Session preparation owns retention until that original refresh actually ends.
+        var models = await context.ObserveOriginalAsync(providers.GetModelsAsync(providerId, CancellationToken.None)).ConfigureAwait(false);
+        context.CancellationToken.ThrowIfCancellationRequested();
+        return models;
     }
 
     private static ModelProviderDescriptor? FindProviderDescriptor(AltaCommandContext context, string providerKey)

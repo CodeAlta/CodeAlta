@@ -179,6 +179,9 @@ public sealed record StatisticsStatus
     /// <summary>Gets the number of changes to the numbers so far; it grows each time a catch-up is saved.</summary>
     public long Revision { get; init; }
 
+    /// <summary>Gets the saved sessions available independently of the surviving-journal history choice.</summary>
+    public int SavedSessions { get; init; }
+
     /// <summary>Gets the reason the engine failed to start, when <see cref="State"/> is <see cref="HistoryState.Failed"/>.</summary>
     public string? Error { get; init; }
 

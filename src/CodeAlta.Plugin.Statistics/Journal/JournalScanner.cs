@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace CodeAlta.Plugin.Statistics.Journal;
@@ -32,6 +33,10 @@ internal sealed class JournalScanOptions
     /// time and its run, and the bytes between are counted while they are passed over. At least 640 bytes.
     /// </summary>
     public int MaxParsedRecordBytes { get; init; } = 4 * 1024 * 1024;
+
+    /// <summary>For retirement only: validate every complete JSON record and its session, and hash every source byte.
+    /// Records above the bound fail closed instead of authorizing deletion on a partial parse.</summary>
+    public string? RetirementSessionId { get; init; }
 }
 
 /// <summary>What a scan of a journal did.</summary>
@@ -90,6 +95,9 @@ internal sealed class JournalScanResult
 
     /// <summary>Gets the number of bytes the scan consumed.</summary>
     public long BytesConsumed => EndOffset - StartOffset;
+
+    /// <summary>Gets or sets the SHA-256 of the full scan's bytes, only for strict retirement scans from zero to EOF.</summary>
+    public string? SourceSha256 { get; set; }
 }
 
 /// <summary>
@@ -227,6 +235,7 @@ internal sealed class JournalScanner : IDisposable
         }
 
         stream.Position = startOffset;
+        using var hash = _options.RetirementSessionId is not null && startOffset == 0 ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256) : null;
         _isPromptSeen = sink.IsPromptSeen;
         _readBuffer ??= ArrayPool<byte>.Shared.Rent(_options.ReadBufferBytes);
         ResetLine();
@@ -246,8 +255,11 @@ internal sealed class JournalScanner : IDisposable
                 {
                     result.ReachedEnd = true;
                     result.PendingBytes = _lineLength;
+                    result.SourceSha256 = hash is null ? null : Convert.ToHexString(hash.GetHashAndReset());
                     return result;
                 }
+
+                hash?.AppendData(buffer, 0, end);
 
                 if (checkBom)
                 {
@@ -367,7 +379,7 @@ internal sealed class JournalScanner : IDisposable
     private void Decide()
     {
         _kind = JournalPrefixClassifier.Classify(_line.AsSpan(0, _lineFill), out _runEnd);
-        if (_kind is JournalRecordKind.Touch or JournalRecordKind.RunEnd or JournalRecordKind.Unknown)
+        if (_options.RetirementSessionId is null && _kind is JournalRecordKind.Touch or JournalRecordKind.RunEnd or JournalRecordKind.Unknown)
         {
             _mode = LineMode.Skip;
             _tailLength = 0;
@@ -447,6 +459,37 @@ internal sealed class JournalScanner : IDisposable
         }
 
         result.Lines++;
+        if (_options.RetirementSessionId is { } expectedSession)
+        {
+            if (_oversize)
+            {
+                result.OversizeRecords++;
+                return;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(_line.AsMemory(0, _lineFill));
+                var root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("sessionId", out var identity) || identity.GetString() != expectedSession
+                    || !RetirementJournalValidation.IsValid(root, _kind, expectedSession))
+                {
+                    result.MalformedLines++;
+                    return;
+                }
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException or NotSupportedException or KeyNotFoundException)
+            {
+                result.MalformedLines++;
+                return;
+            }
+
+            if (_kind == JournalRecordKind.Unknown)
+            {
+                result.UnknownLines++;
+                return;
+            }
+        }
         JournalRecord? record;
         ReadOnlySpan<byte> tail;
         if (_mode == LineMode.Skip)
@@ -504,7 +547,9 @@ internal sealed class JournalScanner : IDisposable
             tail = line.Length > JournalEnvelope.TailBytes ? line[^JournalEnvelope.TailBytes..] : line;
             try
             {
-                record = _parser.Parse(_kind, line, isFinalBlock: true, _isPromptSeen);
+                record = _kind == JournalRecordKind.RunEnd ? new RunEndRecord { End = _runEnd }
+                    : _kind == JournalRecordKind.Touch ? new TouchRecord()
+                    : _parser.Parse(_kind, line, isFinalBlock: true, _isPromptSeen);
             }
             catch (JsonException)
             {

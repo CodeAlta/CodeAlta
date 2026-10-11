@@ -330,6 +330,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(@event);
+        using var retentionWork = ClaimRetentionWork(sessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         cancellationToken.ThrowIfCancellationRequested();
         if (!string.Equals(sessionId, @event.SessionId, StringComparison.OrdinalIgnoreCase))
         {
@@ -432,6 +433,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(markdown);
         ArgumentNullException.ThrowIfNull(committed);
+        using var retentionWork = ClaimRetentionWork(sessionId);
         if (kind is not (AgentNotesUpdateKind.Set or AgentNotesUpdateKind.Cleared) ||
             (kind == AgentNotesUpdateKind.Cleared && markdown.Length != 0))
         {
@@ -829,6 +831,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private async Task PersistSessionLocalStateOwnedBodyAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
+        using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         if (!string.IsNullOrWhiteSpace(session.SessionId))
         {
             await _agentSessionCatalog.NotifySessionUpdatedAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
@@ -952,6 +955,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private async Task<SessionViewDescriptor> CreateGlobalSessionOwnedBodyAsync(SessionExecutionOptions options, string? title,
         string? parentSessionId, AltaActorProvenance? createdBy, CancellationToken cancellationToken)
     {
+        using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(options);
         ValidateDiscoveryPaths(null, options);
 
@@ -1053,6 +1057,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private async Task<SessionViewDescriptor> CreateProjectSessionOwnedBodyAsync(ProjectDescriptor project, SessionExecutionOptions options,
         string? title, string? parentSessionId, AltaActorProvenance? createdBy, string? worktreeDirectory, CancellationToken cancellationToken)
     {
+        using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(options);
 
@@ -1176,6 +1181,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private async Task<RuntimeSessionEntry> ResolveCoordinatorEntryAsync(SessionViewDescriptor session, SessionExecutionOptions options, bool history = false, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false)
     {
         ReserveSessionIdentity(session);
+        using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(options);
         string? preparedPrompt = null;
         while (true)
@@ -1625,6 +1631,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(sendOptions);
 
+        using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         RuntimeSessionEntry? capturedEntry = null;
         OwnedProviderEventForwarding.Use? handleUse = null;
         CancellationTokenSource? execution = null;
@@ -1874,10 +1881,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
 
+        using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var actor = GetActorForWork(session.SessionId);
         return await actor.QueryAsync(
                 async actorCancellationToken =>
                 {
+                    var current = await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(session.SessionId, actorCancellationToken).ConfigureAwait(false);
+                    if (current is null || current.CreatedAt != session.CreatedAt)
+                        throw new InvalidOperationException("The queued prompt's session generation no longer exists.");
                     var timestamp = DateTimeOffset.UtcNow;
                     var item = new SessionViewQueuedPrompt
                     {
@@ -1932,6 +1943,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="session"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty or a supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     /// <exception cref="KeyNotFoundException">Thrown when the requested skill cannot be resolved.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired.</exception>
     public async Task<AgentRunId> ActivateSkillAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
@@ -1946,26 +1958,35 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(skillName);
 
-        var activation = await CreateSkillActivationAsync(session, options, skillName, cancellationToken).ConfigureAwait(false);
+        return await WithRetentionWorkAsync(async () =>
+        {
+            // Join the preparation and send originals, never their public cancelable observers.
+            // The activation admission covers both phases, including their cancellation unwind.
+            var activation = await AwaitRetentionAwareAsync(
+                CreateSkillActivationOwnedBodyAsync(session, options, skillName, cancellationToken)).ConfigureAwait(false);
 
-        var input = new AgentInput(
-        [
-            new AgentInputItem.Skill(activation.Descriptor.Name, activation.Descriptor.SkillFilePath),
-            new AgentInputItem.Text(
-                $"""
-                The user activated the CodeAlta skill '{activation.Descriptor.Name}' for this session.
-                Treat the following host-provided skill content as active session context.
+            var input = new AgentInput(
+            [
+                new AgentInputItem.Skill(activation.Descriptor.Name, activation.Descriptor.SkillFilePath),
+                new AgentInputItem.Text(
+                    $"""
+                    The user activated the CodeAlta skill '{activation.Descriptor.Name}' for this session.
+                    Treat the following host-provided skill content as active session context.
 
-                {activation.Payload}
-                """),
-        ]);
+                    {activation.Payload}
+                    """),
+            ]);
 
-        return await SendAsync(
-                session,
-                options,
-                new AgentSendOptions { Input = input },
-                cancellationToken)
-            .ConfigureAwait(false);
+            // Preserve SendAsync's pre-admission cancellation check without using its waiter.
+            cancellationToken.ThrowIfCancellationRequested();
+            return await AwaitRetentionAwareAsync(SendOwnedBodyAsync(
+                    session,
+                    options,
+                    new AgentSendOptions { Input = input },
+                    cancellationToken,
+                    CancellationToken.None))
+                .ConfigureAwait(false);
+        }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1979,6 +2000,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="session"/> or <paramref name="options"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="skillName"/> is empty or a supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
     /// <exception cref="KeyNotFoundException">Thrown when the requested skill cannot be resolved.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired.</exception>
     public async Task<SkillActivation> CreateSkillActivationAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
@@ -1993,16 +2015,20 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(skillName);
 
-        ValidateDiscoveryPaths(session, options);
-        var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
-        var query = BuildSkillCatalogQuery(project, options.ProjectRoots);
-        return await _skillCatalog.ActivateAsync(query, skillName, cancellationToken).ConfigureAwait(false)
-            ?? throw new KeyNotFoundException($"Skill '{skillName}' was not found or is not activatable for this session.");
+        return await WithRetentionWorkAsync(async () =>
+        {
+            ValidateDiscoveryPaths(session, options);
+            var project = await AwaitRetentionAwareAsync(ResolveProjectAsync(session, cancellationToken)).ConfigureAwait(false);
+            var query = BuildSkillCatalogQuery(project, options.ProjectRoots);
+            return await AwaitRetentionAwareAsync(_skillCatalog.ActivateAsync(query, skillName, cancellationToken)).ConfigureAwait(false)
+                ?? throw new KeyNotFoundException($"Skill '{skillName}' was not found or is not activatable for this session.");
+        }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Steers the current coordinator run for a session.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired, has been retired, or has no matching active run.</exception>
     public async Task<AgentRunId> SteerAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
@@ -2018,6 +2044,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(steerOptions);
 
+        return await WithRetentionWorkAsync(async () =>
+        {
         OwnedProviderEventForwarding.Use? handleUse = null;
         try
         {
@@ -2036,12 +2064,56 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         using var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, handleUse!.Attachment.Cancellation.Token);
         return await SteerCapturedAsync(sessionHandleId, steerOptions, execution.Token).ConfigureAwait(false);
         }
+        catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))
+        {
+            handleUse?.Retain(failure);
+            throw;
+        }
         finally { handleUse?.Dispose(); }
+        }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
-    private async Task<AgentRunId> SteerCapturedAsync(AgentSessionHandleId sessionHandleId, AgentSteerOptions steerOptions, CancellationToken cancellationToken)
+    // Own the original body, including options/provider preparation, not a caller's cancelable wait.
+    // Unconfirmed dependency failure keeps admission with the same owner as the orphaned operation.
+    private async Task<T> WithRetentionWorkAsync<T>(Func<Task<T>> body, params string?[] sessionIds)
     {
-        return await _agentHub.SteerAsync(sessionHandleId, steerOptions, cancellationToken).ConfigureAwait(false);
+        var claim = ClaimRetentionWork(sessionIds);
+        var retained = false;
+        Task<T>? original = null;
+        try
+        {
+            original = body();
+            return await original.ConfigureAwait(false);
+        }
+        catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(original?.Exception ?? failure))
+        {
+            retained = true;
+            var failureGraph = original?.Exception ?? failure;
+            _forwarding.RetainDependencies(failureGraph, new { Runtime = this, Claim = claim, Original = original });
+            if (!ReferenceEquals(failureGraph, failure)) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failureGraph);
+            throw;
+        }
+        finally
+        {
+            if (!retained) claim.Dispose();
+        }
+    }
+
+    // Await alone selects one sibling from a faulted original. Preserve retention evidence before
+    // callers release a handle/history use or interpret the failure as permission to queue instead.
+    private static async Task<T> AwaitRetentionAwareAsync<T>(Task<T> original)
+    {
+        try { return await original.ConfigureAwait(false); }
+        catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(original.Exception ?? failure))
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(original.Exception ?? failure);
+            throw;
+        }
+    }
+
+    private Task<AgentRunId> SteerCapturedAsync(AgentSessionHandleId sessionHandleId, AgentSteerOptions steerOptions, CancellationToken cancellationToken)
+    {
+        return AwaitRetentionAwareAsync(_agentHub.SteerAsync(sessionHandleId, steerOptions, cancellationToken));
     }
 
     // Only the command owner supplies execution cancellation; transport cancellation never reaches
@@ -2712,6 +2784,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Triggers a manual compaction for a session coordinator session.
     /// </summary>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired, or compaction admission failed.</exception>
     public async Task CompactAsync(
         SessionViewDescriptor session,
         SessionExecutionOptions options,
@@ -2724,6 +2797,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
 
+        await WithRetentionWorkAsync(async () =>
+        {
         ReserveSessionIdentity(session);
         GetActorForWork(session.SessionId);
         var result = await _sessionActors.GetOrCreate(session.SessionId).ExecuteAsync(
@@ -2763,7 +2838,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 }, CancellationToken.None).ConfigureAwait(false);
                 if (handleUse is null) continue;
                 using var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, entry.Attachment.Cancellation.Token);
-                var outcome = await _agentHub.CompactAsync(entry.SessionHandleId, execution.Token).ConfigureAwait(false);
+                var outcome = await AwaitRetentionAwareAsync(_agentHub.CompactAsync(entry.SessionHandleId, execution.Token)).ConfigureAwait(false);
                 if (outcome is not null && ShouldPublishHostCompactionOutcome(outcome))
                 {
                     _events.TryPublish(new SessionHostEvent(
@@ -2774,7 +2849,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 }
             }
         }
+        catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))
+        {
+            handleUse?.Retain(failure);
+            throw;
+        }
         finally { handleUse?.Dispose(); }
+        return true;
+        }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
     private static bool ShouldPublishHostCompactionOutcome(AgentCompactionOutcome outcome)
@@ -2794,6 +2876,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The sanitized session event history.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="session" /> or <paramref name="options" /> is <see langword="null" />.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired.</exception>
     /// <remarks>
     /// History loading is a read operation. When a coordinator session is already attached, this method intentionally
     /// does not compare or apply <paramref name="options" /> because replacing a live attachment can cancel in-flight work.
@@ -2810,6 +2893,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
+        return await WithRetentionWorkAsync(async () =>
+        {
         while (true)
         {
             var entry = await ResolveCoordinatorEntryAsync(session, options, history: true).ConfigureAwait(false);
@@ -2819,8 +2904,19 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             if (use is null) continue;
             using (use)
             using (var execution = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, entry.Attachment.Cancellation.Token))
-                return await GetProjectedHistoryAsync(entry, execution.Token).ConfigureAwait(false);
+            {
+                try
+                {
+                    return await GetProjectedHistoryAsync(entry, execution.Token).ConfigureAwait(false);
+                }
+                catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))
+                {
+                    use.Retain(failure);
+                    throw;
+                }
+            }
         }
+        }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -2854,7 +2950,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(entry);
 
-        var history = await _agentHub.GetSessionHistoryAsync(entry.SessionHandleId, cancellationToken).ConfigureAwait(false);
+        var history = await AwaitRetentionAwareAsync(_agentHub.GetSessionHistoryAsync(entry.SessionHandleId, cancellationToken)).ConfigureAwait(false);
         return await GetActorForWork(entry.SessionId).QueryAsync(async _ =>
         {
             await Task.CompletedTask.ConfigureAwait(false);
@@ -3028,11 +3124,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var workingDirectory = projector.Entry.WorkingDirectory;
         AgentEvent? published = null;
         IReadOnlyList<ParentNotificationWork> notifications = [];
+        IDisposable? parentNotificationClaim = null;
+        var retainParentNotificationClaim = false;
         var actorChoresCompleted = false;
         var publication = new LiveEventPublication(new { Runtime = this, Projector = projector, Use = projectionUse });
         try
         {
-            await publication.CompleteAsync(mark => actor.QueryAsync(_ =>
+            await publication.CompleteAsync(mark =>
+            {
+                // Capture admission before the mailbox handoff, Project publication, or final-answer
+                // candidate update. Entry lineage is immutable. The original forwarding operation owns
+                // this claim, not an observer's wait or the use released before independent delivery.
+                if (!string.IsNullOrWhiteSpace(projector.Entry!.ParentSessionId)
+                    && @event is AgentContentCompletedEvent { Kind: AgentContentKind.Assistant }
+                        or AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle })
+                    parentNotificationClaim = ClaimRetentionWork(sessionId, projector.Entry.ParentSessionId,
+                        projector.Entry.CreatedBy?.SourceSessionId);
+                return actor.QueryAsync(_ =>
                 {
                     if (arrivedOnOpenActivity) ObserveAdmittedActivity(sessionId, projector.Entry!, @event);
                     var sanitized = projector.Project(@event);
@@ -3044,7 +3152,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     notifications = projector.Entry!.TakeParentNotifications(sanitized);
                     actorChoresCompleted = true;
                     return ValueTask.FromResult(true);
-                }).AsTask(), projectionUse.Dispose, ObserveLivePluginEventAsync, () =>
+                }).AsTask();
+            }, projectionUse.Dispose, ObserveLivePluginEventAsync, () =>
             {
                 var effects = new List<Func<Task>>();
                 if (published is not null)
@@ -3061,6 +3170,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 _forwarding.RetainDependencies(failure, dependencies);
             }).ConfigureAwait(false);
         }
+        catch (Exception failure) when (OwnedProviderEventForwarding.HasRetention(failure))
+        {
+            // An orphaned dependency is not a conclusively finished notification. Keep the original
+            // lineage admission with the forwarding owner's retained work, including at shutdown.
+            retainParentNotificationClaim = true;
+            _forwarding.RetainDependencies(failure, new { Runtime = this, Claim = parentNotificationClaim, Publication = publication });
+            throw;
+        }
         catch (ObjectDisposedException) when (publication.CanToleratePrepublicationFailure)
         {
         }
@@ -3075,6 +3192,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
         catch (UnauthorizedAccessException) when (publication.CanToleratePrepublicationFailure)
         {
+        }
+        finally
+        {
+            if (!retainParentNotificationClaim) parentNotificationClaim?.Dispose();
         }
     }
 
@@ -3449,7 +3570,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     await PersistPromptProvenanceAsync(parent, runId.Value, queued: false, "parent-notify", prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
                     return;
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex))
                 {
                     PublishParentNotificationWarning(notification.SourceSessionId, $"Parent session '{notification.ParentSessionId}' could not be steered; queued the child-session notification instead. {ex.Message}");
                 }
@@ -3458,7 +3579,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             await QueuePromptOwnedBodyAsync(parent, prompt, "parent-notify", submittedBy, CancellationToken.None).ConfigureAwait(false);
             await TryDrainNextQueuedPromptAsync(parent.SessionId).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || _disposed)
+        catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
+            && (ex is not OperationCanceledException || _disposed))
         {
             PublishParentNotificationWarning(notification.SourceSessionId, $"Automatic parent notification failed without affecting the child session: {ex.Message}");
         }
@@ -3471,7 +3593,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             session = await ResolveParentFromCachedStoreAsync(sessionId, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
+            && (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested))
         {
         }
 
@@ -3486,6 +3609,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProviderKey = entry.ProviderKey,
                 ProjectRef = entry.ProjectId,
                 ParentSessionId = entry.ParentSessionId,
+                CreatedBy = entry.CreatedBy,
                 WorkingDirectory = entry.WorkingDirectory,
                 WorktreeDirectory = entry.WorktreeDirectory,
                 Title = sessionId,
@@ -4126,6 +4250,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // mode as it is: only the owner of the session changes it.
     private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode)
     {
+        using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
         if (createdPermissionMode is not null) localState.PermissionMode = createdPermissionMode;
         localState.ProviderKey = session.ResolvedProviderKey;

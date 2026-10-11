@@ -387,6 +387,15 @@ public sealed class SystemPromptInfrastructureTests
             PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
         });
         StringAssert.Contains(rooted.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(Path.GetFullPath(projectRoot), "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
+        var developerRoot = Path.Combine(projectRoot, "dev");
+        var isolated = builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex", UserCodeAltaRoot = projectRoot,
+            InstanceStateRoot = developerRoot,
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = workingDirectory, Kind = SessionViewKind.ProjectSession },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
+        });
+        StringAssert.Contains(isolated.DeveloperInstructions!, $"- Scratchpad file: `{Path.Combine(developerRoot, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md")}`");
         // A session of no project has no project root: its links start from where it works.
         StringAssert.Contains(rooted.DeveloperInstructions!, "the path of the file relative to the current working directory, with forward slashes");
         // Another session has another hash, whatever its id is made of: two agents never write the same file.

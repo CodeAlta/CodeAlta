@@ -65,11 +65,13 @@ internal static class DesktopPlugins
     /// statistics of every session; without them it keeps the cards of the timeline and reads nothing.
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="ui"/> or <paramref name="sessions"/> is null.</exception>
-    internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands, ISessionJournalCatalog? journals = null)
+    /// <param name="archives">The dedicated archive of the owning StateRoot, borrowed by the same Statistics plugin.</param>
+    internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands,
+        ISessionJournalCatalog? journals = null, CodeAlta.Catalog.StatisticsArchiveStore? archives = null)
     {
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(sessions);
-        var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals) : definition)];
+        var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals, archives) : definition)];
         // The landing page is the window's: the terminal application has no such plugin.
         builtIns = [.. builtIns, DesktopLandingPlugin.Definition()];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
@@ -79,13 +81,17 @@ internal static class DesktopPlugins
     /// <param name="journals">The journals of the session store of this instance.</param>
     /// <exception cref="ArgumentNullException"><paramref name="journals"/> is null.</exception>
     internal static BuiltInPluginDefinition StatisticsDefinition(ISessionJournalCatalog journals)
+        => StatisticsDefinition(journals, null);
+
+    private static BuiltInPluginDefinition StatisticsDefinition(ISessionJournalCatalog journals, CodeAlta.Catalog.StatisticsArchiveStore? archives)
     {
         ArgumentNullException.ThrowIfNull(journals);
         return new()
         {
             Id = "statistics", DisplayName = "Statistics",
             Description = "Projects transient per-turn and session statistics from normalized agent events, and keeps the statistics of every session.",
-            PluginType = typeof(StatisticsPlugin), Factory = () => StatisticsPlugin.CreateForDesktop(journals),
+            PluginType = typeof(StatisticsPlugin), Factory = () => archives is null
+                ? StatisticsPlugin.CreateForDesktop(journals) : StatisticsPlugin.CreateForDesktop(journals, archives),
         };
     }
 

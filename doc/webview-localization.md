@@ -1,6 +1,6 @@
 # WebView shell language
 
-Settings → Appearance offers Auto, English, Español, Français, Deutsch, 日本語,
+Settings → General offers Auto, English, Español, Français, Deutsch, 日本語,
 and 简体中文. This is a WebView-local preference, not host/global configuration.
 The selected shell text updates immediately; restarting does not translate the
 remaining English surfaces. Auto examines at most eight browser language tags,
@@ -17,7 +17,7 @@ stable and untranslated. No dependencies, network translation or HTML injection
 are involved.
 
 This bounded slice covers primary shell navigation, Settings navigation/title/
-close names, General appearance and navigator preferences, recent-count labels,
+close names, General and Appearance preferences, recent-count labels,
 storage notices and shortcut Help descriptions. It also covers regular owned,
 catalog-only and local-draft composer controls, expanded-editor controls, static
 image preview/count/removal/help text, the implemented action palette, and session

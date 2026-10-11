@@ -57,6 +57,38 @@ public sealed class CodeAltaConfigDocument
     /// </summary>
     [JsonPropertyName("work_items")]
     public CodeAltaWorkItemSettingsDocument? WorkItems { get; set; }
+
+    /// <summary>Gets or sets profile storage policy, read from the user's configuration only.</summary>
+    [JsonPropertyName("storage")]
+    public CodeAltaStorageSettingsDocument? Storage { get; set; }
+}
+
+/// <summary>Global-only automatic storage maintenance preferences.</summary>
+public sealed class CodeAltaStorageSettingsDocument
+{
+    /// <summary>Gets or sets whether startup clears this instance's scratchpad; true when absent.</summary>
+    [JsonPropertyName("clear_scratchpad_on_startup")]
+    public bool? ClearScratchpadOnStartup { get; set; }
+
+    /// <summary>Gets or sets session retention; three calendar months when absent.</summary>
+    [JsonPropertyName("session_retention")]
+    public CodeAltaSessionRetentionSettingsDocument? SessionRetention { get; set; }
+}
+
+/// <summary>A configurable duration for inactive sessions, independent of manual deletion confirmations.</summary>
+public sealed class CodeAltaSessionRetentionSettingsDocument
+{
+    /// <summary>Gets or sets whether retention is enabled; true when absent, false for Never.</summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>Gets or sets the positive whole-number duration; one when absent.</summary>
+    [JsonPropertyName("amount")]
+    public int? Amount { get; set; }
+
+    /// <summary>Gets or sets days, weeks, months or years; months when absent.</summary>
+    [JsonPropertyName("unit")]
+    public string? Unit { get; set; }
 }
 
 /// <summary>

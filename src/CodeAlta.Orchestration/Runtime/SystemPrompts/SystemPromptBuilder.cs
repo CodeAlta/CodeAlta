@@ -622,8 +622,9 @@ public sealed class SystemPromptBuilder
             return null;
         }
 
-        // The same root the prompt resources of the user are read from.
-        var root = NormalizeOptionalRoot(request.UserCodeAltaRoot);
+        // Instance-owned scratchpads are separate from shared prompt/skill resource discovery.
+        // Older callers without a state root retain the normal-profile fallback.
+        var root = NormalizeOptionalRoot(request.InstanceStateRoot) ?? NormalizeOptionalRoot(request.UserCodeAltaRoot);
         if (root is null)
         {
             var profile = NormalizeOptionalRoot(request.DiscoveryScope?.UserProfileRoot ?? request.UserProfileRoot)
@@ -1197,6 +1198,9 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets the optional CodeAlta user-global root used to resolve prompt overrides.</summary>
     public string? UserCodeAltaRoot { get; init; }
+
+    /// <summary>Gets the owning instance's state root for scratchpads, independent of shared user resources.</summary>
+    public string? InstanceStateRoot { get; init; }
 
     /// <summary>Gets optional prompt part overrides.</summary>
     public PartialSystemPromptPartOptions? PartOptionsOverride { get; init; }

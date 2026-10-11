@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Storage;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
@@ -19,7 +20,7 @@ public sealed class CodeAltaHostOptions
 
     /// <summary>
     /// Gets the root of the state this host alone writes (sessions, session cache, view state, prompt
-    /// drafts). When unset, it is the global root.
+    /// drafts and scratchpads). When unset, it is the global root.
     /// </summary>
     /// <remarks>
     /// A host with a separate state root runs beside the host that owns the global root: it shares that
@@ -27,6 +28,13 @@ public sealed class CodeAltaHostOptions
     /// coordinator <c>AGENTS.md</c> another build maintains there.
     /// </remarks>
     public string? StateRoot { get; init; }
+
+    /// <summary>Gets the instance-owned startup pass; null authorizes no deletion.</summary>
+    public IStartupScratchpadCleanup? StartupScratchpadCleanup { get; init; }
+
+    /// <summary>Gets the instance-owned retention admission registry to install before providers or plugins can start work.</summary>
+    /// <remarks>When absent, the host creates an unknown, fail-closed registry. Supplying it does not authorize deletion.</remarks>
+    public SessionRetentionProtection? RetentionProtection { get; init; }
 
     /// <summary>Gets optional explicit home and lexical instruction ancestry limits.</summary>
     /// <remarks>Requires explicit absolute global/project roots; does not isolate plugins, providers, authentication or filesystem links.</remarks>

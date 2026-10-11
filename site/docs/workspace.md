@@ -108,7 +108,7 @@ Open it with the **Home** icon in the title bar, **Welcome** in the search, or `
 
 **Documentation** opens the documentation that ships with CodeAlta, in the window.
 
-Two switches at the bottom of the page are kept on your computer. The same two are in **Settings > Appearance**, as **Show the welcome page at startup** and **Animate the welcome page**:
+Two switches at the bottom of the page are kept on your computer. The same two are in **Settings > General > Welcome page**, as **Show the welcome page at startup** and **Animate the welcome page**:
 
 {.table}
 | Switch | What it does |
@@ -237,7 +237,7 @@ While it is on:
 
 Remote Control needs Claude Code signed in with your claude.ai account: it does not work with an API key.
 When CodeAlta starts again, Remote Control is off unless you turned on **Turn Remote Control back on when
-CodeAlta starts** in Settings > Appearance: the sessions that had it on are then connected again.
+CodeAlta starts** in Settings > General > Startup and closing: the sessions that had it on are then connected again.
 
 ## Session notes
 
@@ -486,9 +486,46 @@ Open settings with `Ctrl+G Ctrl+W` or `/settings`.
 
 ### Desktop
 
-The desktop app has one Settings window with a page per area: **Appearance**, **Spaces**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too.
+The desktop app has one Settings window with a page per area, including **Appearance**, **General**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too. Settings opens on Appearance; General follows it before Spaces in the Personalization group.
 
 Like the other windows of the desktop app, Settings closes with `Esc`, with its close button, or with a click outside it. A window that asks you something stays open until you answer.
+
+#### Storage
+
+In the desktop app, **Settings > Advanced > Storage** has two cards: **Automatic cleanup** first,
+then **File sizes** below it. The info buttons beside the card titles explain
+what is cleaned up and what the sizes mean; the one beside **File sizes** also shows your profile path.
+
+**File sizes** shows the measured total and the last scan time. An always-visible table, sorted by
+size, with a donut beside it (below it in a narrow window), shows sessions and attachments,
+scratchpads, saved Statistics, database/backups, configuration/credentials, extensions, projects,
+caches/logs, other state and developer data. This is information, not a list of things to delete:
+there are no category-removal buttons. Configuration, credentials, personal files and saved
+Statistics are protected.
+
+**Refresh** measures again; **Cancel scan** or closing Settings cancels that measurement, not any
+startup cleanup. Skipped links or unreadable/changing files make the result partial, and percentages
+describe only the bytes measured. File sizes may differ from allocated disk space because of
+compression, sparse files and hard links.
+
+Under **Automatic cleanup**, **Clear scratchpad on startup** is on by default. **Delete inactive
+sessions** is set to **After 3 months** by default. Enter a positive whole number or use the increment/decrement
+buttons or arrow keys, then choose days, weeks, months or years. Valid changes save on leaving
+the field, pressing Enter, stepping or choosing a unit; incomplete and invalid entries do not save.
+Choose **Never** to disable session retention without forgetting the saved duration.
+
+Automatic session cleanup runs once at startup on supported local Windows storage, after open
+sessions and drafts have been restored and protected. Unavailable Statistics, incomplete restoration
+or unsupported storage skips cleanup rather than weakening its safety checks.
+
+Changes apply at the **next startup**, never immediately. Inactivity is measured since meaningful
+session activity, not creation or viewing. Open sessions, drafts and active work are protected;
+Statistics must be durably saved before expired session files can be removed. Manual deletion
+confirmation preferences do not control this automatic policy. The configuration-file row opens,
+copies or reveals the global `~/.alta/config.toml` using the same controls as other Settings pages.
+The latest scratchpad cleanup appears as one line in the cleanup card; open **Details** for its reasons.
+Session cleanup has its own line: how many sessions it removed, or why it did not run (for example,
+when it is off, restoration is incomplete or Saved Statistics are unavailable).
 
 #### Files of the settings
 
@@ -519,20 +556,22 @@ What you create in Settings you can remove there: a prompt, a skill, a plugin, a
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The Appearance page: language, theme, color scheme, project sorting and window behavior.</figcaption>
+  <figcaption class="small text-secondary mt-2">Settings groups visual preferences in Appearance, language and startup behavior in General, and confirmations in Permissions.</figcaption>
 </figure>
 
-The **Appearance** page sets:
+The **Appearance** page has three sections:
 
-- the UI language: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese;
-- the theme: **Dark**, **Light**, or **Auto**, which follows the operating system;
-- **Darker dark theme**, for deeper backgrounds in the dark theme with the same text and accents;
-- one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own;
-- how projects are sorted, how many recent sessions are listed per project, and how many sub-agents per session;
-- the width of the conversation, as a percentage of the space of a session;
-- **Ask before deleting a session** and **Ask before archiving a project**: turn one on again after you ticked **Do not ask again** in its question;
-- **Show the welcome page at startup** and **Animate the welcome page**, the two switches of the [welcome page](#welcome-page-desktop);
-- what closing the window does: ask, keep CodeAlta running in the notification area, or exit.
+- **Theme and colors**: **Dark**, **Light**, or **Auto** (which follows the operating system); **Darker dark theme** for deeper backgrounds with the same text and accents; and one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own.
+- **Explorer**: project sorting, recent-session and sub-agent counts, and whether the project rail is collapsed.
+- **Conversation and changes**: the conversation width and its reset, and whether changes are shown one file at a time or all at once.
+
+The **General** page contains:
+
+- **Language**: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese.
+- **Welcome page**: **Show the welcome page at startup** and **Animate the welcome page**, the same two switches as on the [welcome page](#welcome-page-desktop).
+- **Startup and closing**: turn Remote Control back on at startup, and choose what closing the window does—ask, keep CodeAlta running in the notification area, or exit.
+
+The **Permissions** page keeps the agent permission modes and adds **Confirmations**: **Ask before deleting a session** and **Ask before archiving a project**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
 
 The zoom of the window is in the title bar, as a percentage before the theme switch. Click it to zoom out, to zoom in, or to go back to 100% with a click on the percentage. `Ctrl+-`, `Ctrl+=` and `Ctrl+0` do the same, and the zoom is kept for the next start.
 
@@ -732,7 +771,7 @@ Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep 
   <figcaption class="small text-secondary mt-2">Enter keeps CodeAlta running, Escape leaves the window open.</figcaption>
 </figure>
 
-**Settings > Appearance > When the window is closed** changes the choice later. `Ctrl+Q` exits directly. If sessions are still running, CodeAlta asks before exiting because exiting stops them.
+**Settings > General > Startup and closing > When the window is closed** changes the choice later. `Ctrl+Q` exits directly. If sessions are still running, CodeAlta asks before exiting because exiting stops them.
 
 ## Plugin management
 

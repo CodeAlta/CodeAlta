@@ -234,6 +234,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionOperationsService? operations = null;
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
+        DesktopSessionRetention? retention = null;
         Automations.AutomationService? automations = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
@@ -272,12 +273,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // What a resize uncovers is filled in the theme's background, not in white, until the view covers it.
             var windowBackground = new DesktopWindowBackground(window);
             windowBackground.Apply(appearance.Background);
-            window.Closed += (_, _) => closed.TrySetResult();
+            window.Closed += (_, _) => { retention?.ProtectionRpc.InvalidatePage(); closed.TrySetResult(); };
             var shutdownWindow = window;
             // The application's shutdown starts once, from the window being closed without a tray to stay in,
             // from Exit in the tray or in the page, or from the end of the user's session.
             var shell = new DesktopShell(window, application.Dispatcher, options.DataRoot, () =>
             {
+                retention?.ProtectionRpc.InvalidatePage();
                 operations?.CloseAdmission();
                 asks?.CloseAdmission();
                 reminders?.CloseAdmission();
@@ -340,11 +342,15 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             void Mark(string step) => LogManager.GetLogger("CodeAlta.Desktop").Info($"Startup: {step} at {startupClock.ElapsedMilliseconds} ms");
             var startedWindow = window;
             var catalog = new CatalogOptions { GlobalRoot = options.CatalogRoot!, StateRoot = options.StateRoot ?? options.CatalogRoot! };
+            var startupScratchpadCleanup = new ScratchpadStartupCleanup(
+                CodeAltaInstanceProfile.Create(options.CatalogRoot!, options.Developer), _lease);
             // Plugins read the user's profile (the MCP servers and their sign-ins, the provider CLIs): they
             // run in the normal launch and stay off when the roots are explicit.
             var pluginAlta = roots.Home is null ? new PluginAltaServiceBridge() : null;
             var startupStatus = new DesktopStartupStatus();
-            var pluginUi = new DesktopPluginUi();
+            using var scratchpadStartupStatus = startupScratchpadCleanup.Subscribe(startupStatus.SetScratchpadCleanup);
+            var retentionProtection = DesktopSessionRetention.CreateProtection();
+            var pluginUi = new DesktopPluginUi(retentionProtection);
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             pluginUi.Modules = canvases?.Modules;
@@ -359,6 +365,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             _hostCreation = Task.Run(() => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
+                StartupScratchpadCleanup = startupScratchpadCleanup,
+                RetentionProtection = retentionProtection,
                 DiscoveryScope = roots.Home is null || roots.Instructions is null
                     ? null
                     : new SessionDiscoveryScope(roots.Home, roots.Instructions),
@@ -380,7 +388,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = false, HasInteractiveUi = true,
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
-                PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, DesktopPlugins.CreateJournalCatalog(catalog)), PluginSafeMode = DesktopPlugins.SafeMode,
+                PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
+                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot)), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
@@ -391,6 +400,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             {
                 await workspacePrepared.Task;
                 if (mcp is not null) await mcp.DisposeAsync(); // No client starts a command on a host that is closing.
+                if (retention is not null) await retention.DisposeAsync(); // Join original archive/retirement work before releasing its owners.
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
                 if (automations is not null) await automations.DisposeAsync(); // Nothing more is started; sessions end with the host.
                 if (terminals is not null) await terminals.CloseAsync(); // The programs of the terminals end with the application.
@@ -430,7 +440,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // The kept zoom, before the first document: the window never shows at another one.
             view.ZoomFactor = shell.Zoom / 100d;
             shell.ApplyZoom = factor => view.ZoomFactor = factor;
-            view.NavigationRequested = static request => ValueTask.FromResult(DecideNavigation(request));
+            view.NavigationRequested = request =>
+            {
+                if (request.IsMainFrame && IsApplicationDocument(request.Uri)) retention?.BeforeMainFrameNavigation(request.Uri);
+                return ValueTask.FromResult(DecideNavigation(request));
+            };
+            view.ProcessFailed += (_, _) => retention?.ProtectionRpc.InvalidatePage();
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
             // The start-up screen first, then the window: it appears with the logo on its theme, never empty.
             // The browser draws into a shown window only, so the window is shown out of sight until the
@@ -543,6 +558,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
+                retention = new DesktopSessionRetention(host, epoch);
                 // The git worktrees sessions can work in: created with a session, listed and removed from the changes of a project.
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
                 var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
@@ -550,7 +566,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 asks = new SessionAsksService(host.Commands.Asks, epoch);
-                reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch);
+                reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
                 changesView = new DesktopChangesView();
                 // The space the window shows, and what a command asks of it. A catalog that never had spaces
                 // gets its first ones before the page reads them.
@@ -607,7 +623,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
-                        MaximumChannelsPerSession = 35, MaximumUnacknowledgedChannelItems = 2,
+                        // Keep one additional channel for the page's retention lifetime fence.
+                        MaximumChannelsPerSession = 36, MaximumUnacknowledgedChannelItems = 2,
                         // Up to 32 open session panes, plus workspace/control observations.
                         MaximumConcurrentInvocationsPerSession = 128,
                         RequestRatePerSecond = 512, RequestRateBurst = 1024,
@@ -618,6 +635,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }));
                     chrome.AddHandlers(builder);
                     var configStore = new CodeAltaConfigStore(catalog);
+                    builder.AddStorageService(new StorageService(catalog, epoch, host.StartupScratchpadCleanup, retention.Service));
                     // The window can always answer a request: the setting changes while the host runs, and a send
                     // started with it on goes on asking after it is turned off.
                     builder.AddBootService(new BootService(epoch, commandReview: true, options.EnableOwnedUserInput, options.Developer)
@@ -652,6 +670,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
+                    builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch));
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
@@ -715,6 +734,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, static () => true));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
+                    // All session-work producers now share the original admission registry. This does
+                    // not qualify desktop restoration: its authenticated lifetime/inventory handshake
+                    // is still unknown until the application document has completed it.
+                    DesktopSessionRetention.CompleteExternalRegistration(host, retentionProtection);
                     if (!closeRequested.Task.IsCompleted)
                     {
                         bindingLifetime = NeoRpcViewBinding.Bind(rpc, view);
@@ -736,6 +759,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             bodyFailed = true;
             closeRequested.TrySetResult();
         }
+        retention?.ProtectionRpc.InvalidatePage();
         operations?.CloseAdmission();
         asks?.CloseAdmission();
         reminders?.CloseAdmission();
@@ -870,6 +894,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddWorkspaceService(new WorkspaceService(options.CatalogRoot));
             builder.AddConfigurationService(new ConfigurationService(options.CatalogRoot!));
             builder.AddGlobalConfigService(new GlobalConfigService());
+            builder.AddStorageService(new StorageService());
             builder.AddProviderLoginService(new ProviderLoginService());
             builder.AddProviderUsageService(new ProviderUsageService());
             builder.AddMcpServersService(new McpServersService());
@@ -888,6 +913,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddWorkItemsService(new WorkItemsService());
+            builder.AddSessionRetentionProtectionService(new SessionRetentionProtectionService());
             builder.AddIssuesService(new IssuesService());
             builder.AddPullRequestPromptsService(new PullRequestPromptsService());
             builder.AddSpacesService(new SpacesService());

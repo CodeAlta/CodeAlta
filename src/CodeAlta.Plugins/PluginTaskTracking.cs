@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
 
@@ -10,6 +11,7 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
 {
     private readonly object _gate = new();
     private readonly CancellationToken _lifetimeCancellationToken;
+    private readonly ISessionRetentionAdmission? _sessionRetentionAdmission;
     private readonly List<TrackedPluginTask> _runningTasks = [];
     private bool _closed;
     private PluginOwnedOperation? _close;
@@ -19,8 +21,17 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
     /// </summary>
     /// <param name="lifetimeCancellationToken">The token cancelled when the plugin activation is deactivated.</param>
     public PluginRuntimeTaskService(CancellationToken lifetimeCancellationToken)
+        : this(lifetimeCancellationToken, null)
+    {
+    }
+
+    /// <summary>Creates a task owner with the host's optional session-retention admission.</summary>
+    /// <param name="lifetimeCancellationToken">The token cancelled when the plugin activation is deactivated.</param>
+    /// <param name="sessionRetentionAdmission">The admission owner, or null for a host without retention.</param>
+    public PluginRuntimeTaskService(CancellationToken lifetimeCancellationToken, ISessionRetentionAdmission? sessionRetentionAdmission)
     {
         _lifetimeCancellationToken = lifetimeCancellationToken;
+        _sessionRetentionAdmission = sessionRetentionAdmission;
     }
 
     /// <inheritdoc />
@@ -61,8 +72,19 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
         {
             ObjectDisposedException.ThrowIf(_closed, this);
             RemoveCompletedTasks();
-            tracked = new TrackedPluginTask(this, name, work, options);
-            _runningTasks.Add(tracked);
+            IDisposable? protection = null;
+            if (!options.SessionRetentionIndependent && _sessionRetentionAdmission is { } admission)
+                protection = admission.TryProtectAll() ?? throw new InvalidOperationException("Session retirement prevents starting this plugin task.");
+            try
+            {
+                tracked = new TrackedPluginTask(this, name, work, options, protection);
+                _runningTasks.Add(tracked);
+            }
+            catch
+            {
+                protection?.Dispose();
+                throw;
+            }
         }
 
         tracked.Launch();
@@ -160,12 +182,14 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
         private readonly CancellationTokenSource _cancellation = new();
         private readonly PluginRuntimeTaskService _owner;
         private readonly PluginOwnedOperation _work;
+        private readonly IDisposable? _protection;
         private PluginOwnedOperation? _cancel;
         private bool _completed;
 
-        internal TrackedPluginTask(PluginRuntimeTaskService owner, string name, Func<CancellationToken, ValueTask> work, PluginTaskOptions options)
+        internal TrackedPluginTask(PluginRuntimeTaskService owner, string name, Func<CancellationToken, ValueTask> work, PluginTaskOptions options, IDisposable? protection)
         {
             _owner = owner;
+            _protection = protection;
             _work = new PluginOwnedOperation(async () =>
             {
                 // Do not use a linked CTS whose synchronous propagation can run plugin control callbacks.
@@ -176,7 +200,13 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
                     // Async control propagation is not the entry gate: recheck lifetime at actual callback entry.
                     owner._lifetimeCancellationToken.ThrowIfCancellationRequested();
                     token.ThrowIfCancellationRequested();
-                    await work(token).ConfigureAwait(false);
+                    var original = work(token).AsTask();
+                    try { await original.ConfigureAwait(false); }
+                    catch when (original.Exception is { } failure && PluginDependencyRetention.Contains(failure))
+                    {
+                        // Await selects one failure; a retained dependency may be a different sibling.
+                        throw failure;
+                    }
                 }, _cancellation.Token, options.LongRunning).ConfigureAwait(false);
             });
             Handle = new PluginTaskHandle(name, options.Description, options.LongRunning, DateTimeOffset.UtcNow, _work.Work, RequestCancellation);
@@ -200,13 +230,16 @@ public sealed class PluginRuntimeTaskService : IPluginTaskService
 
         private async Task CleanupAsync()
         {
-            await _work.Outcome.ConfigureAwait(false);
+            var failure = await _work.Outcome.ConfigureAwait(false);
             PluginOwnedOperation? cancel;
             lock (_gate) { _completed = true; cancel = _cancel; }
             try
             {
                 if (cancel is not null) await PluginOwnedOperation.JoinAsync([cancel]).ConfigureAwait(false);
+                if (failure is not null && PluginDependencyRetention.Contains(failure))
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(failure);
                 _cancellation.Dispose();
+                _protection?.Dispose();
             }
             catch
             {

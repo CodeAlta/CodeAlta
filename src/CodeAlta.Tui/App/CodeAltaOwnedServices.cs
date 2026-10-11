@@ -115,9 +115,15 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
     /// <exception cref="Exception">Creation failed and rollback succeeded; the original exception is propagated.</exception>
     /// <exception cref="OperationCanceledException">Creation was canceled and rollback succeeded.</exception>
     /// <exception cref="AggregateException">Creation and rollback both failed; their direct exceptions remain ordered and unflattened.</exception>
-    public static async Task<CodeAltaOwnedServices> CreateAsync(
+    public static Task<CodeAltaOwnedServices> CreateAsync(
         CancellationToken cancellationToken,
         PluginRuntimeManager? prestartedPluginRuntime = null)
+        => CreateAsync(cancellationToken, prestartedPluginRuntime, null);
+
+    internal static async Task<CodeAltaOwnedServices> CreateAsync(
+        CancellationToken cancellationToken,
+        PluginRuntimeManager? prestartedPluginRuntime,
+        CodeAltaSingleInstanceGuard? instanceGuard)
     {
         ModelsDevCatalogService? modelsDevCatalogService = null;
         CodeAltaHost? sharedHost = null;
@@ -155,6 +161,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                     {
                         GlobalRoot = homeRoot,
                         StateRoot = instance.StateRoot,
+                        StartupScratchpadCleanup = new ScratchpadStartupCleanup(instance, instanceGuard),
                         CurrentProjectPath = Environment.CurrentDirectory,
                         IsHeadless = false,
                         PluginFrontend = CodeAlta.Plugins.Abstractions.PluginFrontends.Terminal,

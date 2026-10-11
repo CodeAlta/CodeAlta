@@ -299,8 +299,17 @@ internal sealed partial class PluginUiService
         lock (_gate)
         {
             if (_lifetime.IsCancellationRequested) return new("closed");
+            if (!_ui!.TryProtectWork(out var protection)) return new("retiring");
             _commands.RemoveAll(static task => task.IsCompleted);
-            _commands.Add(Task.Run(() => RunCommandAsync(command, options, pane), CancellationToken.None));
+            try
+            {
+                _commands.Add(Task.Run(() => RunCommandAsync(command, options, pane, protection), CancellationToken.None));
+            }
+            catch
+            {
+                protection?.Dispose();
+                throw;
+            }
         }
 
         return new("started");
@@ -383,13 +392,16 @@ internal sealed partial class PluginUiService
         try { await Task.WhenAll(running).ConfigureAwait(false); } catch (Exception) { /* Each command already reported its own failure. */ }
     }
 
-    private async Task RunCommandAsync(PluginCommandContribution command, PluginAdapterOperationOptions options, DesktopPluginScope pane)
+    private async Task RunCommandAsync(PluginCommandContribution command, PluginAdapterOperationOptions options, DesktopPluginScope pane, IDisposable? protection)
     {
         var ui = _ui!;
         ui.Enter(pane);
+        Task? original = null;
         try
         {
-            var (result, diagnostics) = await _plugins!.Adapter.ExecuteCommandAsync(_plugins.ActivePlugins, command, options, _lifetime.Token).ConfigureAwait(false);
+            var callback = _plugins!.Adapter.ExecuteCommandAsync(_plugins.ActivePlugins, command, options, _lifetime.Token).AsTask();
+            original = callback;
+            var (result, diagnostics) = await callback.ConfigureAwait(false);
             if (diagnostics.Count > 0)
             {
                 ui.NotifyProblem($"The plugin command '{command.Name}' failed. See Application Logs.");
@@ -406,6 +418,13 @@ internal sealed partial class PluginUiService
             if (!string.IsNullOrWhiteSpace(result.PromptText))
                 await ui.PromptAsync(result.EnqueuePrompt ? "enqueue" : "send", result.PromptText, _lifetime.Token).ConfigureAwait(false);
         }
+        catch (Exception failure) when (PluginDependencyRetention.Contains(failure)
+            || original?.Exception is { } failures && PluginDependencyRetention.Contains(failures))
+        {
+            ui.RetainWork(protection, original?.Exception ?? failure, new { Runtime = _plugins, Command = command, Options = options, Original = original });
+            protection = null;
+            LogManager.GetLogger("CodeAlta.Desktop.Plugins").Error(failure, $"Plugin command '{command.Name}' retained its dependencies");
+        }
         catch (OperationCanceledException) { /* The application is closing. */ }
         catch (Exception exception)
         {
@@ -413,6 +432,7 @@ internal sealed partial class PluginUiService
         }
         finally
         {
+            protection?.Dispose();
             // What the plugin shows usually changed with what its command did.
             ui.Refresh();
         }

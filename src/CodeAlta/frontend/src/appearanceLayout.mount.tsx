@@ -1,10 +1,12 @@
-// The Appearance card alone, in a frame of a chosen width: what the Settings window gives it at its sizes.
+// The reorganized preference pages, in a frame of a chosen width.
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createAppearancePreview } from "./appearancePreview";
 import type { ColorSchemeLibrary } from "./colorSchemeLibrary";
 import { colorSchemeOf, defaultColorScheme } from "./colorSchemes";
 import { GeneralSettings } from "./GeneralSettings";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { PermissionSettings } from "./PermissionSettings";
 import type { Locale } from "./localization";
 import { ShellLanguageContext } from "./shellLanguage";
 
@@ -14,16 +16,19 @@ const library: ColorSchemeLibrary = { status: "ok", directory: null, problems: [
 function Fixture() {
   const [locale, setLocale] = useState<Locale>("en");
   const [width, setWidth] = useState(900);
+  const [page, setPage] = useState("appearance");
   const [preview] = useState(createAppearancePreview);
-  Object.assign(window, { appearanceLayout: { setLocale, setWidth } });
+  Object.assign(window, { appearanceLayout: { setLocale, setWidth, setPage } });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
-    <div className="settings-card-page" style={{ width }}>
-      <GeneralSettings theme="dark" setTheme={() => { }} darker={false} setDarker={() => { }} sort="name" setSort={() => { }}
+    <style>{`.settings-card-page.configuration-page { padding: 0; overflow: visible; }`}</style>
+    <div className="settings-card-page" style={{ width }}><div className="settings-grid">
+      {page === "general" ? <GeneralSettings closing={{ behavior: "ask", platform: "windows", set: () => {} }} remoteControl={{ reconnect: true, set: () => {} }} />
+        : page === "permissions" ? <PermissionSettings permissions={null} confirms={{ sessionDelete: true, projectArchive: true, set: () => {} }} />
+        : <AppearanceSettings theme="dark" setTheme={() => { }} darker={false} setDarker={() => { }} sort="name" setSort={() => { }}
         desktopCollapsed={false} setDesktopCollapsed={() => { }} recentSessionCount={6} setRecentSessionCount={() => { }} subAgentCount={4} setSubAgentCount={() => { }} notices={{}}
-        closing={{ behavior: "ask", platform: "windows", set: () => { } }}
         schemes={{ colorScheme: defaultColorScheme, setColorScheme: () => { }, shownScheme: colorSchemeOf(defaultColorScheme), variant: "dark", customSchemes: [],
-          library, preview, platform: "windows" }} />
-    </div>
+          library, preview, platform: "windows" }} />}
+    </div></div>
   </ShellLanguageContext.Provider>;
 }
 document.documentElement.classList.add("bp6-dark");

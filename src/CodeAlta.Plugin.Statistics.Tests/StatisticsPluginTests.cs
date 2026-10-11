@@ -58,6 +58,24 @@ internal sealed class FakeAlta : IPluginAltaService
 [TestClass]
 public sealed class StatisticsPluginTests
 {
+    private sealed class StartupOnlyRetentionAdmission : ISessionRetentionAdmission
+    {
+        private int _attempts;
+        public int Attempts => Volatile.Read(ref _attempts);
+        public bool StartupReleased { get; private set; }
+        public IDisposable? TryProtectSession(string sessionId) { Interlocked.Increment(ref _attempts); return null; }
+        public IDisposable? TryProtectAll()
+        {
+            // Startup must be admitted before callbacks. History/flow remain explicitly independent:
+            // any subsequent attempt to acquire session-work admission is refused by this fixture.
+            return Interlocked.Increment(ref _attempts) == 1 ? new StartupClaim(this) : null;
+        }
+        private sealed class StartupClaim(StartupOnlyRetentionAdmission owner) : IDisposable
+        {
+            public void Dispose() => owner.StartupReleased = true;
+        }
+    }
+
     /// <summary>
     /// The time zone of the stores of these tests: the one of the machine. A plugin always cuts its days in that zone, so a store made
     /// in another one would have its roll-ups added up again by the first command, and the numbers of a test would be those of other days.
@@ -619,6 +637,7 @@ public sealed class StatisticsPluginTests
         var session = EngineHarness.Session("a", start, 2);
         journals.Set(session, EngineHarness.EndOf(session, start));
         StatisticsPlugin? created = null;
+        var admission = new StartupOnlyRetentionAdmission();
         var runtime = new PluginRuntimeManager();
         var result = await runtime.StartAsync(new PluginRuntimeManagerOptions
         {
@@ -626,6 +645,7 @@ public sealed class StatisticsPluginTests
             StateRoot = temp.Path,
             ApplicationDatabase = application,
             Frontend = PluginFrontends.Desktop,
+            SessionRetentionAdmission = admission,
             BuiltIns =
             [
                 new BuiltInPluginDefinition
@@ -640,6 +660,7 @@ public sealed class StatisticsPluginTests
         try
         {
             Assert.IsNotNull(created);
+            Assert.IsTrue(admission.StartupReleased, "The original startup has released its own admission before returning.");
             var service = created.Statistics;
             Assert.IsNotNull(service, "The job runs on the desktop, with a database.");
             await WaitAsync(() => service.Status.State == HistoryState.NeedsChoice);
@@ -663,6 +684,7 @@ public sealed class StatisticsPluginTests
                     Event = new AgentActivityEvent(new ModelProviderId("codex"), "a", DateTimeOffset.UtcNow, null, AgentActivityKind.Turn, AgentActivityPhase.Started, "x", null, "turn", "started"),
                 });
             await WaitAsync(async () => (await service.Queries.SummaryAsync(new StatisticsRequest { Period = "2026-10-09..2026-10-09" })).Tiles.Single(static tile => tile.Id == "runs").Value == 3);
+            Assert.AreEqual(1, admission.Attempts, "Only startup is admitted; the independent Statistics history/flow tasks must not acquire session-work claims.");
 
             var stdout = new StringWriter();
             var context = new PluginAltaCommandContext { Plugin = active.Descriptor, Services = active.RuntimeContext.Services, CorrelationId = "c", Stdin = TextReader.Null, Stdout = stdout, Stderr = new StringWriter() };

@@ -2,12 +2,20 @@ import { landingMessages } from "./landing/messages";
 import { statisticsMessages } from "./statistics/messages";
 import { worktreeMessages } from "./worktrees/messages";
 import { documentationMessages } from "./documentation/messages";
+import { storageMessages } from "./storage/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
   return Object.freeze(Object.fromEntries(Object.entries(rows).map(([key, row]) => [key, Object.freeze(row)]))) as Readonly<T>;
 }
 export const messages = dictionary({
+  "Theme and colors": ["Tema y colores", "Thème et couleurs", "Design und Farben", "テーマと色", "主题与颜色"],
+  "Conversation and changes": ["Conversación y cambios", "Conversation et modifications", "Unterhaltung und Änderungen", "会話と変更", "对话与更改"],
+  "Startup and closing": ["Inicio y cierre", "Démarrage et fermeture", "Starten und Schließen", "起動と終了", "启动与关闭"],
+  "Welcome page": ["Página de bienvenida", "Page d’accueil", "Willkommensseite", "ウェルカムページ", "欢迎页面"],
+  "Agent permissions": ["Permisos de los agentes", "Autorisations des agents", "Agentenberechtigungen", "エージェントの権限", "代理权限"],
+  "Confirmations": ["Confirmaciones", "Confirmations", "Bestätigungen", "確認", "确认"],
+  "These confirmations apply to manual actions, not automatic session retention.": ["Estas confirmaciones se aplican a las acciones manuales, no a la retención automática de sesiones.", "Ces confirmations concernent les actions manuelles, pas la conservation automatique des sessions.", "Diese Bestätigungen gelten für manuelle Aktionen, nicht für die automatische Sitzungsaufbewahrung.", "これらの確認は手動操作に適用され、自動的なセッション保持には適用されません。", "这些确认适用于手动操作，不适用于自动会话保留。"],
   "New session": ["Nueva sesión", "Nouvelle session", "Neue Sitzung", "新しいセッション", "新会话"],
   "New session — {project}": ["Nueva sesión — {project}", "Nouvelle session — {project}", "Neue Sitzung — {project}", "新しいセッション — {project}", "新会话 — {project}"],
   "Start session": ["Iniciar sesión", "Démarrer la session", "Sitzung starten", "セッションを開始", "开始会话"],
@@ -2198,6 +2206,7 @@ export const messages = dictionary({
   "The session is working. Ask for the pull request once it is idle.": ["La sesión está trabajando. Pide la pull request cuando esté inactiva.", "La session travaille. Demandez la pull request quand elle est au repos.", "Die Sitzung arbeitet. Fordere den Pull Request an, sobald sie im Leerlauf ist.", "セッションは作業中です。アイドルになってからプルリクエストを依頼してください。", "会话正在工作。请在其空闲后再请求拉取请求。"],
   "These are the instructions CodeAlta ships. To change them, make a copy of your own: it takes their place.": ["Estas son las instrucciones que incluye CodeAlta. Para cambiarlas, crea tu propia copia: ocupará su lugar.", "Ce sont les instructions fournies avec CodeAlta. Pour les changer, faites-en une copie à vous : elle prend leur place.", "Dies sind die Anweisungen, die CodeAlta mitliefert. Um sie zu ändern, erstelle eine eigene Kopie: Sie tritt an ihre Stelle.", "これは CodeAlta に同梱されている指示です。変更するには自分用のコピーを作成してください。コピーが代わりに使われます。", "这些是 CodeAlta 附带的指令。要更改它们，请创建自己的副本：它会取而代之。"],
   "This session cannot take it right now. Try again in a moment.": ["Esta sesión no puede aceptarlo ahora. Inténtalo de nuevo en un momento.", "Cette session ne peut pas le prendre pour l'instant. Réessayez dans un instant.", "Diese Sitzung kann es gerade nicht annehmen. Versuche es gleich noch einmal.", "このセッションは今は受け付けられません。しばらくしてからもう一度お試しください。", "此会话现在无法接收。请稍后重试。"],
+  "The prompt may have been sent. Check the session before trying again.": ["Es posible que se haya enviado el mensaje. Revisa la sesión antes de intentarlo de nuevo.", "Le message a peut-être été envoyé. Vérifiez la session avant de réessayer.", "Die Nachricht wurde möglicherweise gesendet. Prüfen Sie die Sitzung, bevor Sie es erneut versuchen.", "プロンプトが送信された可能性があります。再試行する前にセッションを確認してください。", "提示可能已发送。请先检查会话，再决定是否重试。"],
   "What a session is told when you ask it to create a pull request.": ["Lo que se le dice a una sesión cuando le pides crear una pull request.", "Ce qui est dit à une session quand vous lui demandez de créer une pull request.", "Was einer Sitzung gesagt wird, wenn du sie bittest, einen Pull Request zu erstellen.", "プルリクエストの作成を依頼したときにセッションへ伝える内容。", "当你要求会话创建拉取请求时告知它的内容。"],
   "Open the session {title}": ["Abrir la sesión {title}", "Ouvrir la session {title}", "Sitzung {title} öffnen", "セッション「{title}」を開く", "打开会话 {title}"],
   "{count} sub-agent(s)": ["{count} subagente(s)", "{count} sous-agent(s)", "{count} Sub-Agent(en)", "サブエージェント {count} 件", "{count} 个子代理"],
@@ -2329,6 +2338,7 @@ export const messages = dictionary({
   ...statisticsMessages,
   ...worktreeMessages,
   ...documentationMessages,
+  ...storageMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

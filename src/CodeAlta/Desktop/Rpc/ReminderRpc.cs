@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using CodeAlta.Agent;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -31,10 +32,14 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
     private bool _closed;
 
     internal ReminderService(OwnedSessionWorkspace reads, OwnedSessionCommandService commands, SessionRuntimeService runtime, string epoch)
+        : this(reads, commands, runtime, epoch, null) { }
+
+    internal ReminderService(OwnedSessionWorkspace reads, OwnedSessionCommandService commands, SessionRuntimeService runtime, string epoch,
+        ISessionRetentionAdmission? retention)
         : this(epoch, async (id, token) => (await reads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions
             .Any(session => string.Equals(session.SessionId, id, StringComparison.Ordinal)),
             request => commands.AdmitSend(request),
-            (id, content) => runtime.DeliverHostPromptToRunningTurnAsync(id, content, PromptKind)) { }
+            (id, content) => runtime.DeliverHostPromptToRunningTurnAsync(id, content, PromptKind), null, retention) { }
 
     // Literal callbacks and clock let tests exercise admission and firing without a provider or profile writes.
     internal ReminderService(string epoch, Func<string, CancellationToken, Task<bool>> exists,
@@ -45,6 +50,11 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
     // `idle` when no turn runs.
     internal ReminderService(string epoch, Func<string, CancellationToken, Task<bool>> exists,
         Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send, Func<string, string, Task<string>> running, TimeProvider? clock = null)
+        : this(epoch, exists, send, running, clock, null) { }
+
+    internal ReminderService(string epoch, Func<string, CancellationToken, Task<bool>> exists,
+        Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send, Func<string, string, Task<string>> running,
+        TimeProvider? clock, ISessionRetentionAdmission? retention)
     {
         if (!Identity(epoch)) throw new ArgumentException("A bounded host epoch is required.", nameof(epoch));
         ArgumentNullException.ThrowIfNull(exists);
@@ -56,7 +66,9 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
         _running = running;
         _clock = clock ?? TimeProvider.System;
         _closingToken = _closing.Token;
-        _reminders = new AltaReminderService(new AltaServiceCollection(), _clock, this);
+        var services = new AltaServiceCollection();
+        if (retention is not null) services.Add<ISessionRetentionAdmission>(retention);
+        _reminders = new AltaReminderService(services, _clock, this);
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ import type { PluginComposerRequest } from "../pluginUi";
 import type { RunsWith } from "./runsWith";
 import type { WorkItem, WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
+import { awaitComposerAdmission } from "../pluginPromptAdmission";
 
 /** What starting the work of an item needs from the window. */
 export type WorkStartHost = Readonly<{
@@ -42,7 +43,12 @@ export async function startWorkItem(host: WorkStartHost, item: WorkItem, start: 
     return false;
   }
   const busy = host.composer("state", session.id).state?.busy ?? false;
-  if (host.composer(busy ? "enqueue" : "send", session.id, prepared.prompt, prepared.agentPromptId).result) return true;
+  const accepted = await awaitComposerAdmission(() => host.composer(busy ? "enqueue" : "send", session.id, prepared.prompt, prepared.agentPromptId));
+  if (accepted === true) return true;
+  if (accepted === null) {
+    host.refuse("The prompt may have been sent. Check the session before trying again.", null);
+    return false;
+  }
   // The session did not take the prompt: nobody carries the item out.
   await host.hub.act(item, "release");
   host.refuse("This session cannot take it right now. Try again in a moment, or start it in a new session.", null);

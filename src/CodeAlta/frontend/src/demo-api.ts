@@ -94,6 +94,7 @@ const emptyPage = async () => ({ status: "ok", rows: [], next: null, epoch: "dem
 
 export const sessionDisplay = Object.freeze({ observe: unavailable });
 export const sessionRuntimeState = Object.freeze({ current: unavailable });
+export const sessionRetentionProtection = Object.freeze({ publish: async () => ({ accepted: true, reason: null }) });
 export const sessionUsage = Object.freeze({ read: unavailable });
 export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable });
 export const sessionOperations = Object.freeze({
@@ -123,6 +124,14 @@ export const projectGit = Object.freeze({ status: unavailable, changes: unavaila
 export const worktrees = Object.freeze({ list: unavailable, remove: unavailable, branches: unavailable, switch: unavailable, settings: unavailable, saveSettings: unavailable,
   inventory: unavailable, removeMany: unavailable, openEditor: unavailable });
 export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable });
+// A browser preview neither measures nor edits the user's real profile.
+export const storage = Object.freeze({
+  readSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),
+  saveSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),
+  scan: async () => ({ status: "unavailable", snapshot: null }),
+  watchMaintenance: unavailable,
+  watchRetention: unavailable,
+});
 export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
   open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });
 // The demo starts no session by itself: its automations tab says so.

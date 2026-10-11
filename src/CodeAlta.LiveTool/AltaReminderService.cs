@@ -99,6 +99,7 @@ public sealed class AltaReminderService : IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when a required string value is missing.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when duration or repeat count is not positive.</exception>
     /// <exception cref="ObjectDisposedException">The service has started worker disposal.</exception>
+    /// <exception cref="InvalidOperationException">Retention already owns the target session.</exception>
     public AltaReminderDescriptor Create(AltaReminderCreateRequest request)
         => Create(request, out _);
 
@@ -110,6 +111,7 @@ public sealed class AltaReminderService : IAsyncDisposable
     /// <exception cref="ArgumentException">Thrown when a required string value is missing.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when duration or repeat count is not positive.</exception>
     /// <exception cref="ObjectDisposedException">The service has started worker disposal.</exception>
+    /// <exception cref="InvalidOperationException">Retention already owns the target session.</exception>
     public AltaReminderDescriptor Create(AltaReminderCreateRequest request, out AltaReminderNotificationFailure? notificationFailure)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -131,6 +133,9 @@ public sealed class AltaReminderService : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_stopping, this);
         }
 
+        // Creation/observer work and the original timer/delivery worker have independent lifetimes.
+        // Acquire both before publication; deleting the public entry cannot release the worker's claim.
+        using var creationRetention = _services.ClaimSessionWork(request.TargetSessionId);
         var now = _timeProvider.GetUtcNow();
         var descriptor = new AltaReminderDescriptor
         {
@@ -155,6 +160,7 @@ public sealed class AltaReminderService : IAsyncDisposable
         var admitted = false;
         try
         {
+            entry.Retention = _services.ClaimSessionWork(descriptor.TargetSessionId);
             lock (_gate)
             {
                 PruneCompletedWorkersUnderGate();
@@ -489,7 +495,7 @@ public sealed class AltaReminderService : IAsyncDisposable
                     snapshot = new ReminderDeliverySnapshot(entry.Descriptor, entry.Content);
                 }
 
-                var delivery = await DeliverAsync(snapshot).ConfigureAwait(false);
+                var delivery = await DeliverAsync(entry, snapshot).ConfigureAwait(false);
                 var firedAt = _timeProvider.GetUtcNow();
                 var completed = false;
                 NotificationContext context;
@@ -552,6 +558,7 @@ public sealed class AltaReminderService : IAsyncDisposable
             {
                 OnChanged(context);
             }
+            if (entry.RetainedFailure is not null) ExceptionDispatchInfo.Capture(entry.RetainedFailure).Throw();
         }
         finally
         {
@@ -569,12 +576,26 @@ public sealed class AltaReminderService : IAsyncDisposable
         }
     }
 
-    private async Task<AltaReminderDeliveryResult> DeliverAsync(ReminderDeliverySnapshot snapshot)
+    private async Task<AltaReminderDeliveryResult> DeliverAsync(ReminderEntry entry, ReminderDeliverySnapshot snapshot)
     {
         if (_delivery is not null)
         {
-            try { return await _delivery.DeliverAsync(snapshot.Descriptor, snapshot.Content).ConfigureAwait(false); }
-            catch (Exception ex) { return new AltaReminderDeliveryResult(AltaExitCodes.Failure, ex.Message, string.Empty); }
+            Task<AltaReminderDeliveryResult>? original = null;
+            try
+            {
+                original = _delivery.DeliverAsync(snapshot.Descriptor, snapshot.Content);
+                return await original.ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                var evidence = original?.Exception ?? ex;
+                if (AltaRetentionAdmission.ContainsRetainedDependency(evidence))
+                {
+                    entry.RetainedFailure = evidence;
+                    ExceptionDispatchInfo.Capture(evidence).Throw();
+                }
+                return new AltaReminderDeliveryResult(AltaExitCodes.Failure, evidence.Message, string.Empty);
+            }
         }
         var dispatcher = _services.Get<AltaCommandDispatcher>() ?? new AltaCommandDispatcher(new AltaCommandRegistry(), _services);
         var caller = new AltaCallerIdentity
@@ -1013,7 +1034,7 @@ public sealed class AltaReminderService : IAsyncDisposable
         for (var index = 0; index < _workers.Count;)
         {
             var entry = _workers[index];
-            if (!entry.Publication.Task.IsCompletedSuccessfully ||
+            if (entry.RetainedFailure is not null || !entry.Publication.Task.IsCompletedSuccessfully ||
                 entry.Original is not { } original)
             {
                 index++;
@@ -1073,6 +1094,10 @@ public sealed class AltaReminderService : IAsyncDisposable
 
         public string Content { get; set; }
 
+        public IDisposable? Retention { get; set; }
+
+        public Exception? RetainedFailure { get; set; }
+
         public long ContentRevision { get; set; }
 
         public Task? Original { get; set; }
@@ -1127,7 +1152,13 @@ public sealed class AltaReminderService : IAsyncDisposable
             }
         }
 
-        public void DisposeCancellation() => _cancellation.Dispose();
+        public void DisposeCancellation()
+        {
+            // A terminal callback Task is not proof that its retained dependencies stopped.
+            if (RetainedFailure is not null) return;
+            try { _cancellation.Dispose(); }
+            finally { Retention?.Dispose(); }
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Plugin.Statistics.History;
 using CodeAlta.Plugin.Statistics.Query;
 using CodeAlta.Plugin.Statistics.Store;
@@ -10,6 +11,7 @@ namespace CodeAlta.Plugin.Statistics;
 public sealed partial class StatisticsPlugin
 {
     private readonly ISessionJournalCatalog? _journals;
+    private readonly StatisticsArchiveStore? _archives;
     private readonly TimeSpan? _startDelay;
     private readonly TimeSpan? _flowDebounce;
 
@@ -38,6 +40,21 @@ public sealed partial class StatisticsPlugin
     /// </remarks>
     public static StatisticsPlugin CreateForDesktop(ISessionJournalCatalog journals) => new(journals);
 
+    /// <summary>Creates the desktop plugin with the owning StateRoot's durable archive. The archive is independent of plugin unload/reset.</summary>
+    /// <param name="journals">The owning instance's journal catalog.</param>
+    /// <param name="archives">The dedicated archive supplied by host composition.</param>
+    /// <returns>The plugin with optional retirement preservation capability while activated.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static StatisticsPlugin CreateForDesktop(ISessionJournalCatalog journals, StatisticsArchiveStore archives)
+        => new(journals, archives);
+
+    private StatisticsPlugin(ISessionJournalCatalog journals, StatisticsArchiveStore archives)
+        : this(journals)
+    {
+        ArgumentNullException.ThrowIfNull(archives);
+        _archives = archives;
+    }
+
     internal StatisticsPlugin(ISessionJournalCatalog journals, TimeSpan startDelay, TimeSpan flowDebounce, TimeProvider? time = null)
         : this(journals)
     {
@@ -52,6 +69,9 @@ public sealed partial class StatisticsPlugin
     /// </summary>
     public IStatisticsService? Statistics => _engine;
 
+    /// <summary>Gets the active engine's source-bound archive capability; null when disabled, unloaded or not composed with durable storage.</summary>
+    public ISessionStatisticsRetirementArchive? RetirementArchive => _archives is null ? null : _engine;
+
     /// <inheritdoc />
     public override ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
     {
@@ -62,7 +82,7 @@ public sealed partial class StatisticsPlugin
 
         var directory = new AltaProjectDirectory(Services.Alta);
         _directory = directory;
-        var store = new StatisticsStore(Services.Database, new LocalDays(TimeZoneInfo.Local));
+        var store = new StatisticsStore(Services.Database, new LocalDays(TimeZoneInfo.Local), _archives);
         var engine = new StatisticsEngine(store, _journals, new StatisticsEngineOptions
         {
             Logger = Logger,
@@ -79,7 +99,9 @@ public sealed partial class StatisticsPlugin
         _job = Tasks.Run(
             "statistics-history",
             token => new ValueTask(engine.RunAsync(token)),
-            new PluginTaskOptions { LongRunning = true, Description = "Keeps the statistics of the sessions up to date." });
+            // Reads tolerate disappearing journals; history/flow only write the Statistics projection/archive,
+            // never schedule or mutate a session. Archive preparation serializes with this reader in the engine.
+            new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Keeps the statistics of the sessions up to date." });
         return ValueTask.CompletedTask;
     }
 
@@ -162,7 +184,7 @@ public sealed partial class StatisticsPlugin
             return null;
         }
 
-        var store = new StatisticsStore(database, new LocalDays(TimeZoneInfo.Local));
+        var store = new StatisticsStore(database, new LocalDays(TimeZoneInfo.Local), _archives);
         await store.InitializeAsync(cancellationToken).ConfigureAwait(false);
         return store;
     }

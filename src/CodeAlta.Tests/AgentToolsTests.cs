@@ -705,6 +705,159 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    [DataRow(false, true)]
+    [DataRow(true, true)]
+    [DataRow(true, false)]
+    public async Task ShellCommandTool_BoundsOutputCollectionAfterShellExits(bool cancel, bool hasTimeout)
+    {
+        using var temp = TestTempDirectory.Create();
+        using var cancellation = new CancellationTokenSource();
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        // The child deliberately inherits both output pipes and outlives the shell, as a
+        // desktop application launched with Process.Start does. Never use a real app/profile.
+        var command = OperatingSystem.IsWindows()
+            ? """
+              $start = [Diagnostics.ProcessStartInfo]::new()
+              $start.FileName = (Get-Process -Id $PID).Path
+              $start.UseShellExecute = $false
+              $start.ArgumentList.Add('-NoProfile')
+              $start.ArgumentList.Add('-Command')
+              $start.ArgumentList.Add('Start-Sleep -Seconds 60')
+              $child = [Diagnostics.Process]::Start($start)
+              [IO.File]::WriteAllText((Join-Path (Get-Location) 'process-ids.txt'), "$PID,$($child.Id)")
+              [Console]::Out.WriteLine('child-started')
+              """
+            : "sleep 60 & child=$!; printf '%s,%s' \"$$\" \"$child\" > process-ids.txt; printf 'child-started\\n'";
+        const int timeoutMs = 5000;
+        int? configuredTimeout = hasTimeout ? (cancel ? 30000 : timeoutMs) : null;
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":{{JsonSerializer.Serialize(configuredTimeout)}}}""");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var execution = tool.Handler(
+            new AgentToolInvocation(
+                ModelProviderIds.OpenAIResponses,
+                "session-1",
+                "tool-1",
+                tool.Spec.Name,
+                args.RootElement.Clone(),
+                (update, _) =>
+                {
+                    if (update.Delta.Contains("child-started", StringComparison.Ordinal))
+                    {
+                        started.TrySetResult();
+                    }
+
+                    return ValueTask.CompletedTask;
+                }),
+            cancellation.Token);
+        Process? child = null;
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            var ids = (await File.ReadAllTextAsync(Path.Combine(temp.Path, "process-ids.txt")).ConfigureAwait(false))
+                .Split(',').Select(int.Parse).ToArray();
+            child = Process.GetProcessById(ids[1]);
+            // Retain the handle before waiting; never look the PID up again during cleanup.
+            _ = child.SafeHandle;
+            Process? shell;
+            try
+            {
+                shell = Process.GetProcessById(ids[0]);
+            }
+            catch (ArgumentException)
+            {
+                shell = null; // The shell already exited, but its child still holds the pipes.
+            }
+
+            if (shell is not null)
+            {
+                using (shell)
+                {
+                    await shell.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                }
+            }
+
+            Assert.IsFalse(child.HasExited, "The regression requires a child still holding the shell's pipes.");
+            if (cancel)
+            {
+                cancellation.Cancel();
+            }
+
+            var result = await execution.WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            Assert.IsFalse(result.Success);
+            Assert.AreEqual(cancel ? "shell_command was canceled." : $"shell_command timed out after {timeoutMs} ms.", result.Error);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            // The shell is already gone or is terminated by the tool's cancellation path.
+            // Only terminate the child whose original process handle this test retained.
+            // If startup failed before acquiring it, its own 60-second sleep bounds its life.
+            if (child is not null)
+            {
+                using (child)
+                {
+                    try
+                    {
+                        child.Kill(entireProcessTree: true);
+                        await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+                    }
+                    catch (InvalidOperationException)
+                    {
+                    }
+                }
+            }
+
+            try
+            {
+                await execution.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+    }
+
+    [TestMethod]
+    public async Task ShellCommandTool_TimesOutWhileShellIsStillRunning()
+    {
+        using var temp = TestTempDirectory.Create();
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        var command = OperatingSystem.IsWindows() ? "Start-Sleep -Seconds 60" : "sleep 60";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":500}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            cancellation.Token).WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(false);
+
+        Assert.IsFalse(result.Success);
+        Assert.AreEqual("shell_command timed out after 500 ms.", result.Error);
+    }
+
+    [TestMethod]
+    public async Task ShellCommandTool_DrainsFinalUnterminatedOutput()
+    {
+        using var temp = TestTempDirectory.Create();
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        var command = OperatingSystem.IsWindows()
+            ? "[Console]::Out.Write('stdout-tail'); [Console]::Error.Write('stderr-tail')"
+            : "printf 'stdout-tail'; printf 'stderr-tail' >&2";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":5000}""");
+
+        var result = await tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
+            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;
+        StringAssert.Contains(output, "stdout-tail");
+        StringAssert.Contains(output, "stderr-tail");
+    }
+
+    [TestMethod]
     public async Task ShellCommandTool_TreatsNullOptionalArgumentsAsMissing()
     {
         using var temp = TestTempDirectory.Create();

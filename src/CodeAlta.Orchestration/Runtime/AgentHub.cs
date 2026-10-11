@@ -11,8 +11,14 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <see cref="AgentHub"/> owns active in-memory session attachments, per-session run/control coordination,
 /// subscriptions, and lifecycle events. Persisted session discovery/listing and model-provider probing are owned by
 /// the session catalog and provider initialization services, not by this facade.
+/// When composed with retention admission, preparation claims precede provider construction and remain owned by
+/// the original attachment until its references, provider callbacks and dependency disposal have completed.
+/// Canceling a waiter cannot release these claims. Resume also requires a currently existing owned journal.
+/// Raw model-provider registrations transfer executor lifetime to <see cref="AgentRuntime"/>; their provider
+/// wrapper must not own independent session work. The executor is disposed by that runtime, not twice through
+/// both runtime and wrapper. Direct session-provider runtimes retain their own disposal ownership.
 /// </remarks>
-public sealed class AgentHub : IAsyncDisposable
+public sealed partial class AgentHub : IAsyncDisposable
 {
     private readonly ModelProviderRegistry _modelProviderRegistry;
     private readonly string? _stateRootPath;
@@ -42,12 +48,27 @@ public sealed class AgentHub : IAsyncDisposable
         ModelProviderRegistry modelProviderRegistry,
         string? stateRootPath = null,
         IAgentSessionProjectionCache? sessionProjectionCache = null)
+        : this(modelProviderRegistry, stateRootPath, sessionProjectionCache, null)
+    {
+    }
+
+    /// <summary>Creates a hub whose preparation and original attachment lifetimes exclude automatic retention.</summary>
+    /// <param name="modelProviderRegistry">Registry used to construct providers, after retention admission.</param>
+    /// <param name="stateRootPath">The owning instance's journal root.</param>
+    /// <param name="sessionProjectionCache">Optional shared journal projection cache.</param>
+    /// <param name="retentionAdmission">The same admission registry used by the host's retirement owner; null disables integration.</param>
+    /// <exception cref="ArgumentNullException">The provider registry is null.</exception>
+    /// <exception cref="ArgumentException">Retention is configured without an explicit journal root.</exception>
+    public AgentHub(ModelProviderRegistry modelProviderRegistry, string? stateRootPath,
+        IAgentSessionProjectionCache? sessionProjectionCache, ISessionRetentionAdmission? retentionAdmission)
     {
         ArgumentNullException.ThrowIfNull(modelProviderRegistry);
+        if (retentionAdmission is not null) ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
 
         _modelProviderRegistry = modelProviderRegistry;
         _stateRootPath = stateRootPath;
         _sessionProjectionCache = sessionProjectionCache;
+        _retentionAdmission = retentionAdmission;
     }
 
     /// <summary>
@@ -67,32 +88,14 @@ public sealed class AgentHub : IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The active session handle.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when no provider key was provided, or when the provider returns a different requested session identifier.</exception>
+    /// <exception cref="InvalidOperationException">No provider key was provided, the provider changed the requested identity, or retirement owns a requested identity.</exception>
     public async Task<AgentSessionHandle> StartSessionAsync(
         AgentSessionCreateOptions options,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var providerId = ResolveProviderId(options);
-        var runtime = await CreateStartedProviderRuntimeAsync(providerId, cancellationToken).ConfigureAwait(false);
-        IAgentSession? session = null;
-        try
-        {
-            session = await runtime.CreateSessionAsync(options, cancellationToken).ConfigureAwait(false);
-            EnsureRuntimePreservedRequestedSessionId(options.SessionId, session.SessionId);
-            return await AttachSessionAsync(providerId, runtime, session, options.ParentSessionId, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            if (session is not null)
-            {
-                await session.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await runtime.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
+        return await PrepareSessionAsync(options, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -104,7 +107,8 @@ public sealed class AgentHub : IAsyncDisposable
     /// <returns>The active session handle.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="sessionId"/> is empty.</exception>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when no provider key was provided, or when the provider returns a different requested session identifier.</exception>
+    /// <exception cref="InvalidOperationException">No provider key was provided, the provider changed the requested identity, or retirement owns a requested identity.</exception>
+    /// <exception cref="KeyNotFoundException">Retention admission is configured and the session no longer has an owned journal.</exception>
     public async Task<AgentSessionHandle> ResumeSessionAsync(
         string sessionId,
         AgentSessionResumeOptions options,
@@ -113,25 +117,7 @@ public sealed class AgentHub : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(options);
 
-        var providerId = ResolveProviderId(options);
-        var runtime = await CreateStartedProviderRuntimeAsync(providerId, cancellationToken).ConfigureAwait(false);
-        IAgentSession? session = null;
-        try
-        {
-            session = await runtime.ResumeSessionAsync(sessionId, options, cancellationToken).ConfigureAwait(false);
-            EnsureRuntimePreservedRequestedSessionId(sessionId, session.SessionId);
-            return await AttachSessionAsync(providerId, runtime, session, options.ParentSessionId, cancellationToken).ConfigureAwait(false);
-        }
-        catch
-        {
-            if (session is not null)
-            {
-                await session.DisposeAsync().ConfigureAwait(false);
-            }
-
-            await DisposeProviderRuntimeAsync(runtime).ConfigureAwait(false);
-            throw;
-        }
+        return await PrepareSessionAsync(options, sessionId.Trim(), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -158,6 +144,12 @@ public sealed class AgentHub : IAsyncDisposable
         CancellationToken cancellationToken)
     {
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        return await RunAsync(entry, sessionHandleId, takeOptions, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<AgentRunId> RunAsync(SessionEntry entry, AgentSessionHandleId sessionHandleId,
+        Func<AgentSendOptions?> takeOptions, CancellationToken cancellationToken)
+    {
         var original = entry.Lifetime.RecordRun(() => entry.Coordinator.RunAsync(sessionHandleId, takeOptions, _events, cancellationToken));
         try
         {
@@ -174,11 +166,11 @@ public sealed class AgentHub : IAsyncDisposable
 
     // The provider of the session started a turn by itself (a background command of an agent CLI ended): a run is
     // started for it, in its turn among the runs of the session, so that it is shown and recorded as any other.
-    private async Task RunProviderInitiatedAsync(AgentSessionHandleId sessionHandleId, IAgentProviderInitiatedRuns session)
+    private async Task RunProviderInitiatedAsync(SessionEntry entry, AgentSessionHandleId sessionHandleId, IAgentProviderInitiatedRuns session)
     {
         try
         {
-            await RunAsync(sessionHandleId, session.TakeProviderInitiatedRun, CancellationToken.None).ConfigureAwait(false);
+            await RunAsync(entry, sessionHandleId, session.TakeProviderInitiatedRun, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -203,14 +195,8 @@ public sealed class AgentHub : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
 
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return await entry.Coordinator.SteerAsync(sessionHandleId, options, _events, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            entry.ReleaseReference();
-        }
+        return await ExecuteReferencedAsync(entry,
+            () => entry.Coordinator.SteerAsync(sessionHandleId, options, _events, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -230,14 +216,14 @@ public sealed class AgentHub : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(handler);
 
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return await entry.Coordinator.SubscribeAsync(handler, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            entry.ReleaseReference();
-        }
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.SubscribeAsync(entry, value =>
+            {
+                if (!entry.TryAddReference()) return;
+                Exception? failure = null;
+                try { handler(value); }
+                catch (Exception ex) { failure = ex; throw; }
+                finally { entry.Lifetime.CompleteReference(failure, handler); }
+            }, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -252,14 +238,7 @@ public sealed class AgentHub : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return await entry.Coordinator.GetHistoryAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            entry.ReleaseReference();
-        }
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.GetHistoryAsync(cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -294,8 +273,7 @@ public sealed class AgentHub : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskId);
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try { return await entry.Coordinator.StopBackgroundTaskAsync(taskId, cancellationToken).ConfigureAwait(false); }
-        finally { entry.ReleaseReference(); }
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.StopBackgroundTaskAsync(taskId, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -313,8 +291,7 @@ public sealed class AgentHub : IAsyncDisposable
     public async Task<AgentRemoteControl?> SetRemoteControlAsync(AgentSessionHandleId sessionHandleId, bool enabled, string? name, CancellationToken cancellationToken = default)
     {
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try { return await entry.Coordinator.SetRemoteControlAsync(enabled, name, cancellationToken).ConfigureAwait(false); }
-        finally { entry.ReleaseReference(); }
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.SetRemoteControlAsync(enabled, name, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>Sets the permission mode the next runs of an attached session request, without attaching it again.</summary>
@@ -328,8 +305,7 @@ public sealed class AgentHub : IAsyncDisposable
     public async Task<bool> SetPermissionModeAsync(AgentSessionHandleId sessionHandleId, string? permissionMode, CancellationToken cancellationToken = default)
     {
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try { return entry.Coordinator.SetPermissionMode(permissionMode); }
-        finally { entry.ReleaseReference(); }
+        return await ExecuteReferencedAsync(entry, () => Task.FromResult(entry.Coordinator.SetPermissionMode(permissionMode))).ConfigureAwait(false);
     }
 
     /// <summary>Signals only the expected run on an existing attachment and joins original cancellation work.</summary>
@@ -348,8 +324,7 @@ public sealed class AgentHub : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedRunId.Value);
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try { return await entry.Coordinator.AbortRunAsync(expectedRunId, cancellationToken).ConfigureAwait(false); }
-        finally { entry.ReleaseReference(); }
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.AbortRunAsync(expectedRunId, cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -362,14 +337,8 @@ public sealed class AgentHub : IAsyncDisposable
     public async Task<AgentCompactionOutcome?> CompactAsync(AgentSessionHandleId sessionHandleId, CancellationToken cancellationToken = default)
     {
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try
-        {
-            return await entry.Coordinator.CompactAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            entry.ReleaseReference();
-        }
+        return await ExecuteReferencedAsync(entry,
+            () => entry.Coordinator.CompactAsync(cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>Attempts settled idle compaction on this exact attachment without waiting for run admission.</summary>
@@ -384,8 +353,8 @@ public sealed class AgentHub : IAsyncDisposable
     public async Task<AgentCompactionOutcome?> TryCompactWhenIdleAsync(AgentSessionHandleId sessionHandleId, CancellationToken cancellationToken = default)
     {
         var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
-        try { return await entry.Coordinator.TryCompactWhenIdleAsync(cancellationToken).ConfigureAwait(false); }
-        finally { entry.ReleaseReference(); }
+        return await ExecuteReferencedAsync(entry,
+            () => entry.Coordinator.TryCompactWhenIdleAsync(cancellationToken)).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -441,6 +410,12 @@ public sealed class AgentHub : IAsyncDisposable
     private async Task DisposeCoreAsync(Task launch)
     {
         await launch.ConfigureAwait(false);
+        Task preparations;
+        lock (_disposalGate) preparations = _preparationsIdle?.Task ?? Task.CompletedTask;
+        await preparations.ConfigureAwait(false);
+        lock (_disposalGate)
+            if (_retainedPreparations.Count != 0)
+                throw new AgentDependencyRetentionException("hub", "session preparation", _retainedPreparations.ToArray(), this);
         _events.Complete();
 
         SessionEntry[] sessions;
@@ -472,7 +447,7 @@ public sealed class AgentHub : IAsyncDisposable
 
     private async Task<AgentSessionHandle> AttachSessionAsync(
         ModelProviderId providerId,
-        ProviderSessionRuntimeLease runtime,
+        SessionEntry entry,
         IAgentSession session,
         string? parentSessionId,
         CancellationToken cancellationToken)
@@ -486,7 +461,16 @@ public sealed class AgentHub : IAsyncDisposable
             ProviderId = new ModelProviderId(providerId.Value),
             ParentSessionId = normalizedParentSessionId,
         };
-        var entry = new SessionEntry(new AgentSessionCoordinator(session), runtime);
+        if (session is IAgentProviderInitiatedRuns providerRuns)
+        {
+            entry.Coordinator.ObserveProviderRuns(providerRuns.OnProviderInitiatedRun(() =>
+            {
+                // Capture the reference before handing the callback to the scheduler. Stopping the entry
+                // closes admission, but cannot release its protection while this original callback runs.
+                if (entry.TryAddReference())
+                    _ = Task.Run(() => RunProviderInitiatedAsync(entry, handleId, providerRuns));
+            }));
+        }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -499,13 +483,6 @@ public sealed class AgentHub : IAsyncDisposable
             _gate.Release();
         }
 
-        if (session is IAgentProviderInitiatedRuns providerRuns)
-        {
-            // The handler is called while the provider is read: the run starts elsewhere.
-            entry.Coordinator.ObserveProviderRuns(providerRuns.OnProviderInitiatedRun(
-                () => _ = Task.Run(() => RunProviderInitiatedAsync(handleId, providerRuns))));
-        }
-
         _events.TryPublish(new AgentSessionAttachedEvent(DateTimeOffset.UtcNow, handleId, session.SessionId, new ModelProviderId(providerId.Value), normalizedParentSessionId));
         return handle;
     }
@@ -514,47 +491,67 @@ public sealed class AgentHub : IAsyncDisposable
         ModelProviderId providerId,
         CancellationToken cancellationToken)
     {
-        var providerRuntime = await _modelProviderRegistry.CreateRuntimeAsync(providerId, cancellationToken).ConfigureAwait(false);
+        var providerRuntime = await InvokeOriginalAsync(() => _modelProviderRegistry.CreateRuntimeAsync(providerId, cancellationToken).AsTask()).ConfigureAwait(false);
         if (providerRuntime is IModelProviderSessionRuntime sessionRuntime)
         {
             var sessionLease = new ProviderSessionRuntimeLease(sessionRuntime);
             try
             {
-                await sessionLease.StartAsync(cancellationToken).ConfigureAwait(false);
+                await InvokeOriginalAsync(() => sessionLease.StartAsync(cancellationToken)).ConfigureAwait(false);
                 return sessionLease;
             }
-            catch
+            catch (Exception failure)
             {
-                await sessionLease.DisposeAsync().ConfigureAwait(false);
+                if (OwnedProviderEventForwarding.HasRetention(failure))
+                    throw new AgentDependencyRetentionException("hub", "provider start", [failure], sessionLease);
+                try { await InvokeOriginalAsync(() => sessionLease.DisposeAsync().AsTask()).ConfigureAwait(false); }
+                catch (Exception cleanupFailure)
+                {
+                    throw new AgentDependencyRetentionException("hub", "provider start cleanup", [failure, cleanupFailure], sessionLease);
+                }
                 throw;
             }
         }
 
         if (providerRuntime is not IAgentModelProviderRuntime agentProviderRuntime)
         {
-            await providerRuntime.DisposeAsync().ConfigureAwait(false);
+            try { await InvokeOriginalAsync(() => providerRuntime.DisposeAsync().AsTask()).ConfigureAwait(false); }
+            catch (Exception cleanupFailure)
+            {
+                throw new AgentDependencyRetentionException("hub", "unsupported provider cleanup", [cleanupFailure], providerRuntime);
+            }
             throw new InvalidOperationException($"Model provider '{providerId.Value}' does not expose an agent session runtime.");
         }
 
-        var runtime = new AgentRuntime(
-            providerId,
-            providerRuntime.Descriptor.DisplayName,
-            new AgentRuntimeOptions
-            {
-                StateRootPath = _stateRootPath,
-                SessionProjectionCache = _sessionProjectionCache,
-                Providers = [agentProviderRuntime.CreateProviderRegistration()],
-            });
+        AgentRuntime? runtime = null;
         try
         {
-            await providerRuntime.StartAsync(cancellationToken).ConfigureAwait(false);
-            await runtime.StartAsync(cancellationToken).ConfigureAwait(false);
+            runtime = new AgentRuntime(
+                providerId,
+                providerRuntime.Descriptor.DisplayName,
+                new AgentRuntimeOptions
+                {
+                    StateRootPath = _stateRootPath,
+                    SessionProjectionCache = _sessionProjectionCache,
+                    Providers = [agentProviderRuntime.CreateProviderRegistration()],
+                });
+            await InvokeOriginalAsync(() => providerRuntime.StartAsync(cancellationToken)).ConfigureAwait(false);
+            await InvokeOriginalAsync(() => runtime.StartAsync(cancellationToken)).ConfigureAwait(false);
             return new ProviderSessionRuntimeLease(runtime);
         }
-        catch
+        catch (Exception failure)
         {
-            await runtime.DisposeAsync().ConfigureAwait(false);
-            await providerRuntime.DisposeAsync().ConfigureAwait(false);
+            if (OwnedProviderEventForwarding.HasRetention(failure))
+                throw new AgentDependencyRetentionException("hub", "provider preparation", [failure], new { runtime, providerRuntime });
+            try
+            {
+                if (runtime is not null) await InvokeOriginalAsync(() => runtime.DisposeAsync().AsTask()).ConfigureAwait(false);
+                await InvokeOriginalAsync(() => providerRuntime.DisposeAsync().AsTask()).ConfigureAwait(false);
+            }
+            catch (Exception cleanupFailure)
+            {
+                throw new AgentDependencyRetentionException("hub", "provider start cleanup", [failure, cleanupFailure], new { runtime, providerRuntime });
+            }
             throw;
         }
     }
@@ -667,6 +664,8 @@ public sealed class AgentHub : IAsyncDisposable
         private readonly SemaphoreSlim _runGate = new(initialCount: 1, maxCount: 1);
         private readonly SemaphoreSlim _controlGate = new(initialCount: 1, maxCount: 1);
         private readonly CoordinatorFailureOwner _failureOwner;
+        private readonly List<EntrySubscription> _subscriptions = [];
+        private readonly object _subscriptionsGate = new();
         private IDisposable? _providerRuns;
 
         public AgentSessionCoordinator(IAgentSession session)
@@ -718,7 +717,7 @@ public sealed class AgentHub : IAsyncDisposable
             await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var runId = await _session.SteerAsync(options, cancellationToken).ConfigureAwait(false);
+                var runId = await InvokeOriginalAsync(() => _session.SteerAsync(options, cancellationToken)).ConfigureAwait(false);
                 events.TryPublish(new RunStartedEvent(DateTimeOffset.UtcNow, sessionHandleId, runId));
                 events.TryPublish(new RunCompletedEvent(DateTimeOffset.UtcNow, sessionHandleId, runId));
                 return runId;
@@ -734,12 +733,14 @@ public sealed class AgentHub : IAsyncDisposable
             }
         }
 
-        public async Task<IDisposable> SubscribeAsync(Action<AgentEvent> handler, CancellationToken cancellationToken)
+        public async Task<IDisposable> SubscribeAsync(SessionEntry entry, Action<AgentEvent> handler, CancellationToken cancellationToken)
         {
             await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                return _session.Subscribe(handler);
+                var subscription = new EntrySubscription(entry, _session.Subscribe(handler), RemoveSubscription);
+                lock (_subscriptionsGate) _subscriptions.Add(subscription);
+                return subscription;
             }
             finally
             {
@@ -752,7 +753,7 @@ public sealed class AgentHub : IAsyncDisposable
             await _controlGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                return await _session.GetHistoryAsync(cancellationToken).ConfigureAwait(false);
+                return await InvokeOriginalAsync(() => _session.GetHistoryAsync(cancellationToken)).ConfigureAwait(false);
             }
             finally
             {
@@ -787,7 +788,7 @@ public sealed class AgentHub : IAsyncDisposable
 
         public async Task<AgentRemoteControl?> SetRemoteControlAsync(bool enabled, string? name, CancellationToken cancellationToken)
             => _session is IAgentRemoteControlProvider { SupportsRemoteControl: true } provider
-                ? await provider.SetRemoteControlAsync(enabled, name, cancellationToken).ConfigureAwait(false)
+                ? await InvokeOriginalAsync(() => provider.SetRemoteControlAsync(enabled, name, cancellationToken)).ConfigureAwait(false)
                 : null;
 
         public bool SetPermissionMode(string? permissionMode)
@@ -809,10 +810,10 @@ public sealed class AgentHub : IAsyncDisposable
             {
                 if (_session is IAgentCompactionOutcomeProvider compactionOutcomeProvider)
                 {
-                    return await compactionOutcomeProvider.CompactWithOutcomeAsync(cancellationToken).ConfigureAwait(false);
+                    return await InvokeOriginalAsync(() => compactionOutcomeProvider.CompactWithOutcomeAsync(cancellationToken)).ConfigureAwait(false);
                 }
 
-                await _session.CompactAsync(cancellationToken).ConfigureAwait(false);
+                await InvokeOriginalAsync(() => _session.CompactAsync(cancellationToken)).ConfigureAwait(false);
                 return null;
             }
             finally
@@ -828,19 +829,60 @@ public sealed class AgentHub : IAsyncDisposable
             {
                 if (_session is not IAgentIdleCompactionProvider provider)
                     throw new NotSupportedException("The session does not support idle compaction.");
-                return await provider.TryCompactWhenIdleAsync(cancellationToken).ConfigureAwait(false);
+                return await InvokeOriginalAsync(() => provider.TryCompactWhenIdleAsync(cancellationToken)).ConfigureAwait(false);
             }
             finally { _runGate.Release(); }
         }
 
         public async ValueTask DisposeAsync()
         {
-            Interlocked.Exchange(ref _providerRuns, null)?.Dispose();
+            try
+            {
+                Interlocked.Exchange(ref _providerRuns, null)?.Dispose();
+                EntrySubscription[] subscriptions;
+                lock (_subscriptionsGate) subscriptions = _subscriptions.ToArray();
+                foreach (var subscription in subscriptions) subscription.DisposeOriginal();
+            }
+            catch (Exception failure)
+            {
+                throw new AgentDependencyRetentionException("hub coordinator", "subscription cleanup", [failure], this);
+            }
             await _failureOwner.DisposeAsync(_session.DisposeAsync, () =>
             {
                 _runGate.Dispose();
                 _controlGate.Dispose();
             }).ConfigureAwait(false);
+        }
+
+        private void RemoveSubscription(EntrySubscription subscription)
+        {
+            lock (_subscriptionsGate) _subscriptions.Remove(subscription);
+        }
+    }
+
+    private sealed class EntrySubscription(SessionEntry entry, IDisposable registration, Action<EntrySubscription> onDisposed) : IDisposable
+    {
+        private int _disposed;
+        public void Dispose()
+        {
+            // Once shutdown closes reference admission, the coordinator owns the registration's
+            // disposal. An already admitted unsubscribe remains part of the original entry lifetime.
+            if (!entry.TryAddReference()) return;
+            Exception? failure = null;
+            try { DisposeOriginal(); }
+            catch (Exception ex)
+            {
+                failure = new AgentDependencyRetentionException("hub", "subscription disposal", [ex], this);
+                throw failure;
+            }
+            finally { entry.Lifetime.CompleteReference(failure, this); }
+        }
+
+        internal void DisposeOriginal()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            registration.Dispose();
+            onDisposed(this);
         }
     }
 
@@ -926,11 +968,11 @@ public sealed class AgentHub : IAsyncDisposable
 
     private sealed class SessionEntry : IAsyncDisposable
     {
-        public SessionEntry(AgentSessionCoordinator coordinator, ProviderSessionRuntimeLease providerRuntime)
+        public SessionEntry(AgentSessionCoordinator coordinator, ProviderSessionRuntimeLease providerRuntime, IDisposable protection)
         {
             Coordinator = coordinator;
             Lifetime = new SessionEntryLifetime(this, () => coordinator.AbortAsync(CancellationToken.None),
-                coordinator.DisposeAsync, () => DisposeProviderRuntimeAsync(providerRuntime));
+                coordinator.DisposeAsync, () => DisposeProviderRuntimeAsync(providerRuntime), protection);
         }
         public AgentSessionCoordinator Coordinator { get; }
         internal SessionEntryLifetime Lifetime { get; }
@@ -940,7 +982,7 @@ public sealed class AgentHub : IAsyncDisposable
     }
 
     internal sealed class SessionEntryLifetime(object dependencies, Func<Task> abort,
-        Func<ValueTask> disposeSession, Func<ValueTask> disposeProvider)
+        Func<ValueTask> disposeSession, Func<ValueTask> disposeProvider, IDisposable? retentionProtection = null)
     {
         private readonly object _gate = new();
         private readonly List<(Exception Failure, object? Original)> _retained = [];
@@ -1036,6 +1078,7 @@ public sealed class AgentHub : IAsyncDisposable
                     throw new AgentDependencyRetentionException("hub entry", "provider release", failures, new { Owner = dependencies, Lifetime = this });
             }
             DependenciesReleased = true;
+            retentionProtection?.Dispose();
             if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
             if (failures.Count > 1) throw new AggregateException(failures);
         }

@@ -5,6 +5,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { askPluginComposer } from "../pluginUi";
 import { useShellLanguage } from "../shellLanguage";
+import { awaitComposerAdmission } from "../pluginPromptAdmission";
 
 /** The part of the host the button uses; a test gives its own. */
 export type PullRequestPromptsApi = Pick<typeof pullRequestPrompts, "list">;
@@ -31,12 +32,14 @@ export function PullRequestButton({ api, epoch, projectId, sessionId, onOpenSett
     void api.list({ expectedEpoch: epoch, projectId, all: false }, { timeoutMilliseconds: 15_000 })
       .then(reply => setItems(reply.status === "ok" ? reply.items : []), () => setItems([]));
   }
-  function send(item: PullRequestPromptItem) {
+  async function send(item: PullRequestPromptItem) {
     const state = askPluginComposer("state", sessionId).state;
     if (state?.busy) { onNotice(t("The session is working. Ask for the pull request once it is idle.")); return; }
     // The instructions go through the prompt: what is being written there is not thrown away for them.
     if (state?.draftText.trim()) { onNotice(t("Send or clear the prompt you are writing first.")); return; }
-    if (!askPluginComposer("send", sessionId, item.content).result) onNotice(t("This session cannot take it right now. Try again in a moment."));
+    const accepted = await awaitComposerAdmission(() => askPluginComposer("send", sessionId, item.content));
+    if (accepted === false) onNotice(t("This session cannot take it right now. Try again in a moment."));
+    else if (accepted === null) onNotice(t("The prompt may have been sent. Check the session before trying again."));
   }
   return <PopoverNext placement="top-start" onOpening={load} content={<Menu className="pull-request-menu" aria-label={t("Create a pull request")}>
     <MenuDivider title={t("Create a pull request")} />

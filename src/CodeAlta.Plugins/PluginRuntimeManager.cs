@@ -1,4 +1,5 @@
 using System.Reflection;
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 
@@ -40,6 +41,10 @@ public sealed record PluginRuntimeManagerOptions
 
     /// <summary>Gets host services exposed to activated plugins.</summary>
     public IPluginServices? Services { get; init; }
+
+    /// <summary>Gets the host's admission owner for the original lifetime of session-affecting plugin tasks.</summary>
+    /// <remarks>Null is for hosts without automatic retention. The original startup options are retained for reload.</remarks>
+    public ISessionRetentionAdmission? SessionRetentionAdmission { get; init; }
 
     /// <summary>
     /// Gets the application database the plugins keep their tables in. It is borrowed: its owner disposes it after the
@@ -103,6 +108,26 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     /// </summary>
     public IPluginServices? HostServices { get; private set; }
 
+    /// <summary>Gets the admission owner captured by the original admitted startup, or null before startup and for hosts without retention.</summary>
+    /// <remarks>
+    /// A host borrowing a prestarted runtime can compare this identity with its own admission owner before
+    /// qualifying plugin tasks for retention. A rejected repeated start cannot replace it; reload retains it.
+    /// The identity alone does not establish that the original startup has completed.
+    /// </remarks>
+    public ISessionRetentionAdmission? SessionRetentionAdmission
+    {
+        get { lock (_lock) return _options?.SessionRetentionAdmission; }
+    }
+
+    /// <summary>Gets whether the original admitted startup completed successfully.</summary>
+    /// <remarks>An admission identity exposed during startup is not proof of this condition.</remarks>
+    public bool IsStarted
+    {
+        get { lock (_lock) return _retainedStartup is null && _ownedStart is { Work.IsCompletedSuccessfully: true }; }
+    }
+
+    private (IDisposable? Protection, Exception Failure)? _retainedStartup;
+
     /// <summary>
     /// Gets the application database the plugins were given, or <see langword="null"/> before the start and for a
     /// host that gave none. A host that starts its plugins before the rest of its services shares this database with
@@ -142,7 +167,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
     /// <returns>The startup result.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="options"/> or its startup feedback is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the authoring profile is invalid, before startup acquires resources.</exception>
-    /// <exception cref="InvalidOperationException">Startup was already admitted, or manager-wide event admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Startup was already admitted, manager-wide event admission is closed, or session retirement refuses startup.</exception>
     public async ValueTask<PluginRuntimeManagerStartResult> StartAsync(
         PluginRuntimeManagerOptions options,
         CancellationToken cancellationToken = default)
@@ -163,7 +188,23 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
         }
 
         PluginRuntimeManagerStartResult? result = null;
-        await RunOwnedStartAsync(async () => result = await StartOwnedCoreAsync(options, cancellationToken).ConfigureAwait(false)).ConfigureAwait(false);
+        await RunOwnedStartAsync(async () =>
+        {
+            IDisposable? protection = null;
+            if (options.SessionRetentionAdmission is { } admission)
+                protection = admission.TryProtectAll() ?? throw new InvalidOperationException("Session retirement prevents plugin startup.");
+            try
+            {
+                result = await StartOwnedCoreAsync(options, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception failure) when (PluginDependencyRetention.Contains(failure))
+            {
+                lock (_lock) _retainedStartup = (protection, failure);
+                protection = null;
+                throw;
+            }
+            finally { protection?.Dispose(); }
+        }).ConfigureAwait(false);
         return result!;
     }
 
@@ -220,7 +261,7 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
                     discovered,
                     sourcePackage: null,
                     loadContext: null,
-                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase },
+                    new PluginActivationOptions { HostInfo = hostInfo, Services = options.Services, SessionRetentionAdmission = options.SessionRetentionAdmission, ActivationGeneration = ++_activationGeneration, BuiltInFactory = builtIn.Factory, ApplicationDatabase = ApplicationDatabase },
                     cancellationToken)
                 .ConfigureAwait(false);
             if (activation.ActivePlugin is not null)

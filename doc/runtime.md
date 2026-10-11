@@ -992,6 +992,14 @@ CodeAlta-runtime providers can receive host-injected tools. Current built-ins ar
 - `rename_file_or_dir`
 - `apply_patch`
 
+`shell_command.timeoutMs` bounds both shell execution and stdout/stderr collection. A child
+that inherits an output pipe can keep it open after the shell exits; the deadline still applies.
+Omitting the timeout sets no deadline. Caller cancellation is reported as cancellation, not a
+timeout. On either outcome the host stops its output readers and attempts to terminate the
+still-running shell tree; it does not rediscover or terminate orphaned children after the shell
+has exited. Launch long-lived applications with output redirected to their own log files rather
+than inheriting the tool's pipes.
+
 Mutation and shell tools flow through host permission handling. Tool schemas are bridged to provider-specific declarations, including strict-schema normalization where required. `request_user_input` is registered only when the send explicitly sets default-false `EnableUserInputTool` and has a selected user-input callback. A profile may disable it but cannot independently activate it. `OnUserInputRequest` selects a per-send callback or falls back to the session callback when null; a callback alone never enables the tool. Retained definitions keep their original callback selection. Owned input adds the separate run/attachment authority described above; other provider implementations must explicitly support these options.
 
 `AgentSendOptions.OnPermissionRequest` optionally selects the permission callback for one send's built-in tool definitions in the in-process `AgentSession`. Null preserves the existing `AgentSessionCreateOptions.OnPermissionRequest` fallback. Session options, custom tool definitions and user-input handling are unchanged; other provider session implementations must explicitly support this option. This is callback selection only, not automatic approval, lifetime cancellation, stale-callback rejection or recovery: a retained built-in tool definition still holds its original callback after the send returns. Owned command permissions default to denial; the backend opt-in described above supplies runtime execution/attachment binding. This API alone enables no Desktop approval route.

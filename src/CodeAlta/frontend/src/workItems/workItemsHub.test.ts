@@ -170,3 +170,28 @@ test("work starts in a new session, or through the composer of the session that 
   assert.equal(refused.pop(), "This project has no git repository with a commit: start it in a new session instead.");
   assert.equal(startRefusal("anything else"), null, "what the host said is shown when the window has no text for it");
 });
+
+test("work start waits for admission and never releases uncertain work", async () => {
+  for (const outcome of [true, false, null, "throw"] as const) {
+    const server = host({ a: [row("one")] });
+    const hub = createWorkItemsHub(server.api, noTimers);
+    hub.connect("epoch"); hub.setProjects(["a"]);
+    await settled(); await settled();
+    const item = workItems(hub.getSnapshot().projects, new Set())[0];
+    let resolve!: (value: boolean | null) => void, reject!: (error: Error) => void;
+    const completion = new Promise<boolean | null>((yes, no) => { resolve = yes; reject = no; });
+    const notices: (string | null)[] = [];
+    const running = startWorkItem({ hub, openSession: () => {}, refuse: message => notices.push(message),
+      composer: (kind, sessionId, text) => ({ kind, sessionId, text: text ?? null, handled: true, result: true,
+        state: kind === "state" ? { sessionId, draftText: "", busy: false } : null,
+        completion: kind === "state" ? undefined : completion }) }, item, "here", { id: "s1", workingDirectory: null });
+    let finished = false; void running.then(() => { finished = true; });
+    await settled();
+    assert.equal(finished, false, "taking the request is not downstream admission");
+    assert.equal(server.acted.some(action => action.startsWith("release:")), false);
+    if (outcome === "throw") reject(Error("lost response")); else resolve(outcome);
+    assert.equal(await running, outcome === true);
+    assert.equal(server.acted.some(action => action.startsWith("release:")), outcome === false);
+    if (outcome === null || outcome === "throw") assert.match(notices.at(-1) ?? "", /may have been sent.*Check the session/);
+  }
+});

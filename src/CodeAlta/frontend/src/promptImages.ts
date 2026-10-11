@@ -26,6 +26,8 @@ export function createImageDrafts() {
   let copying = false;
   return {
     subscribe: change.subscribe, getSnapshot: change.getSnapshot,
+    /** All image drafts and pending pastes, including sessions not mounted in the current space. No image payloads. */
+    retentionKeys: (): readonly string[] => [...new Set([...entries.keys(), ...reads])],
     get: (key: string) => entries.get(key) ?? empty,
     beginRead(key: string): (() => void) | null {
       if (copying || reads.has(key) || reads.size >= 8) return null;

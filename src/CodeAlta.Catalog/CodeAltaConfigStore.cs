@@ -115,6 +115,24 @@ public sealed class CodeAltaConfigStore
     public CodeAltaConfigDocument LoadGlobal()
         => LoadDocument(_options.ConfigPath);
 
+    /// <summary>Reads global cleanup policy. Only an actually missing file uses the enabled defaults.</summary>
+    /// <remarks>Unlike a File.Exists probe, an inaccessible file must not look like permission to delete.</remarks>
+    /// <exception cref="InvalidDataException">The configuration or duration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public Storage.StorageSettings LoadGlobalStorageSettings()
+    {
+        string content;
+        try { content = File.ReadAllText(_options.ConfigPath); }
+        catch (FileNotFoundException) { return Storage.StorageSettings.Default; }
+        catch (DirectoryNotFoundException) { return Storage.StorageSettings.Default; }
+        try { return Storage.StorageSettings.Read(ParseDocument(content, _options.ConfigPath).Storage); }
+        catch (Exception ex) when (IsConfigLoadException(ex))
+        {
+            throw new InvalidDataException($"Failed to read storage settings from '{_options.ConfigPath}'.", ex);
+        }
+    }
+
     /// <summary>
     /// Creates the global user configuration from the bundled first-run template when it is missing.
     /// </summary>
@@ -604,6 +622,30 @@ public sealed class CodeAltaConfigStore
         SaveDocument(_options.ConfigPath, document);
     }
 
+    /// <summary>Saves global storage choices, omitting default fields and retaining unknown TOML settings.</summary>
+    /// <exception cref="ArgumentNullException">The settings or retention is null.</exception>
+    /// <exception cref="InvalidDataException">The duration or existing configuration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public void SaveGlobalStorageSettings(Storage.StorageSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(settings.SessionRetention);
+        if (settings.SessionRetention.GetValidationError() is { } error) throw new InvalidDataException(error);
+        var document = LoadGlobal();
+        document.Storage = new CodeAltaStorageSettingsDocument
+        {
+            ClearScratchpadOnStartup = settings.ClearScratchpadOnStartup,
+            SessionRetention = new CodeAltaSessionRetentionSettingsDocument
+            {
+                Enabled = settings.SessionRetention.Enabled,
+                Amount = settings.SessionRetention.Amount,
+                Unit = settings.SessionRetention.Unit,
+            },
+        };
+        SaveDocument(_options.ConfigPath, document);
+    }
+
     /// <summary>
     /// Loads globally configured provider definitions.
     /// </summary>
@@ -816,6 +858,7 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(document);
 
         NormalizeDocument(document);
+        _ = Storage.StorageSettings.Read(document.Storage);
         var definitions = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
             .Values
             .Select(CloneProviderDefinition)
@@ -831,7 +874,7 @@ public sealed class CodeAltaConfigStore
     }
 
     private static bool IsConfigLoadException(Exception ex)
-        => ex is InvalidOperationException or FormatException or IOException or TomlException;
+        => ex is InvalidOperationException or FormatException or InvalidDataException or IOException or TomlException;
 
     private static CodeAltaConfigValidationResult CreateValidationFailure(Exception exception)
     {
@@ -1143,6 +1186,22 @@ public sealed class CodeAltaConfigStore
             {
                 document.Worktrees = null;
             }
+        }
+
+        if (document.Storage is { } storage)
+        {
+            // Only known defaults are omitted. Unknown/invalid values must survive normalization so they
+            // produce a visible validation failure, never silently enable a shorter destructive policy.
+            if (storage.ClearScratchpadOnStartup == true) storage.ClearScratchpadOnStartup = null;
+            if (storage.SessionRetention is { } retention)
+            {
+                var defaults = Storage.SessionRetentionSettings.Default;
+                if (retention.Enabled == defaults.Enabled) retention.Enabled = null;
+                if (retention.Amount == defaults.Amount) retention.Amount = null;
+                if (retention.Unit == defaults.Unit) retention.Unit = null;
+                if (retention is { Enabled: null, Amount: null, Unit: null }) storage.SessionRetention = null;
+            }
+            if (storage is { ClearScratchpadOnStartup: null, SessionRetention: null }) document.Storage = null;
         }
 
         if (document.Skills is not null)

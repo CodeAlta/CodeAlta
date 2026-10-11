@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Catalog.Storage;
 using CodeAlta.Plugins;
 using NeoAstra;
 
@@ -6,7 +7,7 @@ namespace CodeAlta.Desktop;
 
 /// <summary>
 /// What the start-up screen says below its progress bar while the host starts: nothing in the usual start,
-/// and the plugin being built when a source plugin is new or has changed.
+/// scratchpad cleanup while its worker runs, and plugins being built when source plugins changed.
 /// </summary>
 /// <remarks>
 /// The start-up screen is a document without a bridge to the host: it reads this status as a file of the
@@ -26,6 +27,10 @@ internal sealed class DesktopStartupStatus
         get { lock (_gate) return _text; }
         set { lock (_gate) _text = value ?? string.Empty; }
     }
+
+    /// <summary>Shows the actual cleanup worker; plugin preparation begins only after it settles.</summary>
+    internal void SetScratchpadCleanup(ScratchpadCleanupSnapshot snapshot)
+        => Text = snapshot.State == ScratchpadCleanupState.Running ? "Clearing scratchpad…" : string.Empty;
 
     /// <summary>The status as the JSON document the start-up screen reads.</summary>
     internal byte[] ToJson()

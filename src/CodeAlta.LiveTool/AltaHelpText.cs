@@ -1,5 +1,4 @@
 using System.Globalization;
-using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
 
@@ -39,14 +38,13 @@ public static class AltaHelpText
             Stderr = stderr,
             CorrelationId = AltaCommandDispatcher.CreateCorrelationId(),
         };
-        var app = registry.CreateCommandApp(context);
-        var exitCode = app.RunAsync(["--help"], new CommandRunConfig { Out = stdout, Error = stderr })
+        var result = registry.InvokeAsync(["--help"], context)
             .ConfigureAwait(false)
             .GetAwaiter()
             .GetResult();
-        if (exitCode != AltaExitCodes.Success)
+        if (result.ExitCode != AltaExitCodes.Success)
         {
-            throw new InvalidOperationException($"Rendering alta root help failed with exit code {exitCode}: {stderr}");
+            throw new InvalidOperationException($"Rendering alta root help failed with exit code {result.ExitCode}: {stderr}");
         }
 
         return NormalizeLineEndings(stdout.ToString());

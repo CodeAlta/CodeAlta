@@ -46,6 +46,9 @@ internal sealed class ApplyRequest
     /// <summary>Gets a value indicating whether the batch replaces every fact of the session, which are removed first.</summary>
     public bool Replace { get; init; }
 
+    /// <summary>Gets whether a strict, stable full-source scan verified this replacement of saved facts.</summary>
+    public bool VerifiedArchiveReplacement { get; init; }
+
     /// <summary>Gets the length of the file when the reading began; zero when the reading did not reach the end.</summary>
     public long FileLength { get; init; }
 

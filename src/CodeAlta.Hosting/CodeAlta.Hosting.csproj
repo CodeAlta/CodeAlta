@@ -31,6 +31,7 @@
              CopyToPublishDirectory="PreserveNewest"
              TargetPath="ProviderDefaults/provider_defaults.toml" />
     <InternalsVisibleTo Include="CodeAlta.Hosting.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Orchestration.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 

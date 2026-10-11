@@ -109,6 +109,7 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static async ValueTask<int> HandleJobStartAsync(AltaCommandContext context, JobStartOptions options)
     {
+        context.ClaimSessionWork(FirstNonEmpty(options.SessionId, context.Caller.SourceSessionId));
         const string path = "alta job start";
         if (!TryGetJobs(context, out var jobs))
         {

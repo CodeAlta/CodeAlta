@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
@@ -125,6 +126,9 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
 /// </summary>
 public sealed record PluginActivationOptions
 {
+    /// <summary>Gets the host's admission owner for session-affecting plugin tasks, or null for hosts without retention.</summary>
+    public CodeAlta.Agent.ISessionRetentionAdmission? SessionRetentionAdmission { get; init; }
+
     /// <summary>Gets host information exposed to plugins.</summary>
     public required PluginHostInfo HostInfo { get; init; }
 
@@ -183,6 +187,7 @@ public sealed class PluginRuntimeActivator
     /// <param name="options">Activation options.</param>
     /// <param name="cancellationToken">A token to cancel activation.</param>
     /// <returns>The activation result.</returns>
+    /// <exception cref="AgentDependencyRetentionException">Dependency release was not confirmed; the constructed activation and original failure graphs remain retained.</exception>
     public async ValueTask<PluginActivationResult> ActivateAsync(
         DiscoveredPluginType discoveredType,
         SourcePluginPackage? sourcePackage,
@@ -196,6 +201,12 @@ public sealed class PluginRuntimeActivator
 
         var diagnostics = new List<PluginRuntimeDiagnostic>();
         PluginBase? instance = null;
+        Task? activationOriginal = null;
+        // A failed callback's marker need not reference this activation. Keep every acquisition and
+        // original explicitly; the retained result transfers this inventory to the startup owner.
+        var dependencies = new List<object> { discoveredType, options, _contributionRegistry };
+        if (sourcePackage is not null) dependencies.Add(sourcePackage);
+        if (loadContext is not null) dependencies.Add(loadContext);
         try
         {
             instance = CreateInstance(options.BuiltInFactory, () => (PluginBase?)Activator.CreateInstance(discoveredType.Type));
@@ -203,6 +214,7 @@ public sealed class PluginRuntimeActivator
             {
                 throw new InvalidOperationException($"Failed to instantiate plugin type '{discoveredType.Type.FullName}'.");
             }
+            dependencies.Add(instance);
 
             if (instance.GetType() != discoveredType.Type)
             {
@@ -210,17 +222,23 @@ public sealed class PluginRuntimeActivator
             }
 
             var logger = LogManager.GetLogger($"CodeAlta.Plugin.{discoveredType.Descriptor.RuntimeKey}");
+            dependencies.Add(logger);
             var lifetime = new PluginActivationLifetime(cancellationToken);
-            var taskService = new PluginRuntimeTaskService(lifetime.Token);
+            dependencies.Add(lifetime);
+            var taskService = new PluginRuntimeTaskService(lifetime.Token, options.SessionRetentionAdmission);
+            dependencies.Add(taskService);
             var hostServices = options.Services ?? new NoopPluginServices(logger);
+            dependencies.Add(hostServices);
             // A host that keeps no plugin data of its own gives each plugin a folder in the CodeAlta home.
             var state = hostServices.State is NoopPluginStateStore && !string.IsNullOrWhiteSpace(options.HostInfo.UserDataDirectory)
                 ? new PluginFileStateStore(Path.Combine(options.HostInfo.UserDataDirectory, "plugin-data"), discoveredType.Descriptor.RuntimeKey, sourcePackage?.Root.ProjectPath, hostServices)
                 : null;
+            if (state is not null) dependencies.Add(state);
             // The tables of this plugin: its key decides the prefix, so it finds them again after a restart.
             IPluginDatabase? database = options.ApplicationDatabase is { } applicationDatabase
                 ? new PluginDatabase(applicationDatabase, discoveredType.Descriptor.RuntimeKey, lifetime.Token)
                 : null;
+            if (database is not null) dependencies.Add(database);
             var services = new PluginRuntimeServices(
                 logger,
                 discoveredType.Descriptor.RuntimeKey,
@@ -230,6 +248,7 @@ public sealed class PluginRuntimeActivator
                 taskService,
                 state,
                 database);
+            dependencies.Add(services);
             var context = new PluginRuntimeContext
             {
                 Plugin = discoveredType.Descriptor,
@@ -242,10 +261,18 @@ public sealed class PluginRuntimeActivator
                 ScopeProjectPath = sourcePackage?.Root.ProjectPath,
                 LifetimeCancellationToken = lifetime.Token,
             };
+            dependencies.Add(context);
             instance.AttachRuntimeContext(context);
-            await instance.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            var initialization = activationOriginal = instance.InitializeAsync(cancellationToken).AsTask();
+            dependencies.Add(initialization);
+            try { await initialization.ConfigureAwait(false); }
+            catch when (initialization.Exception is { } failure && PluginDependencyRetention.Contains(failure)) { throw failure; }
             var contributions = CollectContributions(discoveredType.Descriptor, context, instance, options.ActivationGeneration, diagnostics);
-            await instance.OnActivatedAsync(cancellationToken).ConfigureAwait(false);
+            dependencies.Add(contributions);
+            var original = activationOriginal = instance.OnActivatedAsync(cancellationToken).AsTask();
+            dependencies.Add(original);
+            try { await original.ConfigureAwait(false); }
+            catch when (original.Exception is { } failure && PluginDependencyRetention.Contains(failure)) { throw failure; }
             var active = new ActivePluginInstance(
                 instance,
                 discoveredType.Descriptor,
@@ -262,13 +289,26 @@ public sealed class PluginRuntimeActivator
                 Diagnostics = diagnostics,
             };
         }
+        catch (Exception failure) when (PluginDependencyRetention.Contains(failure))
+        {
+            throw new AgentDependencyRetentionException(discoveredType.Descriptor.RuntimeKey, "plugin activation", [failure], dependencies.AsReadOnly());
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             if (instance is not null)
             {
+                Task? disposal = null;
                 try
                 {
-                    await instance.DisposeAsync().ConfigureAwait(false);
+                    disposal = instance.DisposeAsync().AsTask();
+                    dependencies.Add(disposal);
+                    await disposal.ConfigureAwait(false);
+                }
+                catch (Exception cleanup) when (PluginDependencyRetention.Contains(cleanup)
+                    || disposal?.Exception is { } failures && PluginDependencyRetention.Contains(failures))
+                {
+                    throw new AgentDependencyRetentionException(discoveredType.Descriptor.RuntimeKey, "failed plugin activation disposal",
+                        [activationOriginal?.Exception ?? ex, disposal?.Exception ?? cleanup], dependencies.AsReadOnly());
                 }
                 catch
                 {

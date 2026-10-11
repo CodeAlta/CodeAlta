@@ -173,7 +173,12 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       if (tab) select(tab);
       return undefined;
     }
-    if (sessionLayoutActionAllowed(model, action, state, snapshot, current, files)) return action;
+    if (sessionLayoutActionAllowed(model, action, state, snapshot, current, files)) {
+      // An asynchronous selection can still be pending while App owns the old tab.
+      // Reselecting that tab is a new intent too; changed() deliberately ignores it.
+      if (action.type === Actions.SELECT_TAB && !files.active && state.active && action.data.tabNode === sessionNodeId(state.active)) select(state.active);
+      return action;
+    }
     const file = fileTabAction(action, files, current);
     if (file?.kind === "close") { closeFile?.(file.file); return undefined; }
     const intent = sessionTabAction(action, state, snapshot, current);

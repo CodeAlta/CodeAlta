@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using CodeAlta.Agent;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
@@ -9,6 +11,7 @@ namespace CodeAlta.LiveTool;
 public sealed class AltaCommandRegistry
 {
     private readonly IReadOnlyList<IAltaCommandContributor> _contributors;
+    private readonly ConcurrentQueue<AltaCommandRetentionLifetime> _retainedInvocations = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AltaCommandRegistry"/> class.
@@ -33,9 +36,12 @@ public sealed class AltaCommandRegistry
 
     /// <summary>Creates a fresh <see cref="CommandApp"/> for one invocation.</summary>
     /// <param name="context">The invocation context captured by command actions.</param>
+    /// <exception cref="InvalidOperationException">Commands require an owned <see cref="InvokeAsync"/> invocation when retention admission is registered.</exception>
     public CommandApp CreateCommandApp(AltaCommandContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        if (context.RetentionLifetime is null && context.Services.Get<ISessionRetentionAdmission>() is not null)
+            throw new InvalidOperationException("Retention admission requires AltaCommandRegistry.InvokeAsync.");
         var contributionContext = new AltaCommandContributionContext { Invocation = context };
         var app = new CommandApp(
             "alta",
@@ -51,8 +57,13 @@ public sealed class AltaCommandRegistry
 
         foreach (var contributor in _contributors)
         {
+            if (contributor is not BuiltInAltaCommandContributor and not PluginAltaCommandContributor)
+            {
+                context.ClaimUnknownCommandWork();
+            }
             foreach (var node in contributor.CreateCommandLineNodes(contributionContext))
             {
+                if (node is Command command) ObserveCommandOriginals(command, context);
                 app.Add(node);
             }
         }
@@ -60,6 +71,23 @@ public sealed class AltaCommandRegistry
         AddRootGuidance(app);
 
         return app;
+    }
+
+    private static void ObserveCommandOriginals(Command command, AltaCommandContext context)
+    {
+        if (command.Action is { } action)
+        {
+            command.Action = async (run, args) =>
+            {
+                try { return await context.ObserveOriginalAsync(action(run, args).AsTask()).ConfigureAwait(false); }
+                catch (Exception failure)
+                {
+                    context.RetentionLifetime?.ObserveFailure(failure);
+                    throw;
+                }
+            };
+        }
+        foreach (var child in command.SubCommands.Values) ObserveCommandOriginals(child, context);
     }
 
     private static void AddRootGuidance(CommandApp app)
@@ -101,45 +129,47 @@ public sealed class AltaCommandRegistry
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(context);
 
+        using var retentionLifetime = new AltaCommandRetentionLifetime(_retainedInvocations.Enqueue);
+        context = context with { RetentionLifetime = retentionLifetime };
         var stopwatch = Stopwatch.StartNew();
-        var parseApp = CreateCommandApp(context);
-        var parseResult = parseApp.Parse(args, new CommandRunConfig { Out = TextWriter.Null, Error = TextWriter.Null });
-        if (parseResult.HasErrors)
-        {
-            foreach (var error in parseResult.Errors)
-            {
-                AltaJsonlWriter.WriteError(
-                    context.Stderr,
-                    context.CorrelationId,
-                    "usage.invalid",
-                    AltaExitCodes.Usage,
-                    error.Message,
-                    parseResult.ResolvedCommandPath,
-                    BuildUsageHint(parseResult.ResolvedCommandPath),
-                    ExtractSuggestions(error.Message));
-            }
-
-            return CaptureResult(
-                AltaExitCodes.Usage,
-                context,
-                stopwatch.Elapsed,
-                isHelp: false,
-                error: parseResult.Errors[0].Message);
-        }
-
-        if (parseResult.HelpRequested)
-        {
-            var helpApp = CreateCommandApp(context);
-            var exitCode = await helpApp.RunAsync(
-                    args,
-                    new CommandRunConfig { Out = context.Stdout, Error = context.Stderr })
-                .ConfigureAwait(false);
-            return CaptureResult(exitCode, context, stopwatch.Elapsed, isHelp: true, error: null);
-        }
-
         int commandExitCode;
         try
         {
+            var parseApp = CreateCommandApp(context);
+            var parseResult = parseApp.Parse(args, new CommandRunConfig { Out = TextWriter.Null, Error = TextWriter.Null });
+            if (parseResult.HasErrors)
+            {
+                foreach (var error in parseResult.Errors)
+                {
+                    AltaJsonlWriter.WriteError(
+                        context.Stderr,
+                        context.CorrelationId,
+                        "usage.invalid",
+                        AltaExitCodes.Usage,
+                        error.Message,
+                        parseResult.ResolvedCommandPath,
+                        BuildUsageHint(parseResult.ResolvedCommandPath),
+                        ExtractSuggestions(error.Message));
+                }
+
+                return CaptureResult(
+                    AltaExitCodes.Usage,
+                    context,
+                    stopwatch.Elapsed,
+                    isHelp: false,
+                    error: parseResult.Errors[0].Message);
+            }
+
+            if (parseResult.HelpRequested)
+            {
+                var helpApp = CreateCommandApp(context);
+                var exitCode = await helpApp.RunAsync(
+                        args,
+                        new CommandRunConfig { Out = context.Stdout, Error = context.Stderr })
+                    .ConfigureAwait(false);
+                return CaptureResult(exitCode, context, stopwatch.Elapsed, isHelp: true, error: null);
+            }
+
             var runApp = CreateCommandApp(context);
             commandExitCode = await runApp.RunAsync(
                     args,
@@ -163,6 +193,7 @@ public sealed class AltaCommandRegistry
         }
         catch (Exception ex)
         {
+            retentionLifetime.ObserveFailure(ex);
             commandExitCode = AltaExitCodes.Failure;
             AltaJsonlWriter.WriteError(
                 context.Stderr,

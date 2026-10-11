@@ -9,7 +9,9 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
 {
     private readonly object _lock = new();
     private readonly Dictionary<string, Registration> _registrations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _preparations = new(StringComparer.OrdinalIgnoreCase);
     private long _lastVersion;
+    private bool _closed;
 
     /// <summary>
     /// Registers or replaces a provider runtime factory.
@@ -17,6 +19,8 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     /// <param name="descriptor">The provider descriptor.</param>
     /// <param name="runtimeFactory">The runtime factory.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="descriptor" /> or <paramref name="runtimeFactory" /> is <see langword="null" />.</exception>
+    /// <exception cref="InvalidOperationException">The provider's original model preparation still owns its cached runtime.</exception>
+    /// <exception cref="ObjectDisposedException">Registry shutdown has begun.</exception>
     public void RegisterOrReplace(ModelProviderDescriptor descriptor, Func<IModelProviderRuntime> runtimeFactory)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -25,6 +29,8 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
         var key = ModelProviderId.NormalizeValue(descriptor.ProviderId.Value);
         lock (_lock)
         {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            ThrowIfPreparing(key);
             if (_registrations.Remove(key, out var previous))
             {
                 DisposeRuntime(previous.Runtime);
@@ -39,12 +45,16 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     /// </summary>
     /// <param name="providerId">The provider identifier.</param>
     /// <returns><see langword="true" /> when removed; otherwise <see langword="false" />.</returns>
+    /// <exception cref="InvalidOperationException">The provider's original model preparation still owns its cached runtime.</exception>
+    /// <exception cref="ObjectDisposedException">Registry shutdown has begun.</exception>
     public bool Unregister(ModelProviderId providerId)
     {
         var key = ModelProviderId.NormalizeValue(providerId.Value);
         Registration? removed = null;
         lock (_lock)
         {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            ThrowIfPreparing(key);
             if (_registrations.Remove(key, out var registration))
             {
                 removed = registration;
@@ -119,6 +129,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     }
 
     /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException">Registry shutdown has begun.</exception>
     public ValueTask<IModelProviderRuntime> GetOrCreateRuntimeAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken = default)
@@ -127,6 +138,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
         var key = ModelProviderId.NormalizeValue(providerId.Value);
         lock (_lock)
         {
+            ObjectDisposedException.ThrowIf(_closed, this);
             if (!_registrations.TryGetValue(key, out var registration))
             {
                 throw new KeyNotFoundException($"Model provider '{key}' is not registered.");
@@ -150,6 +162,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     /// <returns>The provider runtime.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="providerId" /> is empty.</exception>
     /// <exception cref="KeyNotFoundException">Thrown when <paramref name="providerId" /> is not registered.</exception>
+    /// <exception cref="ObjectDisposedException">Registry shutdown has begun.</exception>
     public ValueTask<IModelProviderRuntime> CreateRuntimeAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken = default)
@@ -159,6 +172,7 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
         Registration registration;
         lock (_lock)
         {
+            ObjectDisposedException.ThrowIf(_closed, this);
             if (!_registrations.TryGetValue(key, out registration))
             {
                 throw new KeyNotFoundException($"Model provider '{key}' is not registered.");
@@ -169,11 +183,16 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     }
 
     /// <inheritdoc />
+    /// <exception cref="AgentDependencyRetentionException">An original preparation still owns cached runtimes; no runtime is disposed.</exception>
     public async ValueTask DisposeAsync()
     {
         IModelProviderRuntime[] runtimes;
         lock (_lock)
         {
+            _closed = true;
+            if (_preparations.Count != 0)
+                throw new AgentDependencyRetentionException("model provider registry", "original preparation",
+                    [new InvalidOperationException("Original model preparations have not released their runtimes.")], this);
             runtimes = _registrations.Values
                 .Select(static registration => registration.Runtime)
                 .Where(static runtime => runtime is not null)
@@ -185,6 +204,41 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
         foreach (var runtime in runtimes)
         {
             await runtime.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    // A preparation uses a cached runtime, unlike AgentHub's separately owned fresh runtimes. Live
+    // configuration must not dispose that acquisition while its original Start/Probe is still running.
+    internal IDisposable ProtectPreparation(ModelProviderId providerId)
+    {
+        var key = ModelProviderId.NormalizeValue(providerId.Value);
+        lock (_lock)
+        {
+            ObjectDisposedException.ThrowIf(_closed, this);
+            if (!_registrations.ContainsKey(key)) throw new KeyNotFoundException($"Model provider '{key}' is not registered.");
+            _preparations.TryGetValue(key, out var count);
+            _preparations[key] = checked(count + 1);
+            return new Preparation(this, key);
+        }
+    }
+
+    private void ThrowIfPreparing(string key)
+    {
+        if (_preparations.ContainsKey(key))
+            throw new InvalidOperationException($"Model provider '{key}' still has an original preparation. Its configuration cannot be applied yet.");
+    }
+
+    private sealed class Preparation(ModelProviderRegistry owner, string key) : IDisposable
+    {
+        private int _released;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            lock (owner._lock)
+            {
+                if (owner._preparations[key] == 1) owner._preparations.Remove(key);
+                else owner._preparations[key]--;
+            }
         }
     }
 

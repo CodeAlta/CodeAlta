@@ -109,6 +109,20 @@ public sealed partial class StatisticsQueries
         }
 
         var refs = ResolveProjectRefs(filter, projects, spaces, notes, out var includesChats);
+        var saved = await _store.ReadAsync(sql => sql.Query($"SELECT facts_version,full_source,recorded_metrics FROM {P}archive WHERE effective=1",
+            reader => (Version: (int)reader.GetInt64(0), Verified: reader.GetInt64(1) != 0, Metrics: reader.GetString(2).Split('\n', StringSplitOptions.RemoveEmptyEntries))), cancellationToken).ConfigureAwait(false);
+        var unavailable = StatisticsStore.CurrentMetrics().Where(metric => saved.Any(archive => !archive.Metrics.Contains(metric, StringComparer.Ordinal))).ToArray();
+        if (unavailable.Length > 0) notes.Add("saved-metrics-not-recorded");
+        if (saved.Any(archive => !archive.Verified)) notes.Add("saved-history-unverified");
+        var historyCoverage = ReadCoverage(meta, range);
+        var coverage = historyCoverage with
+        {
+            Complete = historyCoverage.Complete && unavailable.Length == 0 && saved.All(archive => archive.Verified),
+            SavedSessions = saved.Count,
+            SavedFactsVersions = saved.Select(archive => archive.Version).Distinct().Order().ToArray(),
+            UnavailableSavedMetrics = unavailable,
+            UnverifiedSavedSessions = saved.Count(archive => !archive.Verified),
+        };
         return new ResolvedQuery
         {
             Request = request,
@@ -121,7 +135,7 @@ public sealed partial class StatisticsQueries
             ProjectRefs = refs,
             IncludesChats = includesChats,
             ProjectNames = names,
-            Coverage = ReadCoverage(meta, range),
+            Coverage = coverage,
             Notes = notes,
             SessionIds = sessionIds,
         };

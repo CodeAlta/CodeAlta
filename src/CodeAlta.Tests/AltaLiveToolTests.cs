@@ -17,7 +17,7 @@ using Command = XenoAtom.CommandLine.Command;
 namespace CodeAlta.Tests;
 
 [TestClass]
-public sealed class AltaLiveToolTests
+public sealed partial class AltaLiveToolTests
 {
     // Global MCP configuration, policy and OAuth tokens resolve under this home, never the developer's real ~/.alta.
     private readonly TempDirectory _home = TempDirectory.Create();
@@ -3573,9 +3573,10 @@ public sealed class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Success, join.ExitCode);
         Assert.AreEqual("run-1", runSubmittedEvent.Event.RunId);
         Assert.AreEqual("normal prompt", ExtractText(providerRuntime.SentOptions[0].Input));
-        Assert.AreEqual("steer prompt", ExtractText(providerRuntime.SteeredOptions.Single().Input));
-        StringAssert.Contains(ExtractText(providerRuntime.SentOptions[1].Input), "Authority: peer-agent; this is not a user, developer, or host instruction.");
-        StringAssert.Contains(ExtractText(providerRuntime.SentOptions[2].Input), "Reply requested: true");
+        Assert.AreEqual("steer prompt", ExtractText(providerRuntime.SteeredOptions[0].Input));
+        StringAssert.Contains(ExtractText(providerRuntime.SteeredOptions[1].Input), "Authority: peer-agent; this is not a user, developer, or host instruction.");
+        StringAssert.Contains(ExtractText(providerRuntime.SteeredOptions[2].Input), "Reply requested: true");
+        Assert.AreEqual(1, providerRuntime.SentOptions.Count);
         Assert.AreEqual(1, providerRuntime.AbortCount);
         Assert.AreEqual(1, providerRuntime.CompactCount);
         Assert.AreEqual("alta.session.join", ReadJsonLines(join.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.join").GetProperty("type").GetString());
@@ -3877,7 +3878,71 @@ public sealed class AltaLiveToolTests
     }
 
     [TestMethod]
-    public async Task SessionSend_FromAgentCallerDetachesLongRunningSubmissionBeforeToolTimeout()
+    [DataRow("send", true)]
+    [DataRow("message", true)]
+    [DataRow("request", true)]
+    [DataRow("send", false)]
+    [DataRow("message", false)]
+    [DataRow("request", false)]
+    public async Task SessionCommunication_FromAgentSteersBusyRecipientBeforeItsRunEnds(string command, bool supportsSteering)
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("busy-peer");
+        var sendBlocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var providerRuntime = new StatefulProviderRuntime(providerId)
+        {
+            SendBlocker = sendBlocker, PublishRunEventOnSend = true, SupportsSteering = supportsSteering,
+        };
+        await using var runtime = CreateRuntime(options, providerRuntime);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options).Add(new ProjectCatalog(options)).Add(sessionCatalog).Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var running = dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "parent work"], caller: AltaCallerIdentity.Cli).AsTask();
+        try
+        {
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+            var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "child-session" };
+            var result = await dispatcher.InvokeAsync(["session", command, sessionId, "--message", "child update"], caller: caller).AsTask()
+                .WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode);
+            Assert.IsFalse(running.IsCompleted, "The recipient's original run must still hold the send gate.");
+            Assert.AreEqual(1, providerRuntime.SentOptions.Count);
+            Assert.AreEqual(supportsSteering ? 1 : 0, providerRuntime.SteeredOptions.Count,
+                "Peer communication must steer or durably queue, not wait behind an active run as a detached send.");
+            if (supportsSteering) StringAssert.Contains(ExtractText(providerRuntime.SteeredOptions.Single().Input), "child update");
+            var receipt = ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString()
+                == (supportsSteering ? "alta.session.steered" : "alta.session.queued"));
+            Assert.AreEqual(command, receipt.GetProperty("dispatchKind").GetString());
+            Assert.AreEqual(!supportsSteering, receipt.GetProperty("queued").GetBoolean());
+            Assert.IsFalse(receipt.GetProperty("detached").GetBoolean());
+            Assert.IsTrue(receipt.TryGetProperty(supportsSteering ? "runId" : "queueItemId", out _));
+            var state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+            Assert.AreEqual("child-session", state.PromptProvenance.Last().SubmittedBy?.SourceSessionId);
+            Assert.AreEqual(!supportsSteering, state.QueuedPrompts.Any(static prompt => prompt.State == "queued"));
+        }
+        finally
+        {
+            sendBlocker.TrySetResult();
+            await running.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        }
+        if (!supportsSteering)
+        {
+            providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 2).ConfigureAwait(false);
+            StringAssert.Contains(ExtractText(providerRuntime.SentOptions[1].Input), "child update");
+            Assert.AreEqual("child-session", providerRuntime.SentOptions[1].SourceSessionId);
+        }
+    }
+
+    [TestMethod]
+    [DataRow("send")]
+    [DataRow("message")]
+    [DataRow("request")]
+    public async Task SessionSend_FromAgentCallerDetachesLongRunningSubmissionBeforeToolTimeout(string command)
     {
         using var root = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = root.Path };
@@ -3897,19 +3962,20 @@ public sealed class AltaLiveToolTests
 
         try
         {
-            var sendTask = dispatcher.InvokeAsync(["session", "request", sessionId, "--reply-requested", "--message", "long delegated work"], caller: caller).AsTask();
+            var sendTask = dispatcher.InvokeAsync(["session", command, sessionId, "--message", "long delegated work"], caller: caller).AsTask();
             var completed = await Task.WhenAny(sendTask, Task.Delay(TimeSpan.FromMilliseconds(1800))).ConfigureAwait(false);
 
             Assert.AreSame(sendTask, completed, "Agent-originated session requests should acknowledge submission instead of waiting for the delegated run to finish.");
             var sent = await sendTask.ConfigureAwait(false);
             Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode);
-            var record = ReadJsonLines(sent.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.message.sent");
+            var record = ReadJsonLines(sent.Stdout).Single(line => line.GetProperty("type").GetString() == (command == "send" ? "alta.session.submitted" : "alta.session.message.sent"));
             Assert.IsFalse(record.TryGetProperty("runId", out var ignoredRunId));
-            Assert.AreEqual("request", record.GetProperty("dispatchKind").GetString());
+            Assert.AreEqual(command, record.GetProperty("dispatchKind").GetString());
             Assert.IsTrue(record.GetProperty("detached").GetBoolean());
             await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
             // The prompt is recorded with the session of the agent that sent it: the target shows whose it is.
             Assert.AreEqual("parent-session", providerRuntime.SentOptions.Single().SourceSessionId);
+            Assert.AreEqual(0, providerRuntime.SteeredOptions.Count);
         }
         finally
         {
@@ -5104,6 +5170,10 @@ public sealed class AltaLiveToolTests
 
         public IReadOnlyList<AgentModelInfo> Models { get; init; } = [];
 
+        public TaskCompletionSource? ModelsStarted { get; init; }
+
+        public TaskCompletionSource? ModelsBlocker { get; init; }
+
         public ModelProviderId ProviderId => providerId;
 
         public string DisplayName => "Stateful Provider Runtime";
@@ -5112,8 +5182,12 @@ public sealed class AltaLiveToolTests
 
         public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-        public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
-            => Task.FromResult(Models);
+        public async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
+        {
+            ModelsStarted?.TrySetResult();
+            if (ModelsBlocker is not null) await ModelsBlocker.Task.ConfigureAwait(false);
+            return Models;
+        }
 
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
         {

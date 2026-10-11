@@ -11,9 +11,12 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
 {
     private readonly IModelProviderRegistry _registry;
     private readonly ModelProviderInitializationOptions _options;
+    private readonly ISessionRetentionAdmission? _retentionAdmission;
     private readonly object _gate = new();
     private readonly Dictionary<string, ModelProviderStateSnapshot> _states = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Task> _refreshTasks = new(StringComparer.OrdinalIgnoreCase);
+    private Task? _drainTask;
+    private bool _closed;
     private readonly Channel<ModelProviderStateChanged> _changes = Channel.CreateUnbounded<ModelProviderStateChanged>(
         new UnboundedChannelOptions
         {
@@ -32,10 +35,23 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     public ModelProviderInitializationService(
         IModelProviderRegistry registry,
         ModelProviderInitializationOptions? options = null)
+        : this(registry, options, null)
+    {
+    }
+
+    /// <summary>Creates a model service whose original provider preparations participate in retention admission.</summary>
+    /// <param name="registry">The provider registry.</param>
+    /// <param name="options">Optional initialization settings.</param>
+    /// <param name="retentionAdmission">The host registry, installed before any provider preparation begins.</param>
+    /// <exception cref="ArgumentNullException">The registry is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The configured probe timeout is not positive.</exception>
+    public ModelProviderInitializationService(IModelProviderRegistry registry, ModelProviderInitializationOptions? options,
+        ISessionRetentionAdmission? retentionAdmission)
     {
         ArgumentNullException.ThrowIfNull(registry);
 
         _registry = registry;
+        _retentionAdmission = retentionAdmission;
         _options = options ?? new ModelProviderInitializationOptions();
         if (_options.DefaultProbeTimeout <= TimeSpan.Zero)
         {
@@ -81,6 +97,9 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     }
 
     /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException">Original preparation admission has closed for shutdown.</exception>
+    /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses new preparation.</exception>
+    /// <exception cref="AgentDependencyRetentionException">A provider preparation retains unconfirmed dependencies.</exception>
     public async Task InitializeAllAsync(CancellationToken cancellationToken = default)
     {
         var tasks = _registry.ListProviders(includeDisabled: true)
@@ -91,6 +110,9 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     }
 
     /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException">Original preparation admission has closed for shutdown.</exception>
+    /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses new preparation.</exception>
+    /// <exception cref="AgentDependencyRetentionException">A provider preparation retains unconfirmed dependencies.</exception>
     public Task RefreshProviderAsync(ModelProviderId providerId, CancellationToken cancellationToken = default)
     {
         var descriptor = GetProviderDescriptor(providerId);
@@ -98,6 +120,9 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     }
 
     /// <inheritdoc />
+    /// <exception cref="ObjectDisposedException">A required preparation cannot start after admission closes.</exception>
+    /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses required preparation.</exception>
+    /// <exception cref="AgentDependencyRetentionException">A provider preparation retains unconfirmed dependencies.</exception>
     public async Task<IReadOnlyList<AgentModelInfo>> GetModelsAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken = default)
@@ -127,22 +152,77 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
 
         var key = ModelProviderId.NormalizeValue(descriptor.ProviderId.Value);
         Task refreshTask;
+        TaskCompletionSource completion;
+        IDisposable? admission;
         lock (_gate)
         {
-            if (_refreshTasks.TryGetValue(key, out refreshTask!))
+            ObjectDisposedException.ThrowIf(_closed, this);
+            if (_refreshTasks.TryGetValue(key, out refreshTask!)
+                && (!refreshTask.IsCompleted || refreshTask.Exception is { } failure && AgentDependencyRetentionException.Contains(failure)))
             {
                 return refreshTask.WaitAsync(cancellationToken);
             }
 
-            refreshTask = RefreshProviderCoreAsync(descriptor, key);
+            // Admission precedes publication and the provider factory, and belongs to the shared original
+            // refresh rather than any caller's cancelable WaitAsync below.
+            admission = _retentionAdmission is null ? null : _retentionAdmission.TryProtectAll()
+                ?? throw new InvalidOperationException("Provider preparation cannot start during session retirement.");
+            completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            refreshTask = completion.Task;
             _refreshTasks[key] = refreshTask;
         }
 
+        // Publish first and invoke external callbacks outside the lock. A synchronous provider callback
+        // may reenter DrainAsync; its snapshot must already include this original, even before an await.
+        _ = CompleteRefreshAsync(descriptor, admission, completion);
         return refreshTask.WaitAsync(cancellationToken);
     }
 
-    private async Task RefreshProviderCoreAsync(ModelProviderDescriptor descriptor, string key)
+    private async Task CompleteRefreshAsync(ModelProviderDescriptor descriptor, IDisposable? admission, TaskCompletionSource completion)
     {
+        Task? original = null;
+        try
+        {
+            original = RefreshProviderCoreAsync(descriptor, admission);
+            await original.ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (Exception failure)
+        {
+            completion.TrySetException(original?.Exception is { } aggregate ? aggregate.InnerExceptions : [failure]);
+        }
+    }
+
+    /// <summary>Closes refresh admission and joins every original preparation before providers are released.</summary>
+    /// <remarks>Cancelable observers do not own this drainage. Retained failures stay rooted by this service.</remarks>
+    /// <returns>The one original drainage task.</returns>
+    /// <exception cref="AgentDependencyRetentionException">A preparation still owns unconfirmed dependencies.</exception>
+    public Task DrainAsync()
+    {
+        lock (_gate)
+        {
+            _closed = true;
+            return _drainTask ??= JoinRefreshesAsync(Task.WhenAll(_refreshTasks.Values));
+        }
+    }
+
+    private async Task JoinRefreshesAsync(Task original)
+    {
+        try { await original.ConfigureAwait(false); }
+        catch (Exception failure) when (AgentDependencyRetentionException.Contains(original.Exception ?? failure))
+        {
+            throw new AgentDependencyRetentionException("provider initialization", "original preparation drainage",
+                [original.Exception ?? failure], new { Service = this, Original = original });
+        }
+    }
+
+    private async Task RefreshProviderCoreAsync(ModelProviderDescriptor descriptor, IDisposable? admission)
+    {
+        var retained = false;
+        Task? original = null;
+        IDisposable? preparation = null;
+        IModelProviderRuntime? runtime = null;
+        CancellationTokenSource? timeout = null;
         try
         {
             if (!descriptor.IsEnabled)
@@ -169,10 +249,19 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
                 ObservedAt = DateTimeOffset.UtcNow,
             });
 
-            using var timeout = new CancellationTokenSource(_options.DefaultProbeTimeout);
-            var runtime = await _registry.GetOrCreateRuntimeAsync(descriptor.ProviderId, timeout.Token).ConfigureAwait(false);
-            await runtime.StartAsync(timeout.Token).ConfigureAwait(false);
-            var probe = await runtime.ProbeAsync(timeout.Token).ConfigureAwait(false);
+            // The original and retention claim are already published, so Drain includes this acquisition.
+            // Never take the registry lock under _gate: factories may synchronously reenter DrainAsync.
+            // Custom registries own their own mutation/disposal synchronization.
+            preparation = (_registry as ModelProviderRegistry)?.ProtectPreparation(descriptor.ProviderId);
+            timeout = new CancellationTokenSource(_options.DefaultProbeTimeout);
+            var acquisition = _registry.GetOrCreateRuntimeAsync(descriptor.ProviderId, timeout.Token).AsTask();
+            original = acquisition;
+            runtime = await acquisition.ConfigureAwait(false);
+            original = runtime.StartAsync(timeout.Token);
+            await original.ConfigureAwait(false);
+            var probing = runtime.ProbeAsync(timeout.Token);
+            original = probing;
+            var probe = await probing.ConfigureAwait(false);
             var availability = probe.Availability is ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing
                 ? ModelProviderAvailability.Ready
                 : probe.Availability;
@@ -199,6 +288,12 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
                 ObservedAt = DateTimeOffset.UtcNow,
             });
         }
+        catch (Exception failure) when (AgentDependencyRetentionException.Contains(original?.Exception ?? failure))
+        {
+            retained = true;
+            throw new AgentDependencyRetentionException("provider initialization", "unconfirmed dependency release", [original?.Exception ?? failure],
+                new RetainedPreparation(this, admission, preparation, runtime, original, timeout));
+        }
         catch (OperationCanceledException)
         {
             PublishFailureState(descriptor, ModelProviderAvailability.Failed, $"Provider probe timed out after {_options.DefaultProbeTimeout}.", "Timeout");
@@ -210,12 +305,20 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         }
         finally
         {
-            lock (_gate)
+            if (!retained)
             {
-                _refreshTasks.Remove(key);
+                timeout?.Dispose();
+                preparation?.Dispose();
+                admission?.Dispose();
             }
+            // Keep the original outcome until replacement or shutdown. In particular a swallowed RPC
+            // failure cannot drop its dependency graph, and synchronous completion cannot remove a
+            // newer refresh (or leave a stale completed task masquerading as in-flight work).
         }
     }
+
+    internal sealed record RetainedPreparation(ModelProviderInitializationService Service, IDisposable? Admission,
+        IDisposable? Preparation, IModelProviderRuntime? Runtime, Task? Original, CancellationTokenSource? Cancellation);
 
     private void EnsureDescriptorStates()
     {

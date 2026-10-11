@@ -9,6 +9,7 @@ import { pluginButtonsChangedEvent } from "./pluginButtons/pluginButtonModel";
 import { landingCardsChangedEvent } from "./landing/landingShell";
 import { pluginsChangedEvent } from "./pluginUi";
 import { useShellLanguage } from "./shellLanguage";
+import { createPluginPromptAdmissions, type PluginPromptOutcome } from "./pluginPromptAdmission";
 
 type Api = Pick<typeof pluginUi, "watch" | "respond" | "dialogAction">;
 type Ask = PluginUiEvent & { requestId: string };
@@ -22,7 +23,8 @@ const reconnectMilliseconds = 2000;
  * `onDraft` replaces a prompt draft.
  */
 export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
-  epoch: string | null; onPrompt: (request: PluginUiEvent) => boolean; onDraft: (request: PluginUiEvent) => void; api?: Api;
+  epoch: string | null; onPrompt: (request: PluginUiEvent, signal: AbortSignal) => PluginPromptOutcome | Promise<PluginPromptOutcome>;
+  onDraft: (request: PluginUiEvent) => void; api?: Api;
 }) {
   const [asks, setAsks] = useState<readonly Ask[]>([]);
   const handlers = useRef({ onPrompt, onDraft }); handlers.current = { onPrompt, onDraft };
@@ -30,7 +32,11 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
     if (!epoch) return;
     const abort = new AbortController();
     let timer: number | undefined;
-    const answer = (value: PluginUiAnswer) => void api.respond(value, { timeoutMilliseconds: 8000 }).catch(() => { /* The plugin times out on its own. */ });
+    const answer = (value: PluginUiAnswer) => void api.respond(value, { timeoutMilliseconds: 8000 }).catch(() => {
+      /* A lost prompt response retains the host handoff claim; it must never cause the work to replay. */
+    });
+    const prompts = createPluginPromptAdmissions<PluginUiEvent>((event, signal) => handlers.current.onPrompt(event, signal),
+      (requestId, taken) => answer({ requestId, button: taken ? "ok" : null, cancelled: !taken, text: null, selectedIndex: null, values: null }));
     async function watch() {
       try {
         for await (const event of await api.watch({ expectedEpoch: epoch }, { signal: abort.signal })) {
@@ -41,11 +47,10 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
           } else if (event.kind === "ask" && requestId) {
             setAsks(current => current.some(ask => ask.requestId === requestId) ? current : [...current, { ...event, requestId }]);
           } else if (event.kind === "close" && requestId) {
+            prompts.close(requestId);
             setAsks(current => current.filter(ask => ask.requestId !== requestId));
           } else if (event.kind === "prompt" && requestId) {
-            let taken = false;
-            try { taken = handlers.current.onPrompt(event); } catch { taken = false; }
-            answer({ requestId, button: taken ? "ok" : null, cancelled: !taken, text: null, selectedIndex: null, values: null });
+            prompts.receive(requestId, event);
           } else if (event.kind === "draft") {
             handlers.current.onDraft(event);
           } else if (event.kind === "refresh") {
@@ -60,10 +65,11 @@ export function PluginUiHost({ epoch, onPrompt, onDraft, api = pluginUi }: {
           }
         }
       } catch { /* The channel ended: watch again below, unless the window is going away. */ }
+      prompts.disconnect();
       if (!abort.signal.aborted) timer = window.setTimeout(() => void watch(), reconnectMilliseconds);
     }
     void watch();
-    return () => { abort.abort(); window.clearTimeout(timer); setAsks([]); };
+    return () => { abort.abort(); prompts.dispose(); window.clearTimeout(timer); setAsks([]); };
   }, [epoch, api]);
 
   const ask = asks[0];

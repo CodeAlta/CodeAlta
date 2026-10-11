@@ -227,11 +227,13 @@ public sealed class PluginContributionAdapterService
     /// <summary>
     /// Executes a command contribution by contribution snapshot.
     /// </summary>
+    /// <remarks>Explicit dependency-retention failures propagate with the original task's complete failure graph.</remarks>
     /// <param name="activePlugins">Active plugins used to build operation contexts.</param>
     /// <param name="contribution">The command contribution.</param>
     /// <param name="options">Operation options.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The command result and diagnostics.</returns>
+    /// <exception cref="Exception">The original command reports unconfirmed dependency release.</exception>
     public async ValueTask<(PluginCommandResult Result, IReadOnlyList<PluginRuntimeDiagnostic> Diagnostics)> ExecuteCommandAsync(
         IReadOnlyList<ActivePluginInstance> activePlugins,
         PluginCommandContribution contribution,
@@ -257,11 +259,14 @@ public sealed class PluginContributionAdapterService
             try
             {
                 var context = CreateCommandContext(active, options, cancellationToken);
-                var result = await command.Handler(context, cancellationToken).ConfigureAwait(false);
+                var original = command.Handler(context, cancellationToken).AsTask();
+                PluginCommandResult result;
+                try { result = await original.ConfigureAwait(false); }
+                catch when (original.Exception is { } failure && PluginDependencyRetention.Contains(failure)) { throw failure; }
                 context.Invalidate();
                 return (result, diagnostics);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException && !PluginDependencyRetention.Contains(ex))
             {
                 LogCallbackFailure(active, "Command contribution failed.", ex);
                 diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(registration, "Command contribution failed.", ex)));
@@ -544,6 +549,7 @@ public sealed class PluginContributionAdapterService
     }
 
     /// <summary>Runs early startup contribution handlers and returns early resource contributions.</summary>
+    /// <exception cref="Exception">An original startup handler reports unconfirmed dependency release.</exception>
     public async ValueTask<PluginStartupAdapterResult> RunStartupAsync(
         IReadOnlyList<ActivePluginInstance> activePlugins,
         IReadOnlyList<string> rawArguments,
@@ -571,10 +577,12 @@ public sealed class PluginContributionAdapterService
             var context = CreateStartupContext(active, options, rawArguments, cancellationToken);
             try
             {
-                await startup.Handler(context, cancellationToken).ConfigureAwait(false);
+                var original = startup.Handler(context, cancellationToken).AsTask();
+                try { await original.ConfigureAwait(false); }
+                catch when (original.Exception is { } failure && PluginDependencyRetention.Contains(failure)) { throw failure; }
                 context.Invalidate();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException && !PluginDependencyRetention.Contains(ex))
             {
                 LogCallbackFailure(active, "Startup contribution failed.", ex);
                 diagnostics.Add(AddDiagnostic(CreateCallbackDiagnostic(registration, "Startup contribution failed.", ex)));

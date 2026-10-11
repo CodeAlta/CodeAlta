@@ -48,6 +48,8 @@ public sealed class SessionJobService : IAsyncDisposable
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Entry> _jobs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _retiringSessions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<Entry> _pendingDeliveries = [];
     private readonly Queue<string> _ended = new();
     private readonly Func<SessionJob, string, Task<string>>? _deliver;
     private readonly TimeProvider _time;
@@ -82,6 +84,7 @@ public sealed class SessionJobService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Command);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Folder);
+        request = request with { SessionId = request.SessionId.Trim() };
         if (request.Command.Length > MaxCommandCharacters) throw new ArgumentException("The command line is too long.", nameof(request));
         if (request.Timeout is { } timeout && (timeout <= TimeSpan.Zero || timeout > MaxTimeout)) throw new ArgumentException("The timeout is not a time a job can be given.", nameof(request));
         if (!Directory.Exists(request.Folder)) return new("no_folder", null);
@@ -90,6 +93,7 @@ public sealed class SessionJobService : IAsyncDisposable
         lock (_gate)
         {
             if (_closed) return new("closed", null);
+            if (_retiringSessions.Contains(request.SessionId)) return new("session_retiring", null, "The session is being retired; no job can start.");
             var running = _jobs.Values.Where(static job => job.State == SessionJobState.Running).ToArray();
             if (running.Length >= MaxRunningJobs
                 || running.Count(job => string.Equals(job.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase)) >= MaxRunningJobsPerSession)
@@ -125,6 +129,29 @@ public sealed class SessionJobService : IAsyncDisposable
 
         if (entry.CancelRequested) process.Kill();
         return new("ok", job);
+    }
+
+    // Kept through archive and removal, not a racy CountRunning snapshot. Completed jobs also protect the session:
+    // their delivery can still be outstanding after the process itself has stopped.
+    internal IDisposable? TryReserveRetirement(string sessionId)
+    {
+        lock (_gate)
+        {
+            if (_closed || _jobs.Values.Any(job => string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+                || _pendingDeliveries.Any(job => string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+                || !_retiringSessions.Add(sessionId)) return null;
+            return new RetirementReservation(this, sessionId);
+        }
+    }
+
+    private sealed class RetirementReservation(SessionJobService owner, string sessionId) : IDisposable
+    {
+        private int _released;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            lock (owner._gate) owner._retiringSessions.Remove(sessionId);
+        }
     }
 
     /// <summary>Lists the jobs: the ones that run in the order they were started, then the ones that ended, the last first.</summary>
@@ -469,6 +496,7 @@ public sealed class SessionJobService : IAsyncDisposable
             job = entry.Snapshot();
             if (told)
             {
+                _pendingDeliveries.Add(entry);
                 var tail = entry.Tail(2 * ResultCharacters, out var start);
                 prompt = FormatResult(job, tail, start > 0);
             }
@@ -480,7 +508,11 @@ public sealed class SessionJobService : IAsyncDisposable
         string delivery;
         try { delivery = await _deliver!(job, prompt).ConfigureAwait(false); }
         catch (Exception) { delivery = "failed"; }
-        lock (_gate) entry.Delivery = delivery;
+        lock (_gate)
+        {
+            entry.Delivery = delivery;
+            _pendingDeliveries.Remove(entry);
+        }
     }
 
     private sealed class Entry(string id, SessionJobRequest request, DateTimeOffset startedAt)

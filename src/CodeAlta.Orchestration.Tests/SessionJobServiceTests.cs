@@ -11,6 +11,49 @@ public sealed class SessionJobServiceTests
     private static readonly string Folder = Path.GetTempPath();
 
     [TestMethod]
+    public async Task SessionRetention_PendingDeliveryOutlivesBoundedHistory()
+    {
+        var shell = new FakeShell();
+        var delivering = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var jobs = new SessionJobService((job, _) =>
+        {
+            if (job.SessionId != "old") return Task.FromResult("queued");
+            delivering.TrySetResult();
+            return release.Task;
+        }, shell.Start);
+        var first = jobs.Start(Request("old", "fixture")).Job!;
+        shell.Processes[^1].Exit(0);
+        await delivering.Task.WaitAsync(Wait);
+        var settled = jobs.WhenSettledAsync(first.Id);
+        try
+        {
+            for (var index = 0; index < SessionJobService.MaxEndedJobs; index++)
+            {
+                var next = jobs.Start(Request("other", "fixture")).Job!;
+                shell.Processes[^1].Exit(0);
+                await jobs.WhenSettledAsync(next.Id).WaitAsync(Wait);
+            }
+            Assert.IsNull(jobs.Get(first.Id), "The presentation history must actually have evicted the job.");
+            using var retirement = jobs.TryReserveRetirement("old");
+            Assert.IsNull(retirement, "Unresolved delivery still owns the session after history eviction.");
+        }
+        finally { release.TrySetResult("queued"); }
+        await settled.WaitAsync(Wait);
+        using var afterDelivery = jobs.TryReserveRetirement("old");
+        Assert.IsNotNull(afterDelivery);
+    }
+
+    [TestMethod]
+    public async Task SessionRetention_WhitespaceCannotBypassAdmissionReservation()
+    {
+        await using var jobs = new SessionJobService(start: (_, _, _) => throw new AssertFailedException("No process may start."));
+        using var retirement = jobs.TryReserveRetirement("old");
+        Assert.IsNotNull(retirement);
+        Assert.AreEqual("session_retiring", jobs.Start(Request(" old ", "fixture")).Status);
+    }
+
+    [TestMethod]
     public async Task AJob_RunsItsCommand_KeepsWhatItWrites_AndTellsItsSessionWhenItSucceeds()
     {
         var shell = new FakeShell();

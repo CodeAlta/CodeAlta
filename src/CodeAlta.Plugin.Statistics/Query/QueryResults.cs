@@ -4,7 +4,20 @@ namespace CodeAlta.Plugin.Statistics.Query;
 /// <param name="Complete">Whether the numbers are complete for the whole period. False while the history is read, or when it was not read that far back: the page hatches the part before <paramref name="CompleteFrom"/>.</param>
 /// <param name="HistoryState">Where the reading of the history stands: <c>needs-choice</c>, <c>reading</c>, <c>paused</c>, <c>stopped</c> or <c>done</c>.</param>
 /// <param name="CompleteFrom">The first local day, as <c>yyyy-MM-dd</c>, from which the numbers are complete; null when everything is read.</param>
-public sealed record StatisticsCoverage(bool Complete, string HistoryState, string? CompleteFrom);
+public sealed record StatisticsCoverage(bool Complete, string HistoryState, string? CompleteFrom)
+{
+    /// <summary>Gets the number of effective saved session projections (profile-wide coverage information).</summary>
+    public int SavedSessions { get; init; }
+
+    /// <summary>Gets the reducer versions of the saved values; older values are never recomputed or silently upgraded.</summary>
+    public IReadOnlyList<int> SavedFactsVersions { get; init; } = [];
+
+    /// <summary>Gets metrics not recorded with today's definitions in at least one saved session; zero is not an observation for these archives.</summary>
+    public IReadOnlyList<string> UnavailableSavedMetrics { get; init; } = [];
+
+    /// <summary>Gets saved sessions migrated without full-source verification, whose historical coverage is not certified.</summary>
+    public int UnverifiedSavedSessions { get; init; }
+}
 
 /// <summary>What a query echoes of its request, and what the numbers rest on. Every result starts with it.</summary>
 /// <param name="Period">The period as it was asked.</param>

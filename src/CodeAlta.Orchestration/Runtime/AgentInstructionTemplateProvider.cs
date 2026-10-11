@@ -132,6 +132,7 @@ public sealed class AgentInstructionTemplateProvider
             SelectedPromptName = selectedPromptName ?? session.AgentPromptId,
             UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
+            InstanceStateRoot = _catalogOptions?.StateRoot,
             DiscoveryScope = DiscoveryScope,
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project),
         });

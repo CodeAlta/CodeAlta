@@ -483,6 +483,17 @@ test("the first time asks how much history to read, then shows the progress, the
   });
 });
 
+test("saved Statistics stay visible while surviving history awaits a choice", { skip: !edge, timeout: 300_000 }, async () => {
+  await withCanvas(async page => {
+    await render(page, { scenario: "first-time" });
+    await page.until(`document.querySelector('.stats-first') && !document.querySelector('.stats-tabs')`, "initial history choice");
+    await page.evaluate(`statsFixture.control.setStatus({ savedSessions: 2 })`);
+    await page.until(`document.querySelector('.stats-first') && document.querySelector('.stats-tabs')`, "saved charts beside surviving-history choice");
+    await page.click('button[aria-label="Statistics menu"]');
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('.bp6-menu-item')].find(item => item.textContent.includes('Forget deleted sessions'))?.getAttribute('title')`), "Saved Statistics archives are kept and cannot be forgotten here.");
+  });
+});
+
 test("two Statistics tabs in one window share no element id, and each names its own parts", { skip: !edge, timeout: 300_000 }, async () => {
   await withCanvas(async page => {
     const repeated = `(() => { const ids = [...document.querySelectorAll('.statistics-canvas [id]')].map(element => element.id); return [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))]; })()`;

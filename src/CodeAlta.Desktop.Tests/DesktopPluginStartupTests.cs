@@ -1,4 +1,5 @@
 using System.Text;
+using CodeAlta.Catalog.Storage;
 using CodeAlta.Desktop;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Plugins;
@@ -10,6 +11,20 @@ namespace CodeAlta.Desktop.Tests;
 [TestClass]
 public sealed class DesktopPluginStartupTests
 {
+    [TestMethod]
+    public void StartupStatus_ShowsScratchpadOnlyWhileTheActualWorkerRuns()
+    {
+        var status = new DesktopStartupStatus();
+        foreach (var state in Enum.GetValues<ScratchpadCleanupState>())
+        {
+            status.SetScratchpadCleanup(new(state, 0, 0, 0, [], null, null));
+            var expected = state == ScratchpadCleanupState.Running ? "Clearing scratchpad…" : string.Empty;
+            Assert.AreEqual(expected, status.Text);
+            using var json = System.Text.Json.JsonDocument.Parse(status.ToJson());
+            Assert.AreEqual(expected, json.RootElement.GetProperty("text").GetString());
+        }
+    }
+
     [TestMethod]
     public void Describe_NamesOnePluginAndCountsSeveral()
     {

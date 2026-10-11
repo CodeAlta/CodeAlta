@@ -1,11 +1,12 @@
 using System.Threading.Channels;
+using CodeAlta.Agent;
 using CodeAlta.LiveTool;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.Tests;
 
 [TestClass]
-public sealed class AltaReminderServiceTests
+public sealed partial class AltaReminderServiceTests
 {
     [TestMethod]
     public async Task OwnedDeliveryRoute_UsesCapturedSessionAndRepeatWithoutDispatcher()
@@ -590,6 +591,7 @@ public sealed class AltaReminderServiceTests
 
         public object? GetService(Type serviceType)
         {
+            if (serviceType == typeof(ISessionRetentionAdmission)) return null;
             if (serviceType != typeof(AltaCommandDispatcher))
             {
                 throw new InvalidOperationException($"Unexpected service resolution: {serviceType.Name}");

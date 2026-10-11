@@ -4,7 +4,7 @@ Select an exact saved project in the project rail and choose **Archive project�
 or **Unarchive project…**, in the menu of its row or in the menu of the Projects
 header. An owned host is required; catalog-only browsing cannot mutate metadata.
 A popover beside the row asks once, with **Do not ask again** (taken back with
-**Ask before archiving a project** of **Settings → Appearance**). Once the answer
+**Ask before archiving a project** of **Settings → Permissions → Confirmations**). Once the answer
 is yes, the window reads the source evidence and writes with it in one go: the
 project ID, project path, source, raw-byte revision and expected archive state the
 read returned are the ones the write requires. A scope, host or catalog change

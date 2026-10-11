@@ -17,6 +17,7 @@
     <InternalsVisibleTo Include="CodeAlta.Agent.Xai" />
     <InternalsVisibleTo Include="CodeAlta.Catalog" />
     <InternalsVisibleTo Include="CodeAlta.Orchestration" />
+    <InternalsVisibleTo Include="CodeAlta.Orchestration.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 

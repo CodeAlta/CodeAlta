@@ -13,7 +13,7 @@ namespace CodeAlta.Orchestration.Tests;
 /// Every fixture keeps its explicit root, original work and observers on failure or unconfirmed cleanup.
 /// </summary>
 [TestClass]
-public sealed class SessionRuntimeForwardingLifetimeTests
+public sealed partial class SessionRuntimeForwardingLifetimeTests
 {
     [TestMethod]
     public Task Activity_IsAttachmentLocalAdmissionOrderWithExplicitOmissions() => Fixture.Run(async f =>
@@ -1326,7 +1326,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
             try { await task.ConfigureAwait(false); }
             catch (Exception ex) { lock (_gate) _observed.Add(ex); }
         }
-        private Task Close()
+        internal Task Close()
         {
             var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Task close;
@@ -1377,6 +1377,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
         internal TaskCompletionSource SteerStarted { get; } = NewGate();
         internal TaskCompletionSource SteerCancelled { get; } = NewGate();
         internal TaskCompletionSource ReleaseSteer { get; } = NewGate();
+        internal Exception? SteerFailure { get; set; }
         private int _steers;
         internal int Steers => Volatile.Read(ref _steers);
         internal bool HoldIdleCompact { get; set; }
@@ -1510,6 +1511,7 @@ public sealed class SessionRuntimeForwardingLifetimeTests
                     owner.SteerStarted.TrySetResult();
                     await owner.ReleaseSteer.Task.ConfigureAwait(false);
                     cancellationToken.ThrowIfCancellationRequested();
+                    if (owner.SteerFailure is { } failure) throw failure;
                     return steer.ExpectedRunId ?? new AgentRunId("steered");
                 }
                 finally { Interlocked.Decrement(ref _active); }

@@ -17,6 +17,12 @@ This page documents the foundation of the Statistics history in `src/CodeAlta.Pl
 
 ## The reader
 
+### Full-source retirement verification
+
+The ordinary incremental reader below is intentionally tolerant. It is not evidence that a journal may be deleted. The active Statistics engine's retirement path uses `JournalScanOptions.RetirementSessionId`: SHA-256 over every source byte, strict JSON and typed event/header/state validation, matching session identity, supported discriminators and the serializer's envelope ordering. A record above the bounded 4 MiB retirement parse limit is uncertain and blocks retirement, even when the normal reader could skip it. EOF with pending bytes, a malformed/unknown record, an open run, cancellation or a source change also blocks a receipt.
+
+`StatisticsArchiveSource` (Catalog) resolves the catalog path, rejects linked ancestors and hashes the held source again and the current pathname before and after archive commit. Its streams use `FileShare.ReadWrite | FileShare.Delete` so the owning runtime can keep its native exact-file deletion lease. These reads do not themselves grant exclusive ownership: the caller must retain the runtime retirement reservation and native source identity through validation and deletion. The dedicated archive described in [Statistics](statistics.md#durable-saved-statistics) stores the complete base facts, never this incremental checkpoint. Facts version remains **5**; archive version **1** and application projection schema **3** are separate contracts.
+
 A journal is UTF-8, one JSON object per line, with no byte order mark. Every record is written with its discriminators first (`$type`, then `kind`, `phase`, or `backendEventType` for a raw record) and its **envelope last** (`backendId`, `sessionId`, `timestamp`, `runId`). The reader depends on both facts:
 
 | Step | What |

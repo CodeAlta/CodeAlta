@@ -1,4 +1,6 @@
+using CodeAlta.Agent;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Plugins;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Desktop;
@@ -56,9 +58,31 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Pending> _pending = new(StringComparer.Ordinal);
     private readonly Queue<PluginUiEvent> _backlog = new();
+    private readonly ISessionRetentionAdmission? _sessionRetentionAdmission;
+    private readonly List<(IDisposable? Protection, Exception Failure, object? Dependencies)> _retainedWork = [];
     private Action<PluginUiEvent>? _watcher;
     private long _next;
     private bool _closed;
+
+    /// <summary>Creates a broker for a host without automatic retention.</summary>
+    internal DesktopPluginUi() : this(null) { }
+
+    /// <summary>Creates a broker using the host's session-retention admission owner.</summary>
+    internal DesktopPluginUi(ISessionRetentionAdmission? sessionRetentionAdmission)
+        => _sessionRetentionAdmission = sessionRetentionAdmission;
+
+    /// <summary>Claims arbitrary plugin work before invocation; false forbids any callback effects.</summary>
+    internal bool TryProtectWork(out IDisposable? protection)
+    {
+        protection = _sessionRetentionAdmission?.TryProtectAll();
+        return _sessionRetentionAdmission is null || protection is not null;
+    }
+
+    /// <summary>Keeps failed original dependency ownership even after broker shutdown.</summary>
+    internal void RetainWork(IDisposable? protection, Exception failure, object? dependencies = null)
+    {
+        lock (_gate) _retainedWork.Add((protection, failure, dependencies));
+    }
 
     /// <inheritdoc />
     public bool HasInteractiveUi => true;
@@ -94,7 +118,14 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         {
             _watcher = watcher;
             while (_backlog.TryDequeue(out var missed)) watcher(missed);
-            foreach (var pending in _pending.Values) watcher(pending.Event);
+            foreach (var pending in _pending.Values)
+            {
+                // A prompt is a command, not a dialog. A previous page may still own its captured
+                // handoff: never schedule the same request again after reconnection.
+                if (pending.Event.Kind == "prompt" && pending.Published) continue;
+                pending.Published = true;
+                watcher(pending.Event);
+            }
         }
 
         return new Registration(this, watcher);
@@ -127,16 +158,33 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         }
 
         if (pending.OnAction is null || string.IsNullOrWhiteSpace(action)) return ("unsupported", null, false);
+        if (!TryProtectWork(out var protection)) return ("retiring", null, false);
         var fields = values ?? new Dictionary<string, string>();
         PluginDialogActionResult result;
+        CancellationTokenSource? linked = null;
+        Task<PluginDialogActionResult>? original = null;
         try
         {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, pending.Cancellation.Token);
-            result = await pending.OnAction(new PluginDialogAction { Name = action, Value = value, Values = fields }, linked.Token).ConfigureAwait(false)
+            linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, pending.Cancellation.Token);
+            original = pending.OnAction(new PluginDialogAction { Name = action, Value = value, Values = fields }, linked.Token).AsTask();
+            result = await original.ConfigureAwait(false)
                 ?? PluginDialogActionResult.KeepOpen;
+        }
+        catch (Exception failure) when (PluginDependencyRetention.Contains(failure)
+            || original?.Exception is { } failures && PluginDependencyRetention.Contains(failures))
+        {
+            RetainWork(protection, original?.Exception ?? failure, new { Pending = pending, Cancellation = linked, Original = original });
+            protection = null;
+            linked = null;
+            return ("failed", null, false);
         }
         catch (OperationCanceledException) { return ("unknown", null, false); }
         catch (Exception) { return ("failed", null, false); } // The plugin's own failure: its text stays out of the page.
+        finally
+        {
+            linked?.Dispose();
+            protection?.Dispose();
+        }
 
         if (result.Close)
         {
@@ -377,12 +425,27 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
             if (_closed) return;
             _closed = true;
             pending = [.. _pending.Values];
-            _pending.Clear();
+            // A published prompt may already be executing in a page. Closing the broker is not proof
+            // that its original handoff ended. Keep it answerable (and protected) until that page acknowledges.
+            foreach (var entry in pending)
+            {
+                if (entry.Protection is not null && entry.Published)
+                {
+                    entry.Event = new PluginUiEvent("close") { RequestId = entry.Event.RequestId };
+                    _watcher?.Invoke(entry.Event);
+                }
+                else
+                    _pending.Remove(entry.Event.RequestId!);
+            }
             _backlog.Clear();
             _watcher = null;
         }
 
-        foreach (var entry in pending) entry.Complete(null);
+        foreach (var entry in pending)
+        {
+            if (entry.Protection is not null && entry.Published) entry.Cancel(CancellationToken.None);
+            else entry.Complete(null);
+        }
     }
 
     private void Post(PluginUiEvent value)
@@ -404,17 +467,33 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
         lock (_gate)
         {
             if (_closed) return null;
+            IDisposable? protection = null;
+            if (value.Kind == "prompt" && _sessionRetentionAdmission is { } admission)
+                protection = (value.SessionId is { } sessionId ? admission.TryProtectSession(sessionId) : admission.TryProtectAll())
+                    ?? throw new InvalidOperationException("Session retirement prevents publishing this plugin prompt.");
             var id = "ui-" + Interlocked.Increment(ref _next).ToString(System.Globalization.CultureInfo.InvariantCulture);
-            pending = new Pending(value with { RequestId = id }, onAction);
+            pending = new Pending(value with { RequestId = id }, onAction, protection);
             _pending.Add(id, pending);
-            _watcher?.Invoke(pending.Event);
+            if (_watcher is { } watcher)
+            {
+                pending.Published = true;
+                watcher(pending.Event);
+            }
         }
 
         await using var registration = cancellationToken.Register(() =>
         {
-            bool removed;
-            lock (_gate) removed = _pending.Remove(pending.Event.RequestId!);
-            if (!removed) return;
+            lock (_gate)
+            {
+                if (!_pending.ContainsKey(pending.Event.RequestId!)) return;
+                if (pending.Protection is not null && pending.Published)
+                    pending.Event = new PluginUiEvent("close") { RequestId = pending.Event.RequestId };
+                else
+                {
+                    _pending.Remove(pending.Event.RequestId!);
+                    pending.ReleaseProtection();
+                }
+            }
             // The page closes what it shows for a request that no longer waits.
             Post(new PluginUiEvent("close") { RequestId = pending.Event.RequestId });
             pending.Cancel(cancellationToken);
@@ -434,11 +513,18 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
     internal static string Cut(string value, int maximum)
         => value.Length <= maximum ? value : value[..(char.IsHighSurrogate(value[maximum - 1]) ? maximum - 1 : maximum)];
 
-    private sealed class Pending(PluginUiEvent value, PluginDialogActionHandler? onAction)
+    private sealed class Pending(PluginUiEvent value, PluginDialogActionHandler? onAction, IDisposable? protection)
     {
         private readonly TaskCompletionSource<PluginUiAnswer?> _answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private IDisposable? _protection = protection;
 
-        public PluginUiEvent Event { get; } = value;
+        public PluginUiEvent Event { get; set; } = value;
+
+        public bool Published { get; set; }
+
+        public IDisposable? Protection => _protection;
+
+        public void ReleaseProtection() => Interlocked.Exchange(ref _protection, null)?.Dispose();
 
         public PluginDialogActionHandler? OnAction { get; } = onAction;
 
@@ -449,6 +535,7 @@ internal sealed class DesktopPluginUi : IPluginUiRuntimeService, IPluginSessionS
 
         public void Complete(PluginUiAnswer? answer)
         {
+            ReleaseProtection();
             _answer.TrySetResult(answer);
             Cancellation.Cancel();
         }

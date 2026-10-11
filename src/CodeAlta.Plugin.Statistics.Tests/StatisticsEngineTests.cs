@@ -1032,7 +1032,7 @@ public sealed class StatisticsEngineTests
         await harness.Store.Application.WriteAsync("test", async (connection, token) =>
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = $"ALTER TABLE {prefix}run DROP COLUMN skipped_ms; UPDATE app_meta SET version = 1 WHERE owner = 'plugin:statistics';";
+            command.CommandText = $"ALTER TABLE {prefix}run DROP COLUMN skipped_ms; DROP TABLE {prefix}archive; UPDATE app_meta SET version = 1 WHERE owner = 'plugin:statistics';";
             await command.ExecuteNonQueryAsync(token);
         });
         await harness.RestartAsync();

@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Catalog;
 using CodeAlta.Plugin.Statistics.Facts;
 using CodeAlta.Plugin.Statistics.Journal;
 using CodeAlta.Plugins.Abstractions;
@@ -23,7 +24,7 @@ namespace CodeAlta.Plugin.Statistics.Store;
 internal sealed partial class StatisticsStore
 {
     /// <summary>The version of the tables, kept by the host for the plugin.</summary>
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     /// <summary>The version of the roll-ups: when it changes, they are added up again from the facts.</summary>
     public const int RollupVersion = 1;
@@ -42,6 +43,11 @@ internal sealed partial class StatisticsStore
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="InvalidOperationException">The host has no database.</exception>
     public StatisticsStore(IPluginDatabase database, LocalDays days)
+        : this(database, days, null)
+    {
+    }
+
+    internal StatisticsStore(IPluginDatabase database, LocalDays days, StatisticsArchiveStore? archives)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(days);
@@ -51,6 +57,7 @@ internal sealed partial class StatisticsStore
         }
 
         _database = database;
+        _archives = archives;
         Days = days;
         Prefix = database.TablePrefix;
     }
@@ -86,6 +93,12 @@ internal sealed partial class StatisticsStore
                 sql.Execute($"ALTER TABLE {Table("run")} ADD COLUMN skipped_ms INTEGER NOT NULL DEFAULT 0");
             }
 
+            if (from < 3)
+            {
+                using var sql = new SqlSession(connection);
+                sql.Execute($"CREATE TABLE {Table("archive")} (session_id TEXT PRIMARY KEY, generation TEXT NOT NULL, facts_version INTEGER NOT NULL, full_source INTEGER NOT NULL, recorded_metrics TEXT NOT NULL, effective INTEGER NOT NULL, source_seen INTEGER NOT NULL)");
+            }
+
             return ValueTask.CompletedTask;
         }, cancellationToken).ConfigureAwait(false);
 
@@ -95,6 +108,8 @@ internal sealed partial class StatisticsStore
         {
             await RebuildRollupsAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        await RestoreArchivesAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Gets a value of the <c>meta</c> table.</summary>
@@ -243,7 +258,7 @@ internal sealed partial class StatisticsStore
         await WriteAsync(
             sql =>
             {
-                var ids = sql.Query($"SELECT session_id FROM {Table("journal")} WHERE deleted = 1", static reader => reader.GetString(0));
+                var ids = sql.Query($"SELECT session_id FROM {Table("journal")} WHERE deleted = 1 AND session_id NOT IN (SELECT session_id FROM {Table("archive")})", static reader => reader.GetString(0));
                 var quarters = new HashSet<int>();
                 foreach (var id in ids)
                 {
@@ -265,8 +280,13 @@ internal sealed partial class StatisticsStore
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the write.</param>
     /// <returns>A task representing the write.</returns>
-    public ValueTask ResetAsync(CancellationToken cancellationToken = default)
-        => WriteAsync(
+    public async ValueTask ResetAsync(CancellationToken cancellationToken = default)
+    {
+        // Validate the irreplaceable archive BEFORE clearing anything. Migration is idempotent and never issues deletion receipts.
+        await ReadArchivesAsync(cancellationToken).ConfigureAwait(false);
+        await PreserveDeletedAsync(cancellationToken).ConfigureAwait(false);
+        var archives = await ReadArchivesAsync(cancellationToken).ConfigureAwait(false);
+        await WriteAsync(
             sql =>
             {
                 // The prefix is the name of the plugin followed by an underscore, which LIKE reads as any character: compare the start of the name.
@@ -278,8 +298,17 @@ internal sealed partial class StatisticsStore
                 {
                     sql.Execute($"DELETE FROM {table}");
                 }
+
+                foreach (var (entry, payload) in archives)
+                {
+                    ImportArchive(sql, entry, payload);
+                }
+
+                SetMeta(sql, new Dictionary<string, string?> { [RollupVersionKey] = RollupVersion.ToString(CultureInfo.InvariantCulture), [RollupTimeZoneKey] = Days.TimeZone.Id });
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
+        SavedSessions = archives.Count;
+    }
 
     private ApplyResult Apply(SqlSession sql, ApplyRequest request)
     {
@@ -338,6 +367,7 @@ internal sealed partial class StatisticsStore
         WriteRuns(sql, session, batch, floor);
         WriteSession(sql, batch);
         WriteJournal(sql, request);
+        sql.Execute($"UPDATE {Table("archive")} SET effective=0,source_seen=@p1 WHERE session_id=@p0", session, request.VerifiedArchiveReplacement ? 1L : 0L);
         if (request.Meta is { Count: > 0 } meta)
         {
             SetMeta(sql, meta.ToDictionary(static pair => pair.Key, static pair => (string?)pair.Value, StringComparer.Ordinal));

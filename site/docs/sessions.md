@@ -68,7 +68,13 @@ A compaction asks the model for a summary, and the provider bills that request l
 
 When you give an agent many instructions at once, such as a list of tasks or numbered steps, it first writes them down in a file under `~/.alta/scratchpad/`. A long session compacts its context; the file keeps your instructions as you wrote them, and the agent reads it again after a compaction and before it reports the work as done.
 
-The file is the agent's own record. It is not part of your project and is never committed.
+The file is the agent's own record. It is not part of your project and is never committed. Scratchpads belong to the running instance: a developer instance (`--dev`) uses `~/.alta/dev/scratchpad/`, while the normal instance keeps `~/.alta/scratchpad/`. Existing files and references in old conversations are not moved or rewritten.
+
+Scratchpads are temporary, not permanent notes. Startup clearing is on by default when its configuration and safety checks permit it; it preserves the scratchpad folder and only removes ordinary contents of that instance. Locked, inaccessible or linked entries are left in place and reported. Sessions do not start until the cleanup worker has stopped. A normal instance skips clearing when it cannot exclude an older developer instance that still uses the normal scratchpad path.
+
+The inactive-session policy in **Settings > Advanced > Storage** defaults to three calendar months and accepts an editable duration or **Never**. At startup, eligible expired sessions can be removed after their Statistics have been durably saved. Open sessions, drafts, background work and related session families are protected; unavailable safety checks skip cleanup. Saving a duration does not immediately delete anything. Saved Statistics have separate durable storage and survive Statistics reset; neither Storage settings nor manual session deletion removes that archive.
+
+The current handle-safe cleanup supports fixed local NTFS volumes on Windows. Other platforms, remote paths and unqualified filesystems report a skipped pass rather than using weaker deletion checks.
 
 ## Branches
 
@@ -149,6 +155,8 @@ summary back here.
 ```
 
 For parent/child delegated work, CodeAlta uses a notification-based pattern: the child final reply or child-run error is forwarded back to the parent session automatically. The parent agent should yield instead of repeatedly polling while waiting.
+
+Messages between agents follow the same rule as automatic replies: they steer a running recipient, or start a new turn when it is idle. This includes an agent's `session send`, `session message` and `session request`. An agent can explicitly queue work for later instead. Providers without live steering keep the message in the prompt queue.
 
 In CodeAlta Desktop, an agent can show you what changed with `alta diff show`: it opens the [Changes tab](workspace.md#changes-desktop) of the project, and `--file <path>` selects a file in it. It can also show you a file with `alta editor open --file <path> --line <n>`, which opens it in the [code editor](workspace.md#code-editor) of the project.
 

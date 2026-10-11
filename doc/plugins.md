@@ -666,6 +666,18 @@ The data stays when a plugin is disabled. The host side removes it with `PluginR
 
 Long-running plugin work should use `Services.Tasks.Run(...)` or the `PluginBase.Tasks` shortcut instead of untracked `Task.Run`. The runtime tracks task handles, cancels them during deactivation, and can delay unload while tracked work completes.
 
+When the host supplies `PluginRuntimeManagerOptions.SessionRetentionAdmission` (also passed through activation and reload), a task claims protection for all sessions **before** it is published or scheduled. Refused admission throws `InvalidOperationException` without invoking the callback. Protection lasts through original work and cancellation cleanup, not merely a canceled waiter or task-list removal. A host without automatic retention can keep the compatibility constructors/options.
+
+`PluginRuntimeManager.SessionRetentionAdmission` exposes the identity captured by the original admitted startup. A host borrowing a prestarted runtime may qualify it only when this is the same shared admission owner **and `IsStarted` is true**; missing/different owners and an in-progress or failed startup remain unqualified. Startup itself claims protection before activation callbacks and retains it through the original startup, regardless of canceled waiters. Reload retains the original options and a rejected repeated start cannot replace this identity.
+
+Ordinary callback faults permit release after original cleanup. Explicit retained-dependency failures, including nested Agent or plugin dependency failures, do not: tasks, startup, desktop commands and dialog actions retain the claim and failure evidence. Command adapters propagate these failures rather than converting them to an ordinary diagnostic. Cancellation, broker shutdown and a terminal fault cannot prove that their dependent work terminated.
+
+If activation or its failed-activation disposal reports retained dependencies, its outer `AgentDependencyRetentionException.Dependencies` explicitly roots the constructed plugin, context, services, task owner, lifetime, contribution registry and original callback tasks. The complete original failure graphs remain nested without flattening; an arbitrary plugin-provided marker is not assumed to root that activation itself.
+
+`PluginTaskOptions.SessionRetentionIndependent = true` explicitly promises that the task never starts, resumes, queues or mutates sessions, publishes lineage or hands off such work. Its journal reads must tolerate concurrent retirement and missing sources. It is not a performance hint or a plugin-name exemption. Statistics declares this contract for its history/flow reader, whose writes are confined to its projection/archive and whose archive preparation is serialized in the engine. All undeclared tasks protect all sessions.
+
+Desktop commands and dialog actions likewise protect the original callback, even if an RPC caller cancels. A published plugin prompt keeps its session claim (or an all-session claim when its target is unknown) until the page acknowledges accepted downstream ownership or conclusive cancellation. Timeout, disconnection and broker disposal do not prove a captured page handoff has stopped: canceled published prompts remain protected and replay as `close`, not as runnable prompts. The page must answer only after its original handoff has ended; a missing acknowledgment deliberately keeps protection.
+
 Unload can still fail if plugin code keeps static references, host-static delegates, pinned native resources, or untracked background work alive.
 
 ## Built-in plugins

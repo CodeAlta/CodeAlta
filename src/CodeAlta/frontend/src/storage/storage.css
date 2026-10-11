@@ -1,0 +1,79 @@
+/* Storage: two compact cards. Cleanup controls first (above the fold in a small Settings window), then the sizes,
+   whose table is the legend of the donut beside it. The cards are stacked at every width. */
+.storage-settings { container-type: inline-size; }
+.storage-layout { display: grid; gap: 12px; min-width: 0; }
+.storage-card.bp6-card { min-width: 0; padding: 10px 16px 12px; }
+
+.storage-card-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 30px; }
+.storage-card-heading h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.storage-help-button.bp6-button { min-width: 22px; min-height: 22px; padding: 0; color: var(--muted); }
+.storage-help-button.bp6-button:hover { color: var(--text); }
+.storage-help { max-width: 300px; padding: 10px 12px; font-size: 12px; line-height: 1.45; }
+.storage-help p { margin: 0 0 6px; }
+.storage-help p:last-child { margin-bottom: 0; }
+.storage-help-path { display: block; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+.storage-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.storage-card-heading > .storage-hint { margin-left: auto; }
+.storage-total { margin-left: 4px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.storage-heading-actions { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 6px; margin-left: auto; }
+.storage-scanning { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Settings rows, tighter than the Appearance cards; the first row draws the line under the heading. */
+.storage-settings .storage-field.settings-field { grid-template-columns: minmax(0, 1fr) auto; padding: 8px 0; }
+.storage-settings .storage-field > .settings-field-control { justify-content: flex-end; }
+.storage-settings .storage-retention-controls { gap: 6px; }
+.storage-settings .storage-retention-controls .bp6-html-select { width: auto; min-width: 0; }
+.storage-settings .storage-retention-controls .bp6-html-select select { width: auto; }
+/* The input fills the numeric control, whose step buttons stay attached to it. */
+.storage-retention-controls .bp6-numeric-input { flex: none; width: 88px; }
+.storage-retention-controls .bp6-numeric-input .bp6-input-group { flex: 1 1 auto; width: auto; min-width: 0; }
+.storage-retention-controls .bp6-numeric-input .bp6-input { width: 100%; }
+.storage-validation { grid-column: 1 / -1; margin: 0; color: var(--red); font-size: 12px; }
+
+.storage-maintenance { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }
+.storage-maintenance-title { display: inline-flex; align-items: center; gap: 6px; }
+.storage-maintenance-title > svg { flex: none; color: var(--muted); }
+.storage-maintenance[data-state="completed"] .storage-maintenance-title > svg { color: var(--green); }
+.storage-maintenance[data-state="partial"] .storage-maintenance-title > svg { color: var(--yellow); }
+.storage-maintenance details { display: contents; }
+.storage-maintenance summary { color: var(--muted); cursor: pointer; }
+.storage-maintenance summary:hover { color: var(--text); }
+.storage-maintenance ul { flex-basis: 100%; margin: 4px 0 0; padding-left: 20px; color: var(--muted); }
+.storage-cleanup .settings-file-locations { margin-top: 6px; }
+/* A second status line follows the first without a second rule. */
+.storage-maintenance + .storage-maintenance { padding-top: 0; border-top: 0; }
+
+.storage-scan-time { margin-bottom: 6px; }
+.storage-usage .bp6-callout { margin-block: 4px 8px; }
+/* The table and the donut side by side, the donut centered in the room the table leaves. The table stops growing
+   so that a wide card does not spread the sizes away from their names; a narrow page puts the donut below it. */
+.storage-distribution { display: grid; gap: 12px 24px; min-width: 0; }
+.storage-distribution > * { min-width: 0; }
+.storage-table.bp6-html-table { max-width: 600px; }
+.storage-donut { justify-self: center; width: 168px; }
+.storage-distribution .storage-donut .chart-surface { height: 168px; }
+@container (min-width: 600px) {
+  .storage-distribution[data-chart] { grid-template-columns: minmax(0, 600px) minmax(200px, 1fr); align-items: center; }
+  .storage-donut { width: 240px; max-width: 100%; }
+  .storage-distribution .storage-donut .chart-surface { height: 240px; }
+}
+
+/* The table is the legend: a swatch per row, sizes and shares aligned on their digits. */
+.storage-table.bp6-html-table { width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.storage-table caption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.storage-table.bp6-html-table th, .storage-table.bp6-html-table td { padding: 3px 6px; vertical-align: top; }
+.storage-table.bp6-html-table thead th { color: var(--muted); font-size: 11px; font-weight: 600; }
+.storage-table.bp6-html-table tbody th { position: relative; font-weight: 400; overflow-wrap: anywhere; }
+.storage-table.bp6-html-table td, .storage-table.bp6-html-table thead th:not(:first-child) { text-align: right; white-space: nowrap; }
+.storage-table.bp6-html-table tr > :last-child { padding-right: 0; }
+.storage-table.bp6-html-table tr > :first-child { padding-left: 0; }
+.storage-table.bp6-html-table tbody tr > th:first-child { padding-left: 16px; }
+.storage-swatch { position: absolute; left: 0; top: calc(3px + .5lh - 4.5px); width: 9px; height: 9px; border-radius: 2px; background: var(--storage-swatch); }
+.storage-table tr[data-empty] { color: var(--muted); }
+.storage-table tr[data-empty] .storage-swatch { opacity: .35; }
+
+/* A narrow page: the retention controls go under their name. */
+@container (max-width: 400px) {
+  .storage-settings .storage-retention.settings-field { grid-template-columns: minmax(0, 1fr); }
+  .storage-settings .storage-retention > .settings-field-control { justify-content: flex-start; }
+}

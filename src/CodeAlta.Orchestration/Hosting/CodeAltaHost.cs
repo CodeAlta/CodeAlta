@@ -3,6 +3,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Catalog.Storage;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugins;
@@ -46,9 +47,13 @@ public sealed class CodeAltaHost : IAsyncDisposable
         int ownedCommandReceiptCapacity,
         Func<bool> reviewOwnedCommandPermissions,
         bool enableOwnedAsks,
-        bool enableOwnedUserInput)
+        bool enableOwnedUserInput,
+        IStartupScratchpadCleanup? startupScratchpadCleanup,
+        SessionRetentionProtection retentionProtection)
     {
         CatalogOptions = catalogOptions;
+        StartupScratchpadCleanup = startupScratchpadCleanup;
+        RetentionProtection = retentionProtection;
         ProjectCatalog = projectCatalog;
         SpaceCatalog = new SpaceCatalog(projectCatalog);
         SessionViewCatalog = sessionViewCatalog;
@@ -65,7 +70,13 @@ public sealed class CodeAltaHost : IAsyncDisposable
         CurrentProject = currentProject;
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)
         {
-            SelectionModels = modelProviderInitializationService.GetModelsAsync,
+            SelectionModels = async (provider, token) =>
+            {
+                token.ThrowIfCancellationRequested();
+                var models = await modelProviderInitializationService.GetModelsAsync(provider, CancellationToken.None).ConfigureAwait(false);
+                token.ThrowIfCancellationRequested();
+                return models;
+            },
             SelectionProvider = provider => modelProviderRegistry.TryGetProvider(provider, out var descriptor) ? descriptor : null,
             ProjectFileSearch = projectFileSearchService,
             Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins),
@@ -79,7 +90,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         var disposal = CreateHostDisposal(
             DisposeCommandsAndRuntimeAsync,
             AgentHub.DisposeAsync,
-            ModelProviderRegistry.DisposeAsync,
+            DisposeModelProvidersAsync,
             PluginRuntime.DisposeAsync,
             LogManager.Shutdown,
             ownsPluginRuntime,
@@ -122,6 +133,14 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// Gets the catalog options used by the host.
     /// </summary>
     public CatalogOptions CatalogOptions { get; }
+
+    /// <summary>Gets replayable startup maintenance, or null when composition supplied no cleanup capability.</summary>
+    /// <remarks>When supplied, its worker ended before this host existed.</remarks>
+    public IStartupScratchpadCleanup? StartupScratchpadCleanup { get; }
+
+    /// <summary>Gets the original host admission registry shared by providers, external work and desktop restoration.</summary>
+    /// <remarks>It remains fail-closed until the composition has qualified every required owner.</remarks>
+    public SessionRetentionProtection RetentionProtection { get; }
 
     /// <summary>
     /// Gets the project catalog.
@@ -251,6 +270,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ? new BuiltInCodeAltaSkillRootProvider()
             : new BuiltInCodeAltaSkillRootProvider(options.BuiltInSkillRoot);
 
+        var retentionProtection = options.RetentionProtection ?? new SessionRetentionProtection();
+        // Borrowed plugin workers may already be running without this registry. They cannot be retroactively
+        // qualified by an empty snapshot or by assigning a new property after startup.
+        if (options.PrestartedPluginRuntime is { } prestarted
+            && (!prestarted.IsStarted || !ReferenceEquals(prestarted.SessionRetentionAdmission, retentionProtection)))
+            retentionProtection.MarkUnknown("prestarted-plugins", "external_admission_unqualified");
         PluginRuntimeManager? pluginRuntime = null;
         ModelProviderRegistry? modelProviderRegistry = null;
         AgentHub? agentHub = null;
@@ -272,6 +297,33 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 StateRoot = string.IsNullOrWhiteSpace(options.StateRoot) ? globalRoot : Path.GetFullPath(options.StateRoot),
             };
             Directory.CreateDirectory(catalogOptions.StateRoot);
+            var startupScratchpadCleanup = options.StartupScratchpadCleanup;
+            if (startupScratchpadCleanup is not null
+                && (!string.Equals(startupScratchpadCleanup.StateRoot, catalogOptions.StateRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
+                    || !string.Equals(startupScratchpadCleanup.GlobalRoot, globalRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+                throw new ArgumentException("Startup scratchpad ownership must match the host roots.", nameof(options));
+            // No hub, actor, provider or runnable host has been constructed here yet. All execution routes
+            // (including resumed/autonomous work) inherit this barrier instead of each adding a waiter.
+            // Never use WaitAsync(token): cancellation cannot release admission while deletion runs.
+            if (startupScratchpadCleanup is not null)
+            {
+                var enabled = false;
+                var configurationValid = false;
+                try
+                {
+                    // Read only; never materialize defaults or rewrite the normal instance's shared
+                    // configuration during developer startup. Only an actually missing file defaults on.
+                    enabled = new CodeAltaConfigStore(catalogOptions).LoadGlobalStorageSettings().ClearScratchpadOnStartup;
+                    configurationValid = true;
+                }
+                catch (Exception)
+                {
+                    // No unreadable, malformed or semantically invalid policy authorizes deletion.
+                    // The worker retains a bounded invalid-configuration result for late subscribers.
+                }
+                await startupScratchpadCleanup.RunAsync(enabled, configurationValid, cancellationToken).ConfigureAwait(false);
+            }
+            cancellationToken.ThrowIfCancellationRequested();
             // One database for the instance: the list of sessions and the plugins use the same file and the same queue of writers.
             applicationDatabase = options.ApplicationDatabase ?? options.PrestartedPluginRuntime?.ApplicationDatabase;
             if (applicationDatabase is null)
@@ -304,6 +356,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                         new PluginRuntimeManagerOptions
                         {
                             GlobalRoot = globalRoot,
+                            SessionRetentionAdmission = retentionProtection,
                             ApplicationDatabase = applicationDatabase,
                             ProjectContext = new PluginProjectContext
                             {
@@ -342,8 +395,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope);
             modelProviderRegistry = new ModelProviderRegistry();
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
-            var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry);
-            agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache);
+            var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);
+            agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache, retentionProtection);
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
             var projectFileSnapshotCache = new ProjectFileSnapshotCache();
             var eventFailurePolicy = options.PluginAgentEventFailurePolicy ??
@@ -405,7 +458,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 options.OwnedCommandReceiptCapacity,
                 reviewOwnedPermissions,
                 options.EnableOwnedAsks,
-                options.EnableOwnedUserInput);
+                options.EnableOwnedUserInput,
+                startupScratchpadCleanup,
+                retentionProtection);
         }
         catch (Exception creationFailure)
         {
@@ -578,6 +633,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
     /// <exception cref="AggregateException">Multiple cleanup stages failed.</exception>
     /// <exception cref="AgentDependencyRetentionException">A required prerequisite was not released; dependent acquisitions remain owned.</exception>
     public ValueTask DisposeAsync() => PluginEventDependencyBarrier.EnterDispose(PluginRuntime, _disposeTask);
+
+    private async ValueTask DisposeModelProvidersAsync()
+    {
+        await ModelProviderInitializationService.DrainAsync().ConfigureAwait(false);
+        await ModelProviderRegistry.DisposeAsync().ConfigureAwait(false);
+    }
 
     /// <summary>Closes owned read/command admission and starts their independent shutdown controls without joining them.</summary>
     /// <remarks>

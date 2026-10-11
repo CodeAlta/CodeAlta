@@ -31,6 +31,7 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="ArgumentException">An argument is blank.</exception>
     /// <exception cref="OperationCanceledException">The request was canceled before it was admitted.</exception>
     /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired.</exception>
     public Task<string> DeliverHostPromptAsync(string sessionId, string prompt, string kind, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -56,6 +57,7 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="ArgumentException">An argument is blank.</exception>
     /// <exception cref="OperationCanceledException">The request was canceled before it was admitted.</exception>
     /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    /// <exception cref="InvalidOperationException">The target or its lineage is being retired or has been retired.</exception>
     public Task<string> DeliverHostPromptToRunningTurnAsync(string sessionId, string prompt, string kind, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -64,10 +66,15 @@ public sealed partial class SessionRuntimeService
         return AdmitAsync(() => DeliverHostPromptBodyAsync(sessionId, prompt, kind, whenIdle: false), cancellationToken);
     }
 
-    private async Task<string> DeliverHostPromptBodyAsync(string sessionId, string prompt, string kind, bool whenIdle)
+    private Task<string> DeliverHostPromptBodyAsync(string sessionId, string prompt, string kind, bool whenIdle)
+        => WithRetentionWorkAsync(() => DeliverHostPromptClaimedBodyAsync(sessionId, prompt, kind, whenIdle), sessionId);
+
+    private async Task<string> DeliverHostPromptClaimedBodyAsync(string sessionId, string prompt, string kind, bool whenIdle)
     {
         var session = await TryResolveSessionForParentDeliveryAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         if (session is null) return "missing_session";
+        return await WithRetentionWorkAsync(async () =>
+        {
         var running = await HasActiveRunOwnedBodyAsync(session, CancellationToken.None).ConfigureAwait(false);
         if (!running && !whenIdle) return "idle";
         var submittedBy = new AltaActorProvenance
@@ -86,7 +93,7 @@ public sealed partial class SessionRuntimeService
                 await PersistPromptProvenanceAsync(session, runId.Value, queued: false, kind, prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
                 return "steered";
             }
-            catch (Exception)
+            catch (Exception failure) when (!OwnedProviderEventForwarding.HasRetention(failure))
             {
                 // A provider that takes nothing in a turn that runs, or a turn that just ended: the prompt waits its turn.
             }
@@ -95,6 +102,7 @@ public sealed partial class SessionRuntimeService
         await QueuePromptOwnedBodyAsync(session, prompt, kind, submittedBy, CancellationToken.None).ConfigureAwait(false);
         await TryDrainNextQueuedPromptAsync(session.SessionId).ConfigureAwait(false);
         return "queued";
+        }, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
     // Called by the jobs when one ended and its session is to be told.
@@ -105,7 +113,8 @@ public sealed partial class SessionRuntimeService
             var status = await DeliverHostPromptAsync(job.SessionId, prompt, JobPromptKind).ConfigureAwait(false);
             return status == "missing_session" ? "failed" : status;
         }
-        catch (Exception failure) when (failure is ObjectDisposedException or InvalidOperationException or IOException or OperationCanceledException)
+        catch (Exception failure) when (!OwnedProviderEventForwarding.HasRetention(failure)
+            && failure is ObjectDisposedException or InvalidOperationException or IOException or OperationCanceledException)
         {
             return "failed";
         }

@@ -44,6 +44,9 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         var usedRoots = new HashSet<string>(ReservedRootCommands, StringComparer.OrdinalIgnoreCase);
         foreach (var contribution in FilterContributions(catalog.ListCommandContributions(), usedRoots))
         {
+            // Factories run before the parser identifies a target and can execute plugin code.
+            // Keep this unknown-target claim through the original selected command callback too.
+            context.Invocation.ClaimUnknownCommandWork();
             var pluginContext = CreatePluginContext(context.Invocation, contribution);
             var node = contribution.Command.CreateCommandNode(pluginContext);
             if (node is not Command command ||

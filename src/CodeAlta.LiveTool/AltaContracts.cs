@@ -28,6 +28,8 @@ public sealed record AltaCommandPolicy
 /// </summary>
 public sealed record AltaCommandContext
 {
+    internal AltaCommandRetentionLifetime? RetentionLifetime { get; init; }
+
     /// <summary>Gets the caller identity.</summary>
     public required AltaCallerIdentity Caller { get; init; }
 

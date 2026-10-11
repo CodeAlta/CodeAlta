@@ -8,7 +8,7 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Persists local raw-API session journals on the filesystem.
 /// </summary>
-public sealed class FileSystemAgentSessionStore : IAgentSessionJournalStore, Images.IAgentSessionAttachmentStore
+public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalStore, Images.IAgentSessionAttachmentStore
 {
     private const string SessionSummaryEventType = "local.sessionSummary";
     private const string SessionStateEventType = "local.sessionState";

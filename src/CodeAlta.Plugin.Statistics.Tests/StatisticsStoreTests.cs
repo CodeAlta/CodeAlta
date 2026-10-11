@@ -150,6 +150,19 @@ public sealed class StatisticsStoreTests
     }
 
     [TestMethod]
+    public async Task Reset_PreservesAlreadyDeletedSessionFacts()
+    {
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        await harness.Store.ApplyAsync(Request(SyntheticFacts.Batch(new Random(41), "gone", SyntheticFacts.SpringStart, 96, 12), "gone"));
+        await harness.Store.MarkDeletedAsync(["gone"]);
+        var before = await harness.DumpAsync("archive");
+
+        await harness.Store.ResetAsync();
+
+        Assert.AreEqual(before, await harness.DumpAsync("archive"), "Reset must not destroy the only remaining facts of a deleted session.");
+    }
+
+    [TestMethod]
     public async Task ADeletedSession_KeepsItsFacts_UntilTheyAreForgotten()
     {
         await using var harness = await StoreHarness.CreateAsync(StoreHarness.Zone("Europe/Paris"));
