@@ -1,6 +1,6 @@
 # Dual-head CodeAlta: native desktop and terminal
 
-- Status: Functional-first M4–M6 execution resumed on 2026-09-22. The live plugin-effect cutover is implemented and behaviorally verified; ordinary synchronous cleanup failures remain ordinary while explicit retained-dependency evidence still blocks unsafe release. Brittle source-shape reconstruction checks for this cutover are deliberately ignored rather than continuously rebased. A locally runnable interactive web demo, usable responsive workspace shell and first provider/plugin configuration inventory are now integrated. No-argument desktop startup now matches the TUI's owned interactive host for the current directory and `~/.alta`, while WebView-only data remains platform-local; explicit catalog-copy startup remains read-only. Detailed M4 recovery/native/file boundaries and advanced M5/M6 editing/mutation parity remain open; M7 stays deferred and no publish/push/merge is authorized.
+- Status: Done
 - Plan file: `.alta/plans/2026-09-05-dual-head-desktop.md`
 - Created: 2026-09-05
 - Revised: 2026-09-05 — retain the editor/visual library evaluation and rich workspace UX; follow the user's trusted-desktop direction with direct library integration and no custom isolation infrastructure.
