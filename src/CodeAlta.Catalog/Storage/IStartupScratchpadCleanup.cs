@@ -29,7 +29,14 @@ public enum ScratchpadCleanupState
 /// <param name="CompletedAt">UTC termination time, when settled.</param>
 public sealed record ScratchpadCleanupSnapshot(ScratchpadCleanupState State, long RemovedFiles,
     long RemovedDirectories, long SkippedEntries, ImmutableArray<string> Reasons,
-    DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt);
+    DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt)
+{
+    /// <summary>Gets the file entries examined, including skipped entries whose type was known.</summary>
+    public long ProcessedFiles { get; init; }
+
+    /// <summary>Gets the child directory entries examined, excluding the preserved scratchpad root.</summary>
+    public long ProcessedDirectories { get; init; }
+}
 
 /// <summary>The host admission and presentation contract for instance-owned scratchpad maintenance.</summary>
 /// <remarks>Host composition supplies the implementation; orchestration does not acquire instance locks.</remarks>

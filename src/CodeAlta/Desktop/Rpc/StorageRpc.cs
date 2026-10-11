@@ -79,16 +79,57 @@ internal sealed class StorageService
         finally { _settingsGate.Release(); }
     }
 
-    /// <summary>Measures logical file lengths without reading contents; cancellation stops only this scan.</summary>
-    [NeoRpcMethod("scan", TimeoutMilliseconds = 600_000)]
-    public async Task<StorageScanResponse> ScanAsync(StorageRequest request, CancellationToken cancellationToken)
+    /// <summary>Streams bounded metadata progress and a final measurement; closing it stops only this scan.</summary>
+    [NeoRpcMethod("scan")]
+    public NeoRpcChannel<StorageScanResponse> Scan(StorageRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (Refuse(request.ExpectedEpoch) is { } status) return new(status, null);
-        var measured = await _scanner!.ScanAsync(cancellationToken).ConfigureAwait(false);
-        return new("ok", new(measured.RootPath, measured.TotalBytes, measured.CompletedAt,
-            measured.Categories.Select(category => new StorageCategory(category.Id, category.Bytes, category.FileCount)).ToArray(),
-            measured.SkippedLinks, measured.SkippedEntries, measured.IsPartial));
+        return new(ScanAsync(request, cancellationToken), DesktopJsonContext.Default.StorageScanResponse);
+    }
+
+    internal async IAsyncEnumerable<StorageScanResponse> ScanAsync(StorageRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (Refuse(request.ExpectedEpoch) is { } status) { yield return new(status, null); yield break; }
+        yield return new("running", null);
+        using var scanCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var updates = Channel.CreateBounded<StorageScanResponse>(new BoundedChannelOptions(1)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.DropOldest,
+        });
+        var worker = ProduceScanAsync(updates.Writer, scanCancellation.Token);
+        try
+        {
+            await foreach (var update in updates.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                yield return update;
+        }
+        finally
+        {
+            await scanCancellation.CancelAsync().ConfigureAwait(false);
+            await worker.ConfigureAwait(false);
+        }
+    }
+
+    private async Task ProduceScanAsync(ChannelWriter<StorageScanResponse> updates, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var measured = await _scanner!.ScanAsync(new ScanProgress(updates), cancellationToken).ConfigureAwait(false);
+            updates.TryWrite(new("ok", new(measured.RootPath, measured.TotalBytes, measured.CompletedAt,
+                measured.Categories.Select(category => new StorageCategory(category.Id, category.Bytes, category.FileCount)).ToArray(),
+                measured.SkippedLinks, measured.SkippedEntries, measured.IsPartial))
+            { ProcessedFiles = measured.ProcessedFiles, ProcessedDirectories = measured.ProcessedDirectories });
+            updates.TryComplete();
+        }
+        catch (Exception exception) { updates.TryComplete(exception); }
+    }
+
+    private sealed class ScanProgress(ChannelWriter<StorageScanResponse> updates) : IProgress<ProfileStorageProgress>
+    {
+        public void Report(ProfileStorageProgress value) => updates.TryWrite(new("running", null)
+        { ProcessedFiles = value.ProcessedFiles, ProcessedDirectories = value.ProcessedDirectories });
     }
 
     /// <summary>Replays and follows the host-owned startup operation; closing the stream never cancels cleanup.</summary>
@@ -112,7 +153,8 @@ internal sealed class StorageService
         using var subscription = _scratchpadCleanup.Subscribe(snapshot => snapshots.Writer.TryWrite(snapshot));
         await foreach (var snapshot in snapshots.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             yield return new(snapshot.State.ToString().ToLowerInvariant(), snapshot.RemovedFiles,
-                snapshot.RemovedDirectories, snapshot.SkippedEntries, snapshot.Reasons, snapshot.StartedAt, snapshot.CompletedAt);
+                snapshot.RemovedDirectories, snapshot.SkippedEntries, snapshot.Reasons, snapshot.StartedAt, snapshot.CompletedAt)
+            { ProcessedFiles = snapshot.ProcessedFiles, ProcessedDirectories = snapshot.ProcessedDirectories };
     }
 
     /// <summary>Replays and follows retention outcomes without starting, retrying or canceling the host pass.</summary>
@@ -171,10 +213,22 @@ internal sealed record StorageMeasurement(string RootPath,
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long SkippedLinks,
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long SkippedEntries,
     bool IsPartial);
-internal sealed record StorageScanResponse(string Status, StorageMeasurement? Snapshot);
+internal sealed record StorageScanResponse(string Status, StorageMeasurement? Snapshot)
+{
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long ProcessedFiles { get; init; }
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long ProcessedDirectories { get; init; }
+}
 internal sealed record StorageMaintenance(string State,
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long RemovedFiles,
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long RemovedDirectories,
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long SkippedEntries,
-    IReadOnlyList<string> Reasons, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt);
+    IReadOnlyList<string> Reasons, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt)
+{
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long ProcessedFiles { get; init; }
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long ProcessedDirectories { get; init; }
+}
 internal sealed record StorageRetentionMaintenance(string State, int Examined, int Deleted, int Skipped, string? Reason);

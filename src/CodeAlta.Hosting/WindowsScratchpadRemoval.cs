@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO.Enumeration;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
@@ -149,10 +150,12 @@ internal static class WindowsScratchpadRemoval
             while (frames.TryPeek(out var frame))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                string? entry = null;
+                ScratchpadEntry? entry = null;
                 try
                 {
-                    frame.Entries ??= Directory.EnumerateFileSystemEntries(frame.Path).GetEnumerator();
+                    frame.Entries ??= new FileSystemEnumerable<ScratchpadEntry>(frame.Path,
+                        static (ref FileSystemEntry value) => new(value.ToFullPath(), value.IsDirectory),
+                        new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false, RecurseSubdirectories = false }).GetEnumerator();
                     if (frame.Entries.MoveNext()) entry = frame.Entries.Current;
                 }
                 catch (Exception ex) when (IsFilesystemFailure(ex)) { result.Skip("directory-enumeration-unavailable"); }
@@ -174,31 +177,37 @@ internal static class WindowsScratchpadRemoval
                             catch (Exception ex) when (IsFilesystemFailure(ex)) { result.Skip("directory-not-empty-or-unavailable"); }
                         }
                     }
+                    result.ReportProgress();
                     continue;
                 }
 
                 SafeFileHandle? handle = null;
+                var discovered = entry.Value;
+                // Counts describe examined entries, even when opening a locked/linked entry fails.
+                // Deletion still relies exclusively on the pinned handle's attributes below.
+                if (discovered.IsDirectory) result.ProcessedDirectories++;
+                else result.ProcessedFiles++;
                 try
                 {
-                    beforeOpen?.Invoke(entry);
-                    handle = Open(entry, delete: true);
+                    beforeOpen?.Invoke(discovered.Path);
+                    handle = Open(discovered.Path, delete: true);
                     var attributes = Attributes(handle);
                     if ((attributes & ReparseAttribute) != 0) { result.Skip("linked-entry"); continue; }
                     if ((attributes & DirectoryAttribute) != 0)
                     {
-                        frames.Push(new DirectoryFrame(entry, handle));
+                        frames.Push(new DirectoryFrame(discovered.Path, handle));
                         handle = null;
                     }
                     else
                     {
-                        beforeDelete?.Invoke(entry);
+                        beforeDelete?.Invoke(discovered.Path);
                         cancellationToken.ThrowIfCancellationRequested();
                         MarkForDeletion(handle);
                         result.RemovedFiles++;
                     }
                 }
                 catch (Exception ex) when (IsFilesystemFailure(ex)) { result.Skip("entry-locked-denied-or-changed"); }
-                finally { handle?.Dispose(); }
+                finally { handle?.Dispose(); result.ReportProgress(); }
             }
         }
         finally { while (frames.TryPop(out var frame)) frame.Dispose(); }
@@ -208,9 +217,11 @@ internal static class WindowsScratchpadRemoval
     {
         internal string Path { get; } = path;
         internal SafeFileHandle? Handle { get; } = handle;
-        internal IEnumerator<string>? Entries { get; set; }
+        internal IEnumerator<ScratchpadEntry>? Entries { get; set; }
         public void Dispose() { try { Entries?.Dispose(); } finally { Handle?.Dispose(); } }
     }
+
+    private readonly record struct ScratchpadEntry(string Path, bool IsDirectory);
 
     private static SafeFileHandle OpenDirectory(string path, bool delete)
     {

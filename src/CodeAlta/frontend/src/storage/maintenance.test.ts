@@ -5,7 +5,7 @@ import type { StorageMaintenance, StorageRetentionMaintenance } from "#neoastra"
 import { disconnectedMaintenance, followMaintenance, maintenanceNotice, scratchpadReason, type MaintenanceApi, type MaintenanceState } from "./maintenance";
 
 const scratchpad = (state: string): StorageMaintenance => ({ state, removedFiles: "9223372036854775807", removedDirectories: "2",
-  skippedEntries: "0", reasons: [], startedAt: null, completedAt: null });
+  processedFiles: "9223372036854775807", processedDirectories: "2", skippedEntries: "0", reasons: [], startedAt: null, completedAt: null });
 const retention = (state: string, reason: string | null = null): StorageRetentionMaintenance => ({ state, examined: 1, deleted: 0, skipped: 1, reason });
 
 test("maintenance independently follows both replay streams and keeps wire counts exact", async () => {

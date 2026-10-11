@@ -6,6 +6,103 @@ namespace CodeAlta.Catalog.Tests;
 public sealed class ProfileStorageScannerTests
 {
     [TestMethod]
+    public async Task ProgressIsIncrementalAndCancelingTheWorkerDoesNotLockSessionFiles()
+    {
+        var root = NewRoot();
+        Directory.CreateDirectory(root);
+        using var cancellation = new CancellationTokenSource();
+        using var release = new ManualResetEventSlim();
+        var paused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reports = new List<ProfileStorageProgress>();
+        Task<ProfileStorageSnapshot>? worker = null;
+        try
+        {
+            var journal = Path.Combine(root, "session.jsonl");
+            await File.WriteAllTextAsync(journal, "initial");
+            await File.WriteAllTextAsync(Path.Combine(root, "second"), "fixture");
+            var progress = new Progress(value =>
+            {
+                reports.Add(value);
+                if (value.ProcessedFiles != 1) return;
+                paused.SetResult();
+                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Test did not release scan.");
+            });
+            worker = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }).ScanAsync(progress, cancellation.Token);
+            await paused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.IsFalse(worker.IsCompleted);
+            await using (var writer = new FileStream(journal, FileMode.Append, FileAccess.Write, FileShare.None))
+                await writer.WriteAsync(new byte[8]);
+            cancellation.Cancel();
+            release.Set();
+            await Assert.ThrowsAsync<OperationCanceledException>(() => worker);
+            Assert.AreEqual(new ProfileStorageProgress(0, 0), reports[0]);
+            Assert.AreEqual(new ProfileStorageProgress(1, 0), reports[^1]);
+            var finalReports = new List<ProfileStorageProgress>();
+            var completed = await new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root }).ScanAsync(new Progress(finalReports.Add), default);
+            Assert.AreEqual(new ProfileStorageProgress(2, 0), finalReports[^1]);
+            Assert.AreEqual(2L, completed.ProcessedFiles);
+        }
+        finally
+        {
+            release.Set();
+            if (worker is not null) { try { await worker; } catch (OperationCanceledException) { } }
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task UsesEnumeratedFileMetadataWithoutReopeningPaths()
+    {
+        var root = NewRoot();
+        Directory.CreateDirectory(root);
+        var moved = NewRoot();
+        try
+        {
+            await File.WriteAllBytesAsync(Path.Combine(root, "session.jsonl"), new byte[64]);
+            var scanner = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root })
+            {
+                EntryEnumerated = (path, _) =>
+                {
+                    try { File.Move(path, moved); }
+                    catch (IOException ex) { Assert.Fail($"Could not move the metadata-test fixture: {ex}"); }
+                },
+            };
+            var result = await scanner.ScanAsync(CancellationToken.None);
+            Assert.IsTrue(File.Exists(moved), "The test must invalidate the enumerated path.");
+            Assert.AreEqual(64L, result.TotalBytes, "Measurement uses enumeration metadata, not another I/O for each file and ancestor.");
+            Assert.IsFalse(result.IsPartial);
+        }
+        finally { Directory.Delete(root, true); File.Delete(moved); }
+    }
+
+    [TestMethod]
+    public async Task DirectoryReplacedByLinkAfterDiscoveryIsNotTraversed()
+    {
+        var root = NewRoot();
+        var outside = NewRoot();
+        Directory.CreateDirectory(Path.Combine(root, "child"));
+        Directory.CreateDirectory(outside);
+        try
+        {
+            await File.WriteAllBytesAsync(Path.Combine(outside, "not-profile-data"), new byte[100]);
+            var scanner = new ProfileStorageScanner(new CatalogOptions { GlobalRoot = root })
+            {
+                EntryEnumerated = (path, isDirectory) =>
+                {
+                    if (!isDirectory) return;
+                    Directory.Delete(path);
+                    try { Directory.CreateSymbolicLink(path, outside); }
+                    catch (UnauthorizedAccessException) { Assert.Inconclusive("Creating symlinks requires platform permission."); }
+                },
+            };
+            var result = await scanner.ScanAsync(CancellationToken.None);
+            Assert.AreEqual(0L, result.TotalBytes);
+            Assert.AreEqual(1L, result.SkippedLinks);
+        }
+        finally { Directory.Delete(root, true); Directory.Delete(outside, true); }
+    }
+
+    [TestMethod]
     public async Task MeasuresHiddenUnknownAndDeveloperFilesOnce_WithoutChangingAnything()
     {
         var root = NewRoot();
@@ -108,4 +205,9 @@ public sealed class ProfileStorageScannerTests
     }
 
     private static string NewRoot() => Path.Combine(Path.GetTempPath(), "codealta-storage-scan-" + Guid.NewGuid().ToString("N"));
+
+    private sealed class Progress(Action<ProfileStorageProgress> report) : IProgress<ProfileStorageProgress>
+    {
+        public void Report(ProfileStorageProgress value) => report(value);
+    }
 }

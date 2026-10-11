@@ -16,6 +16,8 @@ import "./storage.css";
 export interface StorageMaintenanceSummary {
   state: "running" | "completed" | "partial" | "skipped" | "canceled" | "unavailable";
   reasons: readonly string[];
+  processedFiles?: string;
+  processedDirectories?: string;
 }
 
 /** Host-owned session retention feedback. An unknown state reads as unavailable and unknown reasons are never shown raw. */
@@ -41,6 +43,7 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
   const [revision, setRevision] = useState(0);
   const [measurement, setMeasurement] = useState<StorageMeasurement | null>(null);
   const [scanState, setScanState] = useState<"loading" | "ready" | "error" | "canceled">("loading");
+  const [progress, setProgress] = useState({ processedFiles: "0", processedDirectories: "0" });
   const scanController = useRef<AbortController | null>(null);
   const writeController = useRef<AbortController | null>(null);
   const files = useSettingsFiles({ page: "config", epoch, projectId: null, revision: settings, onOpened: onOpenFile, setNotice, api: filesApi });
@@ -51,12 +54,22 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
     scanController.current = controller;
     if (!epoch) { setScanState("error"); return; }
     setScanState("loading");
-    void api.scan({ expectedEpoch: epoch }, { signal: controller.signal, timeoutMilliseconds: 600_000 }).then(reply => {
-      if (controller.signal.aborted) return;
-      if ((reply.status === "ok" || reply.status === "partial") && reply.snapshot) {
-        setMeasurement(reply.snapshot); setScanState("ready");
-      } else setScanState(reply.status === "canceled" ? "canceled" : "error");
-    }).catch(() => { if (!controller.signal.aborted) setScanState("error"); });
+    setProgress({ processedFiles: "0", processedDirectories: "0" });
+    void (async () => {
+      try {
+        for await (const reply of await api.scan({ expectedEpoch: epoch }, { signal: controller.signal, timeoutMilliseconds: 20_000 })) {
+          if (controller.signal.aborted) return;
+          setProgress({ processedFiles: reply.processedFiles, processedDirectories: reply.processedDirectories });
+          if (reply.status === "running") continue;
+          if ((reply.status === "ok" || reply.status === "partial") && reply.snapshot) {
+            setMeasurement(reply.snapshot); setScanState("ready");
+          } else setScanState(reply.status === "canceled" ? "canceled" : "error");
+          return;
+        }
+        // A disconnected/empty stream is not a completed scan.
+        if (!controller.signal.aborted) setScanState("error");
+      } catch { if (!controller.signal.aborted) setScanState("error"); }
+    })();
   }, [api, epoch]);
   useEffect(() => {
     setMeasurement(null); refresh();
@@ -137,6 +150,10 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
             <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />} onClick={refresh}>{t("Refresh")}</Button>
           </span>
         </div>
+        {scanState === "loading" && <p className="storage-hint storage-progress" role="status">{t("{files} files and {folders} folders processed.", {
+          files: new Intl.NumberFormat(locale).format(storageBytes(progress.processedFiles)),
+          folders: new Intl.NumberFormat(locale).format(storageBytes(progress.processedDirectories)),
+        })}</p>}
         {measurement && <p className="storage-hint storage-scan-time">{t("Last scan: {time}", { time: new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(measurement.completedAt)) })}</p>}
         {scanState === "canceled" && <p className="storage-hint" role="status">{t("Scan canceled.")}</p>}
         {scanState === "error" && <Callout compact intent="warning" role="alert">{t("Storage could not be measured. Refresh to try again.")}</Callout>}
@@ -160,13 +177,17 @@ const maintenanceTitles = {
 
 /** One line of host-owned scratchpad cleanup feedback, with its bounded reasons folded below it. A state it does not know reads as unavailable. */
 function MaintenanceStatus({ maintenance }: { maintenance: StorageMaintenanceSummary }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const state = Object.hasOwn(maintenanceTitles, maintenance.state) ? maintenance.state : "unavailable";
   const reasons = maintenance.reasons.slice(0, 8).map(reason => reason.slice(0, 500));
   const icon = state === "running" ? <ActivitySpinner size={12} />
     : <AppIcon name={state === "partial" ? "warning" : state === "completed" ? "check" : "info"} size={14} />;
   return <div className="storage-maintenance" data-state={state}>
     <span className="storage-maintenance-title" role="status">{icon}<span>{t(maintenanceTitles[state])}</span></span>
+    {state === "running" && <span className="storage-hint" role="status">{t("{files} files and {folders} folders processed.", {
+      files: new Intl.NumberFormat(locale).format(storageBytes(maintenance.processedFiles ?? "0")),
+      folders: new Intl.NumberFormat(locale).format(storageBytes(maintenance.processedDirectories ?? "0")),
+    })}</span>}
     {reasons.length > 0 && <details>
       <summary>{t("Details")}</summary>
       <ul>{reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>

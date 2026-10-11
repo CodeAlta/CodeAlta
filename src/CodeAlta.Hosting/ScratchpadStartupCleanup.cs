@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using CodeAlta.Catalog.Storage;
 
 namespace CodeAlta.Hosting;
@@ -70,7 +71,12 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
     private void Run(bool enabled, bool configurationValid, CancellationToken cancellationToken)
     {
         var started = DateTimeOffset.UtcNow;
-        var result = new ScratchpadRemovalResult();
+        var result = new ScratchpadRemovalResult
+        {
+            Progress = current => Publish(new(ScratchpadCleanupState.Running, current.RemovedFiles, current.RemovedDirectories,
+                current.SkippedEntries, current.Reasons.ToImmutableArray(), started, null)
+            { ProcessedFiles = current.ProcessedFiles, ProcessedDirectories = current.ProcessedDirectories }),
+        };
         var state = ScratchpadCleanupState.Skipped;
         try
         {
@@ -110,7 +116,8 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
         finally
         {
             Publish(new(state, result.RemovedFiles, result.RemovedDirectories, result.SkippedEntries,
-                result.Reasons.ToImmutableArray(), started, DateTimeOffset.UtcNow));
+                result.Reasons.ToImmutableArray(), started, DateTimeOffset.UtcNow)
+            { ProcessedFiles = result.ProcessedFiles, ProcessedDirectories = result.ProcessedDirectories });
         }
     }
 
@@ -138,6 +145,10 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
 
 internal sealed class ScratchpadRemovalResult
 {
+    private long _lastProgress;
+    internal Action<ScratchpadRemovalResult>? Progress { get; init; }
+    internal long ProcessedFiles;
+    internal long ProcessedDirectories;
     internal long RemovedFiles;
     internal long RemovedDirectories;
     internal long SkippedEntries;
@@ -147,6 +158,13 @@ internal sealed class ScratchpadRemovalResult
         if (Reasons.Count < 12 && !Reasons.Contains(reason, StringComparer.Ordinal)) Reasons.Add(reason);
     }
     internal void Skip(string reason) { SkippedEntries++; Reason(reason); }
+
+    internal void ReportProgress()
+    {
+        if (_lastProgress != 0 && Stopwatch.GetElapsedTime(_lastProgress).TotalMilliseconds < 250) return;
+        Progress?.Invoke(this);
+        _lastProgress = Stopwatch.GetTimestamp();
+    }
 }
 
 internal sealed class ScratchpadSafetyException(string reason) : IOException(reason)

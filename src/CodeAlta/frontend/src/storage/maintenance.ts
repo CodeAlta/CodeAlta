@@ -29,7 +29,7 @@ export function followMaintenance(api: MaintenanceApi, epoch: string, changed: (
   }
   void follow(() => api.watchMaintenance({ expectedEpoch: epoch }, { signal: abort.signal }),
     scratchpad => publish({ scratchpad }), () => publish({ scratchpad: {
-      state: "unavailable", removedFiles: "0", removedDirectories: "0", skippedEntries: "0", reasons: [], startedAt: null, completedAt: null,
+      state: "unavailable", processedFiles: "0", processedDirectories: "0", removedFiles: "0", removedDirectories: "0", skippedEntries: "0", reasons: [], startedAt: null, completedAt: null,
     } }), initial.scratchpad);
   void follow(() => api.watchRetention({ expectedEpoch: epoch }, { signal: abort.signal }),
     retention => publish({ retention }), () => publish({ retention: {

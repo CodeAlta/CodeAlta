@@ -30,7 +30,9 @@ internal sealed class DesktopStartupStatus
 
     /// <summary>Shows the actual cleanup worker; plugin preparation begins only after it settles.</summary>
     internal void SetScratchpadCleanup(ScratchpadCleanupSnapshot snapshot)
-        => Text = snapshot.State == ScratchpadCleanupState.Running ? "Clearing scratchpad…" : string.Empty;
+        => Text = snapshot.State == ScratchpadCleanupState.Running
+            ? $"Clearing scratchpad… {snapshot.ProcessedFiles:N0} files and {snapshot.ProcessedDirectories:N0} folders processed."
+            : string.Empty;
 
     /// <summary>The status as the JSON document the start-up screen reads.</summary>
     internal byte[] ToJson()

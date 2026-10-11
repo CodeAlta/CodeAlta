@@ -16,11 +16,11 @@ public sealed class StorageRpcTests
     {
         var unavailable = new StorageService();
         Assert.AreEqual("unavailable", (await unavailable.ReadSettingsAsync(new(null), default)).Status);
-        Assert.AreEqual("unavailable", (await unavailable.ScanAsync(new(null), default)).Status);
+        Assert.AreEqual("unavailable", (await ReadScanAsync(unavailable, new(null))).Status);
         Assert.AreEqual("unavailable", (await unavailable.SaveSettingsAsync(new(null, new(false, false, 1, "months")), default)).Status);
         var root = NewRoot();
         var owned = new StorageService(new CatalogOptions { GlobalRoot = root }, "host");
-        Assert.AreEqual("stale_epoch", (await owned.ScanAsync(new("old"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await ReadScanAsync(owned, new("old"))).Status);
         Assert.AreEqual("stale_epoch", (await owned.SaveSettingsAsync(new("old", new(false, false, 1, "months")), default)).Status);
         Assert.IsFalse(Directory.Exists(root));
     }
@@ -42,7 +42,7 @@ public sealed class StorageRpcTests
             Assert.AreEqual(preferences, (await service.SaveSettingsAsync(new("host", preferences), default)).Settings);
             Assert.AreEqual("invalid_request", (await service.SaveSettingsAsync(new("host", preferences with { RetentionAmount = 0 }), default)).Status);
             Assert.AreEqual("invalid_request", (await service.SaveSettingsAsync(new("host", preferences with { RetentionEnabled = true, RetentionAmount = int.MaxValue }), default)).Status);
-            var scan = await service.ScanAsync(new("host"), default);
+            var scan = await ReadScanAsync(service, new("host"));
             Assert.AreEqual("ok", scan.Status);
             Assert.IsNotNull(scan.Snapshot);
             Assert.IsTrue(scan.Snapshot.TotalBytes > 0);
@@ -65,12 +65,80 @@ public sealed class StorageRpcTests
             Assert.AreEqual("read_failed", response.Status);
             Assert.IsNull(response.Settings);
             Assert.DoesNotContain("do-not-echo-secret", response.Error!);
-            Assert.AreEqual("ok", (await service.ScanAsync(new("host"), default)).Status);
+            Assert.AreEqual("ok", (await ReadScanAsync(service, new("host"))).Status);
         }
         finally { Directory.Delete(root, true); }
     }
 
     private static string NewRoot() => Path.Combine(Path.GetTempPath(), "codealta-storage-rpc-" + Guid.NewGuid().ToString("N"));
+
+    private static async Task<StorageScanResponse> ReadScanAsync(StorageService service, StorageRequest request)
+    {
+        StorageScanResponse? result = null;
+        await foreach (var update in service.ScanAsync(request, default)) result = update;
+        Assert.IsNotNull(result);
+        return result;
+    }
+
+    [TestMethod]
+    public async Task ScanStreamsProgressAndExactFinalCounts_WhileSettingsAndFileWritesRemainAvailable()
+    {
+        var root = NewRoot();
+        var sessions = Path.Combine(root, "sessions");
+        Directory.CreateDirectory(sessions);
+        try
+        {
+            for (var i = 0; i < 256; i++) await File.WriteAllTextAsync(Path.Combine(sessions, $"{i}.jsonl"), "fixture");
+            var service = new StorageService(new CatalogOptions { GlobalRoot = root }, "host");
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await using var scan = service.ScanAsync(new("host"), timeout.Token).GetAsyncEnumerator();
+            Assert.IsTrue(await scan.MoveNextAsync());
+            Assert.AreEqual("running", scan.Current.Status);
+            Assert.IsNull(scan.Current.Snapshot);
+            // Pause consumption of the progress stream, not the producer or unrelated RPC/file work.
+            Assert.IsTrue(await scan.MoveNextAsync());
+            Assert.AreEqual("ok", (await service.ReadSettingsAsync(new("host"), timeout.Token)).Status);
+            await using (var writer = new FileStream(Path.Combine(sessions, "0.jsonl"), FileMode.Append, FileAccess.Write, FileShare.None))
+                await writer.WriteAsync(new byte[8], timeout.Token);
+            var last = scan.Current;
+            while (await scan.MoveNextAsync())
+            {
+                Assert.IsTrue(scan.Current.ProcessedFiles >= last.ProcessedFiles);
+                Assert.IsTrue(scan.Current.ProcessedDirectories >= last.ProcessedDirectories);
+                last = scan.Current;
+            }
+            Assert.AreEqual("ok", last.Status);
+            Assert.AreEqual(256L, last.ProcessedFiles);
+            Assert.AreEqual(1L, last.ProcessedDirectories);
+            Assert.IsNotNull(last.Snapshot);
+            Assert.AreEqual(256L, last.Snapshot.Categories.Sum(category => category.FileCount));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [TestMethod]
+    public async Task CancelingScanStreamDoesNotCancelMaintenanceOrLaterScans()
+    {
+        var root = NewRoot();
+        Directory.CreateDirectory(root);
+        try
+        {
+            for (var i = 0; i < 256; i++) await File.WriteAllTextAsync(Path.Combine(root, $"{i}"), "fixture");
+            var cleanup = new Cleanup();
+            var service = new StorageService(new CatalogOptions { GlobalRoot = root }, "host", cleanup);
+            using var cancellation = new CancellationTokenSource();
+            await using (var scan = service.ScanAsync(new("host"), cancellation.Token).GetAsyncEnumerator())
+            {
+                Assert.IsTrue(await scan.MoveNextAsync());
+                cancellation.Cancel();
+                await Assert.ThrowsAsync<OperationCanceledException>(async () => await scan.MoveNextAsync());
+            }
+            Assert.AreEqual(ScratchpadCleanupState.Running, cleanup.Snapshot.State);
+            Assert.AreEqual(0, cleanup.RunCalls);
+            Assert.AreEqual(256L, (await ReadScanAsync(service, new("host"))).ProcessedFiles);
+        }
+        finally { Directory.Delete(root, true); }
+    }
 
     [TestMethod]
     public async Task Maintenance_LateSubscriberReplaysAndDisposalDoesNotCancelWorker()
@@ -81,6 +149,8 @@ public sealed class StorageRpcTests
         {
             Assert.IsTrue(await reader.MoveNextAsync());
             Assert.AreEqual("running", reader.Current.State);
+            Assert.AreEqual(4L, reader.Current.ProcessedFiles);
+            Assert.AreEqual(2L, reader.Current.ProcessedDirectories);
             cleanup.Publish(ScratchpadCleanupState.Partial);
             Assert.IsTrue(await reader.MoveNextAsync());
             Assert.AreEqual("partial", reader.Current.State);
@@ -148,19 +218,22 @@ public sealed class StorageRpcTests
     public void ByteCounts_RoundTripBeyondJavaScriptIntegerPrecision()
     {
         var source = new StorageScanResponse("ok", new("root", long.MaxValue, DateTimeOffset.UtcNow,
-            [new("sessions", long.MaxValue, 1)], 0, 0, false));
+            [new("sessions", long.MaxValue, 1)], 0, 0, false)) { ProcessedFiles = long.MaxValue, ProcessedDirectories = long.MaxValue };
         var json = JsonSerializer.Serialize(source, DesktopJsonContext.Default.StorageScanResponse);
         StringAssert.Contains(json, "\"9223372036854775807\"");
         var copy = JsonSerializer.Deserialize(json, DesktopJsonContext.Default.StorageScanResponse);
         Assert.AreEqual(long.MaxValue, copy!.Snapshot!.TotalBytes);
         Assert.AreEqual(long.MaxValue, copy.Snapshot.Categories[0].Bytes);
+        Assert.AreEqual(long.MaxValue, copy.ProcessedFiles);
+        Assert.AreEqual(long.MaxValue, copy.ProcessedDirectories);
     }
 
     private sealed class Cleanup : IStartupScratchpadCleanup
     {
         private Action<ScratchpadCleanupSnapshot>? _observer;
         public ScratchpadCleanupSnapshot Snapshot { get; private set; } = new(ScratchpadCleanupState.Running,
-            3, 2, 1, ImmutableArray.Create("entry_unavailable"), DateTimeOffset.UtcNow, null);
+            3, 2, 1, ImmutableArray.Create("entry_unavailable"), DateTimeOffset.UtcNow, null)
+        { ProcessedFiles = 4, ProcessedDirectories = 2 };
         public string StateRoot => "unused";
         public string GlobalRoot => "unused";
         public int Subscribers { get; private set; }

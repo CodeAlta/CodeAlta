@@ -128,7 +128,7 @@ export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavaila
 export const storage = Object.freeze({
   readSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),
   saveSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),
-  scan: async () => ({ status: "unavailable", snapshot: null }),
+  scan: async () => (async function* () { yield { status: "unavailable", snapshot: null, processedFiles: "0", processedDirectories: "0" }; })(),
   watchMaintenance: unavailable,
   watchRetention: unavailable,
 });

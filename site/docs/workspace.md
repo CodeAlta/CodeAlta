@@ -504,7 +504,8 @@ there are no category-removal buttons. Configuration, credentials, personal file
 Statistics are protected.
 
 **Refresh** measures again; **Cancel scan** or closing Settings cancels that measurement, not any
-startup cleanup. Skipped links or unreadable/changing files make the result partial, and percentages
+startup cleanup. While measuring, the page shows how many files and folders have been processed.
+The scan runs in the background without locking session files. Skipped links or unreadable files make the result partial, and percentages
 describe only the bytes measured. File sizes may differ from allocated disk space because of
 compression, sparse files and hard links.
 
@@ -524,6 +525,7 @@ Statistics must be durably saved before expired session files can be removed. Ma
 confirmation preferences do not control this automatic policy. The configuration-file row opens,
 copies or reveals the global `~/.alta/config.toml` using the same controls as other Settings pages.
 The latest scratchpad cleanup appears as one line in the cleanup card; open **Details** for its reasons.
+During startup, scratchpad clearing shows the number of files and folders processed, so you can follow a large cleanup.
 Session cleanup has its own line: how many sessions it removed, or why it did not run (for example,
 when it is off, restoration is incomplete or Saved Statistics are unavailable).
 

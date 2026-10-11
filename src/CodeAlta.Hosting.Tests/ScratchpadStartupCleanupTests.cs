@@ -8,6 +8,42 @@ namespace CodeAlta.Hosting.Tests;
 public sealed class ScratchpadStartupCleanupTests
 {
     [TestMethod]
+    public async Task RunningSnapshotAdvancesBeforeCleanupCompletes()
+    {
+        RequireWindows();
+        using var fixture = new Fixture(false);
+        fixture.Write("scratchpad/one", "remove");
+        fixture.Write("scratchpad/two", "remove");
+        using var release = new ManualResetEventSlim();
+        var paused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var opened = 0;
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
+        {
+            BeforeEntryOpen = _ =>
+            {
+                if (++opened != 2) return;
+                paused.SetResult();
+                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Test did not release cleanup.");
+            },
+        };
+        var worker = cleanup.RunAsync(true, true, CancellationToken.None);
+        try
+        {
+            await paused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.IsFalse(worker.IsCompleted);
+            Assert.AreEqual(ScratchpadCleanupState.Running, cleanup.Snapshot.State);
+            Assert.AreEqual(1L, cleanup.Snapshot.RemovedFiles, "A long cleanup must publish progress before its final result.");
+            Assert.AreEqual(1L, cleanup.Snapshot.ProcessedFiles);
+            ScratchpadCleanupSnapshot? replay = null;
+            using var subscription = cleanup.Subscribe(snapshot => replay = snapshot);
+            Assert.AreEqual(cleanup.Snapshot, replay);
+        }
+        finally { release.Set(); await worker; }
+        Assert.AreEqual(2L, cleanup.Snapshot.RemovedFiles);
+        Assert.AreEqual(2L, cleanup.Snapshot.ProcessedFiles);
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task RemovesOnlyOwnedContentsAndPreservesRootAndProtectedSentinels(bool developer)
@@ -30,6 +66,8 @@ public sealed class ScratchpadStartupCleanupTests
         Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
         Assert.AreEqual(2L, cleanup.Snapshot.RemovedFiles);
         Assert.AreEqual(40L, cleanup.Snapshot.RemovedDirectories);
+        Assert.AreEqual(2L, cleanup.Snapshot.ProcessedFiles);
+        Assert.AreEqual(40L, cleanup.Snapshot.ProcessedDirectories);
         Assert.IsTrue(Directory.Exists(scratchpad));
         Assert.AreEqual(0, Directory.GetFileSystemEntries(scratchpad).Length);
         foreach (var path in protectedPaths) Assert.AreEqual("protected", File.ReadAllText(Path.Combine(fixture.Root, path)));

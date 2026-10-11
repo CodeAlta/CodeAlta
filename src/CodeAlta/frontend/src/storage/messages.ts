@@ -1,5 +1,6 @@
 // English source keys; translations in es, fr, de, ja, zh-CN order.
 export const storageMessages = {
+  "{files} files and {folders} folders processed.": ["{files} archivos y {folders} carpetas procesados.", "{files} fichiers et {folders} dossiers traités.", "{files} Dateien und {folders} Ordner verarbeitet.", "{files} 個のファイルと {folders} 個のフォルダーを処理しました。", "已处理 {files} 个文件和 {folders} 个文件夹。"],
   "Clearing scratchpad…": ["Vaciando el bloc temporal…", "Nettoyage du brouillon temporaire…", "Scratchpad wird geleert…", "スクラッチパッドを消去中…", "正在清空暂存区…"],
   "Scratchpad cleared.": ["Bloc temporal vaciado.", "Brouillon temporaire vidé.", "Scratchpad geleert.", "スクラッチパッドを消去しました。", "暂存区已清空。"],
   "Scratchpad cleanup is off.": ["Limpieza del bloc temporal desactivada.", "Nettoyage du brouillon temporaire désactivé.", "Scratchpad-Bereinigung deaktiviert.", "スクラッチパッドの消去は無効です。", "暂存区清理已关闭。"],

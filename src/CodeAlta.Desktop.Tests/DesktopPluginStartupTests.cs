@@ -17,8 +17,8 @@ public sealed class DesktopPluginStartupTests
         var status = new DesktopStartupStatus();
         foreach (var state in Enum.GetValues<ScratchpadCleanupState>())
         {
-            status.SetScratchpadCleanup(new(state, 0, 0, 0, [], null, null));
-            var expected = state == ScratchpadCleanupState.Running ? "Clearing scratchpad…" : string.Empty;
+            status.SetScratchpadCleanup(new(state, 3, 2, 0, [], null, null) { ProcessedFiles = 4, ProcessedDirectories = 2 });
+            var expected = state == ScratchpadCleanupState.Running ? "Clearing scratchpad… 4 files and 2 folders processed." : string.Empty;
             Assert.AreEqual(expected, status.Text);
             using var json = System.Text.Json.JsonDocument.Parse(status.ToJson());
             Assert.AreEqual(expected, json.RootElement.GetProperty("text").GetString());

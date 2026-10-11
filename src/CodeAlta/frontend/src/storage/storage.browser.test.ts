@@ -62,8 +62,10 @@ test("Storage edits valid durations only and measures independently without clea
     await command("Page.navigate", { url: pathToFileURL(page).href });
     await until(`${amount} && ${state}.scans.length > 0`);
     assert.deepEqual(await evaluate(`[document.querySelector('#storage-scratchpad').checked, ${amount}.value, ${unit}.value, ${mode}.value, ${state}.saves.length]`), [true, "3", "months", "duration", 0]);
-    assert.equal(await evaluate(`${state}.scans.at(-1).timeoutMilliseconds`), 600000);
+    assert.equal(await evaluate(`${state}.scans.at(-1).timeoutMilliseconds`), 20000, "timeout covers opening the stream, not the scan lifetime");
     assert.ok(await evaluate("document.body.textContent.includes('Measuring file sizes…')"));
+    await act(`${state}.scans.at(-1).resolve({ status: 'running', snapshot: null, processedFiles: '12345', processedDirectories: '678' })`);
+    assert.equal(await evaluate("document.querySelector('.storage-progress').textContent"), "12,345 files and 678 folders processed.");
     // In the content area of a 900 x 650 window, every cleanup control is visible without scrolling.
     assert.equal(await evaluate(`(() => { const box = document.querySelector('.settings-dialog-content').getBoundingClientRect();
       return ['#storage-scratchpad', '#storage-retention-mode', '#storage-retention-amount', 'select[aria-label="Retention unit"]']
@@ -128,6 +130,7 @@ test("Storage edits valid durations only and measures independently without clea
     await act(`${state}.scans.at(-1).resolve(${JSON.stringify(snapshot(999))})`);
     assert.equal(await evaluate("document.querySelector('.storage-table') === null"), true);
     await act(`${button("Refresh")}.click()`);
+    assert.equal(await evaluate("document.querySelector('.storage-progress').textContent"), "0 files and 0 folders processed.");
     await act(`${button("Refresh")}.click()`);
     assert.equal(await evaluate(`${state}.scans.at(-2).signal.aborted`), true);
     await act(`${state}.scans.at(-1).resolve(${JSON.stringify(snapshot(400, true))})`);
@@ -193,6 +196,10 @@ test("Storage edits valid durations only and measures independently without clea
         }
     }
     await act(`${f}.setLocale('en'); ${f}.setSize({ width: 518, height: 484 })`);
+    await act(`${f}.setMaintenance({ state: 'running', reasons: [], processedFiles: '12345', processedDirectories: '678' })`);
+    assert.ok(await evaluate("document.querySelector('.storage-maintenance').textContent.includes('12,345 files and 678 folders processed.')"));
+    await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).finish()`);
+    assert.ok(await evaluate("document.body.textContent.includes('Storage could not be measured.')"), "an interrupted stream never stays measuring forever");
     await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).resolve({ status: 'read_failed', snapshot: null })`);
     assert.ok(await evaluate("document.body.textContent.includes('Storage could not be measured.')"));
     await act(`${button("Refresh")}.click(); ${state}.scans.at(-1).resolve(${JSON.stringify(snapshot(0))})`);

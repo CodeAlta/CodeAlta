@@ -51,6 +51,8 @@ export function useStorageMaintenance(api: MaintenanceApi, epoch: string | null,
     ? state : "unavailable";
   const maintenance = scratchpad && state !== "notstarted" && state !== "not_started" ? {
     state: summaryState,
+    processedFiles: scratchpad.processedFiles,
+    processedDirectories: scratchpad.processedDirectories,
     reasons: reason && state !== "canceled" ? [translate(locale, reason)] : [],
   } as const : undefined;
   return { maintenance, retention: value?.retention?.state === "not_started" ? undefined : value?.retention };
