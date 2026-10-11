@@ -132,4 +132,73 @@ public sealed partial class SessionRuntimeService
     }
 
     private static readonly TimeSpan StatisticsSaveTimeout = TimeSpan.FromSeconds(60);
+
+    // Every file of the sessions folder last written before the cutoff goes, session or not: an orphan journal, one this
+    // version cannot read, the attachments and the trace a removed session left. A file stays only when it belongs to a
+    // session that stays (a recent session, one its family keeps, one the pass could not retire) or to one in use. A file
+    // stat decides, never a read; Statistics is not involved.
+    internal async Task<(int Deleted, int Kept)> SweepExpiredSessionFolderAsync(DateTimeOffset cutoff, IReadOnlySet<string> keptSessionIds,
+        IReadOnlySet<string> retiredSessionIds, SessionRetentionProtection protection, SessionRetentionPass? pass, CancellationToken cancellationToken)
+    {
+        var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+        var deleted = 0;
+        var kept = 0;
+        // A file is named after its session with the characters a file name cannot hold replaced.
+        keptSessionIds = keptSessionIds.Select(AgentRuntimePathLayout.NormalizeSegment).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        retiredSessionIds = retiredSessionIds.Select(AgentRuntimePathLayout.NormalizeSegment).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var files = store.ListExpiredSessionFolderFiles(cutoff, cancellationToken);
+        foreach (var owned in files.GroupBy(file => file.OwnerSessionId ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var owner = owned.Key;
+            if (owner.Length > 0 && keptSessionIds.Contains(owner)) { kept += owned.Count(); continue; }
+            // A session retired in this pass is gone: what it left needs no claim. Any other session must not be in use.
+            using var claims = owner.Length == 0 || retiredSessionIds.Contains(owner) ? null : TryClaimSweep(owner, protection);
+            if (owner.Length > 0 && !retiredSessionIds.Contains(owner) && claims is null) { kept += owned.Count(); continue; }
+            var journalDeleted = false;
+            foreach (var file in owned)
+            {
+                var freed = await store.DeleteExpiredSessionFolderFileAsync(file, cutoff, cancellationToken).ConfigureAwait(false);
+                if (freed < 0) { kept++; continue; }
+                deleted++;
+                pass?.AddFreedBytes(freed);
+                journalDeleted |= file.Kind == SessionFolderFileKind.Journal;
+            }
+
+            if (journalDeleted)
+            {
+                lock (_identityGate) _retiredSessionIds.Add(owner);
+                try { await _agentSessionCatalog.NotifySessionDeletedAsync(owner, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception) { /* The catalog finds the journal gone on its next listing. */ }
+            }
+        }
+
+        store.RemoveEmptyExpiredSessionFolders(cutoff, keptSessionIds, cancellationToken);
+        return (deleted, kept);
+    }
+
+    private IDisposable? TryClaimSweep(string sessionId, SessionRetentionProtection protection)
+    {
+        var hostClaim = protection.TryReserveRetirement(sessionId);
+        if (hostClaim is null) return null;
+        var jobClaim = Jobs.TryReserveRetirement(sessionId);
+        var runtimeClaim = jobClaim is null ? null : TryClaimRuntimeRetirement(sessionId);
+        if (runtimeClaim is null || _entries.ContainsKey(sessionId) || _transitions.ContainsKey(sessionId) || _remoteControlWanted.ContainsKey(sessionId))
+        {
+            runtimeClaim?.Dispose();
+            jobClaim?.Dispose();
+            hostClaim.Dispose();
+            return null;
+        }
+
+        return new SweepClaims(runtimeClaim, jobClaim!, hostClaim);
+    }
+
+    private sealed class SweepClaims(params IDisposable[] claims) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var claim in claims) claim.Dispose();
+        }
+    }
 }

@@ -307,6 +307,48 @@ public sealed class SessionRetentionRuntimeTests
         Assert.AreEqual("new unrelated generation", await File.ReadAllTextAsync(Path.Combine(attachments, "image.png")));
     }
 
+    [TestMethod]
+    public async Task EveryOldFileOfTheSessionsFolderIsRemoved_ButThoseOfKeptOrProtectedSessions()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Exact-handle deletion currently fails closed on other platforms.");
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync("recent", activity: Now.AddDays(-1));
+        var sessions = new AgentRuntimePathLayout(fixture.Root).SessionsRootPath;
+        var old = Now.AddMonths(-4);
+        string Write(string relative, DateTimeOffset lastWrite, string content = "x")
+        {
+            var path = Path.Combine(sessions, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, content);
+            File.SetLastWriteTimeUtc(path, lastWrite.UtcDateTime);
+            return path;
+        }
+        var keptAttachment = Write(Path.Combine(Path.GetRelativePath(sessions, Path.ChangeExtension(fixture.Journal("recent"), ".attachments")), "old.png"), old);
+        var stray = Write("stray.txt", old);
+        var unreadable = Write(Path.Combine("2024", "01", "02", "unreadable.jsonl"), old, "not a journal");
+        var orphanTrace = Write(Path.Combine("traces", "gone.trace"), old);
+        var orphanAttachment = Write(Path.Combine("2023", "03", "04", "gone.attachments", "nested", "image.png"), old);
+        var recentStray = Write("recent.txt", Now.AddDays(-2));
+        var protectedJournal = Write(Path.Combine("2024", "05", "06", "open.jsonl"), old, "not a journal");
+        Assert.IsTrue(fixture.Protection.Publish("window", ["open"], true));
+
+        var result = await fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-3));
+
+        Assert.AreEqual(4, result.FilesDeleted, result.Reason);
+        Assert.IsFalse(File.Exists(stray));
+        Assert.IsFalse(File.Exists(unreadable));
+        Assert.IsFalse(File.Exists(orphanTrace));
+        Assert.IsFalse(File.Exists(orphanAttachment));
+        Assert.IsFalse(Directory.Exists(Path.Combine(sessions, "2024", "01")), "An emptied date folder goes.");
+        Assert.IsFalse(Directory.Exists(Path.Combine(sessions, "2023")), "An emptied attachments folder and its date folders go.");
+        Assert.IsTrue(Directory.Exists(Path.Combine(sessions, "traces")));
+        Assert.IsTrue(File.Exists(keptAttachment), "The files of a session that stays stay.");
+        Assert.IsTrue(File.Exists(recentStray));
+        Assert.IsTrue(File.Exists(protectedJournal), "The files of a session in use stay.");
+        Assert.IsTrue(File.Exists(fixture.Journal("recent")));
+        Assert.AreEqual("protected", await File.ReadAllTextAsync(Path.Combine(fixture.Root, "auth", "sentinel")));
+    }
+
     private sealed class FakeArchive : ISessionStatisticsRetirementArchive
     {
         public Func<string, string> ResolvePath { get; set; } = _ => throw new AssertFailedException("No fixture source resolver.");

@@ -91,6 +91,7 @@ public sealed class SessionRetentionService
         var deleted = 0;
         var skipped = 0;
         var total = 0;
+        var filesDeleted = 0;
         var pass = new SessionRetentionPass();
         string? partial = null;
         try
@@ -131,6 +132,7 @@ public sealed class SessionRetentionService
 
             var ready = new Queue<int>(expired.Where(pair => references.GetValueOrDefault(pair.Key) == 0).Select(pair => pair.Value));
             var processed = new HashSet<int>();
+            var retired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             while (ready.TryDequeue(out var index))
             {
                 token.ThrowIfCancellationRequested();
@@ -140,6 +142,7 @@ public sealed class SessionRetentionService
                 if (result.StartsWith("deleted", StringComparison.Ordinal))
                 {
                     deleted++;
+                    retired.Add(candidates[index].SessionId);
                     if (result != "deleted") partial = result;
                     foreach (var related in lineages[index])
                         if (--references[related] == 0 && expired.TryGetValue(related, out var parent) && !processed.Contains(parent))
@@ -152,6 +155,11 @@ public sealed class SessionRetentionService
             var familyKept = expired.Count - processed.Count;
             examined += familyKept;
             skipped += familyKept;
+
+            // Then every other file of the sessions folder older than the cutoff: what no listed session owns, and what a
+            // removed session left. Only the files of a session that stays, or is in use, stay.
+            var kept = candidates.Select(candidate => candidate.SessionId).Where(id => !retired.Contains(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            (filesDeleted, _) = await _runtime.SweepExpiredSessionFolderAsync(cutoff.Value, kept, retired, _protection, pass, token).ConfigureAwait(false);
             return Set(partial is null ? "completed" : "partial", partial);
         }
         catch (OperationCanceledException) { return Set("partial", "canceled"); }
@@ -159,7 +167,7 @@ public sealed class SessionRetentionService
 
         SessionRetentionStatus Set(string state, string? reason)
         {
-            var status = new SessionRetentionStatus(state, examined, deleted, skipped, reason) { Total = total, FreedBytes = pass.FreedBytes };
+            var status = new SessionRetentionStatus(state, examined, deleted, skipped, reason) { Total = total, FreedBytes = pass.FreedBytes, FilesDeleted = filesDeleted };
             lock (_gate)
             {
                 Volatile.Write(ref _status, status);

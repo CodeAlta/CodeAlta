@@ -63,7 +63,7 @@ public sealed class AgentRuntimePathLayout
         return Path.Combine(SessionTracesRootPath, $"{NormalizeSegment(sessionId)}.trace");
     }
 
-    private static string NormalizeSegment(string value)
+    internal static string NormalizeSegment(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
 

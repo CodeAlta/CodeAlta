@@ -525,7 +525,10 @@ written: viewing a session does not change its age, and cleanup never reads the 
 Open sessions, drafts and active work are protected, and a session is removed only with the sessions that it
 started or that continue it, once they are all inactive. Before removing a session, cleanup saves its
 Statistics when it can; a failure to save them never keeps an expired session. Manual deletion
-confirmation preferences do not control this automatic policy. The configuration-file row opens,
+confirmation preferences do not control this automatic policy. Cleanup also removes every other file of the
+`sessions` folder that has not been written for longer than the duration, whatever it is: a session file it cannot
+read, or the images and traces of a removed session. Only the files of a session that stays, or is in use, stay.
+The configuration-file row opens,
 copies or reveals the global `~/.alta/config.toml` using the same controls as other Settings pages.
 The latest scratchpad cleanup appears as one line in the cleanup card; open **Details** for its reasons.
 During startup, scratchpad clearing shows the number of files and folders processed, so you can follow a large cleanup.
