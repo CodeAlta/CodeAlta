@@ -59,7 +59,10 @@ internal sealed partial class StatisticsStore
     {
         if (_archives is null || !await _archives.RecordDeletionAsync(receipt, artifactsRemaining, token).ConfigureAwait(false)) return false;
         await MarkDeletedAsync([receipt.Source.SessionId], token).ConfigureAwait(false);
-        await RestoreArchivesAsync(token, (await ListJournalsAsync(token).ConfigureAwait(false)).Values.Where(row => !row.Deleted).Select(row => row.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase)).ConfigureAwait(false);
+        // Only this session changed: importing every saved session again would make each deletion of a cleanup slower than
+        // the one before. Startup and reset restore them all.
+        await RestoreArchivesAsync(token, (await ListJournalsAsync(token).ConfigureAwait(false)).Values.Where(row => !row.Deleted).Select(row => row.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase),
+            receipt.Source.SessionId).ConfigureAwait(false);
         return true;
     }
 
@@ -138,13 +141,16 @@ internal sealed partial class StatisticsStore
         }
     }
 
-    private async ValueTask<List<(StatisticsArchiveEntry Entry, StatisticsArchivePayload Payload)>> ReadArchivesAsync(CancellationToken token)
+    private async ValueTask<List<(StatisticsArchiveEntry Entry, StatisticsArchivePayload Payload)>> ReadArchivesAsync(CancellationToken token, string? sessionId = null)
     {
         var result = new List<(StatisticsArchiveEntry, StatisticsArchivePayload)>();
         if (_archives is not null)
         {
-            foreach (var entry in await _archives.ReadAsync(token).ConfigureAwait(false))
+            var entries = await _archives.ReadAsync(token).ConfigureAwait(false);
+            SavedSessions = entries.Count;
+            foreach (var entry in entries)
             {
+                if (sessionId is not null && !string.Equals(entry.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)) continue;
                 var payload = StatisticsArchivePayload.Deserialize(entry.Payload);
                 ValidatePayload(payload, entry.SessionId, entry.Source);
                 result.Add((entry, payload));
@@ -154,15 +160,16 @@ internal sealed partial class StatisticsStore
         return result;
     }
 
-    internal async ValueTask RestoreArchivesAsync(CancellationToken token, IReadOnlySet<string>? present = null)
+    // With a session, only that session's saved copy is considered.
+    internal async ValueTask RestoreArchivesAsync(CancellationToken token, IReadOnlySet<string>? present = null, string? sessionId = null)
     {
-        if (present is not null && _archives is not null)
+        if (present is not null && _archives is not null && sessionId is null)
         {
             // A returning journal can supersede an archive, then disappear again. Preserve those newer facts first.
             await PreserveDeletedAsync(token, existingOnly: true).ConfigureAwait(false);
         }
 
-        var archives = await ReadArchivesAsync(token).ConfigureAwait(false);
+        var archives = await ReadArchivesAsync(token, sessionId).ConfigureAwait(false);
         await WriteAsync(sql =>
         {
             foreach (var (entry, payload) in archives)
@@ -176,7 +183,6 @@ internal sealed partial class StatisticsStore
                 }
             }
         }, token).ConfigureAwait(false);
-        SavedSessions = archives.Count;
     }
 
     private void ImportArchive(SqlSession sql, StatisticsArchiveEntry entry, StatisticsArchivePayload payload, bool unchanged = false)

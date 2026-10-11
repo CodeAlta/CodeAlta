@@ -110,6 +110,39 @@ public sealed class StatisticsArchiveTests
     }
 
     [TestMethod]
+    public async Task DeletionReconciliation_ImportsOnlyTheSessionItReconciles()
+    {
+        // Retention reconciles one deleted session after the other: importing every saved session again each time made
+        // a cleanup of hundreds of sessions slower with every session it removed.
+        const string otherId = "22222222-2222-2222-2222-222222222222";
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        var (engine, path) = await EngineAsync(harness, Journal().ToBytes());
+        await using var lifetime = engine;
+        var otherPath = new AgentRuntimePathLayout(harness.Root).GetSessionFilePath(otherId, JournalBuilder.Time(0));
+        await File.WriteAllBytesAsync(otherPath, new JournalBuilder(otherId).Header(JournalBuilder.Time(0))
+            .User(JournalBuilder.Time(1), "r1", "PROMPT").Usage(JournalBuilder.Time(2), "r1", input: 50, cost: 1, costUnit: "usd")
+            .Assistant(JournalBuilder.Time(3), "r1", "ANSWER").Idle(JournalBuilder.Time(4), "r1").ToBytes());
+        await engine.ChooseHistoryAsync(HistoryChoice.All);
+        await engine.DrainAsync();
+
+        var first = (await engine.PrepareAsync(SessionId)).Receipt;
+        Assert.IsNotNull(first);
+        File.Delete(path);
+        Assert.IsTrue(await engine.ReconcileDeletedAsync(first, artifactsRemaining: false));
+        // A mark on the facts of the first session: importing its saved copy again would erase it.
+        await harness.Store.WriteAsync(sql => sql.Execute($"UPDATE {harness.Store.Table("usage_q")} SET input_tokens=999 WHERE session_id=@p0", SessionId));
+
+        var second = (await engine.PrepareAsync(otherId)).Receipt;
+        Assert.IsNotNull(second);
+        File.Delete(otherPath);
+        Assert.IsTrue(await engine.ReconcileDeletedAsync(second, artifactsRemaining: false));
+
+        Assert.AreEqual(999L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT SUM(input_tokens) FROM {harness.Store.Table("usage_q")} WHERE session_id=@p0", SessionId)));
+        Assert.IsTrue((await harness.Store.GetJournalAsync(otherId))!.Deleted);
+        Assert.AreEqual(2, engine.Status.SavedSessions);
+    }
+
+    [TestMethod]
     public async Task CancellationAndWriteFailure_NeverIssueAReceipt()
     {
         await using var harness = await StoreHarness.CreateAsync(archives: true);
