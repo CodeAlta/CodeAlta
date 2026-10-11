@@ -127,7 +127,7 @@ public sealed class SessionRetentionArchiveIntegrationTests
             Assert.IsNotNull(original);
             var protectedResult = await fixture.Service(engine).RunOnceAsync(Now, Now.AddMonths(-1));
             Assert.AreEqual(0, protectedResult.Deleted);
-            Assert.AreEqual("protection_unavailable", protectedResult.Reason);
+            Assert.AreEqual("completed", protectedResult.State, protectedResult.Reason);
             Assert.IsEmpty(await new StatisticsArchiveStore(harness.Root).ReadAsync());
             CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(fixture.JournalPath));
         }

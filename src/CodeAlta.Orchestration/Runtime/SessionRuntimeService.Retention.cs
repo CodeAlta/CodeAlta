@@ -62,8 +62,8 @@ public sealed partial class SessionRuntimeService
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        using var hostClaim = protection.TryReserveRetirement(candidate.SessionId);
-        if (hostClaim is null) return "protection_unavailable";
+        using var hostClaim = protection.TryReserveRetirement(candidate.SessionId, out var refusal);
+        if (hostClaim is null) return refusal ?? "protection_unavailable";
         using var jobClaim = Jobs.TryReserveRetirement(candidate.SessionId);
         if (jobClaim is null) return "jobs_or_delivery";
         using var runtimeClaim = TryClaimRuntimeRetirement(candidate.SessionId);
@@ -137,12 +137,13 @@ public sealed partial class SessionRuntimeService
     // version cannot read, the attachments and the trace a removed session left. A file stays only when it belongs to a
     // session that stays (a recent session, one its family keeps, one the pass could not retire) or to one in use. A file
     // stat decides, never a read; Statistics is not involved.
-    internal async Task<(int Deleted, int Kept)> SweepExpiredSessionFolderAsync(DateTimeOffset cutoff, IReadOnlySet<string> keptSessionIds,
+    // Returns the files it deleted and, among them, the journals: sessions the listing did not show.
+    internal async Task<(int FilesDeleted, int JournalsDeleted)> SweepExpiredSessionFolderAsync(DateTimeOffset cutoff, IReadOnlySet<string> keptSessionIds,
         IReadOnlySet<string> retiredSessionIds, SessionRetentionProtection protection, SessionRetentionPass? pass, CancellationToken cancellationToken)
     {
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
         var deleted = 0;
-        var kept = 0;
+        var journals = 0;
         // A file is named after its session with the characters a file name cannot hold replaced.
         keptSessionIds = keptSessionIds.Select(AgentRuntimePathLayout.NormalizeSegment).ToHashSet(StringComparer.OrdinalIgnoreCase);
         retiredSessionIds = retiredSessionIds.Select(AgentRuntimePathLayout.NormalizeSegment).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -151,18 +152,20 @@ public sealed partial class SessionRuntimeService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var owner = owned.Key;
-            if (owner.Length > 0 && keptSessionIds.Contains(owner)) { kept += owned.Count(); continue; }
+            if (owner.Length > 0 && keptSessionIds.Contains(owner)) continue;
             // A session retired in this pass is gone: what it left needs no claim. Any other session must not be in use.
             using var claims = owner.Length == 0 || retiredSessionIds.Contains(owner) ? null : TryClaimSweep(owner, protection);
-            if (owner.Length > 0 && !retiredSessionIds.Contains(owner) && claims is null) { kept += owned.Count(); continue; }
+            if (owner.Length > 0 && !retiredSessionIds.Contains(owner) && claims is null) continue;
             var journalDeleted = false;
             foreach (var file in owned)
             {
                 var freed = await store.DeleteExpiredSessionFolderFileAsync(file, cutoff, cancellationToken).ConfigureAwait(false);
-                if (freed < 0) { kept++; continue; }
+                if (freed < 0) continue;
                 deleted++;
                 pass?.AddFreedBytes(freed);
-                journalDeleted |= file.Kind == SessionFolderFileKind.Journal;
+                if (file.Kind != SessionFolderFileKind.Journal) continue;
+                journals++;
+                journalDeleted = true;
             }
 
             if (journalDeleted)
@@ -174,7 +177,7 @@ public sealed partial class SessionRuntimeService
         }
 
         store.RemoveEmptyExpiredSessionFolders(cutoff, keptSessionIds, cancellationToken);
-        return (deleted, kept);
+        return (deleted, journals);
     }
 
     private IDisposable? TryClaimSweep(string sessionId, SessionRetentionProtection protection)

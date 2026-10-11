@@ -27,6 +27,26 @@ public sealed class SessionRetentionAdmissionTests
     }
 
     [TestMethod]
+    public async Task RefusalTellsWhy_AndTheEndOfWorkProtectingEverySessionCanBeAwaited()
+    {
+        var protection = Ready();
+        Assert.IsTrue(protection.Publish("desktop", ["open"], true));
+        Assert.IsNull(protection.TryReserveRetirement("open", out var refusal));
+        Assert.AreEqual("session_protected", refusal);
+        var all = protection.TryProtectAll()!;
+        Assert.IsNull(protection.TryReserveRetirement("closed", out refusal));
+        Assert.AreEqual("all_sessions_protected", refusal);
+        Assert.IsFalse(await protection.WaitForAllSessionsReleasedAsync(TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        var released = protection.WaitForAllSessionsReleasedAsync(TimeSpan.FromSeconds(30), CancellationToken.None);
+        all.Dispose();
+        Assert.IsTrue(await released);
+        using (var retirement = protection.TryReserveRetirement("closed", out refusal)) Assert.IsNotNull(retirement, refusal);
+        protection.MarkUnknown("desktop");
+        Assert.IsNull(protection.TryReserveRetirement("closed", out refusal));
+        Assert.AreEqual("protection_unavailable", refusal);
+    }
+
+    [TestMethod]
     public void SessionClaimsOverlapUntilEveryOriginalOwnerReleases()
     {
         var protection = Ready();

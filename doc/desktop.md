@@ -2025,7 +2025,8 @@ in the cleanup card, with its reasons under **Details**. The optional session re
 separate line below it: running, completed with the removed count, partial with removed and kept counts,
 or skipped/canceled. Once the pass has listed its sessions, the line and the keyed `storage-retention` toast
 add its progress: sessions checked out of the total, sessions removed and bytes freed (`total` and the Int64-string
-`freedBytes` of `StorageRetentionMaintenance`). A recent session is kept without making the pass partial.
+`freedBytes` of `StorageRetentionMaintenance`). A recent session, or an old one that is open or has work in progress,
+is kept without making the pass partial; the pass waits for startup work that protects every session to end.
 Known skip reasons get short localized text (not available yet, off, check the retention duration); unknown
 reasons and states never show host text, and an
 unknown state shows an explicit unavailable line. A broken observation stream or host-liveness outage does not erase an already-final

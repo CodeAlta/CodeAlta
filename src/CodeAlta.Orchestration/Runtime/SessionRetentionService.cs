@@ -37,6 +37,10 @@ public sealed class SessionRetentionService
         _archive = archive;
     }
 
+    // How long the pass waits, once, for work that protects every session to end (a provider being prepared at
+    // startup, a plugin task): a pass that only ran while it did would keep everything.
+    internal TimeSpan ProtectionWait { get; init; } = TimeSpan.FromMinutes(2);
+
     /// <summary>Gets the latest bounded immutable outcome for late subscribers.</summary>
     public SessionRetentionStatus Status => Volatile.Read(ref _status);
 
@@ -133,12 +137,21 @@ public sealed class SessionRetentionService
             var ready = new Queue<int>(expired.Where(pair => references.GetValueOrDefault(pair.Key) == 0).Select(pair => pair.Value));
             var processed = new HashSet<int>();
             var retired = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var waitedOut = false;
             while (ready.TryDequeue(out var index))
             {
                 token.ThrowIfCancellationRequested();
                 processed.Add(index);
                 examined++;
                 var result = await _commands.RetireCatalogSessionAsync(candidates[index], cutoff.Value, _protection, _archive, pass, token).ConfigureAwait(false);
+                // Work that protects every session ends: wait for it, then try the same session again. Once a wait has
+                // run out, the rest of the pass does not wait again.
+                for (var attempt = 0; result == "all_sessions_protected" && !waitedOut && attempt < 20; attempt++)
+                {
+                    Set("running", partial);
+                    if (!await _protection.WaitForAllSessionsReleasedAsync(ProtectionWait, token).ConfigureAwait(false)) { waitedOut = true; break; }
+                    result = await _commands.RetireCatalogSessionAsync(candidates[index], cutoff.Value, _protection, _archive, pass, token).ConfigureAwait(false);
+                }
                 if (result.StartsWith("deleted", StringComparison.Ordinal))
                 {
                     deleted++;
@@ -148,7 +161,7 @@ public sealed class SessionRetentionService
                         if (--references[related] == 0 && expired.TryGetValue(related, out var parent) && !processed.Contains(parent))
                             ready.Enqueue(parent);
                 }
-                else { skipped++; if (result != "not_expired") partial ??= result; }
+                else { skipped++; if (!KeptAsInUse(result)) partial ??= result; }
                 Set("running", partial);
             }
             // Expired, but named by a session that stays: kept with its family, as the policy wants.
@@ -159,7 +172,12 @@ public sealed class SessionRetentionService
             // Then every other file of the sessions folder older than the cutoff: what no listed session owns, and what a
             // removed session left. Only the files of a session that stays, or is in use, stay.
             var kept = candidates.Select(candidate => candidate.SessionId).Where(id => !retired.Contains(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            (filesDeleted, _) = await _runtime.SweepExpiredSessionFolderAsync(cutoff.Value, kept, retired, _protection, pass, token).ConfigureAwait(false);
+            if (!waitedOut) await _protection.WaitForAllSessionsReleasedAsync(ProtectionWait, token).ConfigureAwait(false);
+            (filesDeleted, var journalsDeleted) = await _runtime.SweepExpiredSessionFolderAsync(cutoff.Value, kept, retired, _protection, pass, token).ConfigureAwait(false);
+            // A journal the listing did not show (one it could not read, or not indexed) is a session removed all the same.
+            total += journalsDeleted;
+            examined += journalsDeleted;
+            deleted += journalsDeleted;
             return Set(partial is null ? "completed" : "partial", partial);
         }
         catch (OperationCanceledException) { return Set("partial", "canceled"); }
@@ -176,6 +194,12 @@ public sealed class SessionRetentionService
             return status;
         }
     }
+
+    // A session kept because it is open or has work in progress is kept as the policy wants: that does not make the
+    // pass partial. A refusal of every session, a source that cannot be held or a failure does.
+    private static bool KeptAsInUse(string result)
+        => result is "not_expired" or "session_protected" or "session_in_use" or "interaction_pending" or "jobs_or_delivery"
+            or "runtime_admission_or_lineage" or "busy";
 
     // The sessions a session names: the same relations manual deletion checks before removing a parent.
     private static string[] Lineage(CodeAlta.Agent.AgentSessionMetadata session)

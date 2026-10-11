@@ -535,7 +535,9 @@ During startup, scratchpad clearing shows the number of files and folders proces
 Session cleanup has its own line, also shown in a notification while it runs: how many sessions it has checked out
 of all of them, how many it removed and how much space it freed, or why it did not run (for example,
 when it is off or restoration is incomplete). Sessions keep working while it runs:
-you can send prompts to them, since cleanup only ever holds back the inactive session it is removing.
+you can send prompts to them, since cleanup only ever holds back the inactive session it is removing. An old session
+that is open or has work in progress is kept without making the cleanup partial. While work that may touch any
+session runs (for example a provider being started), cleanup waits for it, up to two minutes.
 
 #### Files of the settings
 

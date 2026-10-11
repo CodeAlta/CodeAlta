@@ -16,6 +16,7 @@ public sealed class SessionRetentionProtection : ISessionRetentionAdmission
     private int _unscopedClaims;
     private HashSet<string>? _required;
     private readonly TaskCompletionSource _initialReadiness = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource? _changed;
 
     /// <summary>Waits for the first complete host restoration without starting or retrying maintenance.</summary>
     /// <remarks>Readiness can subsequently be lost; retirement still rechecks every owner under the admission lock.</remarks>
@@ -86,6 +87,7 @@ public sealed class SessionRetentionProtection : ISessionRetentionAdmission
             if (ids.Overlaps(_retiring) || ids.Overlaps(_retired)) return false;
             _participants[owner] = new(ids, ready);
             if (IsReady) _initialReadiness.TrySetResult();
+            SignalChanged();
             return true;
         }
     }
@@ -104,23 +106,63 @@ public sealed class SessionRetentionProtection : ISessionRetentionAdmission
         {
             var ids = _participants.TryGetValue(owner, out var previous) ? previous.Ids : [];
             _participants[owner] = new(ids, false, reason);
+            SignalChanged();
         }
     }
 
     /// <summary>Reserves a currently unprotected ID, or returns null. The lease must outlive archive and removal.</summary>
     /// <exception cref="ArgumentException">The session ID is blank.</exception>
     public IDisposable? TryReserveRetirement(string sessionId)
+        => TryReserveRetirement(sessionId, out _);
+
+    // The refusal tells why: "protection_unavailable" when an owner is not ready, "all_sessions_protected" while work
+    // with no known session runs (a provider being prepared, a plugin task), which ends, and "session_protected" when
+    // this session is open, claimed or already retired, which keeps it as the policy wants.
+    internal IDisposable? TryReserveRetirement(string sessionId, out string? refusal)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate)
         {
-            if (_required is not { Count: > 0 }
-                || _required.Any(owner => !_participants.TryGetValue(owner, out var state) || !state.Ready)
-                || _participants.Values.Any(state => !state.Ready || state.Ids.Contains(sessionId))
-                || _unscopedClaims != 0 || _claims.ContainsKey(sessionId) || _retired.Contains(sessionId)
-                || !_retiring.Add(sessionId)) return null;
+            refusal = !IsReady ? "protection_unavailable"
+                : _participants.Values.Any(state => state.Ids.Contains(sessionId)) || _claims.ContainsKey(sessionId)
+                    || _retired.Contains(sessionId) || _retiring.Contains(sessionId) ? "session_protected"
+                : _unscopedClaims != 0 ? "all_sessions_protected"
+                : null;
+            if (refusal is not null) return null;
+            _retiring.Add(sessionId);
             return new Reservation(this, sessionId);
         }
+    }
+
+    /// <summary>
+    /// Waits until no work protects every session, for at most <paramref name="timeout"/>. Returns false at the timeout
+    /// or at once when an owner is not ready, which waiting cannot change. It only observes: a reservation can still be
+    /// refused right after.
+    /// </summary>
+    internal async Task<bool> WaitForAllSessionsReleasedAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout);
+        while (true)
+        {
+            Task changed;
+            lock (_gate)
+            {
+                if (!IsReady) return false;
+                if (_unscopedClaims == 0) return true;
+                changed = (_changed ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+            }
+            try { await changed.WaitAsync(deadline.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return false; }
+        }
+    }
+
+    // Called under the gate.
+    private void SignalChanged()
+    {
+        var changed = _changed;
+        _changed = null;
+        changed?.TrySetResult();
     }
 
     // A loss of readiness after a claim must be observed immediately before authorizing deletion.
@@ -160,7 +202,7 @@ public sealed class SessionRetentionProtection : ISessionRetentionAdmission
             if (Interlocked.Exchange(ref _released, 1) != 0) return;
             lock (owner._gate)
             {
-                if (sessionId is null) owner._unscopedClaims--;
+                if (sessionId is null) { if (--owner._unscopedClaims == 0) owner.SignalChanged(); }
                 else if (owner._claims[sessionId] == 1) owner._claims.Remove(sessionId);
                 else owner._claims[sessionId]--;
             }

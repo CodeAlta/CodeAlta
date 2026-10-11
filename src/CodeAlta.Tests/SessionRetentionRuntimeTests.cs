@@ -73,7 +73,8 @@ public sealed class SessionRetentionRuntimeTests
         var result = await fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-1));
         Assert.AreEqual(0, result.Deleted);
         Assert.AreEqual(2, result.Examined);
-        Assert.AreEqual("protection_unavailable", result.Reason);
+        Assert.AreEqual("completed", result.State, "An open session is kept as the policy wants: the pass is not partial.");
+        Assert.IsNull(result.Reason);
         Assert.IsTrue(File.Exists(fixture.Journal("parent")));
     }
 
@@ -308,6 +309,40 @@ public sealed class SessionRetentionRuntimeTests
     }
 
     [TestMethod]
+    public async Task WorkProtectingEverySessionIsWaitedFor_ThenTheSessionIsRemoved()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Exact-handle deletion currently fails closed on other platforms.");
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync("old");
+        // Like a provider prepared at startup: it protects every session while it runs, then ends.
+        var claim = fixture.Protection.TryProtectAll()!;
+        var pass = fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-1));
+        await Task.Delay(200);
+        Assert.IsFalse(pass.IsCompleted, "The pass waits for the work to end instead of keeping every session.");
+        claim.Dispose();
+        var result = await pass.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.AreEqual("completed", result.State, result.Reason);
+        Assert.AreEqual(1, result.Deleted);
+        Assert.IsFalse(File.Exists(fixture.Journal("old")));
+    }
+
+    [TestMethod]
+    public async Task WorkProtectingEverySessionThatDoesNotEndMakesThePassPartial()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync("old");
+        await fixture.SeedAsync("older");
+        using var claim = fixture.Protection.TryProtectAll();
+        var service = new SessionRetentionService(fixture.Commands, fixture.Runtime, fixture.Protection, null) { ProtectionWait = TimeSpan.FromMilliseconds(200) };
+        var result = await service.RunOnceAsync(Now, Now.AddMonths(-1)).WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.AreEqual("partial", result.State);
+        Assert.AreEqual("all_sessions_protected", result.Reason);
+        Assert.AreEqual(0, result.Deleted);
+        Assert.IsTrue(File.Exists(fixture.Journal("old")));
+        Assert.IsTrue(File.Exists(fixture.Journal("older")));
+    }
+
+    [TestMethod]
     public async Task EveryOldFileOfTheSessionsFolderIsRemoved_ButThoseOfKeptOrProtectedSessions()
     {
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Exact-handle deletion currently fails closed on other platforms.");
@@ -335,6 +370,8 @@ public sealed class SessionRetentionRuntimeTests
         var result = await fixture.Service(new FakeArchive()).RunOnceAsync(Now, Now.AddMonths(-3));
 
         Assert.AreEqual(4, result.FilesDeleted, result.Reason);
+        Assert.AreEqual(1, result.Deleted, "The unreadable journal is a session removed, counted with the others.");
+        Assert.AreEqual("completed", result.State, result.Reason);
         Assert.IsFalse(File.Exists(stray));
         Assert.IsFalse(File.Exists(unreadable));
         Assert.IsFalse(File.Exists(orphanTrace));
