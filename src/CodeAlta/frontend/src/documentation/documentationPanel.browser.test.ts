@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable } from "../browserTarget";
+import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 
 const edge = browserExecutable;
 
@@ -27,13 +27,8 @@ test("the Documentation tab shows the guide under the policy of the application:
       [origin + "/fixture.js", bundle.outputFiles[0].text], [origin + "/style.css", style]]);
     const types = new Map([[page, "text/html"], [origin + "/fixture.js", "text/javascript"], [origin + "/style.css", "text/css"]]);
     browser = spawn(edge!, [...browserBaseArgs, "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "--window-size=1500,950", "about:blank"],
-      { stdio: "ignore", windowsHide: true });
-    let port = "";
-    for (let attempt = 0; attempt < 100 && !port; attempt++) {
-      try { port = (await readFile(join(directory, "profile", "DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]; }
-      catch { await new Promise(resolve => setTimeout(resolve, 50)); }
-    }
-    assert.match(port, /^\d+$/);
+      { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const port = await waitForBrowserPort(join(directory, "profile"), browser);
     // Loopback is the control channel of the test alone, never an asset of the page.
     const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json() as { type: string; webSocketDebuggerUrl: string }[];
     socket = new WebSocket(targets.find(target => target.type === "page")!.webSocketDebuggerUrl);

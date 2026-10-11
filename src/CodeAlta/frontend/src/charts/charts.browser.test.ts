@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable } from "../browserTarget";
+import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 
 const edge = browserExecutable;
 const origin = "https://charts.invalid", pageUrl = `${origin}/index.html`;
@@ -41,12 +41,8 @@ async function withGallery(body: (page: Page) => Promise<void>, options: { reduc
       [pageUrl, { type: "text/html", body: '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>' }],
       [`${origin}/style.css`, { type: "text/css", body: style }], [`${origin}/fixture.js`, { type: "text/javascript", body: bundle.outputFiles[0].text }]]);
     browser = spawn(edge!, [...browserBaseArgs, "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"],
-      { stdio: "ignore", windowsHide: true });
-    let port = "";
-    for (let attempt = 0; attempt < 100 && !port; attempt++) {
-      try { port = (await readFile(join(directory, "profile/DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]; } catch { await new Promise(resolve => setTimeout(resolve, 50)); }
-    }
-    assert.match(port, /^\d+$/);
+      { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const port = await waitForBrowserPort(join(directory, "profile"), browser);
     const tabs = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as { type: string; url: string; webSocketDebuggerUrl: string }[];
     socket = new WebSocket(tabs.find(tab => tab.type === "page" && tab.url === "about:blank")!.webSocketDebuggerUrl);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });

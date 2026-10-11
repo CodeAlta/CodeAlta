@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable } from "../browserTarget";
+import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 
 test("Storage edits valid durations only and measures independently without cleanup actions", { skip: !browserExecutable, timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-storage-"));
@@ -21,13 +21,8 @@ test("Storage edits valid durations only and measures independently without clea
       + await readFile(new URL("../style.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="fixture.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
-    browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
-    let port = "";
-    for (let attempt = 0; attempt < 100 && !port; attempt++) {
-      try { port = (await readFile(join(root, "profile", "DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]; }
-      catch { await new Promise(resolve => setTimeout(resolve, 50)); }
-    }
-    assert.match(port, /^\d+$/);
+    browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const port = await waitForBrowserPort(join(root, "profile"), browser);
     const pages: { type?: string; webSocketDebuggerUrl?: string }[] = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);
     await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", () => reject(Error("browser unavailable")), { once: true }); });

@@ -39,6 +39,8 @@ All .NET tests, the frontend tests (`npm test`) and the Lunet website build must
 
 Frontend test output is failure-focused, with totals and emitted diagnostics retained; use `npm run test:verbose` for every test name. Vite builds print warnings and errors, not the successful asset listing. The separate GitHub .NET summary is configured in `src/dotnet-releaser.toml` to omit passed/skipped details, not failures or totals; see `doc/development-guide.md`.
 
+Both frontend test scripts run at most two test files concurrently to bound headless Edge startup load. Browser fixtures use `browserTarget.ts` for guest-mode flags and `waitForBrowserPort`: a five-second wall-clock deadline that tolerates missing/partial port files and reports child exit, spawn errors and bounded stderr. Keep stderr piped, preserve owned-browser cleanup, and do not replace startup failures with blind retries or skips.
+
 ### Debug or Release
 
 CodeAlta is developed with CodeAlta, so a CodeAlta that runs on this computer may be a build of this checkout: `src/CodeAlta/bin/<Configuration>/net10.0/alta` or `src/CodeAlta.Tui/bin/<Configuration>/net10.0/altatui`. Its files cannot be replaced while it runs (on Windows the build stops on a locked file), and every build of that configuration writes them: the solution, `CodeAlta.csproj`, and `dotnet test`, whose test projects build both applications.

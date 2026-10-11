@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
 
 const edge = browserExecutable;
 
@@ -21,13 +21,8 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     const origin = "https://markdown-production.invalid", page = origin + "/index.html", script = origin + "/fixture.js";
     const assets = new Map([[page, '<!doctype html><html><head><link rel="icon" href="data:,"></head><body><div id="app"></div><script src="/fixture.js"></script></body></html>'], [script, bundle.outputFiles[0].text]]);
     browser = spawn(edge!, [...browserBaseArgs,
-      "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
-    let port = "";
-    for (let i = 0; i < 100 && !port; i++) {
-      try { port = (await readFile(join(directory, "profile/DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]; }
-      catch { await new Promise(resolve => setTimeout(resolve, 50)); }
-    }
-    assert.match(port, /^\d+$/);
+      "--host-resolver-rules=MAP * ~NOTFOUND", `--user-data-dir=${join(directory, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const port = await waitForBrowserPort(join(directory, "profile"), browser);
     // Loopback is solely the Node-to-CDP control channel, never a page asset or application bridge.
     const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(5000) })).json() as { type: string; url: string; webSocketDebuggerUrl: string }[];
     socket = new WebSocket(pages.find(p => p.type === "page" && p.url === "about:blank")!.webSocketDebuggerUrl);

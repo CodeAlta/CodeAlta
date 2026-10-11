@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
 
 const edge = browserExecutable;
 
@@ -24,13 +24,8 @@ test("mounted timeline follows the final page across later layout growth", { ski
     await writeFile(page, '<!doctype html><html><body><div id="app"></div><script src="fixture.js"></script></body></html>');
     const profile = join(root, "profile");
     browser = spawn(edge!, [...browserBaseArgs,
-      `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
-    let port = "";
-    for (let attempt = 0; attempt < 100 && !port; attempt++) {
-      try { port = (await readFile(join(profile, "DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]; }
-      catch { await new Promise(resolve => setTimeout(resolve, 50)); }
-    }
-    assert.match(port, /^\d+$/, "test-owned headless Edge did not start");
+      `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const port = await waitForBrowserPort(profile, browser);
     const pages: { type?: string; url?: string; webSocketDebuggerUrl?: string }[] =
       await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(10_000) })).json();
     const tab = pages.find(value => value.type === "page" && value.url === "about:blank");

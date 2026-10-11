@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
 
 const edge = browserExecutable;
 
@@ -47,13 +47,8 @@ test("the title bar keeps Explorer in place and Home opens or focuses one Welcom
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(edge!, [...browserBaseArgs, "--allow-file-access-from-files",
-      `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore", windowsHide: true });
-    let port = "";
-    for (let i = 0; i < 100 && !port; i++) {
-      try { port = (await readFile(join(root, "profile", "DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]; }
-      catch { await new Promise(resolve => setTimeout(resolve, 50)); }
-    }
-    assert.match(port, /^\d+$/);
+      `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const port = await waitForBrowserPort(join(root, "profile"), browser);
     const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as { type?: string; webSocketDebuggerUrl?: string }[];
     const tab = pages.find(tab => tab.type === "page");
     assert.ok(tab?.webSocketDebuggerUrl);
