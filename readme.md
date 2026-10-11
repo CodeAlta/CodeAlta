@@ -1,6 +1,6 @@
 # CodeAlta [![ci](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml/badge.svg)](https://github.com/CodeAlta/CodeAlta/actions/workflows/ci.yml) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.svg?label=CodeAlta)](https://www.nuget.org/packages/CodeAlta/) [![NuGet](https://img.shields.io/nuget/v/CodeAlta.Tui.svg?label=CodeAlta.Tui)](https://www.nuget.org/packages/CodeAlta.Tui/)
 
-CodeAlta is a desktop workspace for agentic coding on your local projects. A terminal UI is available too.
+CodeAlta brings AI coding agents, your code and Git into one desktop workspace. A terminal UI is available too.
 
 <p align="center">
   <img src="site/img/alta-desktop-split-three.webp" alt="CodeAlta Desktop with a parent session and its two child sessions in three panes" width="920">
@@ -28,17 +28,16 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 
 ## ✨ Features
 
-- **A desktop app, and a terminal UI**: CodeAlta Desktop has session tabs you can drag and split, a code editor, terminals and git changes for your projects, and every setting in one window. Hide the Changes sidebar to give diffs more room. CodeAlta TUI is a keyboard-first terminal UI. Both share the `~/.alta` profile, so a session started in one can be continued in the other. See [how they compare](https://codealta.github.io/docs/desktop-and-tui/).
-- **Sessions on your projects**: sessions are saved on disk. Queue prompts, steer a running turn, and let a session delegate tasks to child sessions. Agent-to-agent messages reach a running recipient through steering, like automatic child replies.
-- **Spaces**: in CodeAlta Desktop, group your projects into spaces such as Work and Personal. The window shows one space at a time, each with its own tabs.
-- **Worktrees**: a session can work in its own git worktree, on its own branch, so that several sessions change the same project at the same time.
-- **Automations**: in CodeAlta Desktop, a prompt can run on a schedule, when an issue or a pull request is opened, when a command succeeds, or on demand.
-- **Statistics**: in CodeAlta Desktop, a page of dashboards (`Ctrl+G`, then `C`) shows what you do with CodeAlta: activity, models and tokens, cost, tools, projects and sessions, built from your history on your computer, with the same numbers for agents in `alta statistics`. Tabs refresh every 10 minutes by default, with a configurable interval and a refresh button; recording continues independently. The Overview shows the last data-update date and time, including seconds.
-- **Storage settings**: see the file-size distribution of `~/.alta`, with configuration and personal files kept protected. Background measurement and startup scratchpad clearing show processed file/folder counts. Scratchpad clearing defaults on; inactive-session retention defaults to three calendar months, with an editable duration or **Never**. On supported Windows storage, startup cleanup preserves durable Statistics before removing eligible sessions, protecting open sessions, drafts and background work. Policy changes apply at the next startup. See [Storage](https://codealta.github.io/docs/workspace/#storage).
-- **UI tools and MCP server**: in CodeAlta Desktop, an agent sees and drives the window, and other applications do the same through its MCP server.
-- **The models you already have**: subscriptions and API keys for OpenAI, Anthropic, Google, Mistral, xAI, Azure OpenAI, and OpenAI-compatible servers, and Claude Code through the CLI you installed.
-- **Everything the agent does**: tool calls, file diffs, and context usage are in the timeline. In CodeAlta Desktop a tool call opens with its output in a live terminal, or with the file or the diff it worked on. Web links in assistant messages open in your default browser.
-- **Extensions**: agent prompts, MCP servers, skills, and trusted local .NET plugins, which an agent can write and reload while CodeAlta Desktop runs.
+CodeAlta Desktop brings together:
+
+- **Your choice of models**: use provider subscriptions, API keys or Claude Code.
+- **Sessions and sub-agents**: resume work, queue prompts, steer agents and delegate tasks.
+- **Code and Git**: an editor, terminals, diffs and separate worktrees for parallel work.
+- **A flexible workspace**: arrange tabs and split panes, and group projects into spaces.
+- **Automations**: run tasks on a schedule, on project events or on demand.
+- **Statistics and storage**: track usage and costs, and manage [disk space and cleanup](https://codealta.github.io/docs/workspace/#storage).
+- **UI automation**: let agents inspect and use the desktop through built-in tools or MCP.
+- **Extensions**: customize prompts, skills, MCP servers and trusted local .NET plugins.
 
 <p align="center">
   <img src="site/img/alta-home.png" alt="CodeAlta TUI with the projects sidebar, a session timeline, and the prompt editor" width="920">
@@ -46,16 +45,9 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 
 ## 📖 Documentation
 
-The user guide is at <https://codealta.github.io>:
+Visit the [website](https://codealta.github.io/) for the feature tour and [user guide](https://codealta.github.io/docs/getting-started/), including [model providers](https://codealta.github.io/docs/model-providers/) and [how Desktop and TUI compare](https://codealta.github.io/docs/desktop-and-tui/).
 
-- [Getting started](https://codealta.github.io/docs/getting-started/)
-- [Desktop and TUI](https://codealta.github.io/docs/desktop-and-tui/)
-- [Model providers](https://codealta.github.io/docs/model-providers/)
-- [Sessions and delegation](https://codealta.github.io/docs/sessions/)
-- [Prompts](https://codealta.github.io/docs/prompts/)
-- [Plugins and MCP servers](https://codealta.github.io/docs/plugins/)
-
-Maintainer notes are in [doc/readme.md](doc/readme.md).
+For architecture and contributor guidance, see the [developer documentation](doc/readme.md).
 
 ## 🪪 License
 
