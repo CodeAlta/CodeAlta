@@ -95,8 +95,11 @@ public sealed class StatisticsArchiveTests
         cancellation.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(async () => await engine.PrepareAsync(SessionId, cancellation.Token));
         var archive = new StatisticsArchiveStore(harness.Root);
-        await using (var locked = new FileStream(archive.DatabasePath, FileMode.Open, FileAccess.Read, FileShare.None))
+        // Native SQLite does not honor FileShare.None on Unix; use its writer lock on all platforms.
+        using (var locked = new SqliteConnection($"Data Source={archive.DatabasePath};Pooling=False"))
         {
+            locked.Open();
+            using var transaction = locked.BeginTransaction(deferred: false);
             var result = await engine.PrepareAsync(SessionId);
             Assert.IsNull(result.Receipt);
             Assert.IsNotNull(result.FailureReason);

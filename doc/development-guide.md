@@ -196,6 +196,11 @@ upgrade is required. This keeps successful summaries below GitHub's 1 MiB per-st
 totals, failure details and annotations. A `.runsettings` logger configuration alone is insufficient:
 VSTest replaces it when dotnet-releaser supplies its bare `--logger GitHubActions` argument.
 
+Cross-platform SQLite lock tests must hold a real SQLite writer transaction. A .NET
+`FileStream` with `FileShare.None` excludes native SQLite on Windows, but not on Unix; it
+does not establish a locked-database fixture there. Keep the failure and unchanged-data
+assertions on every supported platform rather than skipping the test.
+
 ### What a render of the desktop page may cost
 
 `App` (in `main.tsx`) holds the state of the whole window, and every open session tab stays mounted with its

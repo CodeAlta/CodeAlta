@@ -112,11 +112,18 @@ public sealed class StatisticsArchiveStoreTests
     {
         using var fixture = new Fixture();
         var entry = await fixture.Store.SaveAsync("s", [1], null);
-        await using (var locked = new FileStream(fixture.Store.DatabasePath, FileMode.Open, FileAccess.Read, FileShare.None))
+        var before = await File.ReadAllBytesAsync(fixture.Store.DatabasePath);
+        // FileShare.None does not exclude native SQLite on Unix. Hold its actual writer lock
+        // so this tests an unavailable archive on every platform, not Windows sharing semantics.
+        using (var locked = new SqliteConnection($"Data Source={fixture.Store.DatabasePath};Pooling=False"))
         {
-            await Assert.ThrowsAsync<Exception>(async () => await fixture.Store.SaveAsync("s", [2], null));
+            locked.Open();
+            using var transaction = locked.BeginTransaction(deferred: false);
+            var error = await Assert.ThrowsAsync<SqliteException>(async () => await fixture.Store.SaveAsync("s", [2], null));
+            Assert.AreEqual(5, error.SqliteErrorCode); // SQLITE_BUSY
         }
 
+        CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(fixture.Store.DatabasePath));
         Assert.AreEqual(entry.Generation, (await fixture.Store.ReadAsync()).Single().Generation);
     }
 
