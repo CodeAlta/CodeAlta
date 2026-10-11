@@ -29,7 +29,7 @@ public sealed partial class OwnedSessionCommandService
         {
             if (_closed || _retained) return new("closed", null);
             // A provider that is being changed, or a session that is being deleted, is not attached meanwhile.
-            if (_deleteWork is not null) return new("busy", null);
+            if (Reserved(sessionId)) return new("busy", null);
             // And none starts until the request ends: it would attach the session as it was before. A request
             // that turns it off while another turns it on is taken, as the provider takes it.
             _remoteControlling[sessionId] = _remoteControlling.GetValueOrDefault(sessionId) + 1;

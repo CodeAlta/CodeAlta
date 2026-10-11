@@ -24,7 +24,7 @@ function createFixture() {
       state, processedFiles: "2", processedDirectories: "1", removedFiles: "2", removedDirectories: "1", skippedEntries: "0", reasons: [], startedAt: null, completedAt: null,
     })),
     watchRetention: async (request, options) => open<StorageRetentionMaintenance>("retention", request.expectedEpoch!, options!.signal!, state => ({
-      state, examined: 0, deleted: 0, skipped: 0, reason: state === "skipped" ? "external_admission_unqualified" : null,
+      state, examined: 0, deleted: 0, skipped: 0, reason: state === "skipped" ? "external_admission_unqualified" : null, total: 0, freedBytes: "0",
     })),
   };
   const root = createRoot(document.getElementById("root")!);

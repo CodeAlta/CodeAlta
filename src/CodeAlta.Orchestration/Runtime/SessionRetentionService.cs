@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -84,6 +85,9 @@ public sealed class SessionRetentionService
         var examined = 0;
         var deleted = 0;
         var skipped = 0;
+        var total = 0;
+        var pass = new SessionRetentionPass();
+        var graphPrepared = false;
         string? partial = null;
         try
         {
@@ -97,17 +101,33 @@ public sealed class SessionRetentionService
             // Listing is discovery, never age authority. The exact held journal is streamed again under ownership.
             var candidates = new List<CodeAlta.Agent.AgentSessionMetadata>();
             await foreach (var candidate in _runtime.ListRetentionCandidatesAsync(token).ConfigureAwait(false)) candidates.Add(candidate);
+            total = candidates.Count;
+            Set("running", null);
             foreach (var candidate in candidates)
             {
                 token.ThrowIfCancellationRequested();
                 examined++;
-                var result = await _commands.RetireCatalogSessionAsync(candidate, now, cutoff.Value, _protection, _archive, token).ConfigureAwait(false);
+                // Most sessions are recent: their age is read without any claim, so they never hold back the
+                // commands of the user. Only an expired session takes the exclusive path, which reads it again.
+                string result;
+                if (await _runtime.IsRetentionCandidateRecentAsync(candidate, now, cutoff.Value, token).ConfigureAwait(false))
+                    result = "not_expired";
+                else
+                {
+                    if (!graphPrepared)
+                    {
+                        await _runtime.PrepareRetentionFamilyGraphAsync(pass, token).ConfigureAwait(false);
+                        graphPrepared = true;
+                    }
+                    result = await _commands.RetireCatalogSessionAsync(candidate, now, cutoff.Value, _protection, _archive, pass, token).ConfigureAwait(false);
+                }
                 if (result.StartsWith("deleted", StringComparison.Ordinal))
                 {
                     deleted++;
                     if (result != "deleted") partial = result;
                 }
-                else { skipped++; partial ??= result; }
+                // A recent session is kept as the policy wants: that does not make the pass partial.
+                else { skipped++; if (result != "not_expired") partial ??= result; }
                 Set("running", partial);
             }
             return Set(partial is null ? "completed" : "partial", partial);
@@ -117,7 +137,7 @@ public sealed class SessionRetentionService
 
         SessionRetentionStatus Set(string state, string? reason)
         {
-            var status = new SessionRetentionStatus(state, examined, deleted, skipped, reason);
+            var status = new SessionRetentionStatus(state, examined, deleted, skipped, reason) { Total = total, FreedBytes = pass.FreedBytes };
             lock (_gate)
             {
                 Volatile.Write(ref _status, status);

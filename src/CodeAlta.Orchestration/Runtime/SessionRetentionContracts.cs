@@ -6,4 +6,11 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="Deleted">Confirmed removed journals.</param>
 /// <param name="Skipped">Candidates retained.</param>
 /// <param name="Reason">Bounded status code; never journal content or private paths.</param>
-public sealed record SessionRetentionStatus(string State, int Examined, int Deleted, int Skipped, string? Reason);
+public sealed record SessionRetentionStatus(string State, int Examined, int Deleted, int Skipped, string? Reason)
+{
+    /// <summary>Gets the number of candidates the pass found, known once it has listed them; zero before.</summary>
+    public int Total { get; init; }
+
+    /// <summary>Gets the bytes of the journals and artifacts the pass removed.</summary>
+    public long FreedBytes { get; init; }
+}

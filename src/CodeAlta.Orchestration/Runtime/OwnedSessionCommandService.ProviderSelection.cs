@@ -7,7 +7,7 @@ public sealed partial class OwnedSessionCommandService
     public Task<OwnedProviderSelectionContext?> GetProviderSelectionAsync(string sessionId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        lock (_gate) { if (_closed || _retained || _deleteWork is not null) return Task.FromResult<OwnedProviderSelectionContext?>(null); }
+        lock (_gate) { if (_closed || _retained || Reserved(sessionId)) return Task.FromResult<OwnedProviderSelectionContext?>(null); }
         return _runtime.ReadProviderSelectionAsync(sessionId);
     }
 

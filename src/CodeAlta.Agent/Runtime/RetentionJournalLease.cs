@@ -187,11 +187,19 @@ internal sealed class RetentionJournalLease : IDisposable
 
 internal sealed class RetentionArtifacts(List<RetentionJournalLease> files, bool partial) : IDisposable
 {
+    /// <summary>Gets the bytes of the captured files that were deleted.</summary>
+    internal long DeletedBytes { get; private set; }
+
     internal bool DeleteCaptured()
     {
         foreach (var file in files)
         {
-            try { file.Delete(); }
+            try
+            {
+                var length = file.Stream.Length;
+                file.Delete();
+                DeletedBytes += length;
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { partial = true; }
         }
         return partial;

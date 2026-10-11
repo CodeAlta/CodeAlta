@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -47,12 +48,25 @@ public sealed partial class SessionRuntimeService
     internal IAsyncEnumerable<AgentSessionMetadata> ListRetentionCandidatesAsync(CancellationToken cancellationToken)
         => _sessionViewCatalog.JournalStore.CreateSessionStore().ListSessionsAsync(cancellationToken: cancellationToken);
 
+    // Claim-free: a recent session never takes the exclusive retirement path. Retirement checks the age again.
+    internal Task<bool> IsRetentionCandidateRecentAsync(AgentSessionMetadata candidate, DateTimeOffset now, DateTimeOffset cutoff,
+        CancellationToken cancellationToken)
+        => _sessionViewCatalog.JournalStore.CreateSessionStore().IsRetentionCandidateRecentAsync(candidate.SessionId, candidate.CreatedAt,
+            now, cutoff, cancellationToken);
+
+    // Reads the whole family graph once, outside any exclusive retirement, so that each retirement only re-reads
+    // the journals that changed since. Its answer is not used: each retirement reads the graph again.
+    internal Task PrepareRetentionFamilyGraphAsync(SessionRetentionPass pass, CancellationToken cancellationToken)
+        => _sessionViewCatalog.JournalStore.CreateSessionStore().ReadRetentionFamilyProtectionAsync(pass, cancellationToken);
+
     internal Task<string> RetireOwnedCatalogSessionAsync(AgentSessionMetadata candidate, DateTimeOffset now,
-        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive, CancellationToken cancellationToken)
-        => AdmitAsync(() => RetireOwnedCatalogSessionBodyAsync(candidate, now, cutoff, protection, archive, cancellationToken), cancellationToken);
+        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive, SessionRetentionPass? pass,
+        CancellationToken cancellationToken)
+        => AdmitAsync(() => RetireOwnedCatalogSessionBodyAsync(candidate, now, cutoff, protection, archive, pass, cancellationToken), cancellationToken);
 
     private async Task<string> RetireOwnedCatalogSessionBodyAsync(AgentSessionMetadata candidate, DateTimeOffset now,
-        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive, CancellationToken cancellationToken)
+        DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive, SessionRetentionPass? pass,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var hostClaim = protection.TryReserveRetirement(candidate.SessionId);
@@ -80,7 +94,7 @@ public sealed partial class SessionRuntimeService
                 return "session_missing";
             // Family retirement needs a multi-actor reservation. Until that exists protect both parents and leaves,
             // including attribution lineage. A corrupt/ambiguous graph is never treated as independent sessions.
-            var graph = await store.ReadRetentionFamilyProtectionAsync(token).ConfigureAwait(false);
+            var graph = await store.ReadRetentionFamilyProtectionAsync(pass, token).ConfigureAwait(false);
             if (graph is null) return "family_graph_unknown";
             if (graph.Contains(candidate.SessionId)) return "family_protected";
             var local = await _sessionViewCatalog.JournalStore.ReadLatestStateAsync(candidate.SessionId, candidate.CreatedAt, token).ConfigureAwait(false);
@@ -102,6 +116,7 @@ public sealed partial class SessionRuntimeService
                     && await archive.ValidateAsync(receipt, archiveToken).ConfigureAwait(false);
             }, delete => protection.DeleteIfReady(candidate.SessionId, delete), token).ConfigureAwait(false);
             if (!result.Deleted) return result.Status;
+            pass?.AddFreedBytes(result.FreedBytes);
             lock (_identityGate) _retiredSessionIds.Add(candidate.SessionId);
             // A reconciliation failure never retries artifact deletion. The durable participant rehydrates the
             // archive after restart and can reconcile its missing journal idempotently.

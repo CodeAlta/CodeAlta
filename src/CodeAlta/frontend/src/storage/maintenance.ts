@@ -1,5 +1,6 @@
 import type { storage, StorageMaintenance, StorageRetentionMaintenance } from "#neoastra";
-import type { MessageKey } from "../localization";
+import { translate, type MessageKey } from "../localization";
+import { storageBytes, storageSize } from "./storage";
 
 export type MaintenanceApi = Pick<typeof storage, "watchMaintenance" | "watchRetention">;
 export interface MaintenanceState {
@@ -33,13 +34,26 @@ export function followMaintenance(api: MaintenanceApi, epoch: string, changed: (
     } }), initial.scratchpad);
   void follow(() => api.watchRetention({ expectedEpoch: epoch }, { signal: abort.signal }),
     retention => publish({ retention }), () => publish({ retention: {
-      state: "unavailable", examined: 0, deleted: 0, skipped: 0, reason: null,
+      state: "unavailable", examined: 0, deleted: 0, skipped: 0, reason: null, total: 0, freedBytes: "0",
     } }), initial.retention);
   return () => abort.abort();
 }
 
 function isFinal(state: string | undefined): boolean {
   return state === "completed" || state === "partial" || state === "skipped" || state === "canceled" || state === "failed";
+}
+
+/**
+ * What a session cleanup has done so far: sessions checked out of all, sessions removed and space freed. Nothing
+ * before the pass has listed its sessions, or when it never did (skipped, off): a long pass is never silent.
+ */
+export function retentionProgress(locale: string, value: { examined: number; total?: number; deleted: number; freedBytes?: string }): string | undefined {
+  if (!value.total || !Number.isFinite(value.total) || value.total <= 0) return undefined;
+  const count = (amount: number) => new Intl.NumberFormat(locale).format(Number.isFinite(amount) ? Math.max(0, Math.floor(amount)) : 0);
+  return translate(locale, "{examined} of {total} sessions checked, {deleted} removed, {size} freed.", {
+    examined: count(value.examined), total: count(value.total), deleted: count(value.deleted),
+    size: storageSize(storageBytes(value.freedBytes ?? "0"), locale),
+  });
 }
 
 /** Disconnects stop observation, not maintenance: keep final results and mark unfinished work unavailable. */

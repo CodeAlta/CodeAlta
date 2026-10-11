@@ -527,8 +527,10 @@ confirmation preferences do not control this automatic policy. The configuration
 copies or reveals the global `~/.alta/config.toml` using the same controls as other Settings pages.
 The latest scratchpad cleanup appears as one line in the cleanup card; open **Details** for its reasons.
 During startup, scratchpad clearing shows the number of files and folders processed, so you can follow a large cleanup.
-Session cleanup has its own line: how many sessions it removed, or why it did not run (for example,
-when it is off, restoration is incomplete or Saved Statistics are unavailable).
+Session cleanup has its own line, also shown in a notification while it runs: how many sessions it has checked out
+of all of them, how many it removed and how much space it freed, or why it did not run (for example,
+when it is off, restoration is incomplete or Saved Statistics are unavailable). Sessions keep working while it runs:
+you can send prompts to them, since cleanup only ever holds back the inactive session it is removing.
 
 #### Files of the settings
 

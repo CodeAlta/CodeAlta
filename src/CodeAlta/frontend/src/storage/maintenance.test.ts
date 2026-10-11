@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { test } from "node:test";
 import type { StorageMaintenance, StorageRetentionMaintenance } from "#neoastra";
-import { disconnectedMaintenance, followMaintenance, maintenanceNotice, scratchpadReason, type MaintenanceApi, type MaintenanceState } from "./maintenance";
+import { disconnectedMaintenance, followMaintenance, maintenanceNotice, retentionProgress, scratchpadReason, type MaintenanceApi, type MaintenanceState } from "./maintenance";
 
 const scratchpad = (state: string): StorageMaintenance => ({ state, removedFiles: "9223372036854775807", removedDirectories: "2",
   processedFiles: "9223372036854775807", processedDirectories: "2", skippedEntries: "0", reasons: [], startedAt: null, completedAt: null });
-const retention = (state: string, reason: string | null = null): StorageRetentionMaintenance => ({ state, examined: 1, deleted: 0, skipped: 1, reason });
+const retention = (state: string, reason: string | null = null): StorageRetentionMaintenance => ({ state, examined: 1, deleted: 0, skipped: 1, reason, total: 0, freedBytes: "0" });
 
 test("maintenance independently follows both replay streams and keeps wire counts exact", async () => {
   const snapshots: MaintenanceState[] = [];
@@ -119,4 +119,13 @@ test("status messages never describe unqualified, disabled or unknown maintenanc
   assert.equal(maintenanceNotice("retention", retention("not_started")), undefined);
   assert.equal(scratchpadReason(["invalid-configuration"]), "Check the storage configuration.");
   assert.equal(scratchpadReason(["unexpected-private"]), "Some scratchpad items were kept.");
+});
+
+test("session cleanup progress counts sessions and freed space once the pass has listed them", () => {
+  assert.equal(retentionProgress("en", { examined: 0, total: 0, deleted: 0, freedBytes: "0" }), undefined, "Nothing listed yet.");
+  assert.equal(retentionProgress("en", { examined: 3, deleted: 0 }), undefined, "An older host sends no total.");
+  const progress = retentionProgress("en", { examined: 1234, total: 2048, deleted: 7, freedBytes: String(3 * 1024 * 1024) });
+  assert.ok(progress?.startsWith("1,234 of 2,048 sessions checked, 7 removed, "), progress);
+  assert.ok(progress?.includes("3"), progress);
+  assert.ok(progress?.endsWith(" freed."), progress);
 });

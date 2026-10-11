@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { showToast } from "../appToaster";
 import { translate, type Locale } from "../localization";
-import { disconnectedMaintenance, followMaintenance, maintenanceNotice, scratchpadReason, type MaintenanceApi, type MaintenanceState } from "./maintenance";
+import { disconnectedMaintenance, followMaintenance, maintenanceNotice, retentionProgress, scratchpadReason, type MaintenanceApi, type MaintenanceState } from "./maintenance";
 
 /** App owns the subscription: navigating away from Settings must not lose maintenance outcomes. */
 export function useStorageMaintenance(api: MaintenanceApi, epoch: string | null, locale: Locale, available = true) {
@@ -26,10 +26,12 @@ export function useStorageMaintenance(api: MaintenanceApi, epoch: string | null,
         if (!current || current === previous[kind]) continue;
         const notice = maintenanceNotice(kind, current);
         if (!notice) continue;
-        // Progress counts can change frequently; update state without repeatedly reannouncing the same toast.
-        if ((kind === "scratchpad" ? scratchpadToast : retentionToast) === notice.key) continue;
-        if (kind === "scratchpad") scratchpadToast = notice.key; else retentionToast = notice.key;
-        showToast({ message: translate(language.current, notice.key), intent: notice.intent,
+        // The session cleanup toast says how far it is; the keyed toast is updated in place, never added again.
+        const progress = kind === "retention" && "examined" in current ? retentionProgress(language.current, current) : undefined;
+        const message = translate(language.current, notice.key) + (progress ? " " + progress : "");
+        if ((kind === "scratchpad" ? scratchpadToast : retentionToast) === message) continue;
+        if (kind === "scratchpad") scratchpadToast = message; else retentionToast = message;
+        showToast({ message, intent: notice.intent,
           timeout: current.state === "running" ? 0 : 6000 }, `storage-${kind}`);
       }
       previous = value;

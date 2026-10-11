@@ -91,6 +91,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     private bool _retained;
     private Task? _disposeTask;
     private Task<string>? _deleteWork;
+    // The session the exclusive work retires, or null when that work holds every session.
+    private string? _retiringSessionId;
     private readonly OriginalInvocation _permissionShutdown = new();
     private readonly OriginalInvocation _askDrain = new();
     private readonly BoundedPromptReferences _references = new();
@@ -393,7 +395,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     && (previous.Send.Images ?? []).SequenceEqual(sent.Images ?? [])) is { } known)
                 return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (Reserved(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (request.Images is { Count: > 0 })
             {
@@ -482,7 +484,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (Known(request.ClientRequestId, previous => previous.Steer == request) is { } known) return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (Reserved(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_steering.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Steer, request.SessionId);
@@ -542,7 +544,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (Known(request.ClientRequestId, previous => previous.Compact == request) is { } known) return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (Reserved(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_compacting.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Compact, request.SessionId);
@@ -605,7 +607,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (Known(request.ClientRequestId, previous => previous.Queue == request) is { } known) return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (Reserved(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_queueing.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Queue, request.SessionId);
@@ -639,7 +641,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (Known(request.ClientRequestId, previous => previous.CancelQueue == request) is { } known) return known;
             if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (_deleteWork is not null && (_retiringSessionId is null || !_queues.TryGetValue(request.TargetOperationId, out var targeted)
+                || Reserved(targeted.Request.SessionId))) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (!_queues.TryGetValue(request.TargetOperationId, out var target)) return new(OwnedSessionCommandAdmissionKind.UnknownTarget);
             operation = target;
@@ -764,7 +767,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (Known(request.ClientRequestId, previous => previous.AbortRun == request) is { } known) return known;
             if (_closed) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (_deleteWork is not null) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (Reserved(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_abortingRuns.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.AbortRun, request.SessionId);

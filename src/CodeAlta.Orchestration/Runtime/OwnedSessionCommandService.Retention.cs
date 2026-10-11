@@ -1,12 +1,14 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Orchestration.Runtime;
 
 public sealed partial class OwnedSessionCommandService
 {
+    // Retirement reserves the exclusive slot for one inactive session only: commands for every other session go on.
     internal Task<string> RetireCatalogSessionAsync(AgentSessionMetadata candidate, DateTimeOffset now,
         DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive,
-        CancellationToken cancellationToken)
+        SessionRetentionPass? pass, CancellationToken cancellationToken)
     {
         TaskCompletionSource<string> completion;
         lock (_gate)
@@ -21,22 +23,33 @@ public sealed partial class OwnedSessionCommandService
                 return Task.FromResult("busy");
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _deleteWork = completion.Task;
-            _ = RetireCatalogSessionOwnedAsync(candidate, now, cutoff, protection, archive, cancellationToken, completion);
+            _retiringSessionId = candidate.SessionId;
+            _ = RetireCatalogSessionOwnedAsync(candidate, now, cutoff, protection, archive, pass, cancellationToken, completion);
         }
         return completion.Task;
     }
 
     private async Task RetireCatalogSessionOwnedAsync(AgentSessionMetadata candidate, DateTimeOffset now,
         DateTimeOffset cutoff, SessionRetentionProtection protection, ISessionStatisticsRetirementArchive archive,
-        CancellationToken cancellationToken, TaskCompletionSource<string> completion)
+        SessionRetentionPass? pass, CancellationToken cancellationToken, TaskCompletionSource<string> completion)
     {
         try
         {
             completion.TrySetResult(await _runtime.RetireOwnedCatalogSessionAsync(candidate, now, cutoff, protection, archive,
-                cancellationToken).ConfigureAwait(false));
+                pass, cancellationToken).ConfigureAwait(false));
         }
         catch (OperationCanceledException) { completion.TrySetResult("canceled"); }
         catch (Exception) { completion.TrySetResult("retirement_unconfirmed"); }
-        finally { lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; } }
+        finally
+        {
+            lock (_gate)
+            {
+                if (ReferenceEquals(_deleteWork, completion.Task)) { _deleteWork = null; _retiringSessionId = null; }
+            }
+        }
     }
+
+    // Called under the gate. A deletion or a provider change holds every session; a retirement holds only its own.
+    private bool Reserved(string sessionId)
+        => _deleteWork is not null && (_retiringSessionId is null || string.Equals(_retiringSessionId, sessionId, StringComparison.OrdinalIgnoreCase));
 }

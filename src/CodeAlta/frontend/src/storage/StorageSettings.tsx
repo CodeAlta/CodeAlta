@@ -10,6 +10,7 @@ import { useSettingsFiles, type SettingsFilesApi } from "../settingsFiles";
 import { settingsFailure, type SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
 import { measuredPercentage, retentionAmount, retentionUnits, storageBytes, storageCategories, storageSize, type StorageApi, type StorageMeasurement, type StoragePreferences } from "./storage";
+import { retentionProgress } from "./maintenance";
 import "./storage.css";
 
 /** Host-owned scratchpad maintenance feedback. Closing this page cancels measurement only, never maintenance. */
@@ -27,6 +28,10 @@ export interface StorageRetentionSummary {
   deleted: number;
   skipped: number;
   reason: string | null;
+  /** Sessions the pass checks; zero or missing until it has listed them. */
+  total?: number;
+  /** Bytes the pass removed so far (an Int64 wire string). */
+  freedBytes?: string;
 }
 
 /** Global storage preferences and a read-only measurement of the profile. No category has a removal action. */
@@ -220,8 +225,10 @@ function RetentionStatus({ retention }: { retention: StorageRetentionSummary }) 
   const icon = state === "running" ? <ActivitySpinner size={12} />
     : <AppIcon name={state === "partial" ? "warning" : state === "completed" ? "check" : "info"} size={14} />;
   const known = ["running", "completed", "partial", "skipped", "canceled"].includes(state);
+  const progress = known && state !== "skipped" ? retentionProgress(locale, retention) : undefined;
   return <div className="storage-maintenance storage-session-cleanup" data-state={known ? state : "unavailable"}>
     <span className="storage-maintenance-title" role="status">{icon}<span>{title}</span></span>
+    {progress && <span className="storage-hint storage-session-cleanup-progress" role="status">{progress}</span>}
     {reason?.detail && <span className="storage-hint">{t(reason.detail)}</span>}
   </div>;
 }

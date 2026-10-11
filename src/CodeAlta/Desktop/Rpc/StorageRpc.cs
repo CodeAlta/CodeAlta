@@ -177,7 +177,8 @@ internal sealed class StorageService
         });
         using var subscription = _retention.Subscribe(snapshot => snapshots.Writer.TryWrite(snapshot));
         await foreach (var snapshot in snapshots.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            yield return new(snapshot.State, snapshot.Examined, snapshot.Deleted, snapshot.Skipped, snapshot.Reason);
+            yield return new(snapshot.State, snapshot.Examined, snapshot.Deleted, snapshot.Skipped, snapshot.Reason)
+            { Total = snapshot.Total, FreedBytes = snapshot.FreedBytes };
     }
 
     private StorageSettingsResponse ReadSettings()
@@ -231,4 +232,11 @@ internal sealed record StorageMaintenance(string State,
     [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
     public long ProcessedDirectories { get; init; }
 }
-internal sealed record StorageRetentionMaintenance(string State, int Examined, int Deleted, int Skipped, string? Reason);
+internal sealed record StorageRetentionMaintenance(string State, int Examined, int Deleted, int Skipped, string? Reason)
+{
+    /// <summary>Gets the number of sessions the pass checks, zero until it has listed them.</summary>
+    public int Total { get; init; }
+    /// <summary>Gets the bytes the pass removed so far.</summary>
+    [NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))]
+    public long FreedBytes { get; init; }
+}

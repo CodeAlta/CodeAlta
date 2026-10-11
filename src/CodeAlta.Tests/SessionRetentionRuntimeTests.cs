@@ -164,6 +164,73 @@ public sealed class SessionRetentionRuntimeTests
     }
 
     [TestMethod]
+    public async Task RetirementHoldsBackCommandsOfItsSessionOnly()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Windows exact-file retirement.");
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync("old");
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var archive = new FakeArchive { WaitDuringPrepare = async () => { entered.SetResult(); await release.Task; } };
+        var retirement = fixture.Service(archive).RunOnceAsync(Now, Now.AddMonths(-1));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        OwnedSessionCommandAdmission other;
+        try
+        {
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, fixture.Commands.AdmitSend(new("retired-send", "old", "stale")).Kind);
+            other = fixture.Commands.AdmitSend(new("other-send", "other", "hello"));
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, other.Kind, "A cleanup must not hold back prompts to other sessions.");
+        }
+        finally { release.TrySetResult(); }
+        await other.Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(1, (await retirement).Deleted);
+    }
+
+    [TestMethod]
+    public async Task RecentSessionsAreKeptWithoutMakingThePassPartial_AndProgressCountsFreedBytes()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("Exact-handle deletion currently fails closed on other platforms.");
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync("old");
+        await fixture.SeedAsync("recent", activity: Now.AddDays(-1));
+        var length = new FileInfo(fixture.Journal("old")).Length;
+        var archive = new FakeArchive();
+        var service = fixture.Service(archive);
+        var statuses = new List<SessionRetentionStatus>();
+        using var subscription = service.Subscribe(statuses.Add);
+        var result = await service.RunOnceAsync(Now, Now.AddMonths(-1));
+        Assert.AreEqual("completed", result.State, result.Reason);
+        Assert.AreEqual(2, result.Total);
+        Assert.AreEqual(2, result.Examined);
+        Assert.AreEqual(1, result.Deleted);
+        Assert.AreEqual(1, result.Skipped);
+        Assert.AreEqual(length, result.FreedBytes);
+        Assert.AreEqual(1, archive.Prepared, "A recent session never reaches the archive.");
+        Assert.IsTrue(File.Exists(fixture.Journal("recent")));
+        Assert.IsTrue(statuses.Any(status => status.State == "running" && status.Total == 2 && status.Examined == 0),
+            "The total is published before the first session is checked.");
+    }
+
+    [TestMethod]
+    public async Task FamilyGraphOfAPassRereadsJournalsThatChanged()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync("parent");
+        await fixture.SeedAsync("child");
+        var store = fixture.Catalog.JournalStore.CreateSessionStore();
+        var pass = new SessionRetentionPass();
+        var first = await store.ReadRetentionFamilyProtectionAsync(pass, default);
+        Assert.IsNotNull(first);
+        Assert.IsFalse(first.Contains("parent"));
+        using var payload = JsonDocument.Parse("{\"session_id\":\"child\",\"parent_session_id\":\"parent\"}");
+        await File.AppendAllTextAsync(fixture.Journal("child"), new AgentRawEvent(new("retention-test"), "child",
+            Now.AddMonths(-2), "codealta.sessionState", payload.RootElement).ToJson() + "\n");
+        var second = await store.ReadRetentionFamilyProtectionAsync(pass, default);
+        Assert.IsNotNull(second);
+        Assert.IsTrue(second.Contains("parent") && second.Contains("child"), "An appended lineage edge is never hidden by the pass cache.");
+    }
+
+    [TestMethod]
     [DataRow("missing")]
     [DataRow("wrong_source")]
     [DataRow("unverified")]

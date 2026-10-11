@@ -2023,7 +2023,10 @@ validation remains authoritative for calendar bounds and safe cleanup eligibilit
 the host's latest outcomes even when Settings was closed. The scratchpad maintenance summary is one line of bounded running/completed/partial/skipped/canceled feedback from the host
 in the cleanup card, with its reasons under **Details**. The optional session retention summary is a
 separate line below it: running, completed with the removed count, partial with removed and kept counts,
-or skipped/canceled. Known skip reasons get short localized text (not available yet, off, Saved Statistics
+or skipped/canceled. Once the pass has listed its sessions, the line and the keyed `storage-retention` toast
+add its progress: sessions checked out of the total, sessions removed and bytes freed (`total` and the Int64-string
+`freedBytes` of `StorageRetentionMaintenance`). A recent session is kept without making the pass partial.
+Known skip reasons get short localized text (not available yet, off, Saved Statistics
 unavailable, check the retention duration); unknown reasons and states never show host text, and an
 unknown state shows an explicit unavailable line. A broken observation stream or host-liveness outage does not erase an already-final
 outcome for the same host epoch. Unfinished outcomes become unavailable until observation resumes; an actual epoch change clears the old results.
@@ -2031,6 +2034,12 @@ Automatic session deletion is a single startup pass after external producers are
 native window's authenticated lifetime/inventory handshake has protected open sessions and drafts in
 every space. Missing restoration, unavailable Statistics or unsupported storage skips cleanup; policy
 editing never enables readiness or retries a pass. Manual deletion confirmations do not govern automatic retention.
+The pass reads the age of each session without any claim first; only an expired session enters the exclusive
+retirement path, and that path reserves owned commands of that session only (`OwnedSessionCommandService.Reserved`):
+sends, queues, steering, compaction and aborts of other sessions are admitted meanwhile. The family-lineage graph is
+read once per pass and a journal is parsed again only when its size or times change (`SessionRetentionPass`); before,
+every candidate re-parsed every journal, which on a profile of about 1,000 journals (11 GB) meant hours of parsing
+while every owned send was refused as busy.
 
 ### Configuration file
 

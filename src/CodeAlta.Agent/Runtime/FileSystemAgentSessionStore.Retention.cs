@@ -8,7 +8,12 @@ public sealed partial class FileSystemAgentSessionStore
 {
     // Unlike normal listing, an incomplete projection is not silently omitted: a hidden child could protect
     // any parent. Read the physical graph without the best-effort SQLite listing, and reject links/duplicates.
-    internal async Task<IReadOnlySet<string>?> ReadRetentionFamilyProtectionAsync(CancellationToken cancellationToken)
+    internal Task<IReadOnlySet<string>?> ReadRetentionFamilyProtectionAsync(CancellationToken cancellationToken)
+        => ReadRetentionFamilyProtectionAsync(null, cancellationToken);
+
+    // With a pass, a journal whose size and times did not change since that pass read it is not parsed again: without
+    // it, every candidate of a pass parsed every journal of the profile, which never ended on large profiles.
+    internal async Task<IReadOnlySet<string>?> ReadRetentionFamilyProtectionAsync(SessionRetentionPass? pass, CancellationToken cancellationToken)
     {
         try
         {
@@ -26,65 +31,102 @@ public sealed partial class FileSystemAgentSessionStore
                         && !child.EndsWith(".attachments", StringComparison.OrdinalIgnoreCase)) pending.Push(child);
                 foreach (var path in Directory.EnumerateFiles(directory, "*.jsonl"))
                 {
-                    if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return null;
-                    var listed = await ProjectSessionFileForListingAsync(path, cancellationToken).ConfigureAwait(false);
-                    if (listed?.Projection.Summary is not { } summary || !ids.Add(summary.SessionId)
-                        || !string.Equals(path, _layout.GetSessionFilePath(summary.SessionId, summary.CreatedAt), StringComparison.OrdinalIgnoreCase)) return null;
-                    // Projection readers may recover around a corrupt record. A retention graph cannot: that
-                    // lost record may contain the only parent/provenance edge. Reject incomplete tails as well.
-                    await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    if (stream.Length == 0) return null;
-                    stream.Position = stream.Length - 1;
-                    if (stream.ReadByte() != '\n') return null;
-                    stream.Position = 0;
-                    using var reader = new StreamReader(stream, new UTF8Encoding(false, true));
-                    while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+                    var file = new FileInfo(path);
+                    if ((file.Attributes & FileAttributes.ReparsePoint) != 0) return null;
+                    // Taken before the read: an append during the read changes it, and the next read parses again.
+                    var stamp = new RetentionJournalStamp(file.Length, file.LastWriteTimeUtc, file.CreationTimeUtc);
+                    if (pass?.TryGetFamily(path, stamp) is not { } family)
                     {
-                        using var document = JsonDocument.Parse(line);
-                        ValidateObject(document.RootElement);
-                        if (document.RootElement.Deserialize(AgentJsonSerializerContext.Default.AgentEvent) is not { } item
-                            || !string.Equals(item.SessionId, summary.SessionId, StringComparison.Ordinal)) return null;
-                        if (item is not AgentRawEvent raw) continue;
-                        if (raw.BackendEventType == SessionSummaryEventType)
-                        {
-                            ValidateObject(raw.Raw);
-                            if (raw.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentSessionSummary) is not { } snapshot
-                                || snapshot.SessionId != summary.SessionId) return null;
-                            AddRelation(snapshot.SessionId, snapshot.ParentSessionId);
-                            AddRelation(snapshot.SessionId, snapshot.CreatedBySessionId);
-                        }
-                        else if (raw.BackendEventType is CodeAltaSessionHeaderEventType or CodeAltaSessionStateEventType)
-                        {
-                            // Catalog is layered above Agent. Read its stable persisted wire fields here rather
-                            // than depending on its best-effort cached view projection. Keep every historical edge.
-                            ValidateObject(raw.Raw);
-                            if (ReadOptionalString(raw.Raw, "session_id") is { } id && id != summary.SessionId) return null;
-                            AddRelation(summary.SessionId, ReadOptionalString(raw.Raw, "parent_session_id"));
-                            if (raw.Raw.TryGetProperty("created_by", out var provenance) && provenance.ValueKind != JsonValueKind.Null)
-                            {
-                                ValidateObject(provenance);
-                                if (string.IsNullOrWhiteSpace(ReadOptionalString(provenance, "Kind"))) return null;
-                                AddRelation(summary.SessionId, ReadOptionalString(provenance, "SourceSessionId"));
-                            }
-                        }
+                        family = await ReadRetentionFamilyAsync(path, cancellationToken).ConfigureAwait(false);
+                        if (family is null) return null;
+                        pass?.SetFamily(path, stamp, family);
                     }
-                    AddRelation(summary.SessionId, summary.ParentSessionId);
-                    AddRelation(summary.SessionId, summary.CreatedBySessionId);
+                    if (!ids.Add(family.SessionId)) return null;
+                    result.UnionWith(family.Protected);
                 }
             }
             return result;
-
-            void AddRelation(string sessionId, string? related)
-            {
-                if (related is null) return;
-                if (string.IsNullOrWhiteSpace(related) || related != related.Trim()) throw new InvalidDataException("Ambiguous lineage identifier.");
-                result.Add(sessionId);
-                result.Add(related);
-            }
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or JsonException or NotSupportedException)
         {
             return null;
+        }
+    }
+
+    private async Task<RetentionJournalFamily?> ReadRetentionFamilyAsync(string path, CancellationToken cancellationToken)
+    {
+        var listed = await ProjectSessionFileForListingAsync(path, cancellationToken).ConfigureAwait(false);
+        if (listed?.Projection.Summary is not { } summary
+            || !string.Equals(path, _layout.GetSessionFilePath(summary.SessionId, summary.CreatedAt), StringComparison.OrdinalIgnoreCase)) return null;
+        var protectedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Projection readers may recover around a corrupt record. A retention graph cannot: that
+        // lost record may contain the only parent/provenance edge. Reject incomplete tails as well.
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        if (stream.Length == 0) return null;
+        stream.Position = stream.Length - 1;
+        if (stream.ReadByte() != '\n') return null;
+        stream.Position = 0;
+        using var reader = new StreamReader(stream, new UTF8Encoding(false, true));
+        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        {
+            using var document = JsonDocument.Parse(line);
+            ValidateObject(document.RootElement);
+            if (document.RootElement.Deserialize(AgentJsonSerializerContext.Default.AgentEvent) is not { } item
+                || !string.Equals(item.SessionId, summary.SessionId, StringComparison.Ordinal)) return null;
+            if (item is not AgentRawEvent raw) continue;
+            if (raw.BackendEventType == SessionSummaryEventType)
+            {
+                ValidateObject(raw.Raw);
+                if (raw.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentSessionSummary) is not { } snapshot
+                    || snapshot.SessionId != summary.SessionId) return null;
+                AddRelation(snapshot.SessionId, snapshot.ParentSessionId);
+                AddRelation(snapshot.SessionId, snapshot.CreatedBySessionId);
+            }
+            else if (raw.BackendEventType is CodeAltaSessionHeaderEventType or CodeAltaSessionStateEventType)
+            {
+                // Catalog is layered above Agent. Read its stable persisted wire fields here rather
+                // than depending on its best-effort cached view projection. Keep every historical edge.
+                ValidateObject(raw.Raw);
+                if (ReadOptionalString(raw.Raw, "session_id") is { } id && id != summary.SessionId) return null;
+                AddRelation(summary.SessionId, ReadOptionalString(raw.Raw, "parent_session_id"));
+                if (raw.Raw.TryGetProperty("created_by", out var provenance) && provenance.ValueKind != JsonValueKind.Null)
+                {
+                    ValidateObject(provenance);
+                    if (string.IsNullOrWhiteSpace(ReadOptionalString(provenance, "Kind"))) return null;
+                    AddRelation(summary.SessionId, ReadOptionalString(provenance, "SourceSessionId"));
+                }
+            }
+        }
+        AddRelation(summary.SessionId, summary.ParentSessionId);
+        AddRelation(summary.SessionId, summary.CreatedBySessionId);
+        return new(summary.SessionId, [.. protectedIds]);
+
+        void AddRelation(string sessionId, string? related)
+        {
+            if (related is null) return;
+            if (string.IsNullOrWhiteSpace(related) || related != related.Trim()) throw new InvalidDataException("Ambiguous lineage identifier.");
+            protectedIds.Add(sessionId);
+            protectedIds.Add(related);
+        }
+    }
+
+    // Reads the age of a journal without any claim, so that a recent session never takes the exclusive retirement
+    // path. It can only keep a session: retirement reads the age again under its exclusive lease. A journal that
+    // grows meanwhile only gains later activity, so a recent prefix means a recent journal.
+    internal async Task<bool> IsRetentionCandidateRecentAsync(string sessionId, DateTimeOffset createdAt, DateTimeOffset now,
+        DateTimeOffset cutoff, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var stream = new FileStream(_layout.GetSessionFilePath(sessionId, createdAt), FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
+            var activity = await SessionMeaningfulActivity.ReadAsync(stream, sessionId, createdAt, now, cancellationToken).ConfigureAwait(false);
+            return activity.BlockedReason is null && activity.LastMeaningfulActivityUtc is { } last && last >= cutoff;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            // The exclusive path decides, and reports, what cannot be read here.
+            return false;
         }
     }
 
@@ -133,7 +175,9 @@ public sealed partial class FileSystemAgentSessionStore
                     if (!commitWhileProtected(() => { journal.Delete(); return true; }))
                     { result = new("protection_unavailable", false, false); return; }
                     result = new("ok", true, true);
+                    var journalBytes = journal.Stream.Length;
                     result = result with { ArtifactsRemaining = artifacts.DeleteCaptured() };
+                    result = result with { FreedBytes = journalBytes + artifacts.DeletedBytes };
                 }
                 // Close the delete-pending handles before reconciling projections. Never remove parent directories
                 // by a stale path, and never sweep leftover artifacts on a subsequent absent-journal retry.
@@ -159,4 +203,8 @@ public sealed partial class FileSystemAgentSessionStore
 
 internal sealed record SessionJournalRetirementSource(string SessionId, string JournalPath, string FileIdentity,
     long Length, DateTimeOffset LastWriteUtc, string Sha256, DateTimeOffset LastMeaningfulActivityUtc);
-internal sealed record SessionJournalRetirementResult(string Status, bool Deleted, bool ArtifactsRemaining);
+internal sealed record SessionJournalRetirementResult(string Status, bool Deleted, bool ArtifactsRemaining)
+{
+    /// <summary>Gets the bytes of the journal and of the artifacts removed with it.</summary>
+    internal long FreedBytes { get; init; }
+}
