@@ -39,7 +39,7 @@ test("exact selected project identity/path renders only recorded snapshot metada
   assert.deepEqual(info, {
     id: "session-1", title: "Recorded title", titleTruncated: false, scope: "Project: Recorded project",
     scopeWarning: null, path: "/exact/p", worktree: null, provider: "recorded-provider",
-    updatedAt: "2026-09-23T01:02:03+00:00", createdAt: null, canCopyId: true,
+    updatedAt: "2026-09-23T01:02:03+00:00", createdAt: null, canCopyId: true, lineage: null,
   });
   const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
   assert.match(html, /<dialog[^>]*aria-labelledby="session-info-title"/);
@@ -64,6 +64,23 @@ test("a session that works in a git worktree names it, and says when its folder 
   assert.deepEqual(missing.worktree, { path: "/trees/p/quiet-heron", missing: true });
   assert.match(renderToStaticMarkup(createElement(SessionInfoDialog, { info: missing, demo: false, onClose: () => {} })),
     /<dt>Git worktree<\/dt><dd>\/trees\/p\/quiet-heron<small>The folder of this worktree is gone/);
+});
+
+test("a fork names the session it comes from, by the title that session has now", () => {
+  const source = { ...session, id: "source", title: "Renamed since", fullTitle: "Renamed since" };
+  const fork = { ...session, forkedFromSessionId: "source", forkedFromTitle: "Title at the fork", forkKind: "fork", forkTurnCount: 4 };
+  assert.equal(sessionInfoView(snapshot, session, "p").lineage, null);
+  const info = sessionInfoView({ ...snapshot, sessions: [fork, source] }, fork, "p");
+  assert.deepEqual(info.lineage, { kind: "fork", sourceId: "source", title: "Renamed since", turnCount: 4 });
+  assert.match(renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} })),
+    /<dt>Origin<\/dt><dd>Forked from Renamed since · started with 4 turns<small><code>source<\/code><\/small><\/dd>/);
+  // The source is gone: the title it had is kept. What a rewind removed says so.
+  const kept = { ...fork, forkKind: "rewind", forkTurnCount: 1 };
+  const alone = sessionInfoView({ ...snapshot, sessions: [kept] }, kept, "p");
+  assert.deepEqual(alone.lineage, { kind: "rewind", sourceId: "source", title: "Title at the fork", turnCount: 1 });
+  assert.match(renderToStaticMarkup(createElement(SessionInfoDialog, { info: alone, demo: false, onClose: () => {} })),
+    /<dt>Origin<\/dt><dd>Kept from a rewind of Title at the fork · rewound to the end of turn 1</);
+  assert.doesNotMatch(renderToStaticMarkup(createElement(SessionInfoDialog, { info: sessionInfoView(snapshot, session, "p"), demo: false, onClose: () => {} })), /Origin/);
 });
 
 test("global persists even when its working path equals a project; unknown or mismatched scope is not inferred", () => {

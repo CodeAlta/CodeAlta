@@ -45,7 +45,7 @@ import { SessionBrowser } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
-import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
+import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, automationsTab, canvasTab, canvasesTab, documentationTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -223,6 +223,13 @@ import "./documentation/documentation.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
 import { createDocumentationHub } from "./documentation/documentationHub";
 import "./pluginButtons/pluginButtons.css";
+import "./sessionBranch/sessionBranch.css";
+import { SessionBranchDialog, type BranchDialogHost } from "./sessionBranch/SessionBranchDialog";
+import { SessionLineageBanner, SessionLineageMark } from "./sessionBranch/SessionLineage";
+import { composerPrompt, type BranchMode } from "./sessionBranch/branchPoints";
+import { createBranchRequests, readKeepRemovedTurns, saveKeepRemovedTurns, type BranchRequests } from "./sessionBranch/branchRequests";
+import { lineageTitle, sessionLineage } from "./sessionBranch/lineage";
+import { branchTarget, createSessionBranch, readSessionTurns, type ForkResult, type RewindResult } from "./sessionBranch/sessionBranchRpc";
 import { CanvasPanel } from "./canvases/CanvasPanel";
 import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/hostBridge";
 import { createCanvasHub, type CanvasClosedInstance, type CanvasOpenRequest } from "./canvases/canvasHub";
@@ -237,9 +244,20 @@ import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
-  latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
+  latestReady: () => boolean; latest: () => void; cancelLatest: () => void;
+  /** Scrolls to a user message, by the journal offset that keys its row; false when the loaded window does not hold it. */
+  showRow: (key: string) => boolean }>;
+
+/**
+ * What a pane of a session asks for a fork or a rewind of its session: the requests that open the window, and the
+ * two changes, which the window of the application carries through (the new session, its tab, the prompt).
+ */
+type SessionBranchHost = Readonly<{ requests: BranchRequests;
+  fork: (session: WorkspaceSession, projectId: string | null, beforeRunId: string | null) => Promise<ForkResult>;
+  rewind: (session: WorkspaceSession, projectId: string | null, beforeRunId: string, keepRemovedTurns: boolean) => Promise<RewindResult> }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
+const noSubscription = () => () => { };
 type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "storage";
 type SettingsSection = Exclude<View, "workspace">;
 
@@ -562,6 +580,14 @@ function App() {
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
   const [sessionPaneOwners] = useState(() => new Map<string, ReturnType<typeof createSessionPaneOwners>>());
+  // The fork and the rewind of sessions: one change at a time, and which pane shows the window that asks for it.
+  const [sessionBranch] = useState(() => createSessionBranch(workspaceApi.forkSession, workspaceApi.rewindSession));
+  const branchActions = useRef<Pick<SessionBranchHost, "fork" | "rewind">>({ fork: async () => ({ kind: "error", code: "unconfigured" }), rewind: async () => ({ kind: "error", code: "unconfigured" }) });
+  const [branchHost] = useState<SessionBranchHost>(() => ({ requests: createBranchRequests(),
+    fork: (...request) => branchActions.current.fork(...request), rewind: (...request) => branchActions.current.rewind(...request) }));
+  // The sessions rewound from this window, with the count the host answered: their pane is read again at once,
+  // before the list of sessions says the same.
+  const [rewoundHere, setRewoundHere] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [scrollMemory] = useState(createTimelineScrollMemory);
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
   const [projectArchive] = useState(() => createProjectArchive(workspace.archiveProject));
@@ -965,6 +991,7 @@ function App() {
     if (currentSnapshot.current?.sessions.some(candidate => candidate.id === session.id)) selectProject(target.projectId, target.sessionId);
     else showSpace(defaultSpaceId, target);
   }
+  const revealSessionLatest = useRef(revealSession); revealSessionLatest.current = revealSession;
   // Shows a space on one of its sessions: the one that waits for the user there. A session that just started is read first.
   async function openSpaceSession(id: string, target: SpaceTarget) {
     if (target.sessionId && !catalog.current?.sessions.some(session => session.id === target.sessionId)) {
@@ -2061,6 +2088,7 @@ function App() {
     switch (command) {
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
+      case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
@@ -2127,6 +2155,7 @@ function App() {
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
       case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
       case "steer": break;
+      case "fork": case "rewind": openSessionBranch(command); break;
       // The remaining commands share their implementation with the older shortcut actions of the same name.
       default: runShortcut(command as ShortcutAction);
     }
@@ -2394,6 +2423,7 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access[pending.action]) return;
+    if (pending.action === "fork") { branchHost.requests.open(pending.sessionId, "fork"); return; }
     if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
@@ -2406,6 +2436,7 @@ function App() {
       {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
         title={carriedBy(work, session.id).map(item => item.title).join("\n")}><AppIcon name="task" size={12} /></span>}
       <WorktreeBadge session={session} />
+      {session.forkedFromSessionId && <SessionLineageMark lineage={sessionLineage(session)!} />}
       <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
     </>;
   }
@@ -2483,11 +2514,13 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access.open) return;
-    if (action === "rename" && !access.rename || action === "delete" && !access.delete) return;
+    if (action === "rename" && !access.rename || action === "delete" && !access.delete || action === "fork" && !access.fork) return;
     const switching = selectedSessionId.current !== row.id;
     if (switching) setSessionId(row.id);
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
     if (action === "remote-control") { dismissSessionMenu(false); if (access["remote-control"]) askRemoteControl(row.id); return; }
+    // The window of the fork is the one of the session's pane: the session is selected, and its pane shows it.
+    if (action === "fork") { dismissSessionMenu(false); branchHost.requests.open(row.id, "fork"); return; }
     dismissSessionMenu(false);
     if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
     if (action === "rename") {
@@ -2772,6 +2805,83 @@ function App() {
         setCreatingMessage(message); recordHandoff(message + " Original draft retained; nothing sent."); }
     } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
   }
+
+  // The window of a fork or a rewind is the one of the selected session's pane: a command only asks for it.
+  function openSessionBranch(mode: BranchMode) {
+    const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId, selectedSessionId.current, selectedScope.current);
+    if (view === "workspace" && owned && currentProjectWritable() && selection) branchHost.requests.open(selection.sessionId, mode);
+  }
+  // A fork: the new session is listed, given the prompt of the turn it stops before as its draft, and opened in a tab.
+  async function forkSessionOfPane(row: WorkspaceSession, paneProjectId: string | null, beforeRunId: string | null): Promise<ForkResult> {
+    const epoch = status?.hostEpoch ?? undefined;
+    const target = branchTarget(currentSnapshot.current, row, paneProjectId);
+    if (!target) return { kind: "error", code: "scope_missing" };
+    const result = await sessionBranch.fork(epoch, target, row.id, beforeRunId, mutation?.capability);
+    if (result.kind === "forked") branchHost.requests.done(row.id);
+    if (result.kind === "forked" && creationAlive.current) void showFork(result, epoch!, row.title);
+    return result;
+  }
+  async function showFork(result: Extract<ForkResult, { kind: "forked" }>, epoch: string, sourceTitle: string) {
+    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+    // The composer of the fork does not exist yet: the prompt waits for it as its draft. A draft that is there is never replaced.
+    const prompt = composerPrompt(result.prompt);
+    if (prompt) transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), result.id, prompt);
+    let fresh: WorkspaceSnapshot | undefined;
+    try { fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 }); } catch { /* The fork exists whatever the list says. */ }
+    if (!creationAlive.current) return;
+    const title = plainTitle(result.title || sourceTitle);
+    const fork = fresh?.configured && currentHostEpoch.current === epoch ? (catalog.current ?? fresh).sessions.find(session => session.id === result.id) : undefined;
+    if (!fresh || !fork) {
+      showToast({ message: say("The fork “{title}” was created, but it could not be opened from here. Look for it in the list of sessions.", { title }), intent: "warning", icon: "warning-sign", timeout: 12_000 });
+      return;
+    }
+    publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    revealSessionLatest.current(fork);
+    focusPromptSoon();
+    showToast({ intent: "success", icon: "tick", timeout: 8000, message: result.turnCount === 0 ? say("The fork “{title}” was created empty.", { title })
+      : say("The fork “{title}” was created with {turns}.", { title, turns: result.turnCount === 1 ? say("1 turn") : say("{count} turns", { count: result.turnCount }) }) });
+  }
+  // A rewind: the pane of the session is read again, its composer gets the prompt of the first removed turn, and the user is told what was removed.
+  async function rewindSessionOfPane(row: WorkspaceSession, paneProjectId: string | null, beforeRunId: string, keepRemovedTurns: boolean): Promise<RewindResult> {
+    const epoch = status?.hostEpoch ?? undefined;
+    const target = branchTarget(currentSnapshot.current, row, paneProjectId);
+    if (!target) return { kind: "error", code: "scope_missing" };
+    const result = await sessionBranch.rewind(epoch, target, row.id, beforeRunId, keepRemovedTurns, mutation?.capability);
+    if (result.kind === "rewound") branchHost.requests.done(row.id);
+    if (result.kind === "rewound" && creationAlive.current) void showRewind(result, epoch!, row);
+    return result;
+  }
+  async function showRewind(result: Extract<RewindResult, { kind: "rewound" }>, epoch: string, row: WorkspaceSession) {
+    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+    // The prompt goes back to the composer when it is empty; a draft that is there is kept, and the prompt offered beside it.
+    const prompt = composerPrompt(result.prompt);
+    let offered: string | null = null;
+    if (prompt) {
+      const composer = askPluginComposer("state", result.id).state;
+      if ((composer?.draftText ?? restoreDraft(key => localStorage.getItem(key), result.id)).trim()) offered = prompt;
+      else {
+        if (composer) askPluginComposer("draft", result.id, prompt);
+        // The pane is mounted again below: its composer starts from what is stored.
+        if (!persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), result.id, prompt)) offered = prompt;
+      }
+    }
+    setRewoundHere(current => new Map(current).set(result.id, Math.max(result.rewindCount, row.rewindCount + 1, (current.get(result.id) ?? 0) + 1)));
+    focusPromptSoon();
+    const title = plainTitle(row.title), kept = result.removedTurnsSessionId;
+    const turns = result.removedTurnCount === 1 ? say("1 turn") : say("{count} turns", { count: result.removedTurnCount });
+    showToast({ intent: "success", icon: "tick", timeout: 12_000,
+      message: kept ? say("Rewound “{title}”: {turns} removed and kept in “{kept}”. Changed files were left as they are.", { title, turns, kept: plainTitle(result.removedTurnsTitle ?? kept) })
+        : say("Rewound “{title}”: {turns} removed and deleted. Changed files were left as they are.", { title, turns }),
+      action: kept ? { text: say("Open the kept session"), onClick: () => openLinkedSession.current(kept) } : undefined });
+    if (offered) showToast({ intent: "primary", icon: "info-sign", timeout: 30_000, message: say("The composer holds a draft: the prompt of the removed turn was not put in it."),
+      action: { text: say("Copy the prompt"), onClick: () => void navigator.clipboard.writeText(offered).catch(() => { }) } });
+    let fresh: WorkspaceSnapshot | undefined;
+    try { fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 }); } catch { /* The session is rewound whatever the list says. */ }
+    if (!creationAlive.current) return;
+    if (fresh?.configured && currentHostEpoch.current === epoch) publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    else showToast({ message: say("The session was rewound, but the list of sessions could not be read. Refresh the sessions to see it as it is now."), intent: "warning", icon: "warning-sign", timeout: 12_000 });
+  }
+  branchActions.current = { fork: forkSessionOfPane, rewind: rewindSessionOfPane };
 
   async function renameSelectedSession() {
     if (batchDeletion.locked()) return;
@@ -3184,6 +3294,7 @@ function App() {
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
+                  { key: "fork", label: t("Fork…"), icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
@@ -3214,7 +3325,11 @@ function App() {
               if (!snapshot) return null;
               if (!row) return <NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")}
                 description={t("This session is no longer in the catalog. Close the tab or refresh the projects.")} />;
-              const ownerKey = JSON.stringify([status?.hostEpoch, tabKey(tab), row.createdAt]);
+              // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
+              const rewinds = Math.max(row.rewindCount, rewoundHere.get(row.id) ?? 0);
+              const ownerKey = sessionPaneKey(status?.hostEpoch, tab, row.createdAt, rewinds);
+              const lineage = sessionLineage(row);
+              const source = lineage && lineageTitle(lineage, (catalog.current ?? snapshot).sessions);
               const admitted = () => !!status && (currentHostAvailable.current
                 ? !!status.hostEpoch && currentHostEpoch.current === status.hostEpoch && retention.hasClaim(status.hostEpoch, row.id)
                 : !status.hostAvailable);
@@ -3226,7 +3341,10 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace session={row} canAdmit={admitted} remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
+              <SessionWorkspace session={row} canAdmit={admitted} rewinds={rewinds} branch={owned ? branchHost : null}
+                lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
+                  onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
+                remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
                 origin={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
@@ -3626,8 +3744,14 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, lineage }: {
   canAdmit: () => boolean;
+  /** The number of times the session was rewound: what was read of its journal before a rewind is not what it holds now. */
+  rewinds?: number;
+  /** The fork and the rewind of this session; null where it cannot be changed. */
+  branch?: SessionBranchHost | null;
+  /** Where the session comes from when it is a fork, shown above its timeline. */
+  lineage?: ReactNode;
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
@@ -3695,6 +3819,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   const [running, setRunning] = useState<boolean | null>(null);
   // The tool calls whose task goes on in the background, or ended there: their tiles say so.
   const [backgroundCallStates, setBackgroundCallStates] = useState<ReadonlyMap<string, BackgroundCallState>>(() => new Map());
+  // How many tasks still run in the background of the session: a rewind waits for them.
+  const [backgroundRunning, setBackgroundRunning] = useState(0);
   const [timelineNotices, setTimelineNotices] = useState<HTMLDivElement | null>(null);
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
@@ -3711,7 +3837,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     infoFocusRestoration.schedule(trigger, () => !infoActive.current && infoTrigger.current === trigger && !trigger?.disabled,
       () => !!modalDialogOpen());
   }
-  const timeline = useTimelinePosition(session.id, scrollMemory);
+  const timeline = useTimelinePosition(session.id, scrollMemory, rewinds);
   const composer = useComposerLayout(preferredComposerHeight, onComposerHeight);
   const [messageNotice, setMessageNotice] = useState<TimelineNotice>(null);
   const [newerOmitted, setNewerOmitted] = useState(false);
@@ -3736,7 +3862,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             : { key: "First retained message in this window. Older journal history may be available via Load older history." }
           : { key: action === "messageFirst" ? "First retained message (not necessarily the first journal message): {label}" : "Retained message: {label}", parameters: result.label === undefined ? undefined : { label: result.label } });
       },
-      latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel };
+      latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel,
+      showRow: key => { newest.cancel(); return timeline.showRow(key); } };
     timelineCommand.current = command;
     return () => { if (timelineCommand.current === command) timelineCommand.current = null; };
   });
@@ -3768,10 +3895,32 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   // A command of a card of this timeline runs for this session, whatever pane has the keyboard.
   const timelinePane = useMemo(() => ({ sessionId: session.id, projectId: selectedProjectId }), [session.id, selectedProjectId]);
   // Reading is not sending: the images of an archived project's session are shown too.
-  const readImages = useMemo(() => pluginEpoch === null ? undefined : timelineImages.reader(pluginEpoch, session.id),
-    [timelineImages, pluginEpoch, session.id]);
-  const readTool = useMemo(() => pluginEpoch === null ? undefined : toolRecords.records.reader(pluginEpoch, session.id),
-    [toolRecords, pluginEpoch, session.id]);
+  const readImages = useMemo(() => pluginEpoch === null ? undefined : timelineImages.reader(pluginEpoch, session.id, rewinds),
+    [timelineImages, pluginEpoch, session.id, rewinds]);
+  const readTool = useMemo(() => pluginEpoch === null ? undefined : toolRecords.records.reader(pluginEpoch, session.id, rewinds),
+    [toolRecords, pluginEpoch, session.id, rewinds]);
+  // The window of a fork or a rewind of this session: a command, a prompt of the timeline or the menu of its row
+  // asks for it, and the pane that has the session shows it.
+  const branchRequest = useSyncExternalStore(branch ? branch.requests.subscribe : noSubscription, () => branch?.requests.forSession(session.id) ?? null);
+  const branchEpoch = branch && ownedSession && !demoMode ? status!.hostEpoch! : null;
+  const branchDialogHost = useMemo<BranchDialogHost | null>(() => branch && branchEpoch ? {
+    readTurns: (beforeTurn, signal) => readSessionTurns(workspaceApi.sessionTurns, branchEpoch, session.id, beforeTurn, signal),
+    fork: beforeRunId => branch.fork(session, selectedProjectId, beforeRunId),
+    rewind: (beforeRunId, keepRemovedTurns) => branch.rewind(session, selectedProjectId, beforeRunId, keepRemovedTurns),
+  } : null, [branch, branchEpoch, session, selectedProjectId]);
+  // A request for a session that cannot be changed here is dropped.
+  useEffect(() => { if (branchRequest && !branchDialogHost) branch?.requests.close(branchRequest); }, [branch, branchRequest, branchDialogHost]);
+  const openBranch = useCallback((key: string, mode: BranchMode) => branch?.requests.open(session.id, mode, key), [branch, session.id]);
+  // The window scrolls the conversation to the turn it has selected; closed without a change, it leaves the reader where they were.
+  const showBranchPoint = (key: string | null) => { if (key) { newest.cancel(); timeline.showRow(key); } };
+  // Whether the composer holds a draft when the window opens: a rewind keeps it, and the window says so.
+  const [branchDraft, setBranchDraft] = useState(false);
+  useLayoutEffect(() => {
+    if (!branchRequest) return;
+    setBranchDraft(!!askPluginComposer("state", session.id).state?.draftText.trim());
+    const before = timeline.position();
+    return () => timeline.restorePosition(before);
+  }, [branchRequest]);
   const toolOutputs = useMemo(() => pluginEpoch === null ? undefined : toolRecords.outputs.session(pluginEpoch, session.id),
     [toolRecords, pluginEpoch, session.id]);
   const ownWidth = useSessionWidthStyle(session.id);
@@ -3784,10 +3933,15 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
+    {branchRequest && branchDialogHost && <SessionBranchDialog key={`${branchRequest.mode}:${branchRequest.promptOffset ?? ""}`} title={plainTitle(session.title)} request={branchRequest} host={branchDialogHost}
+      facts={{ canMutate: !!mutation?.capability.canMutate(), running: running === true, question: askMode !== "none", background: backgroundRunning, draft: branchDraft }}
+      keepRemovedTurns={readKeepRemovedTurns(key => localStorage.getItem(key))} onKeepRemovedTurns={keep => saveKeepRemovedTurns((key, value) => localStorage.setItem(key, value), keep)}
+      onPoint={showBranchPoint} onClose={() => branch?.requests.close(branchRequest)} />}
     {demoMode
       ? <DemoConversation session={session} />
       : <>
         {origin}
+        {lineage}
         <div className="session-timeline-area" data-ask={askMode}>
         <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
         <div className="timeline-scroll" ref={timeline.elementRef}
@@ -3800,7 +3954,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
-          onAcknowledgeOutgoing={submissions.acknowledgeOutgoing}
+          onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
           live={ownedSession ? live?.snapshot?.session ?? null : null} /></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
@@ -3833,7 +3987,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             setRunning(value);
             const calls = backgroundCalls(background ?? []);
             setBackgroundCallStates(current => current.size === calls.size && [...calls].every(([call, state]) => current.get(call) === state) ? current : calls);
-            onRunActivity?.(value, runningBackgroundTasks(background ?? []).length);
+            const stillRunning = runningBackgroundTasks(background ?? []).length;
+            setBackgroundRunning(stillRunning);
+            onRunActivity?.(value, stillRunning);
           }} toolOutputs={toolOutputs} sessionId={session.id} remoteControlRequest={remoteControlRequest} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",

@@ -8,7 +8,7 @@ export type CommandId =
   | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "newTerminal" | "automations" | "workItems" | "issues" | "canvases" | "worktrees" | "documentation" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest"
-  | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact"
+  | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact" | "fork" | "rewind"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace";
@@ -76,6 +76,8 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "abort", name: "abort", label: "Abort", description: "Stop the running turn.", category: "Session", keys: ["F8"], search: "stop cancel" },
   { id: "clearQueue", name: "clear_queue", label: "Clear Queue", description: "Remove every queued prompt.", category: "Session", keys: ["F10"] },
   { id: "compact", name: "compact", label: "Compact", description: "Compact the conversation of the idle session.", category: "Session", keys: ["Ctrl+F11"] },
+  { id: "fork", name: "fork", label: "Fork Session", description: "Continue from a point of the session in a new session.", category: "Session", search: "branch duplicate copy clone" },
+  { id: "rewind", name: "rewind", label: "Rewind Session", description: "Take the session back to an earlier turn.", category: "Session", search: "undo roll back revert" },
   { id: "closeTab", name: "close_tab", label: "Close Tab", description: "Close the current tab.", category: "Session", keys: ["Ctrl+W", "Ctrl+Shift+W"], search: "close" },
   { id: "reopenTab", name: "reopen_tab", label: "Reopen Tab", description: "Reopen the last closed tab.", category: "Session", keys: ["Ctrl+Shift+T"] },
   { id: "previousTab", name: "tab_left", label: "Tab Left", description: "Switch to the previous tab.", category: "Session", keys: ["Ctrl+Alt+Left", "Ctrl+PageUp"] },

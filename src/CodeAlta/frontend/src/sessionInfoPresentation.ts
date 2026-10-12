@@ -1,6 +1,7 @@
 import type { SessionInfoView } from "./sessionInfo";
 import { boundedInfoCopy, type InfoObservations } from "./sessionInfoObservations";
 import type { MessageKey } from "./localization";
+import { lineageSummary } from "./sessionBranch/lineage";
 
 export const infoDescription = "Saved metadata and separate point-in-time observations. Reads are not atomic; may already be stale. Not liveness, finality or command permission. Unknown is not zero.";
 export const infoDemoDescription = "Demo snapshot; values are local to this preview.";
@@ -29,6 +30,7 @@ export function canonicalInfoCopy(info: SessionInfoView, demo: boolean, observat
     ["Provider", info.provider ?? "Not recorded or unverified"],
     ["Saved update", info.updatedAt || "Not recorded or unverified"],
     ["Recorded creation time", info.createdAt || "Not recorded or unavailable"],
+    ...(info.lineage ? [["Origin", lineageSummary(info.lineage)]] : []),
   ];
   const fields = (rows: readonly (readonly string[])[]) => rows.map(row => row.join("\n")).join("\n");
   return boundedInfoCopy([
