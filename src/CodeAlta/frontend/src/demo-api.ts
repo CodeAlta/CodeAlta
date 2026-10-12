@@ -7,6 +7,9 @@ import type {
   ConfigurationSnapshot,
   HistoryRequest,
   HistoryResponse,
+  WorkspaceForkSessionRequest,
+  WorkspaceRewindSessionRequest,
+  WorkspaceSessionTurnsRequest,
   WorkspaceSnapshot,
 } from "../../obj/neoastra/neoastra";
 
@@ -81,6 +84,12 @@ export const modelCatalog = Object.freeze({
 });
 export const workspace = Object.freeze({
   snapshot: async () => snapshot,
+  // The demo has no journal to list the turns of, to fork or to rewind.
+  sessionTurns: async (request: WorkspaceSessionTurnsRequest) => ({ status: "unconfigured", hostEpoch: null, sessionId: request.sessionId, turns: [], total: 0, activeRunId: null, revision: null }),
+  forkSession: async (request: WorkspaceForkSessionRequest) => ({ status: "unconfigured", hostEpoch: null, scope: null, projectId: null, projectPath: null, sessionId: request.sessionId,
+    forkSessionId: null, title: null, turnCount: 0, prompt: null, promptTruncated: false }),
+  rewindSession: async (request: WorkspaceRewindSessionRequest) => ({ status: "unconfigured", hostEpoch: null, scope: null, projectId: null, projectPath: null, sessionId: request.sessionId,
+    turnCount: 0, removedTurnCount: 0, prompt: null, promptTruncated: false, removedTurnsSessionId: null, removedTurnsTitle: null, rewindCount: 0 }),
   history: async (request: HistoryRequest): Promise<HistoryResponse> => ({
     entries: historyEntries.map(entry => ({ ...entry, sessionId: request.sessionId })),
     next: null,
