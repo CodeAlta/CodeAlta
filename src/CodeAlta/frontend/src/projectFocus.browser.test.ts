@@ -203,6 +203,22 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     assert.equal(await wait("document.querySelector('.project-import-confirm code')?.textContent==='C:/fixture/picked'"), true);
     assert.equal(await evaluate("document.querySelector('#saved-project-filter').value"), "C:/fixture/picked");
     assert.equal(await wait("document.activeElement===document.querySelector('.project-import-confirm button')"), true, "Enter trusts the picked folder");
+    const trustSpacing = () => evaluate(`(()=>{
+      const row=document.querySelector('.project-import-confirm'), button=row.querySelector('button');
+      const r=row.getBoundingClientRect(), b=button.getBoundingClientRect();
+      return {right:r.right-b.right, top:b.top-r.top, bottom:r.bottom-b.bottom,
+        overflow:row.scrollWidth>row.clientWidth};
+    })()`);
+    await frames();
+    for (const width of [1280, 900]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: width === 900 ? 650 : 900, deviceScaleFactor: 1, mobile: false });
+      await frames();
+      const spacing = await trustSpacing();
+      assert.ok(spacing.right >= 12 && spacing.top >= 10 && spacing.bottom >= 10,
+        `the trust button has standard insets at viewport width ${width}: ${JSON.stringify(spacing)}`);
+      assert.equal(spacing.overflow, false, "the checked folder and trust button fit inside the row");
+    }
+    await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     // In the window, Ctrl+O and the browse button open the folder dialog in the folder the field names.
     await evaluate("projectFocusFixture.pick={status:'ok',path:'C:/fixture/browsed'}");
     await key("o", "KeyO", 79, true);

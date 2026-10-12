@@ -1503,6 +1503,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .open-project-dialog .project-import { display: grid; justify-items: stretch; gap: 6px; margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); overflow: visible; }
 .open-project-dialog .project-import p { margin: 0; font-size: 12px; }
 .project-import-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.open-project-dialog .project-import-confirm { padding: 10px 14px; }
 .project-import-row .bp6-input-group { flex: 1; min-width: 0; }
 .project-import-row .bp6-input-group .bp6-icon { top: 50%; margin-block: 0; color: var(--muted); transform: translateY(-50%); }
 .project-import-confirm .bp6-control { flex: none; margin: 0; }
