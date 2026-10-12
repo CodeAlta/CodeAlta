@@ -1451,6 +1451,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ProviderId = ProviderId,
             SessionId = SessionId,
             RunId = runId,
+            PromptCacheKey = _summary.ForkedFrom?.RootSessionId,
             ModelId = _summary.ModelId ?? _options.Model,
             ModelInfo = modelInfo,
             WorkingDirectory = _summary.ExecutionDirectory,
@@ -1763,6 +1764,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             ProviderSessionId = response.ProviderSessionId ?? _state.ProviderSessionId,
             ProviderState = response.ProviderState ?? _state.ProviderState,
+            // The provider answered from the point the session was forked at or rewound to: it has taken it up.
+            ProviderBranch = null,
             Usage = effectiveUsage ?? _state.Usage,
             UpdatedAt = DateTimeOffset.UtcNow,
         };

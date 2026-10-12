@@ -2177,6 +2177,37 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_SendsTheCacheKeyOfTheSessionAForkComesFrom()
+    {
+        using var temp = TestTempDirectory.Create();
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateAssistantResponseUpdate(responseId: "response-fork", modelId: "gpt-5.3-codex", text: "Answer.", reasoningText: "Thinking.", encryptedReasoning: null)],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            StateRootPath = temp.Path,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "http" },
+        });
+        var request = CreateTurnRequest() with
+        {
+            Provider = CreateTurnRequest().Provider with { ProtocolFamily = "codex", ProviderKey = "codex", DisplayName = "Codex" },
+            ModelId = "gpt-5.3-codex",
+            PromptCacheKey = "root-session",
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        // The key is the one of the session at the start of the forks; the session stays itself in its metadata.
+        using var document = JsonDocument.Parse(responsesClient.Requests[0].SerializedOptions);
+        Assert.AreEqual("root-session", document.RootElement.GetProperty("prompt_cache_key").GetString());
+        Assert.AreEqual("session-1", document.RootElement.GetProperty("client_metadata").GetProperty("session_id").GetString());
+        Assert.AreEqual("session-1", document.RootElement.GetProperty("client_metadata").GetProperty("thread_id").GetString());
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_AppliesCodexSubscriptionRequestDeltas()
     {
         using var temp = TestTempDirectory.Create();

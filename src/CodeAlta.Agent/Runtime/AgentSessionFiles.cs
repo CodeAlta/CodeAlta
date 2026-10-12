@@ -88,6 +88,17 @@ public sealed record AgentSessionSummary
     public AgentRunId? CreatedByRunId { get; init; }
 
     /// <summary>
+    /// Gets or initializes where the session comes from when it starts with the turns of another one; null otherwise.
+    /// </summary>
+    public AgentSessionForkOrigin? ForkedFrom { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the number of times the session was rewound. A reader that follows the journal of a session
+    /// knows from a change of this number that the journal became shorter, and reads it again from its start.
+    /// </summary>
+    public int RewindCount { get; init; }
+
+    /// <summary>
     /// Gets or initializes the creation timestamp.
     /// </summary>
     public required DateTimeOffset CreatedAt { get; init; }
@@ -154,6 +165,13 @@ public sealed record AgentSessionState
     public JsonElement? ProviderState { get; init; }
 
     /// <summary>
+    /// Gets or initializes how the conversation of the provider is taken up again by a session that was just forked
+    /// or rewound: <see cref="ProviderSessionId"/> and <see cref="ProviderState"/> are then those of the point the
+    /// session continues from. Null once a turn ran, and for a session that was never forked or rewound.
+    /// </summary>
+    public AgentProviderBranch? ProviderBranch { get; init; }
+
+    /// <summary>
     /// Gets or initializes the latest compaction summary event identifier when present.
     /// </summary>
     public string? CompactionSummaryContentId { get; init; }
@@ -193,3 +211,21 @@ public sealed record AgentSessionState
     /// </summary>
     public IReadOnlyList<AgentLoadedSkillState> LoadedSkills { get; init; } = [];
 }
+
+/// <summary>How a session continues a conversation that a provider keeps on its side.</summary>
+public enum AgentProviderBranchKind
+{
+    /// <summary>As another session: the conversation of the source goes on as it was.</summary>
+    Fork,
+
+    /// <summary>As the same session, without what followed the point.</summary>
+    Rewind,
+}
+
+/// <summary>
+/// What a provider that keeps the conversation of a session on its side needs to know about a session that was just
+/// forked or rewound. A provider that is sent the whole conversation with each request needs nothing of it.
+/// </summary>
+/// <param name="Kind">Whether the session is another one than the one the provider knows, or the same one cut.</param>
+/// <param name="AtEnd">Whether the point is the end of the conversation as the provider has it: nothing follows it there.</param>
+public sealed record AgentProviderBranch(AgentProviderBranchKind Kind, bool AtEnd);

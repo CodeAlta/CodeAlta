@@ -209,7 +209,8 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         context.Options.StoredOutputEnabled = false;
         // The key keeps the requests of a session on the cache that holds its prefix. Without it the endpoint routes
         // by the start of the prompt, which every session of CodeAlta shares.
-        context.Options.Patch.Set("$.prompt_cache_key"u8, context.Request.SessionId);
+        // A session that was forked gives the key of the session it comes from.
+        context.Options.Patch.Set("$.prompt_cache_key"u8, context.Request.PromptCacheKey ?? context.Request.SessionId);
         ConfigureOpenAIResponsesReasoning(context);
     }
 

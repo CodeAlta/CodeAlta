@@ -1155,6 +1155,10 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             ParentSessionId = NormalizeOptionalText(snapshot.ParentSessionId) ?? NormalizeOptionalText(current.ParentSessionId),
             CreatedBySessionId = NormalizeOptionalText(snapshot.CreatedBySessionId) ?? NormalizeOptionalText(current.CreatedBySessionId),
             CreatedByRunId = snapshot.CreatedByRunId ?? current.CreatedByRunId,
+            // Where a session comes from never changes: a summary written without it does not erase it.
+            ForkedFrom = snapshot.ForkedFrom ?? current.ForkedFrom,
+            // Nor does a summary written without the count of its rewinds make the session one that never was rewound.
+            RewindCount = Math.Max(snapshot.RewindCount, current.RewindCount),
         };
     }
 
@@ -1396,7 +1400,11 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             CreatedBySessionId: summary.CreatedBySessionId,
             CreatedByRunId: summary.CreatedByRunId,
             ViewState: localState,
-            WorktreePath: string.IsNullOrWhiteSpace(summary.WorktreeDirectory) ? null : summary.WorktreeDirectory);
+            WorktreePath: string.IsNullOrWhiteSpace(summary.WorktreeDirectory) ? null : summary.WorktreeDirectory)
+        {
+            ForkedFrom = summary.ForkedFrom,
+            RewindCount = summary.RewindCount,
+        };
 
     private void DeleteEmptySessionDirectories(string? directory)
     {

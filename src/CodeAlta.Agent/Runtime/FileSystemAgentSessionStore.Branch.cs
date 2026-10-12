@@ -11,6 +11,7 @@ namespace CodeAlta.Agent.Runtime;
 /// <param name="KeptTurnCount">The number of turns before the point.</param>
 /// <param name="Summary">The summary of the session as it is now.</param>
 /// <param name="State">The state of the session at the point: the last one written before it.</param>
+/// <param name="CurrentState">The state of the session as it is now: the last one of the journal.</param>
 internal sealed record AgentSessionBranchPoint(
     string SessionId,
     AgentHistoryRevision Revision,
@@ -19,7 +20,8 @@ internal sealed record AgentSessionBranchPoint(
     IReadOnlyList<AgentSessionTurn> Turns,
     int KeptTurnCount,
     AgentSessionSummary Summary,
-    AgentSessionState State)
+    AgentSessionState State,
+    AgentSessionState CurrentState)
 {
     /// <summary>Gets the first turn after the point; null when the point is after the last turn.</summary>
     internal AgentSessionTurn? NextTurn => KeptTurnCount < Turns.Count ? Turns[KeptTurnCount] : null;
@@ -98,18 +100,22 @@ public sealed partial class FileSystemAgentSessionStore
         var summary = await GetSessionSummaryAsync(sessionId, cancellationToken).ConfigureAwait(false)
             ?? throw new AgentSessionHistoryException("missing_session");
         await using var stream = await OpenReadStreamAsync(scan.Path, cancellationToken).ConfigureAwait(false);
-        var state = await ReadStateSnapshotAsync(stream, boundary.State, cancellationToken).ConfigureAwait(false)
-            ?? new AgentSessionState
-            {
-                SessionId = sessionId,
-                ProtocolFamily = summary.ProtocolFamily,
-                ProviderKey = summary.ProviderKey,
-                UpdatedAt = summary.CreatedAt,
-            };
+        var initial = new AgentSessionState
+        {
+            SessionId = sessionId,
+            ProtocolFamily = summary.ProtocolFamily,
+            ProviderKey = summary.ProviderKey,
+            UpdatedAt = summary.CreatedAt,
+        };
+        var state = await ReadStateSnapshotAsync(stream, boundary.State, cancellationToken).ConfigureAwait(false) ?? initial;
+        var end = scan.Result.End;
+        var current = end.State == boundary.State
+            ? state
+            : await ReadStateSnapshotAsync(stream, end.State, cancellationToken).ConfigureAwait(false) ?? initial;
         var guard = new byte[(int)Math.Min(BranchGuardBytes, boundary.Offset)];
         stream.Position = boundary.Offset - guard.Length;
         await stream.ReadExactlyAsync(guard, cancellationToken).ConfigureAwait(false);
-        return new(sessionId, scan.Revision, boundary.Offset, guard, turns, kept, summary, state) { EndOffset = scan.Result.End.Offset };
+        return new(sessionId, scan.Revision, boundary.Offset, guard, turns, kept, summary, state, current) { EndOffset = end.Offset };
     }
 
     /// <summary>Writes the journal of a new session that starts with the records of another one up to a point.</summary>
