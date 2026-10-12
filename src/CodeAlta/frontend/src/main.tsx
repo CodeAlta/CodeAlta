@@ -3057,7 +3057,7 @@ function App() {
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p> : <div className="sidebar-empty space-empty" role="status">
             <p>{t("No project in this space yet.")}</p>
-            {owned && <Button size="small" icon={<AppIcon name="space" size={14} />} onClick={() => navigate("spaces")}>{t("Add projects")}…</Button>}
+            {owned && <Button size="small" icon={<AppIcon name="plus" size={14} />} onClick={() => void addProjectFolder()}>{t("Add projects")}…</Button>}
           </div>)}
           </>;
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
