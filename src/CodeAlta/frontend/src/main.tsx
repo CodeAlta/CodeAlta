@@ -109,7 +109,7 @@ import { createProjectOpening } from "./projectOpening";
 import { OpenProjectDialog } from "./OpenProjectDialog";
 import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
-import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
+import { createSessionCreation, createdSessionSelection, initialSessionTitle, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
@@ -2695,7 +2695,7 @@ function App() {
     setCreatingMessage("");
     if (handoff) setDraftHandoffNotice("");
     try {
-      const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId, place);
+      const result = await createSession(epoch, target, handoff ? initialSessionTitle(handoff.text) : creatingTitle.trim() || null, capability, providerId, place);
       if (!creationAlive.current) return;
       if (result.kind === "created") {
         if (!isCurrent()) { setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); return; }

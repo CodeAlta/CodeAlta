@@ -35,6 +35,7 @@ CodeAlta Desktop brings together:
 - **Sessions & delegation**: run agents in split panes; resume, queue, steer and delegate work.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
+- **Task titles**: Desktop names prompt-started sessions from the opening task sentence; titles stay unchanged until you use Rename.
 - **Work items**: review agent-proposed tasks and plans; start, defer or dismiss them.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues; start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.

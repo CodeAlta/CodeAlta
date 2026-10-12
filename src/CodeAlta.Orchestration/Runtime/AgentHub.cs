@@ -308,6 +308,22 @@ public sealed partial class AgentHub : IAsyncDisposable
         return await ExecuteReferencedAsync(entry, () => Task.FromResult(entry.Coordinator.SetPermissionMode(permissionMode))).ConfigureAwait(false);
     }
 
+    /// <summary>Renames an attached session in its state-write order, without interrupting its run.</summary>
+    /// <param name="sessionHandleId">Existing attachment identity.</param>
+    /// <param name="title">The nonblank title chosen by the user.</param>
+    /// <param name="cancellationToken">Cancels admission and persistence.</param>
+    /// <returns>False when the session does not support live renaming.</returns>
+    /// <exception cref="ArgumentException">The title is blank.</exception>
+    /// <exception cref="InvalidOperationException">The handle no longer admits references.</exception>
+    /// <exception cref="OperationCanceledException">The operation was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or session is disposed.</exception>
+    public async Task<bool> RenameSessionAsync(AgentSessionHandleId sessionHandleId, string title, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.RenameAsync(title, cancellationToken)).ConfigureAwait(false);
+    }
+
     /// <summary>Signals only the expected run on an existing attachment and joins original cancellation work.</summary>
     /// <param name="sessionHandleId">Existing attachment identity; never acquired from a catalog or replaced.</param>
     /// <param name="expectedRunId">Immutable original provider run identity.</param>
@@ -795,6 +811,13 @@ public sealed partial class AgentHub : IAsyncDisposable
         {
             if (_session is not IAgentPermissionModeProvider provider) return false;
             provider.SetPermissionMode(permissionMode);
+            return true;
+        }
+
+        public async Task<bool> RenameAsync(string title, CancellationToken cancellationToken)
+        {
+            if (_session is not IAgentSessionTitleProvider provider) return false;
+            await provider.RenameAsync(title, cancellationToken).ConfigureAwait(false);
             return true;
         }
 

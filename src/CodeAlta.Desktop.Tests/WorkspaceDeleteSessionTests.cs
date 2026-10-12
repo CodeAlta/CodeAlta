@@ -123,7 +123,7 @@ public sealed class WorkspaceDeleteSessionTests
     }
 
     [TestMethod]
-    public async Task NeverNamedSession_IsDeletedWithTheTitleTheListShows()
+    public async Task CreationTitle_IsListedUnchangedAndUsedToConfirmDeletion()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-delete-" + Guid.NewGuid().ToString("N"));
         var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
@@ -143,15 +143,15 @@ public sealed class WorkspaceDeleteSessionTests
             Assert.IsNotNull(receipt);
             Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
 
-            // The session was never named: the list shows the first line of what it last said, 80 characters at most.
+            // A saved creation title remains authoritative even when the model has answered.
             var rpc = new WorkspaceService(host, Epoch);
             var listed = (await rpc.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(session => session.Id == sessionId);
-            Assert.AreEqual(AnsweringProvider.FirstLine[..79], listed.Title);
+            Assert.AreEqual(project.DisplayName, listed.Title);
             Assert.AreEqual(listed.Title, listed.FullTitle);
 
-            // The title it was created with is not the one the list shows; the one the list shows deletes it.
+            // A response-summary title cannot confirm deletion; the unchanged listed title can.
             WorkspaceDeleteSessionRequest Request(string title) => new(Epoch, "project", project.Id, project.ProjectPath, sessionId, title);
-            Assert.AreEqual("session_missing", (await rpc.DeleteSessionAsync(Request(project.DisplayName), CancellationToken.None)).Status);
+            Assert.AreEqual("session_missing", (await rpc.DeleteSessionAsync(Request(AnsweringProvider.FirstLine[..79]), CancellationToken.None)).Status);
             Assert.AreEqual("ok", (await rpc.DeleteSessionAsync(Request(listed.Title), CancellationToken.None)).Status);
             Assert.IsFalse((await rpc.SnapshotAsync(new(), CancellationToken.None)).Sessions.Any(session => session.Id == sessionId));
             await rpc.CloseSessionsAsync();

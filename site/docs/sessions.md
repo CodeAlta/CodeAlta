@@ -20,6 +20,8 @@ The sidebar keeps running sessions visible even when their tab is closed. Closin
 
 Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and send a prompt. CodeAlta stores provider-independent session journals under `~/.alta/sessions/yyyy/mm/dd/<session-id>.jsonl`.
 
+In Desktop, sending a prompt to start a new session gives it a short title from the opening task sentence. The title stays the same as the conversation continues and when you reopen it. Use **Rename** in the session's actions menu to change it.
+
 When reopening an existing session, CodeAlta restores local history before provider initialization has to finish. A ready compatible provider can resume or switch a CodeAlta-owned local session while it is idle; provider-native continuation state is reused only when it is safe.
 
 In CodeAlta Desktop, the links of a message work, yours and the agent's:

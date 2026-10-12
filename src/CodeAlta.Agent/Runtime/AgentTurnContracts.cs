@@ -308,7 +308,8 @@ public sealed record AgentTurnResponse
     public JsonElement? ProviderState { get; init; }
 
     /// <summary>
-    /// Gets or initializes an optional title candidate.
+    /// Gets or initializes an optional provider title candidate. The shared runtime does not use it to rename
+    /// the session; its saved title belongs to creation and explicit user Rename.
     /// </summary>
     public string? Title { get; init; }
 

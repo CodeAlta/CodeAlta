@@ -11,6 +11,69 @@ namespace CodeAlta.Tests;
 public sealed class AgentSessionTests
 {
     [TestMethod]
+    public async Task AgentSession_RenameAsync_JoinsAnOlderSummaryWriteBeforePersistingTheNewTitle()
+    {
+        using var temp = TestTempDirectory.Create();
+        var layout = new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents"));
+        var cache = new RenameFailureCache();
+        var store = new FileSystemAgentSessionStore(layout, new AgentSessionJournalFile(), cache);
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-rename-write-order") with { Title = "Original task" };
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor((_, _, _) => Task.FromResult(new AgentTurnResponse
+            {
+                Summary = "Response summary",
+                AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+            })), CreateOptions(provider, temp.Path));
+
+        cache.SummaryWritten = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        cache.ReleaseWrite = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var send = session.SendAsync(new() { Input = AgentInput.Text("Continue") });
+        Task? rename = null;
+        try
+        {
+            await cache.SummaryWritten.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            rename = session.RenameAsync("Renamed task");
+            Assert.IsFalse(rename.IsCompleted, "Rename must join the original summary write, not race its cache update.");
+        }
+        finally { cache.ReleaseWrite.TrySetResult(); }
+        await send.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsNotNull(rename);
+        await rename.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual("Renamed task", (await new FileSystemAgentSessionStore(layout).GetSessionSummaryAsync(summary.SessionId))?.Title);
+    }
+
+    [TestMethod]
+    public async Task AgentSession_RenameAsync_RetainsTitleAfterJournalWriteAndCacheFailure()
+    {
+        using var temp = TestTempDirectory.Create();
+        var layout = new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents"));
+        var cache = new RenameFailureCache();
+        var store = new FileSystemAgentSessionStore(layout, new AgentSessionJournalFile(), cache);
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-rename-cache-failure") with { Title = "Original task" };
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor((_, _, _) => Task.FromResult(new AgentTurnResponse
+            {
+                Title = "Provider title",
+                AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+            })), CreateOptions(provider, temp.Path));
+
+        cache.FailRename = true;
+        await Assert.ThrowsExactlyAsync<IOException>(() => session.RenameAsync("Renamed task"));
+        // The authoritative journal was written before its optional cache failed.
+        Assert.AreEqual("Renamed task", (await new FileSystemAgentSessionStore(layout).GetSessionSummaryAsync(summary.SessionId))?.Title);
+        await session.SendAsync(new() { Input = AgentInput.Text("Continue") });
+        Assert.AreEqual("Renamed task", (await new FileSystemAgentSessionStore(layout).GetSessionSummaryAsync(summary.SessionId))?.Title);
+    }
+
+    [TestMethod]
     public async Task AgentSession_SendAsync_ContinuesProviderFollowUpWithAndWithoutDurableOutput()
     {
         using var temp = TestTempDirectory.Create();
@@ -2056,7 +2119,7 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
-    public async Task AgentSession_CompactWithOutcomeAsync_PublishesStartedBeforeSummaryCompletes()
+    public async Task AgentSession_CompactWithOutcomeAsync_PublishesStartedAndRetainsLiveRename()
     {
         using var temp = TestTempDirectory.Create();
         var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
@@ -2140,12 +2203,20 @@ public sealed class AgentSessionTests
         Assert.IsTrue(liveEvents.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.CompactionStarted));
         Assert.IsFalse(liveEvents.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.CompactionCompleted));
 
-        releaseSummary.SetResult();
+        try
+        {
+            // Manual compaction holds the state gate. Rename must still complete, and both the summary-request
+            // usage callback and the completed compaction snapshot must retain the new title.
+            await session.RenameAsync("Continue the coding task").WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.AreEqual("Continue the coding task", (await store.GetSessionSummaryAsync(summary.SessionId))?.Title);
+        }
+        finally { releaseSummary.TrySetResult(); }
         var outcome = await compactTask.ConfigureAwait(false);
 
         Assert.IsNotNull(outcome);
         Assert.IsTrue(outcome.Success);
         Assert.IsTrue(liveEvents.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.CompactionCompleted));
+        Assert.AreEqual("Continue the coding task", (await store.GetSessionSummaryAsync(summary.SessionId))?.Title);
     }
 
     [TestMethod]
@@ -4879,6 +4950,40 @@ public sealed class AgentSessionTests
 
             return step(request, onUpdate, cancellationToken);
         }
+    }
+
+    private sealed class RenameFailureCache : IAgentSessionProjectionCache
+    {
+        public bool FailRename { get; set; }
+
+        public TaskCompletionSource? SummaryWritten { get; set; }
+
+        public TaskCompletionSource? ReleaseWrite { get; set; }
+
+        public async Task UpsertSessionAsync(AgentSessionCacheProjection projection, CancellationToken cancellationToken = default)
+        {
+            if (FailRename && projection.Summary.Title == "Renamed task")
+            {
+                FailRename = false;
+                throw new IOException("Synthetic cache failure after the journal write.");
+            }
+            if (SummaryWritten is { } written && projection.Summary.Summary == "Response summary" && projection.Summary.Title == "Original task")
+            {
+                written.TrySetResult();
+                await ReleaseWrite!.Task.WaitAsync(cancellationToken);
+            }
+        }
+
+        public Task<AgentSessionCacheProjection?> GetSessionAsync(string sessionId, AgentSessionCacheProjectionContext context, CancellationToken cancellationToken = default)
+            => Task.FromResult<AgentSessionCacheProjection?>(null);
+
+        public IAsyncEnumerable<AgentSessionCacheProjection> ListSessionsAsync(AgentSessionCacheProjectionContext context, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public Task RemoveSessionAsync(string sessionId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<AgentSessionCacheReconciliationResult> ReconcileAsync(AgentSessionCacheProjectionContext context, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 
     private sealed class AliasAwareTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog

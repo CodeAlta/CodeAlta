@@ -17,7 +17,7 @@ namespace CodeAlta.Agent.Runtime;
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
 public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns,
-    IAgentBackgroundTaskProvider, IAgentPermissionModeProvider, IAgentRemoteControlProvider
+    IAgentBackgroundTaskProvider, IAgentPermissionModeProvider, IAgentRemoteControlProvider, IAgentSessionTitleProvider
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -55,6 +55,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly IDisposable? _backgroundTasksRegistration;
     private readonly IDisposable? _remoteControlRegistration;
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
+    // Turns release the state gate while they run. Serialize their summary snapshots with live Rename separately.
+    private readonly SemaphoreSlim _summaryGate = new(initialCount: 1, maxCount: 1);
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
     private readonly Queue<AgentInput> _pendingSteerInputs = new();
@@ -204,6 +206,34 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         Volatile.Write(ref _permissionMode, NormalizeOptionalText(permissionMode));
+    }
+
+    /// <inheritdoc />
+    public async Task RenameAsync(string title, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        using var operation = EnterOperation();
+        await _summaryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            // A journal append can succeed before cache refresh fails. Keep the chosen title in memory too,
+            // so a later snapshot cannot undo a partially persisted Rename.
+            _summary = _summary with { Title = title.Trim() };
+            await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _summaryGate.Release(); }
+    }
+
+    private async Task UpdateSummaryAsync(Func<AgentSessionSummary, AgentSessionSummary> update, CancellationToken cancellationToken, bool persist = true)
+    {
+        await _summaryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _summary = update(_summary);
+            if (persist) await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _summaryGate.Release(); }
     }
 
     // The tasks are the state of a provider that runs now: they are told to those who listen and are neither
@@ -1000,9 +1030,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 DateTimeOffset.UtcNow,
                 "Active context window");
             _state = _state with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow };
-            _summary = _summary with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow };
             await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-            await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+            await UpdateSummaryAsync(summary => summary with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
         }
 
         var completed = new AgentSessionUpdateEvent(
@@ -1083,6 +1112,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
         _pendingSteerInputs.Clear();
         _stateGate.Dispose();
+        _summaryGate.Dispose();
         _eventChannel.Writer.TryComplete();
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Count > 1) throw new AggregateException(failures);
@@ -1691,12 +1721,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = refreshedUsage,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
-        _summary = _summary with
-        {
-            Usage = refreshedUsage,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-
         if (shouldEmitPredictiveUpdate)
         {
             var usageEvent = new AgentSessionUpdateEvent(
@@ -1711,7 +1735,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
 
         await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-        await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        await UpdateSummaryAsync(summary => summary with { Usage = refreshedUsage, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task AppendTurnDiffUpdatedAsync(
@@ -1766,17 +1790,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = effectiveUsage ?? _state.Usage,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
-        _summary = _summary with
-        {
-            ModelId = _summary.ModelId ?? _options.Model,
-            ReasoningEffort = _options.ReasoningEffort ?? _summary.ReasoningEffort,
-            AgentPromptId = NormalizeOptionalText(_options.AgentPromptId) ?? _summary.AgentPromptId,
-            Title = response.Title ?? _summary.Title,
-            Summary = response.Summary ?? ExtractAssistantSummary(response.AssistantMessage) ?? _summary.Summary,
-            Usage = effectiveUsage ?? _summary.Usage,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-
         var events = new List<AgentEvent>();
         if (hasDurableAssistantOutput)
         {
@@ -1859,7 +1872,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
         await AppendEventsAsync(events, cancellationToken).ConfigureAwait(false);
         await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-        await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        await UpdateSummaryAsync(summary => summary with
+        {
+            ModelId = summary.ModelId ?? _options.Model,
+            ReasoningEffort = _options.ReasoningEffort ?? summary.ReasoningEffort,
+            AgentPromptId = NormalizeOptionalText(_options.AgentPromptId) ?? summary.AgentPromptId,
+            Summary = response.Summary ?? ExtractAssistantSummary(response.AssistantMessage) ?? summary.Summary,
+            Usage = effectiveUsage ?? summary.Usage,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask OnStreamingDeltaAsync(
@@ -2733,12 +2754,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = usage,
             UpdatedAt = completedAt,
         };
-        _summary = _summary with
-        {
-            Usage = usage,
-            UpdatedAt = completedAt,
-        };
-
         var rawCheckpoint = new AgentRawEvent(
             ProviderId,
             SessionId,
@@ -2760,7 +2775,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage: usage);
         await AppendEventsAsync([rawCheckpoint, completed], cancellationToken).ConfigureAwait(false);
         await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-        await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        await UpdateSummaryAsync(summary => summary with { Usage = usage, UpdatedAt = completedAt }, cancellationToken).ConfigureAwait(false);
 
         long? tokensRemoved = result.TokensAfter is null ? null : Math.Max(0, result.TokensBefore - result.TokensAfter.Value);
         return new AgentCompactionOutcome(
@@ -2785,7 +2800,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             UpdatedAt = now,
         };
         _state = _state with { Usage = usage, UpdatedAt = now };
-        _summary = _summary with { Usage = usage, UpdatedAt = now };
+        await UpdateSummaryAsync(summary => summary with { Usage = usage, UpdatedAt = now }, cancellationToken, persist: false).ConfigureAwait(false);
         var recorded = new AgentSessionUpdateEvent(
             ProviderId,
             SessionId,

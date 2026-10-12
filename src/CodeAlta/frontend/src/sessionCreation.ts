@@ -12,6 +12,25 @@ type Result = { kind: "created"; target: SessionTarget; id: string; path: string
 const worktreeTimeoutMilliseconds = 600_000;
 type Invoke = (request: WorkspaceCreateSessionRequest, options: { timeoutMilliseconds: number }) => Promise<WorkspaceCreateSessionResponse>;
 
+/** A prompt's opening task sentence, saved once at creation rather than derived from later replies. */
+export function initialSessionTitle(prompt: string): string {
+  const opening = prompt.trim().split(/\r?\n\s*\r?\n/u, 1)[0]
+    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+)/u, "")
+    .replace(/[\s\u0000-\u001f\u007f-\u009f]+/gu, " ").trim();
+  if (!opening) return "Image task";
+  const sentence = opening.match(/^.*?[.!?](?=\s|$)/u)?.[0] ?? opening;
+  const title = sentence.replace(/[.!?]+$/u, "").trim() || opening;
+  if (title.length <= 80) return title;
+  // Count code points so an emoji is never cut in half, while retaining the RPC's UTF-16 length bound.
+  let cut = "";
+  for (const character of title) {
+    if (cut.length + character.length > 79) break;
+    cut += character;
+  }
+  const word = cut.lastIndexOf(" ");
+  return (word >= 40 ? cut.slice(0, word) : cut).trimEnd() + "…";
+}
+
 function valid(value: unknown, maximum: number): value is string {
   if (typeof value !== "string" || !value || value.length > maximum || value !== value.trim()
     || /[\u0000-\u001f\u007f-\u009f]/u.test(value)) return false;

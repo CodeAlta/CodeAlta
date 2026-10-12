@@ -10,13 +10,47 @@ namespace CodeAlta.Orchestration.Tests;
 /// The name a session was given stays, whichever frontend attaches the session again.
 /// </summary>
 /// <remarks>
-/// A frontend that lists the sessions itself, as the terminal UI does, gets a named session under its name, and a
-/// session that was never named under the first line of its summary. Attaching a session leaves its saved title as
-/// it is: that line does not become the name of a session that was never named.
+/// Every saved title is authoritative, including one that matches a creation placeholder. Attaching a session
+/// leaves its saved title as it is rather than replacing it with the latest response summary.
 /// </remarks>
 [TestClass]
 public sealed class SessionGivenTitleTests
 {
+    [TestMethod]
+    public async Task PromptTitle_StaysUntilRename_EvenWhenARunningProviderReturnsAnotherTitle()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new AnsweringProvider { ResponseTitle = "An unsolicited provider title" };
+        string sessionId;
+        {
+            await using var host = await CreateHostAsync(temp, provider);
+            sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Fix the login error")).SessionId;
+            await SendAsync(host, sessionId);
+            Assert.AreEqual("Fix the login error", await StoredTitleAsync(host, sessionId));
+            Assert.AreEqual("Fix the login error", (await ListedAsync(host, sessionId)).Title);
+
+            provider.Started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            provider.Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            var send = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "Continue")).Receipt;
+            Assert.IsNotNull(send);
+            await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            try
+            {
+                Assert.IsTrue(await host.Commands.RenameSessionAsync(sessionId, host.CurrentProject.Id, temp.ProjectRoot, "Repair authentication"));
+            }
+            finally { provider.Release.TrySetResult(); }
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+            Assert.AreEqual("Repair authentication", await StoredTitleAsync(host, sessionId));
+            Assert.AreEqual("Repair authentication", (await ListedAsync(host, sessionId)).Title);
+        }
+        provider.Started = null;
+        provider.Release = null;
+        await using var reopened = await CreateHostAsync(temp, provider);
+        Assert.AreEqual("Repair authentication", (await ListedAsync(reopened, sessionId)).Title);
+        await SendAsync(reopened, sessionId);
+        Assert.AreEqual("Repair authentication", await StoredTitleAsync(reopened, sessionId));
+    }
+
     [TestMethod]
     public async Task NamedSession_KeepsItsName_WhenItIsAttachedFromAListOfSessions()
     {
@@ -40,9 +74,7 @@ public sealed class SessionGivenTitleTests
             foreach (var (sessionId, name) in new[] { (named, "Nightly review"), (renamed, "Renamed"), (unnamed, (string?)null) })
             {
                 var listed = await ListedAsync(host, sessionId);
-                // The list names a session by the name it was given, and one that was never named by what it last said:
-                // a parent session finds the sub-agents it created by the titles it gave them.
-                Assert.AreEqual(name ?? AnsweringProvider.Answer, listed.Title);
+                Assert.AreEqual(name ?? host.CurrentProject.DisplayName, listed.Title);
                 var saved = await StoredTitleAsync(host, sessionId);
 
                 await host.RuntimeService.EnsureCoordinatorSessionAsync(listed, new SessionExecutionOptions
@@ -55,8 +87,7 @@ public sealed class SessionGivenTitleTests
                     OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
                 });
 
-                // The name stays; a session that was never named keeps the title it was created with, not the line
-                // it is listed with.
+                // Both chosen titles and creation placeholders stay unchanged.
                 Assert.AreEqual(name ?? host.CurrentProject.DisplayName, saved);
                 Assert.AreEqual(saved, await StoredTitleAsync(host, sessionId));
             }
@@ -64,7 +95,7 @@ public sealed class SessionGivenTitleTests
     }
 
     [TestMethod]
-    public async Task NeverNamedSession_StaysListedByWhatItLastSaid_AfterASendAttachesItAgain()
+    public async Task CreationTitle_StaysListedUnchanged_AfterASendAttachesItAgain()
     {
         using var temp = TempDirectory.Create();
         var provider = new AnsweringProvider();
@@ -75,12 +106,10 @@ public sealed class SessionGivenTitleTests
             await SendAsync(host, unnamed);
         }
 
-        // Other runs of the host: each lists the session by what it last said, and its send attaches the session
-        // again without making a name of that line.
-        foreach (var (listed, reply) in new[] { (AnsweringProvider.Answer, "A second answer."), ("A second answer.", "A third answer.") })
+        foreach (var reply in new[] { "A second answer.", "A third answer." })
         {
             await using var host = await CreateHostAsync(temp, provider);
-            Assert.AreEqual(listed, (await ListedAsync(host, unnamed)).Title);
+            Assert.AreEqual(host.CurrentProject.DisplayName, (await ListedAsync(host, unnamed)).Title);
             provider.Reply = reply;
             await SendAsync(host, unnamed);
             Assert.AreEqual(host.CurrentProject.DisplayName, await StoredTitleAsync(host, unnamed));
@@ -88,7 +117,26 @@ public sealed class SessionGivenTitleTests
 
         {
             await using var host = await CreateHostAsync(temp, provider);
-            Assert.AreEqual("A third answer.", (await ListedAsync(host, unnamed)).Title);
+            Assert.AreEqual(host.CurrentProject.DisplayName, (await ListedAsync(host, unnamed)).Title);
+        }
+    }
+
+    [TestMethod]
+    public async Task RenameToCreationTitle_DoesNotResumeAutomaticSummaryNaming()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new AnsweringProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        foreach (var project in new[] { host.CurrentProject, (ProjectDescriptor?)null })
+        {
+            var session = await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, "Review authentication");
+            var renamed = project?.DisplayName ?? "Global Session";
+            Assert.IsTrue(await host.Commands.RenameSessionAsync(session.SessionId, project?.Id, project?.ProjectPath ?? temp.GlobalRoot, renamed));
+            await SendAsync(host, session.SessionId);
+            Assert.AreEqual(renamed, (await ListedAsync(host, session.SessionId)).Title);
+            var metadata = await host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(session.SessionId);
+            Assert.IsNotNull(metadata);
+            Assert.AreEqual(renamed, SessionRuntimeService.ListedTitle(metadata, session.Kind, project));
         }
     }
 
@@ -137,6 +185,12 @@ public sealed class SessionGivenTitleTests
 
         public string Reply { get; set; } = Answer;
 
+        public string? ResponseTitle { get; set; }
+
+        public TaskCompletionSource? Started { get; set; }
+
+        public TaskCompletionSource? Release { get; set; }
+
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-titles"), "Fake Titles") { DefaultModelId = "fake-model" };
 
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
@@ -163,11 +217,16 @@ public sealed class SessionGivenTitleTests
                 SelectedModelId = "fake-model",
             });
 
-        public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
-            => Task.FromResult(new AgentTurnResponse
+        public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
+        {
+            Started?.TrySetResult();
+            if (Release is { } release) await release.Task.WaitAsync(cancellationToken);
+            return new AgentTurnResponse
             {
+                Title = ResponseTitle,
                 AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(Reply)]),
-            });
+            };
+        }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

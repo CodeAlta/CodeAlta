@@ -25,6 +25,20 @@ Enabled does not mean ready, capable, authenticated or successfully created.
 
 ## Admission and confirmation
 
+Prompt-started Desktop sessions capture a title with their immutable draft: the opening
+task sentence, normalized to a single line and limited to 80 UTF-16 units without splitting
+a surrogate pair. Long titles end in an ellipsis; image-only prompts use `Image task`.
+This is deterministic and does not make an extra model request. The title is supplied to
+the ordinary creation RPC, so it is durable even when the later draft transfer fails.
+
+Saved titles are authoritative, including creation placeholders and titles matching the
+project name. Session summaries remain conversational metadata, not automatic renames.
+Only older sessions without a saved title use summary text as a listing fallback.
+Provider response titles no longer overwrite the saved title. Explicit Rename updates an
+attached session through `IAgentSessionTitleProvider`, using its summary-write gate so
+turn, usage and compaction snapshots cannot undo it. Unattached sessions are renamed
+directly in the journal; an attached runtime lacking this capability refuses Rename.
+
 Create remains effectful. `WorkspaceCreateSessionRpc` validates the bounded optional
 provider ID and exact epoch/scope, then resolves exactly one currently enabled
 descriptor under the existing shared catalog admission gate. Explicit selection

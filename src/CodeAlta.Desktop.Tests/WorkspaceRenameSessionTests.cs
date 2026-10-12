@@ -30,7 +30,7 @@ public sealed class WorkspaceRenameSessionTests
             {
                 GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
-                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime()),
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime(global)),
             });
             var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
             var other = await host.ProjectCatalog.UpsertFromPathAsync(otherPath);
@@ -112,7 +112,7 @@ public sealed class WorkspaceRenameSessionTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    private sealed class DraftRuntime : IModelProviderSessionRuntime
+    private sealed class DraftRuntime(string globalRoot) : IModelProviderSessionRuntime
     {
         public ModelProviderDescriptor Descriptor => Provider;
         public Task StartAsync(CancellationToken token = default) => Task.CompletedTask;
@@ -120,17 +120,24 @@ public sealed class WorkspaceRenameSessionTests
         public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken token = default) => throw new NotSupportedException();
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken token = default)
-            => Task.FromResult<IAgentSession>(new DraftSession(options.SessionId!, options.WorkingDirectory));
+            => Task.FromResult<IAgentSession>(new DraftSession(options.SessionId!, options.WorkingDirectory, globalRoot));
         public Task<IAgentSession> ResumeSessionAsync(string id, AgentSessionResumeOptions options, CancellationToken token = default)
-            => Task.FromResult<IAgentSession>(new DraftSession(id, options.WorkingDirectory));
+            => Task.FromResult<IAgentSession>(new DraftSession(id, options.WorkingDirectory, globalRoot));
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class DraftSession(string id, string? path) : IAgentSession
+    private sealed class DraftSession(string id, string? path, string globalRoot) : IAgentSession, IAgentSessionTitleProvider
     {
         public ModelProviderId ProviderId => Provider.ProviderId;
         public string SessionId => id;
         public string? WorkspacePath => path;
+        public async Task RenameAsync(string title, CancellationToken cancellationToken = default)
+        {
+            var store = new SessionViewJournalStore(new CatalogOptions { GlobalRoot = globalRoot }).CreateSessionStore();
+            var summary = await store.GetSessionSummaryAsync(id, cancellationToken);
+            Assert.IsNotNull(summary);
+            await store.UpsertSessionAsync(summary with { Title = title }, cancellationToken);
+        }
         public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken token = default)
         { await Task.CompletedTask; yield break; }
         public IDisposable Subscribe(Action<AgentEvent> handler) => new Subscription();

@@ -565,8 +565,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 || session.ProjectRef != projectId || session.WorkingDirectory != workspacePath) return false;
             var summary = await store.GetSessionSummaryAsync(sessionId, token).ConfigureAwait(false);
             if (summary is null) return false;
-            await store.UpsertSessionAsync(summary with { Title = title }, token).ConfigureAwait(false);
-            if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) entry.Title = title;
+            var attached = _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated;
+            // A live session owns its summary snapshots: update it too, or its next write would undo the rename.
+            if (attached && !await _agentHub.RenameSessionAsync(entry!.SessionHandleId, title, token).ConfigureAwait(false)) return false;
+            if (!attached)
+                await store.UpsertSessionAsync(summary with { Title = title }, token).ConfigureAwait(false);
+            if (attached) entry!.Title = title;
             await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, token).ConfigureAwait(false);
             return true;
         }).AsTask(), CancellationToken.None);
@@ -586,8 +590,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var session = TryCreateRecoverableSession(metadata, projects);
         if (session is not null)
         {
-            // The session is shown under the name it was given. A send that attaches it again leaves its saved title.
-            if (GivenTitle(metadata, session, projects) is { } title) session.Title = title;
             if (metadata.ViewState is not null)
             {
                 ApplyCachedSessionLocalState(session, metadata.ViewState);
@@ -652,9 +654,6 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 continue;
             }
 
-            // A session that was named is listed under its name, not under the first line of its last answer: a
-            // parent finds its sub-agents by the titles it gave them.
-            if (GivenTitle(metadata, session, projects) is { } title) session.Title = title;
             if (metadata.ViewState is not null)
             {
                 ApplyCachedSessionLocalState(session, metadata.ViewState);
@@ -1367,13 +1366,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         bool startNewSession;
         lock (_identityGate) startNewSession = _newSessionIds.Remove(session.SessionId);
 
-        // An attachment writes the title of the session. A session that starts, or that is not stored yet, takes the
-        // title it is attached with. A stored session keeps its saved title, which is its name or, when it was never
-        // named, what it was created with: a list names such a session by the first line of its summary, and that
-        // line saved as its title would be taken for its name and no longer follow what the session says.
+        // Attachments retain the saved title. Only creation and an explicit Rename choose a new one.
         var stored = startNewSession ? null : await StoredTitleAsync(session, cancellationToken).ConfigureAwait(false);
         var title = stored is { } kept ? kept.Saved : NormalizeOptionalText(session.Title);
-        var shownTitle = stored?.Given ?? session.Title;
+        var shownTitle = title ?? session.Title;
         var requestedSessionId = NormalizeOptionalText(session.SessionId);
         var systemMessage = AppendPromptPart(instructions.SystemMessage, options.AdditionalSystemMessage);
         var finalDeveloperInstructions = AppendPromptPart(developerInstructions, additionalDeveloperInstructions);
@@ -4115,7 +4111,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static string UnnamedProjectSessionSummary(ProjectDescriptor project) => $"Project session for {project.DisplayName}.";
 
     private static string BuildSessionTitle(AgentSessionMetadata session, string fallback)
-        => SummaryTitle(session.Summary) ?? fallback;
+        => NormalizeOptionalText((session.Details as RawApiSessionMetadataDetails)?.Title) ?? SummaryTitle(session.Summary) ?? fallback;
 
     private static string? SummaryTitle(string? summary)
     {
@@ -4133,49 +4129,30 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return null;
     }
 
-    // The saved title of a stored session and the name it was given, which is null for a session that was never
-    // named; null for a session that is not stored.
-    private async Task<(string? Saved, string? Given)?> StoredTitleAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    // A wrapper distinguishes an unstored session from a stored session without a title.
+    private async Task<StoredSessionTitle?> StoredTitleAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(session.SessionId)) return null;
         var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore()
             .GetSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
         if (metadata is null) return null;
-        return (NormalizeOptionalText((metadata.Details as RawApiSessionMetadataDetails)?.Title),
-            GivenTitle(metadata, session, await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false)));
+        return new(NormalizeOptionalText((metadata.Details as RawApiSessionMetadataDetails)?.Title));
     }
 
-    /// <summary>
-    /// The name a session was given, at its creation or by a rename; null for a session that was never named, whose
-    /// saved title is what it was created with or the first line of the summary it was created with.
-    /// </summary>
-    private static string? GivenTitle(AgentSessionMetadata metadata, SessionViewDescriptor session, IReadOnlyList<ProjectDescriptor> projects)
-    {
-        var title = NormalizeOptionalText((metadata.Details as RawApiSessionMetadataDetails)?.Title);
-        return title is null || IsCreationTitle(title, session.Kind, ProjectOf(session, projects)) ? null : title;
-    }
+    private readonly record struct StoredSessionTitle(string? Saved);
 
     private static ProjectDescriptor? ProjectOf(SessionViewDescriptor session, IReadOnlyList<ProjectDescriptor> projects)
         => session.Kind == SessionViewKind.GlobalSession ? null
             : projects.FirstOrDefault(candidate => string.Equals(candidate.Id, session.ProjectRef, StringComparison.Ordinal));
 
-    // The titles a session is created with: "Global Session" or the name of its project, or the first line of the
-    // summary it is created with. A saved title that is one of them was never chosen by anyone.
-    private static bool IsCreationTitle(string title, SessionViewKind? kind, ProjectDescriptor? project) => kind switch
-    {
-        null => false,
-        SessionViewKind.GlobalSession => title is UnnamedGlobalSessionTitle || title == SummaryTitle(UnnamedGlobalSessionSummary),
-        _ => project is not null && (title == project.DisplayName || title == SummaryTitle(UnnamedProjectSessionSummary(project))),
-    };
-
     /// <summary>
-    /// The title a list of sessions shows for a stored session, and the one its deletion is confirmed with: the name
-    /// the session was given, and for a session that was never named the first line of its summary (80 characters at
-    /// most), then the title it was created with, then its id.
+    /// The title a list of sessions shows for a stored session, and the one its deletion is confirmed with: the
+    /// saved title, then (for older sessions without a saved title) the first line of its summary (80 characters at
+    /// most), then its id. A saved title never follows changes to the conversation summary.
     /// </summary>
     /// <param name="session">The stored session.</param>
-    /// <param name="kind">Whether the session is a global one or the session of a project; <see langword="null" /> when that is not known: its saved title is then taken as its name.</param>
-    /// <param name="project">The project of a project session.</param>
+    /// <param name="kind">The session kind, retained for caller compatibility; saved titles are authoritative for every kind.</param>
+    /// <param name="project">The project, retained for caller compatibility.</param>
     /// <returns>The title of the session in a list.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session" /> is <see langword="null" />.</exception>
     public static string ListedTitle(AgentSessionMetadata session, SessionViewKind? kind, ProjectDescriptor? project)
@@ -4183,8 +4160,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(session);
         var saved = (session.Details as RawApiSessionMetadataDetails)?.Title;
         if (string.IsNullOrWhiteSpace(saved)) saved = null;
-        return saved is not null && !IsCreationTitle(saved.Trim(), kind, project) ? saved
-            : SummaryTitle(session.Summary) ?? saved ?? session.SessionId;
+        return saved ?? SummaryTitle(session.Summary) ?? session.SessionId;
     }
 
     // The session of the agent a prompt comes from; null for a prompt of a person, of a reminder or of the host.

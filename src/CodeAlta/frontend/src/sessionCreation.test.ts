@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { createMutationCapability } from "./sessionOperations";
-import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage } from "./sessionCreation";
+import { createSessionCreation, createdSessionSelection, initialSessionTitle, sessionCreationMessage, worktreeCreationMessage } from "./sessionCreation";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
@@ -15,6 +15,23 @@ const reply = (status: string, scope: string | null = "project", projectId: stri
     reason: null as string | null, message: null as string | null });
 const empty: WorkspaceSnapshot = { configured: true, projects: [], sessions: [], projectsTruncated: false,
   sessionsTruncated: false, displayTextTruncated: false };
+
+test("prompt-started sessions have a short task title rather than a changing response summary", async () => {
+  assert.equal(initialSessionTitle("  Fix the login error. Then add a regression test.  "), "Fix the login error");
+  assert.equal(initialSessionTitle("## Review the parser\n\nCheck error handling."), "Review the parser");
+  assert.equal(initialSessionTitle("Fix\t the\r\n login error"), "Fix the login error");
+  assert.equal(initialSessionTitle("Update src/parser.cs and its tests! Keep changes focused."), "Update src/parser.cs and its tests");
+  assert.equal(initialSessionTitle(""), "Image task");
+  assert.equal(initialSessionTitle(" \n\t "), "Image task");
+  const long = initialSessionTitle("Review the parser " + "and its tests ".repeat(20));
+  assert.ok(long.length <= 80);
+  assert.match(long, /…$/u);
+  assert.equal(initialSessionTitle("x".repeat(78) + "😀more"), "x".repeat(78) + "…");
+  let captured: string | null = null;
+  const create = createSessionCreation(async request => { captured = request.title; return reply("ok"); });
+  assert.equal((await create(epoch, project, initialSessionTitle("Fix the login error. More details."), createMutationCapability(epoch))).kind, "created");
+  assert.equal(captured, "Fix the login error");
+});
 
 test("explicit provider is frozen and mismatched success cannot certify creation", async () => {
   let captured: unknown;
