@@ -761,7 +761,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
             authManager,
             request.SessionId,
             OpenAIProviderSdkFactory.CreateCodeAltaUserAgentApplicationId(),
-            provider.ResponsesWebSocketIdleTimeout ?? DefaultWebSocketIdleTimeout);
+            provider.ResponsesWebSocketIdleTimeout ?? DefaultWebSocketIdleTimeout,
+            request.PromptCacheKey);
         return ValueTask.FromResult(session);
     }
 
@@ -1463,7 +1464,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
             options.IncludedProperties.Add(IncludedResponseProperty.ReasoningEncryptedContent);
         }
 
-        options.Patch.Set("$.prompt_cache_key"u8, request.SessionId);
+        // A session that was forked gives the key of the session it comes from, and reads what that one cached.
+        options.Patch.Set("$.prompt_cache_key"u8, request.PromptCacheKey ?? request.SessionId);
         if (modelCapabilities.SupportsVerbosity)
         {
             // Avoid the SDK's root-level "$.text.*" propagator, which dereferences null text options.
@@ -1512,7 +1514,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
             "turn",
             DateTimeOffset.UtcNow,
             installationId,
-            GetCodexTurnState(request) ?? new CodexTurnState());
+            GetCodexTurnState(request) ?? new CodexTurnState(),
+            request.PromptCacheKey);
     }
 
     private static string? ComposeInstructions(AgentTurnRequest request)

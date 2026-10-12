@@ -85,7 +85,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `notes` | Get, replace, or clear the current session's sticky Markdown notes shown in the sidebar. |
 | `project` | List, show, resolve and inspect current project context; add, rename, archive, unarchive and remove projects. |
 | `space` | List, show, create, update, delete and reorder the spaces that group the projects, put projects in them, and show one in the window. |
-| `session` | List, create, show, send, queue, steer, abort, compact, inspect, report, and coordinate sessions. |
+| `session` | List, create, show, send, queue, steer, abort, compact, inspect, report, and coordinate sessions; list the turns of a session, fork it at a turn, rewind it to one. |
 | `reminder` | Schedule delayed prompt content for the current or another session, and list/delete reminders. |
 | `job` | Start a shell command in the background of a session, list the jobs, read what they write, cancel them; the result is sent to the session when the command ends. |
 | `skill` | List, show, and activate CodeAlta-managed skills. |
@@ -253,6 +253,7 @@ alta session result <session-id>
 alta session metrics <session-id> --scope last-turn
 alta session tail <session-id> --last 10
 alta session events <session-id> --kind assistant.message --fields timestamp,kind,text
+alta session turns <session-id> --last 5
 ```
 
 `alta session current` is the shortest way for an agent-invoked live-tool call to discover its own CodeAlta session id. It does not require a session catalog lookup; outside a caller with session context it returns a usage diagnostic.
@@ -274,6 +275,8 @@ alta session queue <session-id> --message "Run this after the current turn."
 alta session steer <session-id> --message "Focus on the smallest fix."
 alta session abort <session-id> --reason "Superseded"
 alta session compact <session-id>
+alta session fork <session-id> --before <turn>
+alta session rewind <session-id> --before <turn>
 ```
 
 `alta session create --project <project> --worktree` creates the session in a new git worktree: a
@@ -308,6 +311,94 @@ direct children; grandchildren appear in `session children --recursive`. Relatio
 loads the session inventory; sending and steering an active session do not need that scan.
 
 Control commands acknowledge submission. They do not block until the target model finishes. If a session is busy, `send --queue-if-busy` and `session queue` persist queue items with caller attribution; the runtime drains at most one queued prompt when that session becomes idle.
+
+### Turns, fork and rewind
+
+A turn is one prompt and everything the session did until it became idle again. The start of a turn is a
+point a session is forked at or rewound to (`SessionRuntimeService.ReadSessionTurnsAsync`,
+`ForkSessionAsync`, `RewindSessionAsync`).
+
+```text
+alta session turns [<session-id>] [--last <n>]
+alta session fork [<session-id>] [--before <turn> | --after <turn>] [--title <title>] [--parent <session-id>]
+                  [--worktree [--base <ref>]] [--no-worktree]
+alta session rewind <session-id> (--before <turn> | --after <turn>) [--discard]
+```
+
+`<turn>` is the number of a turn (from 1) or its run id, both from `session turns`. `--after N` is
+`--before N+1`, and the two options are exclusive. `turns` and `fork` default to the calling session;
+`rewind` always names its session.
+
+`session turns` (read) emits one `alta.session.turn` record per turn, then `alta.session.turns.summary`
+(`count`, and `truncated` when `--last` left turns out):
+
+| Field | Meaning |
+| --- | --- |
+| `sessionId`, `turn`, `runId` | The session, the number of the turn and the run that names it. |
+| `status` | `running` for the turn in progress, else `completed`, `failed` or `unfinished` (the journal has no end of the turn: the application stopped while it ran). |
+| `startedAt`, `endedAt` | When the turn started and ended; no `endedAt` for a turn without an end. |
+| `prompt`, `promptTruncated` | The first 200 characters of the prompt, and whether the prompt is longer. |
+| `sourceSessionId` | The session of the agent that sent the prompt; absent for a prompt of a person or of the host. |
+| `startedByProvider` | `true` for a turn the provider started by itself (a background command of an agent CLI ended): nobody wrote its prompt. Absent otherwise. |
+| `steers`, `assistantMessages`, `toolCalls`, `compactions` | What the turn holds. |
+
+`session fork` (mutating) creates a session that starts with the turns of another one up to the point,
+and leaves that one as it is. The source may be running: a turn in progress is not part of a fork. Without
+`--before` or `--after` the fork has every complete turn, and `--after <last turn>` is the same fork; a
+turn that is asked for and that runs is refused (`session.turnRunning`). The fork is a stored session
+that no provider is attached to: its first prompt (`session send <fork-id>`) attaches it.
+
+- A fork has **no parent** unless `--parent <session-id>` names one, also when an agent forks. A parent
+  means sub-agent everywhere (instructions, nesting in the session list, deletion with the parent), and it
+  changes the instructions of the fork: its first request then no longer reads the prompt cache of the
+  session it comes from. Without a parent the fork sends what its source sent, under the same cache key.
+  A session without a parent is listed as a child of the session that created it
+  (`CreatedBy.SourceSessionId`), so the command gives the runtime a provenance without that session
+  unless `--parent` is given, for a fork and for what a rewind keeps; `forkedBy` and `rewoundBy` in the
+  records name the calling session.
+- The fork works where its source works: the same worktree, or the folder of the project. `--worktree`
+  gives it a new worktree as `session create --worktree` does (`--base` included, same `worktree.*`
+  failures), removed again when the fork is not created; `--no-worktree` sends it to the folder of the
+  project. No file is copied or restored: the fork sees the folder as it is.
+
+`alta.session.forked` has the identity of the fork as `alta.session.created` does (`sessionId`,
+`providerKey`, `projectId`, `title`, `parentSessionId`, `workingDirectory`, `worktreeDirectory`,
+`worktreeBranch` for a new worktree) and:
+
+| Field | Meaning |
+| --- | --- |
+| `forkedFromSessionId`, `forkRootSessionId` | The session that was forked, and the first session of its lineage (the same one unless a fork was forked). |
+| `turns`, `sourceTurns` | The turns of the fork, and the turns of the source at that time. |
+| `beforeRunId` | The run of the first turn that is not in the fork; absent when the fork has every turn. |
+| `excludedRunningTurn` | True when that turn is the one that runs. |
+| `forkedBy` | The provenance of the caller. |
+
+`session rewind` (disruptive) removes a turn and every turn after it. The session must be idle: no
+run, no queued prompt, no question or permission waiting, no background work; a session does not rewind
+itself, since the session that calls runs. **Files changed by the removed turns are not restored**: only
+the conversation goes back, and the next prompt starts from the point. The session as it was before the
+rewind is kept as a new session titled `<title> (before rewind)`. `--discard` does not keep it, and
+nothing of the removed turns can be found again.
+
+| Field of `alta.session.rewound` | Meaning |
+| --- | --- |
+| `sessionId`, `turns` | The session, and the turns it keeps. |
+| `removedTurns`, `beforeRunId` | The number of turns removed, and the run of the first one. |
+| `removedPrompt`, `removedPromptTruncated` | The first 200 characters of the prompt of the first removed turn, and whether it is longer. |
+| `removedTurnsSessionId` | The session that keeps what was removed; absent with `--discard`. |
+| `rewindCount` | How many times the session was rewound. |
+| `rewoundBy` | The provenance of the caller. |
+
+What stops a fork or a rewind:
+
+| Code | Exit code | When |
+| --- | --- | --- |
+| `usage.missingSession`, `usage.turnConflict`, `usage.missingTurn`, `usage.nothingToRewind`, `usage.invalidLast`, `usage.worktreeConflict`, `usage.invalidBase`, `usage.worktreeWithoutProject` | 2 | No session, both `--before` and `--after`, neither for a rewind, a rewind after the last turn, `--last` below 1, and the worktree options as in `session create`. |
+| `session.notFound`, `session.turnNotFound`, `session.parentNotFound` | 3 | The session, the turn or the parent does not exist. |
+| `session.turnRunning` | 7 | The fork would hold the turn that runs. |
+| `session.running` | 7 | The session to rewind runs or is being attached; also a session that rewinds itself. |
+| `session.queuePending`, `session.interactionPending`, `session.backgroundWork`, `session.archived` | 7 | The session to rewind has a queued prompt, a question or a permission waiting, a job or a provider task that runs, or is archived. The message says what to do first. |
+| `session.changed`, `session.unsupportedFormat`, `session.ioFailed` | 1 | The journal changed while the operation was prepared (run it again), is not one whose turns CodeAlta reads, or could not be read or written. |
 
 ## Ask command
 

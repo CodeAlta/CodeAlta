@@ -107,9 +107,12 @@ export function createToolCallCache(invoke: Invoke, limits: { maximumEntries?: n
     return read;
   }
   return {
-    /** The reader of one session's tool calls under one host epoch. */
-    reader(expectedEpoch: string, sessionId: string): ToolCallReader {
-      const key = (offset: string, outputOffset: string | null) => JSON.stringify([expectedEpoch, sessionId, offset, outputOffset]);
+    /**
+     * The reader of one session's tool calls under one host epoch. `rewinds` is the number of times the session
+     * was rewound: a rewind writes its journal again, and an offset then names another record than the one kept here.
+     */
+    reader(expectedEpoch: string, sessionId: string, rewinds = 0): ToolCallReader {
+      const key = (offset: string, outputOffset: string | null) => JSON.stringify([expectedEpoch, sessionId, rewinds, offset, outputOffset]);
       return {
         peek: (offset, outputOffset) => peek(key(offset, outputOffset)),
         read(offset, outputOffset) {

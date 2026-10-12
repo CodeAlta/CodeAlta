@@ -1506,6 +1506,94 @@ race. Selecting another session, changing page or closing the view cancels the w
 suppresses late results. These checks are not reparse
 isolation or live recovery.
 
+### Fork and rewind
+
+A session is forked or rewound from one window, `SessionBranchDialog`, in the folder of the feature
+(`frontend/src/sessionBranch/`). The host side is `workspace.sessionTurns`, `workspace.forkSession` and
+`workspace.rewindSession` (`WorkspaceBranchSessionRpc.cs`).
+
+**What opens the window.** Nothing forks or rewinds at once: each entry asks for the window, preselected.
+
+- The commands `fork` and `rewind` of the command registry (category **Session**, beside `compact`; no
+  key). They are offered for an owned session of a project that is not archived, and open the window on
+  the end of the session for a fork and on the last prompt for a rewind.
+- **Fork from here** and **Rewind to here** on a user message of the timeline: two buttons in its hover
+  actions, before **Copy**, and a context menu on the message (the menu of the system is kept while text is
+  selected, and on a link or a field). Only the prompt of a turn that the user wrote and the journal holds
+  gets them (`canBranchFrom`, `turnPromptKeys`): not a message of another agent, not the result of a
+  background job, not a prompt being sent, not a live row, and not a message sent while a turn ran (a steer
+  belongs to the turn that was running). The message is named by its journal offset, which is the
+  `promptOffset` of its turn, not by the key of its row: a row takes a `text:` key while the live view shows
+  the same text.
+- **Fork…** in the menu of a session row of the Explorer (`SessionAction` `fork`, with the authority of a
+  rename): the session is selected first, and its pane shows the window.
+
+All three go through one store, `createBranchRequests` (`branchRequests.ts`): a request names a session, a
+mode and, for a message, its offset. The pane of that session follows its own request with
+`useSyncExternalStore` and renders the window; `App` does not follow the store, so opening the window
+renders one pane. A change that was made closes the request from `App` (`requests.done`), because the
+pane that showed the window may be gone by then.
+
+**The window.** It reads the turns by pages of 100, the newest first (`readSessionTurns`), and reads older
+pages by itself until the turn of a message that was pointed at is among them; **Load older turns** reads
+the page before. The list is the end of the session, then the turns from the last to the first
+(`branchRows`); **Only my prompts** (on when it opens, `Ctrl+O`) hides the turns an agent, the answer to a
+question or a background job started, and typing filters by the words of the prompt. The preview shows the
+prompt of the selected turn, what the turn did, and what the action does there with its numbers
+(`forkConsequence`, `rewindConsequence`): a fork before turn N starts with turns 1 to N-1, a rewind to turn N
+removes turns N to the last. `Tab` in the filter switches between Fork and Rewind, as it switches the
+category in the search window; the arrows and the page keys move, `Enter` acts, `Escape` closes. While a
+point is selected the conversation behind scrolls to its prompt when the loaded window holds it
+(`showRow` of the pane's timeline command), and goes back to where it was when the window closes without a
+change.
+
+A rewind is refused before it is asked when the pane knows why (`rewindBlock`): no turn is selected, the
+session works (the pane's run activity, the `activeRunId` of the turns, a turn whose status is `running`), a
+question waits, a task still runs in the background, or the session is read-only. A queued prompt and a
+pending permission are known to the host only: its refusal is shown in the window, which stays open. Every
+status of the host has its own message (`branchMessage`). `session_changed` and `turn_not_found` read the
+turns again. `fork_unconfirmed` and `rewind_unconfirmed` end what the window sends: the outcome is not
+known, and nothing is retried.
+
+**One change at a time.** `createSessionBranch` (`sessionBranchRpc.ts`) sends a fork or a rewind once, with
+the scope the host checks (`branchTarget`: the chats, or the exact project of the pane), refuses a second
+change while the first is under way, and takes an answer that is lost, of another host or about another
+session as an unknown outcome.
+
+**After a fork** (`showFork`): the prompt the host returns is written as the draft of the new session
+before its composer exists (`transferPromptDraft`, which never replaces a draft), the session list is read
+again, the fork is revealed in a tab, and a toast says how many turns it started with. The result of a
+background job and a message of another agent are prompts of the host: `composerPrompt` keeps them out of
+a composer.
+
+**After a rewind** (`showRewind`): the prompt goes to the composer of the session when it is empty; when it
+holds a draft, the draft is kept and a toast offers the prompt to copy. A toast says how many turns were
+removed and that changed files were left as they are, with **Open the kept session** when the removed
+turns were kept (the choice is remembered in `codealta.desktop.rewind.keep-removed-turns.v1`).
+
+**The pane after a rewind.** A rewind writes the journal again, its first line included, so every offset
+moves, while the page assumes a journal only grows. The pane of a rewound session is therefore mounted
+again: its key is `sessionPaneKey(hostEpoch, tab, createdAt, rewinds)`, where `rewinds` is the
+`rewindCount` of the session row, or the count the host answered when the rewind was made from this window
+(the pane does not wait for the list of sessions). The image cache, the tool-record cache and the scroll
+memory, which are kept by session and offset beyond a pane, take the same count. `sessionListSignature`
+includes `rewindCount`, so a rewind made through the `alta` tool publishes a new list and reloads the pane
+as well. The host forgets what its live view held of the removed turns (`RuntimeDisplayProjection`), or the
+pane would show them again as live rows.
+
+**Where a session comes from.** A session row has `forkedFromSessionId`, `forkedFromTitle`, `forkKind`
+(`fork`, or `rewind` for the session that keeps what a rewind removed) and `forkTurnCount`, the number of
+turns before the point: those a fork started with, and those the source kept for a `rewind` session, which
+itself holds every turn the source had. `sessionLineage` reads them. A line above the timeline says
+"Forked from *title* · started with N turns" or "Kept from a rewind of *title* · rewound to the end of turn
+N", the title opening the source while the catalog lists it; Session info has an **Origin** row, also in
+the copied details; the row of the session in the Explorer has a small mark with the same words as its
+tooltip. A fork is not a sub-agent: `parentSessionId` stays null and it is listed beside its source.
+
+The pure modules have their tests beside them, and `sessionBranchDialog.browser.test.ts` mounts the window
+with a fake host (`sessionBranchDialog.mount.tsx`): the keyboard, the filter, the switch of mode, the
+reasons a rewind is not offered, and the request each action sends.
+
 ### Notes
 
 Each open owned-host session has a read-only **Notes** overlay at the top right above its timeline.

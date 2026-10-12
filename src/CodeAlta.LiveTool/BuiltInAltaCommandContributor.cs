@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Catalog.Skills;
@@ -67,6 +68,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Read("session metrics"),
         Read("session tail"),
         Read("session events"),
+        Read("session turns"),
         Mutating("session create"),
         Mutating("session send"),
         Mutating("session steer"),
@@ -74,6 +76,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("session set_agent"),
         Disruptive("session abort"),
         Mutating("session compact"),
+        Mutating("session fork"),
+        Disruptive("session rewind"),
         Read("session join"),
         Mutating("session message"),
         Mutating("session request"),
@@ -685,6 +689,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionMetricsCommand(context));
         group.Add(CreateSessionTailCommand(context));
         group.Add(CreateSessionEventsCommand(context));
+        group.Add(CreateSessionTurnsCommand(context));
         group.Add(CreateSessionCreateCommand(context));
         group.Add(CreateSessionSendCommand(context));
         group.Add(CreateSessionSteerCommand(context));
@@ -692,19 +697,25 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionSetAgentCommand(context));
         group.Add(CreateSessionAbortCommand(context));
         group.Add(CreateSessionCompactCommand(context));
+        group.Add(CreateSessionForkCommand(context));
+        group.Add(CreateSessionRewindCommand(context));
         group.Add(CreateSessionJoinCommand(context));
         group.Add(CreateSessionMessageCommand(context));
         group.Add(CreateSessionRequestCommand(context));
         AddHelpText(
             group,
             "Common: list by project, create child sessions, send prompts, inspect result/metrics snapshots, and steer active runs.",
+            "A session is a list of turns (`session turns`): `session fork` starts a new",
+            "session at one of them, `session rewind` removes one and the turns after it.",
             "Examples:",
             "  `alta session current`",
             "  `alta session list --project CodeAlta --state all --limit 20`",
             "  `alta session create --project CodeAlta --same-model-as <session-id>`",
             "  `alta session send <session-id> --stdin`",
             "  `alta session result <session-id>`",
-            "  `alta session report <session-id-1> <session-id-2> --include=result,metrics`");
+            "  `alta session report <session-id-1> <session-id-2> --include=result,metrics`",
+            "  `alta session turns <session-id> --last 5`",
+            "  `alta session fork <session-id> --before 4 --title \"Other approach\"`");
         return group;
     }
 
@@ -851,6 +862,25 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return command;
     }
 
+    private static Command CreateSessionTurnsCommand(AltaCommandContext context)
+    {
+        string? sessionId = null;
+        int? last = null;
+        var command = Leaf("turns", "List the turns of a session: the points it can be forked at or rewound to.");
+        command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => sessionId = value);
+        command.Add("last=", "Return the last <n> turns only.", (int value) => last = value);
+        command.Add(async (_, _) => await HandleSessionTurnsAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), last).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "A turn is one prompt and everything the session did until it became idle.",
+            "Each `alta.session.turn` record has the number of the turn (`turn`, from 1),",
+            "its `runId`, the start of its prompt and its `status`:",
+            "`running`, `completed`, `failed` or `unfinished`.",
+            "`session fork` and `session rewind` take the number or the run id.",
+            "Examples: `alta session turns`; `alta session turns <session-id> --last 5`.");
+        return command;
+    }
+
     private static void AddSessionEventOptions(Command command, SessionEventsOptions options)
     {
         command.Add("include=", "Comma-separated categories: user,assistant,reasoning,tool,host,event.", value => options.Include = value);
@@ -956,6 +986,69 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         command.Add("submit", "Reserved for submit-after-compaction behavior.", value => submit = value is not null);
         command.Add(async (_, _) => await HandleSessionCompactAsync(context, sessionId, submit).ConfigureAwait(false));
+        return command;
+    }
+
+    private static Command CreateSessionForkCommand(AltaCommandContext context)
+    {
+        var options = new SessionForkOptions();
+        var command = Leaf("fork", "Create a session that starts with the turns of another one up to a point.");
+        command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => options.SessionId = value);
+        command.Add("before=", "The fork stops before this turn: a turn number or a run id from `alta session turns`.", value => options.Before = value);
+        command.Add("after=", "The fork keeps the turns up to this one, included: a turn number or a run id.", value => options.After = value);
+        command.Add("title=", "Title of the fork. Defaults to the title of the session followed by `(fork)`.", value => options.Title = value);
+        command.Add("parent=", "Make the fork a sub-agent of this session, which changes its instructions.", value => options.ParentSessionId = value);
+        command.Add("worktree", "Create a git worktree for the fork: a checkout of its own, on a new branch `alta/<name>`.", value => options.Worktree = value is not null);
+        command.Add("base=", "Branch or commit a new worktree starts from. Defaults to the commit the project folder is on.", value => options.WorktreeBase = value);
+        command.Add("no-worktree", "Work in the project folder, also when the session works in a worktree.", value => options.NoWorktree = value is not null);
+        command.Add(async (_, _) => await HandleSessionForkAsync(context, options).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "The session is left as it is and may be running:",
+            "a turn in progress is not part of the fork.",
+            "Without `--before` or `--after` the fork has every complete turn.",
+            "The fork is a stored session: nothing runs in it until it is sent a prompt,",
+            "with `alta session send <fork-id> --stdin`.",
+            "A fork has no parent unless `--parent` names one, also when an agent forks.",
+            "A parent makes the fork a sub-agent, with other instructions than its session:",
+            "its first request then no longer reads the prompt cache of that session.",
+            "The fork works where the session works: its worktree, or the project folder.",
+            "`--worktree` gives it a worktree of its own, which starts from a commit,",
+            "and `--no-worktree` sends it to the project folder.",
+            "Files are not copied or restored: the fork sees the folder as it is now.",
+            "Examples:",
+            "  `alta session fork` forks the calling session at its last complete turn",
+            "  `alta session fork <session-id> --before 4 --title \"Other approach\"`",
+            "  `alta session fork <session-id> --after <run-id> --worktree`");
+        return command;
+    }
+
+    private static Command CreateSessionRewindCommand(AltaCommandContext context)
+    {
+        string? sessionId = null;
+        string? before = null;
+        string? after = null;
+        var discard = false;
+        var command = Leaf("rewind", "Remove a turn of a session and every turn after it.");
+        command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
+        command.Add("before=", "The first turn to remove: a turn number or a run id from `alta session turns`.", value => before = value);
+        command.Add("after=", "The last turn to keep: a turn number or a run id.", value => after = value);
+        command.Add("discard", "Do not keep the removed turns in a session of their own. This cannot be undone.", value => discard = value is not null);
+        command.Add(async (_, _) => await HandleSessionRewindAsync(context, sessionId, before, after, discard).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "One of `--before` or `--after` is required.",
+            "The session must be idle: no run, no queued prompt, no question or permission",
+            "waiting, no background work. A session cannot rewind itself.",
+            "Files changed by the removed turns are NOT restored:",
+            "only the conversation goes back.",
+            "The session as it was before the rewind is kept as a new session,",
+            "`<title> (before rewind)`, named by `removedTurnsSessionId`.",
+            "With `--discard` it is not kept:",
+            "nothing of the removed turns can be found again, and nothing can be undone.",
+            "Examples:",
+            "  `alta session rewind <session-id> --before 4`",
+            "  `alta session rewind <session-id> --after <run-id> --discard`");
         return command;
     }
 
@@ -2525,30 +2618,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         GitWorktreeCreation? worktree = null;
         if (options.Worktree)
         {
-            if (GetWorktrees(context) is not { } worktrees)
+            var creation = await CreateSessionWorktreeAsync(context, project!, worktreeBase).ConfigureAwait(false);
+            if (creation.Worktree is null)
             {
-                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
-                    "Required in-process service 'GitWorktreeService' is unavailable.");
-                return AltaExitCodes.ServiceUnavailable;
+                return creation.ExitCode;
             }
 
-            worktree = await worktrees.CreateAsync(project!, worktreeBase, context.CancellationToken).ConfigureAwait(false);
-            if (!worktree.Succeeded)
-            {
-                var reason = worktree.Status switch
-                {
-                    "not_repository" => $"The folder of project '{project!.Id}' is not in a git repository.",
-                    "no_commit" => "The repository has no commit yet: a worktree starts from one.",
-                    "invalid" => $"'{worktreeBase}' is not a branch or a commit of the repository.",
-                    "git_unavailable" => "git is not installed.",
-                    "timeout" => "git did not answer in time.",
-                    _ => "git could not create the worktree.",
-                };
-                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "worktree." + worktree.Status, AltaExitCodes.Failure,
-                    worktree.Message is null ? reason : reason + " " + worktree.Message);
-                return AltaExitCodes.Failure;
-            }
-
+            worktree = creation.Worktree;
             worktreeDirectory = worktree.Folder;
         }
         else if (!options.NoWorktree && project is not null
@@ -2580,9 +2656,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
         catch (Exception) when (worktree is not null)
         {
-            // Nothing was written there yet: the checkout that no session will use goes, and the failure stays what it is.
-            try { await GetWorktrees(context)!.RemoveAsync(project!.ProjectPath, worktree.Root!, force: false, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception) { }
+            await RemoveUnusedWorktreeAsync(context, project!, worktree).ConfigureAwait(false);
             throw;
         }
 
@@ -2613,6 +2687,438 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         });
         return AltaExitCodes.Success;
     }
+
+    // A new worktree of a project, for a session that is about to be created; without one, the error is written.
+    private static async Task<(int ExitCode, GitWorktreeCreation? Worktree)> CreateSessionWorktreeAsync(
+        AltaCommandContext context, ProjectDescriptor project, string? worktreeBase)
+    {
+        if (GetWorktrees(context) is not { } worktrees)
+        {
+            AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "service.unavailable", AltaExitCodes.ServiceUnavailable,
+                "Required in-process service 'GitWorktreeService' is unavailable.");
+            return (AltaExitCodes.ServiceUnavailable, null);
+        }
+
+        var worktree = await worktrees.CreateAsync(project, worktreeBase, context.CancellationToken).ConfigureAwait(false);
+        if (worktree.Succeeded)
+        {
+            return (AltaExitCodes.Success, worktree);
+        }
+
+        var reason = worktree.Status switch
+        {
+            "not_repository" => $"The folder of project '{project.Id}' is not in a git repository.",
+            "no_commit" => "The repository has no commit yet: a worktree starts from one.",
+            "invalid" => $"'{worktreeBase}' is not a branch or a commit of the repository.",
+            "git_unavailable" => "git is not installed.",
+            "timeout" => "git did not answer in time.",
+            _ => "git could not create the worktree.",
+        };
+        AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "worktree." + worktree.Status, AltaExitCodes.Failure,
+            worktree.Message is null ? reason : reason + " " + worktree.Message);
+        return (AltaExitCodes.Failure, null);
+    }
+
+    // Nothing was written there yet: the checkout that no session will use goes, and the failure stays what it is.
+    private static async Task RemoveUnusedWorktreeAsync(AltaCommandContext context, ProjectDescriptor project, GitWorktreeCreation worktree)
+    {
+        try { await GetWorktrees(context)!.RemoveAsync(project.ProjectPath, worktree.Root!, force: false, CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception) { }
+    }
+
+    private static async ValueTask<int> HandleSessionTurnsAsync(AltaCommandContext context, string? sessionId, int? last)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return UsageError(context, "usage.missingSession", "Session id is required outside a session caller.", "alta session turns");
+        }
+
+        if (last is <= 0)
+        {
+            return UsageError(context, "usage.invalidLast", "--last is a number of turns, from 1.", "alta session turns");
+        }
+
+        if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var read = await ReadSessionTurnsAsync(context, runtime, sessionId).ConfigureAwait(false);
+        if (read.Snapshot is not { } snapshot)
+        {
+            return read.ExitCode;
+        }
+
+        var turns = snapshot.Turns.Turns;
+        var first = last is { } count && count < turns.Count ? turns.Count - count : 0;
+        for (var index = first; index < turns.Count; index++)
+        {
+            var turn = turns[index];
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.session.turn",
+                version = 1,
+                correlationId = context.CorrelationId,
+                sessionId = read.Session!.SessionId,
+                turn = turn.Number,
+                runId = turn.RunId,
+                status = string.Equals(turn.RunId, snapshot.ActiveRunId, StringComparison.Ordinal) ? "running" : turn.Status.ToString().ToLowerInvariant(),
+                startedAt = turn.StartedAt,
+                endedAt = turn.EndedAt,
+                prompt = TurnPrompt(turn),
+                promptTruncated = IsTurnPromptTruncated(turn),
+                sourceSessionId = turn.SourceSessionId,
+                startedByProvider = turn.StartedByProvider ? true : (bool?)null,
+                steers = turn.SteerCount,
+                assistantMessages = turn.AssistantMessageCount,
+                toolCalls = turn.ToolCallCount,
+                compactions = turn.CompactionCount,
+            });
+        }
+
+        WriteSummary(context, "alta.session.turns.summary", turns.Count - first, truncated: first > 0);
+        return AltaExitCodes.Success;
+    }
+
+    private static async ValueTask<int> HandleSessionForkAsync(AltaCommandContext context, SessionForkOptions options)
+    {
+        const string CommandPath = "alta session fork";
+        var sessionId = FirstNonEmpty(options.SessionId, context.Caller.SourceSessionId);
+        if (sessionId is null)
+        {
+            return UsageError(context, "usage.missingSession", "Session id is required outside a session caller.", CommandPath);
+        }
+
+        var before = NormalizeOptionalText(options.Before);
+        var after = NormalizeOptionalText(options.After);
+        if (before is not null && after is not null)
+        {
+            return UsageError(context, "usage.turnConflict", "Use either --before or --after, not both.", CommandPath);
+        }
+
+        if (options.Worktree && options.NoWorktree)
+        {
+            return UsageError(context, "usage.worktreeConflict", "Use either --worktree or --no-worktree, not both.", CommandPath);
+        }
+
+        var worktreeBase = NormalizeOptionalText(options.WorktreeBase);
+        if (worktreeBase is not null && (!options.Worktree || !GitWorktreeService.IsReferenceName(worktreeBase)))
+        {
+            return UsageError(context, "usage.invalidBase", "--base names the branch or commit a new worktree starts from: use it with --worktree.", CommandPath);
+        }
+
+        context.ClaimSessionWork(sessionId);
+        var parentSessionId = NormalizeOptionalText(options.ParentSessionId);
+        if (parentSessionId is not null) context.ClaimSessionWork(parentSessionId);
+        if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var read = await ReadSessionTurnsAsync(context, runtime, sessionId).ConfigureAwait(false);
+        if (read.Snapshot is not { } snapshot)
+        {
+            return read.ExitCode;
+        }
+
+        var source = read.Session!;
+        var point = ResolveTurnPoint(context, snapshot.Turns.Turns, source.SessionId, before, after);
+        if (point.ExitCode != AltaExitCodes.Success)
+        {
+            return point.ExitCode;
+        }
+
+        // A turn that was asked for and that runs is refused, not left out in silence as it is from a fork of every turn.
+        if ((before ?? after) is { } asked && snapshot.ActiveRunId is { } active
+            && snapshot.Turns.Turns.Take(point.KeptTurnCount).Any(turn => string.Equals(turn.RunId, active, StringComparison.Ordinal)))
+        {
+            return BranchRefused(context, "turn_running", source.SessionId, "forked", asked);
+        }
+
+        if (parentSessionId is not null)
+        {
+            // A parent is a session of the host, attached or stored.
+            var parent = await runtime.TryGetActiveSessionDescriptorAsync(parentSessionId, context.CancellationToken).ConfigureAwait(false)
+                ?? (await LoadSessionInfosAsync(context).ConfigureAwait(false) is { } infos ? FindSession(infos, parentSessionId)?.Session : null);
+            if (parent is null)
+            {
+                return NotFound(context, "session.parentNotFound", $"Parent session '{parentSessionId}' was not found.");
+            }
+
+            parentSessionId = parent.SessionId;
+        }
+
+        ProjectDescriptor? project = null;
+        GitWorktreeCreation? worktree = null;
+        if (options.Worktree)
+        {
+            if (string.IsNullOrWhiteSpace(source.ProjectRef))
+            {
+                return UsageError(context, "usage.worktreeWithoutProject", "A worktree is a checkout of a project: this session has none.", CommandPath);
+            }
+
+            if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
+            {
+                return AltaExitCodes.ServiceUnavailable;
+            }
+
+            project = await ResolveProjectAsync(catalog, source.ProjectRef, context, includeArchived: false).ConfigureAwait(false);
+            if (project is null)
+            {
+                return NotFound(context, "project.notFound", $"Project '{source.ProjectRef}' was not found.");
+            }
+
+            var creation = await CreateSessionWorktreeAsync(context, project, worktreeBase).ConfigureAwait(false);
+            if (creation.Worktree is null)
+            {
+                return creation.ExitCode;
+            }
+
+            worktree = creation.Worktree;
+        }
+
+        var forkedBy = CreateProvenance(context);
+        SessionBranchOutcome outcome;
+        try
+        {
+            outcome = await runtime.ForkSessionAsync(new SessionForkRequest
+            {
+                SessionId = source.SessionId,
+                BeforeRunId = point.BeforeRunId,
+                Title = NormalizeOptionalText(options.Title),
+                ParentSessionId = parentSessionId,
+                CreatedBy = forkedBy,
+                WorktreeDirectory = worktree?.Folder,
+                LeaveWorktree = options.NoWorktree,
+            }, context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception) when (worktree is not null)
+        {
+            await RemoveUnusedWorktreeAsync(context, project!, worktree).ConfigureAwait(false);
+            throw;
+        }
+
+        if (outcome.Session is not { } fork)
+        {
+            if (worktree is not null) await RemoveUnusedWorktreeAsync(context, project!, worktree).ConfigureAwait(false);
+            return BranchRefused(context, outcome.Status, source.SessionId, "forked", before ?? after);
+        }
+
+        // Without a point, the only turn a fork leaves out is the one that runs.
+        var next = outcome.NextTurn;
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.session.forked",
+            version = 1,
+            correlationId = context.CorrelationId,
+            sessionId = fork.SessionId,
+            providerKey = fork.ResolvedProviderKey,
+            projectId = fork.ProjectRef,
+            title = fork.Title,
+            parentSessionId = fork.ParentSessionId,
+            workingDirectory = fork.WorkingDirectory,
+            worktreeDirectory = fork.WorktreeDirectory,
+            worktreeBranch = worktree?.Branch,
+            forkedFromSessionId = fork.ForkedFrom?.SessionId ?? source.SessionId,
+            forkRootSessionId = fork.ForkedFrom?.RootSessionId ?? source.SessionId,
+            turns = outcome.KeptTurnCount,
+            sourceTurns = outcome.Turns.Count,
+            beforeRunId = next?.RunId,
+            excludedRunningTurn = next is not null && (point.BeforeRunId is null || string.Equals(next.RunId, snapshot.ActiveRunId, StringComparison.Ordinal)),
+            forkedBy,
+        });
+        return AltaExitCodes.Success;
+    }
+
+    private static async ValueTask<int> HandleSessionRewindAsync(AltaCommandContext context, string? sessionId, string? before, string? after, bool discard)
+    {
+        const string CommandPath = "alta session rewind";
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return UsageError(context, "usage.missingSession", "Session id is required.", CommandPath);
+        }
+
+        before = NormalizeOptionalText(before);
+        after = NormalizeOptionalText(after);
+        if (before is not null && after is not null)
+        {
+            return UsageError(context, "usage.turnConflict", "Use either --before or --after, not both.", CommandPath);
+        }
+
+        if (before is null && after is null)
+        {
+            return UsageError(context, "usage.missingTurn", "--before <turn> or --after <turn> is required: list the turns with `alta session turns`.", CommandPath);
+        }
+
+        sessionId = sessionId.Trim();
+        context.ClaimSessionWork(sessionId);
+        if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        // The session that calls runs: it is refused as any session that runs, whatever the runtime knows of the caller.
+        if (IsTargetingCallingAgentSession(context, sessionId))
+        {
+            return BranchRefused(context, "session_in_use", sessionId, "rewound");
+        }
+
+        var read = await ReadSessionTurnsAsync(context, runtime, sessionId).ConfigureAwait(false);
+        if (read.Snapshot is not { } snapshot)
+        {
+            return read.ExitCode;
+        }
+
+        var session = read.Session!;
+        var point = ResolveTurnPoint(context, snapshot.Turns.Turns, session.SessionId, before, after);
+        if (point.ExitCode != AltaExitCodes.Success)
+        {
+            return point.ExitCode;
+        }
+
+        if (point.BeforeRunId is null)
+        {
+            return UsageError(context, "usage.nothingToRewind", $"Turn '{after ?? before}' is the last turn of session '{session.SessionId}': there is no turn after it to remove.", CommandPath);
+        }
+
+        var rewoundBy = CreateProvenance(context);
+        var outcome = await runtime.RewindSessionAsync(new SessionRewindRequest
+        {
+            SessionId = session.SessionId,
+            BeforeRunId = point.BeforeRunId,
+            KeepRemovedTurns = !discard,
+            CreatedBy = rewoundBy,
+        }, context.CancellationToken).ConfigureAwait(false);
+        if (outcome.Status != "ok")
+        {
+            return BranchRefused(context, outcome.Status, session.SessionId, "rewound", before ?? after);
+        }
+
+        var removed = outcome.NextTurn;
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.session.rewound",
+            version = 1,
+            correlationId = context.CorrelationId,
+            sessionId = session.SessionId,
+            turns = outcome.KeptTurnCount,
+            removedTurns = outcome.Turns.Count - outcome.KeptTurnCount,
+            beforeRunId = removed?.RunId ?? point.BeforeRunId,
+            removedPrompt = removed is null ? null : TurnPrompt(removed),
+            removedPromptTruncated = removed is not null && IsTurnPromptTruncated(removed),
+            removedTurnsSessionId = outcome.RemovedTurns?.SessionId,
+            rewindCount = outcome.Session?.RewindCount ?? session.RewindCount + 1,
+            rewoundBy,
+        });
+        return AltaExitCodes.Success;
+    }
+
+    // The turns of a session that exists. Without them the error is written: the session is not found, or its
+    // journal is not one that has turns.
+    private static async Task<(int ExitCode, SessionViewDescriptor? Session, SessionTurnsSnapshot? Snapshot)> ReadSessionTurnsAsync(
+        AltaCommandContext context, SessionRuntimeService runtime, string sessionId)
+    {
+        var info = await ResolveSessionInfoAsync(context, sessionId.Trim()).ConfigureAwait(false);
+        if (info.ExitCode != AltaExitCodes.Success)
+        {
+            return (info.ExitCode, null, null);
+        }
+
+        var session = info.Info!.Session;
+        var snapshot = await runtime.ReadSessionTurnsAsync(session.SessionId, context.CancellationToken).ConfigureAwait(false);
+        return snapshot is null
+            ? (BranchRefused(context, "unsupported_format", session.SessionId, "read"), session, null)
+            : (AltaExitCodes.Success, session, snapshot);
+    }
+
+    // The point `--before <turn>` or `--after <turn>` names, as the run of the first turn after it and the number of
+    // turns before it: no run for the point after the last turn, which is also the point when neither is given.
+    // A turn is named by its number or by its run id; `--after N` is `--before N+1`.
+    private static (int ExitCode, string? BeforeRunId, int KeptTurnCount) ResolveTurnPoint(
+        AltaCommandContext context, IReadOnlyList<AgentSessionTurn> turns, string sessionId, string? before, string? after)
+    {
+        if ((before ?? after) is not { } reference)
+        {
+            return (AltaExitCodes.Success, null, turns.Count);
+        }
+
+        var index = -1;
+        if (int.TryParse(reference, NumberStyles.None, CultureInfo.InvariantCulture, out var number))
+        {
+            // The number after the last turn names the point after it, as `--after <last turn>` does.
+            index = number >= 1 && number <= turns.Count + (before is not null ? 1 : 0) ? number - 1 : -1;
+        }
+
+        for (var candidate = 0; candidate < turns.Count && index < 0; candidate++)
+        {
+            if (string.Equals(turns[candidate].RunId, reference, StringComparison.Ordinal))
+            {
+                index = candidate;
+            }
+        }
+
+        if (index < 0)
+        {
+            return (BranchRefused(context, "turn_not_found", sessionId, "read", reference), null, 0);
+        }
+
+        if (after is not null) index++;
+        return (AltaExitCodes.Success, index < turns.Count ? turns[index].RunId : null, index);
+    }
+
+    private static int BranchRefused(AltaCommandContext context, string status, string sessionId, string done, string? turn = null)
+    {
+        var (exitCode, code, message) = DescribeBranchRefusal(status, sessionId, done, turn);
+        AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, code, exitCode, message);
+        return exitCode;
+    }
+
+    // Why a session was not read, forked or rewound (`done`), as the error of the command: what is not there is not
+    // found, what the caller can wait for or do first is a refusal, and the rest is a failure. Every refusal but the
+    // one of a turn is the refusal of a rewind.
+    internal static (int ExitCode, string Code, string Message) DescribeBranchRefusal(string status, string sessionId, string done, string? turn)
+        => status switch
+        {
+            "session_missing" => (AltaExitCodes.NotFound, "session.notFound", $"Session '{sessionId}' was not found."),
+            "turn_not_found" => (AltaExitCodes.NotFound, "session.turnNotFound",
+                $"Session '{sessionId}' has no turn '{turn}'. List its turns with `alta session turns {sessionId}`."),
+            "turn_running" => (AltaExitCodes.Unsupported, "session.turnRunning",
+                $"Turn '{turn}' of session '{sessionId}' is the turn that runs or comes after it: a turn in progress is not part of a fork. Fork before it, or wait for it to end."),
+            "session_in_use" => (AltaExitCodes.Unsupported, "session.running",
+                $"Session '{sessionId}' is running: a session is rewound when it is idle, and not by itself. Wait for its run to end, or stop it with `alta session abort {sessionId}`, then rewind."),
+            "queue_pending" => (AltaExitCodes.Unsupported, "session.queuePending",
+                $"Session '{sessionId}' has queued prompts: wait until they are sent, or remove them, then rewind."),
+            "interaction_pending" => (AltaExitCodes.Unsupported, "session.interactionPending",
+                $"Session '{sessionId}' waits for an answer to a question or to a permission request: answer it, then rewind."),
+            "background_work" => (AltaExitCodes.Unsupported, "session.backgroundWork",
+                $"Session '{sessionId}' has background work that reports to it: wait for it to end, or cancel it (`alta job list --session {sessionId}`, `alta job cancel <job-id>`), then rewind."),
+            "session_archived" => (AltaExitCodes.Unsupported, "session.archived", $"Session '{sessionId}' is archived: unarchive it, then rewind."),
+            "session_changed" => (AltaExitCodes.Failure, "session.changed",
+                $"Session '{sessionId}' changed while it was being {done}: nothing was done. Run the command again."),
+            "unsupported_format" => (AltaExitCodes.Failure, "session.unsupportedFormat",
+                $"Session '{sessionId}' cannot be {done}: its journal is not one whose turns CodeAlta reads."),
+            "io_failed" => (AltaExitCodes.Failure, "session.ioFailed",
+                $"The journal of session '{sessionId}' could not be read or written: the session was not {done}."),
+            _ => (AltaExitCodes.Failure, "session.branchFailed", $"Session '{sessionId}' was not {done}: {status}."),
+        };
+
+    // What the records of a turn show of its prompt.
+    private const int TurnPromptLength = 200;
+
+    private static string TurnPrompt(AgentSessionTurn turn)
+    {
+        var preview = turn.PromptPreview;
+        if (preview.Length <= TurnPromptLength)
+        {
+            return preview;
+        }
+
+        // A character of two code units is not cut in two.
+        return preview[..(char.IsHighSurrogate(preview[TurnPromptLength - 1]) ? TurnPromptLength - 1 : TurnPromptLength)];
+    }
+
+    private static bool IsTurnPromptTruncated(AgentSessionTurn turn)
+        => turn.PromptTruncated || turn.PromptPreview.Length > TurnPromptLength;
 
     private static async ValueTask<int> HandleSessionSendAsync(
         AltaCommandContext context,
@@ -5854,6 +6360,25 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? ParentSessionId { get; set; }
 
         public bool NoParent { get; set; }
+    }
+
+    private sealed class SessionForkOptions
+    {
+        public string? SessionId { get; set; }
+
+        public string? Before { get; set; }
+
+        public string? After { get; set; }
+
+        public string? Title { get; set; }
+
+        public string? ParentSessionId { get; set; }
+
+        public bool Worktree { get; set; }
+
+        public bool NoWorktree { get; set; }
+
+        public string? WorktreeBase { get; set; }
     }
 
     private sealed class SessionEventsOptions

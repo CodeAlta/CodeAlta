@@ -43,15 +43,20 @@ export type MessageNavigationResult = Readonly<{ status: "moved" | "boundary" | 
 // App-owned, bounded in-memory preferences. A new mounted session owns its own selection;
 // restoring an old position must wait for its journal (or an explicit read error), not the loading skeleton.
 export function createTimelineScrollMemory() {
-  const positions = new Map<string, { top: number; following: boolean }>();
-  function remember(id: string, top: number, following: boolean) {
-    positions.delete(id);
-    positions.set(id, { top, following });
-    if (positions.size > 64) positions.delete(positions.keys().next().value!);
-  }
+  const positions = new Map<string, { top: number; following: boolean; rewinds: number }>();
   return {
-    open(id: string) {
-      const saved = positions.get(id) ?? { top: 0, following: true };
+    /**
+     * The position of a session's timeline. `rewinds` is the number of times the session was rewound: a position
+     * kept before a rewind is one of another conversation, and the timeline starts at its end again.
+     */
+    open(id: string, rewinds = 0) {
+      function remember(id: string, top: number, following: boolean) {
+        positions.delete(id);
+        positions.set(id, { top, following, rewinds });
+        if (positions.size > 64) positions.delete(positions.keys().next().value!);
+      }
+      const kept = positions.get(id);
+      const saved = kept?.rewinds === rewinds ? kept : { top: 0, following: true };
       let following = saved.following;
       let restoring = true; // Ignore loading/layout scroll events even for a new following session.
       let pendingFinish = false;
@@ -101,9 +106,9 @@ export function createTimelineScrollMemory() {
 
 // Keep scroller, history settlement and follow wiring together so mounted layout changes
 // receive the same per-session scroll policy as content mutations.
-export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof createTimelineScrollMemory>) {
+export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof createTimelineScrollMemory>, rewinds = 0) {
   const elementRef = useRef<HTMLDivElement>(null);
-  const [selection] = useState(() => memory.open(sessionId));
+  const [selection] = useState(() => memory.open(sessionId, rewinds));
   const [following, setFollowing] = useState(selection.following);
   const restoreFrame = useRef(0);
   const observedHeight = useRef<number | null>(null);
@@ -290,6 +295,31 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (element) selection.pauseAt(element.scrollTop);
     setFollowing(false);
   }
+  // Shows the user message of a journal offset at the top of the timeline, when the window holds it. The reader
+  // is then where they chose to be, not at the end.
+  function showRow(key: string): boolean {
+    const element = elementRef.current;
+    const row = /^\d+$/u.test(key) ? element?.querySelector<HTMLElement>(`[data-prompt-offset="${key}"]`) : null;
+    if (!element || !row) return false;
+    element.scrollTop += row.getBoundingClientRect().top - element.getBoundingClientRect().top - 8;
+    messageAnchor.current = null;
+    selection.pauseAt(element.scrollTop);
+    setFollowing(false);
+    return true;
+  }
+  // Where the timeline is, and what puts it back there: a window that moved it to show a row gives it back as it was.
+  function position(): { top: number; following: boolean } | null {
+    const element = elementRef.current;
+    return element ? { top: element.scrollTop, following: selection.following() } : null;
+  }
+  function restorePosition(saved: { top: number; following: boolean } | null) {
+    const element = elementRef.current;
+    if (!element || !saved) return;
+    if (saved.following) { jump(); return; }
+    element.scrollTop = Math.min(saved.top, bottomScrollTop(element));
+    selection.pauseAt(element.scrollTop);
+    setFollowing(false);
+  }
   function messageReady() {
     const element = elementRef.current;
     return !!element?.querySelector('.history[data-window-ready="true"] [data-persisted-message="true"]');
@@ -320,7 +350,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   }
   return { elementRef, following, settled, scroll, wheel, keyDown, pointerDown, pointerMove, pointerEnd,
     jump, pause, beforeOlderPage, afterOlderPage,
-    messageReady, navigateMessage, resetMessageNavigation, pauseIfUnfollowed };
+    messageReady, navigateMessage, resetMessageNavigation, pauseIfUnfollowed, showRow, position, restorePosition };
 }
 
 // Only a user-requested, generation-matched settled tail can opt a reader into follow.

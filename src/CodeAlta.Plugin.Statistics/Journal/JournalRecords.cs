@@ -104,6 +104,13 @@ internal sealed class HeaderRecord : JournalRecord
 
     /// <summary>Gets or sets the creation time recorded by the header.</summary>
     public DateTimeOffset? CreatedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the time the records of the session are its own from (<c>forked_from.counted_from</c>): a session that starts
+    /// with the turns of another one holds a copy of their records, which are older and are counted in that other session.
+    /// Null for a session that is not a fork.
+    /// </summary>
+    public DateTimeOffset? CountedFrom { get; set; }
 }
 
 /// <summary>An actor (<c>AltaActorProvenance</c>): who created a session or submitted a prompt.</summary>

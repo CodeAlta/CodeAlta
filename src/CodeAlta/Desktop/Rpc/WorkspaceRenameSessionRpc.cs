@@ -34,7 +34,7 @@ internal sealed partial class WorkspaceService
         {
             if (_sessionsClosed) return Reply("closed");
             if (_deleteWork is not null) return Reply("busy");
-            if (_renameWork is not null) return Reply("busy");
+            if (_renameWork is not null || _branchWork is not null) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceRenameSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _renameWork = work = completion.Task;
             _ = RenameOwnedAsync(request, completion);

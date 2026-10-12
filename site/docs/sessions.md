@@ -69,6 +69,44 @@ Local compaction targets a smaller post-compaction context by default so long se
 
 A compaction asks the model for a summary, and the provider bills that request like any other. CodeAlta counts it with the requests of the session: the details of the completion notice give what the summary used (input, cached input, output and, for Copilot, the cost in AI credits), and the [context usage](workspace.md#context-usage-popup) shows it as the last operation until the next request.
 
+## Fork and rewind
+
+In CodeAlta Desktop, a session can be continued from an earlier point in two ways.
+
+- **Fork** creates a new session that starts with the turns before a point. The session you fork is not changed, and it may even be working: a turn that is still running is never part of a fork. Fork a review once per finding, for example, and treat each finding in its own session.
+- **Rewind** takes the session itself back: the turn you choose and every later one are removed from it. The session must be idle.
+
+A point is the start of a turn, that is, just before one of its prompts, or the end of the session (for a fork). In both cases the prompt of the turn at the point is put in the composer, of the new session for a fork and of the same session for a rewind, so that you can edit it and send it again.
+
+Three ways lead to the same window:
+
+- the `/fork` and `/rewind` commands, from the search window or by typing `/` in an empty prompt;
+- **Fork from here** and **Rewind to here** on one of your prompts in the timeline, beside **Copy** when the pointer is over the message, or in the menu of a right-click on it;
+- **Fork…** in the **Actions** menu of a session in the Explorer.
+
+None of them acts at once. The window lists the points of the session, the newest first: **End of the session**, then one row per turn with its number, its prompt, when it started and what it did. Select a point and the window shows its prompt and says in plain words what the action does there, for example "Turns 4 to 9 (6 turns) are removed from this session". The conversation behind the window scrolls to that prompt when it is loaded.
+
+| Key | Action |
+| --- | --- |
+| type | Filter the turns by the text of their prompt |
+| `Up` / `Down`, `PageUp` / `PageDown` | Move the selection |
+| `Tab` (in the filter) | Switch between **Fork** and **Rewind** |
+| `Ctrl+O` | List every turn, or **Only my prompts** |
+| `Enter` | Fork or rewind at the selected point |
+| `Esc` | Close without changing anything |
+
+**Only my prompts** is on when the window opens: it leaves out the turns that another agent, the answer to a question or the result of a background job started.
+
+After a fork, the new session opens in a tab with the copied conversation, and a line above its timeline says which session it was forked from and how many turns it started with; the title in that line opens the source. A fork is a session of its own, listed beside the others, not a sub-agent of its source. It keeps the provider's prompt cache of its source, so its first request does not pay for the copied turns again.
+
+After a rewind, the session shows the turns that are left, and a message says how many were removed.
+
+- **Files are not restored.** A rewind removes turns from the conversation. What those turns changed on disk stays as it is: use git, or the [Changes](workspace.md#changes-desktop) tab, to undo edits.
+- **Nothing is lost by default.** **Keep the removed turns in a separate session** is checked: the session as it was before the rewind is kept as "*title* (before rewind)", and the message offers to open it. Clear the box and the removed turns are deleted; the button then reads **Rewind and delete**. Your choice is remembered.
+- If the composer already holds a draft, the draft is kept, and the message offers the prompt of the removed turn to copy instead.
+
+When a rewind cannot be made now, the window says why before you ask: the session is working, a question waits for your answer, or a command or a task still runs in its background. A fork remains possible while the session works.
+
 ## Long instructions
 
 When you give an agent many instructions at once, such as a list of tasks or numbered steps, it first writes them down in a file under `~/.alta/scratchpad/`. A long session compacts its context; the file keeps your instructions as you wrote them, and the agent reads it again after a compaction and before it reports the work as done.

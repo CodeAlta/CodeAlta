@@ -1230,6 +1230,13 @@ internal sealed class JournalPayloadParser
                             ? created.ToUniversalTime()
                             : null;
                     }
+                    else if (reader.ValueTextEquals("forked_from"u8))
+                    {
+                        if (!reader.Read() || !ParseForkOrigin(ref reader, record))
+                        {
+                            return record;
+                        }
+                    }
                     else if (!SkipValue(ref reader))
                     {
                         return record;
@@ -1243,6 +1250,41 @@ internal sealed class JournalPayloadParser
         }
 
         return record;
+    }
+
+    // The lineage of a session that starts with the turns of another one: only the time its own records start at is read.
+    private static bool ParseForkOrigin(ref Utf8JsonReader reader, HeaderRecord record)
+    {
+        if (reader.TokenType != JsonTokenType.StartObject)
+        {
+            return SkipCurrent(ref reader);
+        }
+
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            if (reader.ValueTextEquals("counted_from"u8))
+            {
+                if (!reader.Read())
+                {
+                    return false;
+                }
+
+                if (reader.TokenType == JsonTokenType.String && reader.TryGetDateTimeOffset(out var countedFrom))
+                {
+                    record.CountedFrom = countedFrom.ToUniversalTime();
+                }
+                else if (!SkipCurrent(ref reader))
+                {
+                    return false;
+                }
+            }
+            else if (!SkipValue(ref reader))
+            {
+                return false;
+            }
+        }
+
+        return reader.TokenType == JsonTokenType.EndObject;
     }
 
     private StateRecord? ParseState(ref Utf8JsonReader reader, ReadOnlySpan<byte> line, bool isFinalBlock, Func<ulong, bool>? isPromptSeen)

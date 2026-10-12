@@ -1,0 +1,60 @@
+/* The window of a fork or a rewind of a session, the actions of a prompt of the timeline, and where a fork comes from. */
+.session-branch-dialog .app-window-body { container-type: inline-size; }
+.branch-bar { display: flex; align-items: center; gap: 12px; margin: 10px 12px 0; }
+.branch-mode { display: inline-flex; flex: none; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.app-dialog .branch-mode > button:not(.bp6-button) { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-weight: 550; }
+.app-dialog .branch-mode > button:not(.bp6-button)[aria-checked="true"] { background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.branch-mode-text { margin: 0; min-width: 0; color: var(--muted); font-size: 12px; }
+.branch-filter { margin-top: 10px; }
+.branch-panes { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); border-top: 1px solid var(--line); }
+.branch-list { padding: 6px; }
+.branch-row { display: grid; grid-template-columns: 30px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; padding: 6px 10px 6px 6px; border-radius: 5px; cursor: default; font-size: 13px; }
+.branch-row + .branch-row { margin-top: 1px; }
+.branch-row:hover { background: var(--panel-2); }
+.branch-row[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.branch-number { grid-row: 1 / span 2; display: inline-flex; align-items: flex-start; justify-content: flex-end; padding-top: 1px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.branch-prompt { min-width: 0; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; white-space: pre-line; line-height: 1.35; }
+.branch-meta { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; color: var(--muted); font-size: 11px; }
+.branch-did { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text); font-size: 11px; line-height: 1.5; white-space: nowrap; }
+.branch-tag[data-status="failed"] { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); color: var(--red); }
+.branch-tag[data-status="running"] { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); }
+.branch-row[data-sender]:not([data-sender="you"]) .branch-prompt { color: var(--muted); }
+.session-branch-dialog[data-mode="rewind"] .branch-row-end { opacity: .55; }
+.branch-row-more .branch-prompt { color: var(--accent); }
+.branch-preview { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; overflow-y: auto; border-inline-start: 1px solid var(--line); background: color-mix(in srgb, var(--panel-2) 45%, var(--panel)); font-size: 13px; }
+.branch-preview-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.branch-preview-heading strong { font-size: 14px; }
+.branch-preview-heading time { color: var(--muted); font-size: 12px; }
+.branch-sender { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; }
+.app-dialog pre.branch-prompt-text { flex: 0 1 auto; min-height: 44px; max-height: 40%; margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font: inherit; line-height: 1.45; white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; }
+.branch-note { margin: 0; color: var(--muted); font-size: 12px; }
+.branch-consequence { margin-top: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+.branch-consequence[data-mode="rewind"] { border-color: color-mix(in srgb, #d9822b 45%, var(--line)); }
+.app-dialog .branch-consequence ul { margin: 6px 0 0; padding-inline-start: 18px; }
+.branch-consequence li { margin: 3px 0; line-height: 1.4; }
+.branch-consequence li[data-warning] { color: #d9822b; font-weight: 550; list-style: none; margin-inline-start: -18px; display: flex; gap: 5px; align-items: baseline; }
+.branch-consequence li[data-warning] > svg { flex: none; transform: translateY(2px); }
+.branch-block { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0 0; padding-top: 8px; border-top: 1px solid var(--line); color: var(--text); font-weight: 550; }
+.branch-block > svg { flex: none; margin-top: 2px; color: var(--accent); }
+.branch-actions { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.branch-actions .bp6-control { flex: none; margin: 0; font-size: 12px; }
+.branch-outcome { flex: 1 1 0; min-width: 0; font-size: 12px; }
+.branch-outcome > [role="status"] { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.branch-actions .bp6-button { flex: none; }
+@container (max-width: 640px) {
+  .branch-bar { flex-wrap: wrap; row-gap: 6px; }
+  .branch-panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(96px, 2fr) minmax(120px, 3fr); }
+  .branch-preview { border-inline-start: 0; border-top: 1px solid var(--line); }
+  .branch-actions { flex-wrap: wrap; }
+  .branch-outcome { flex-basis: 100%; order: 3; }
+  .session-branch-dialog footer.reference-hint { flex-wrap: wrap; row-gap: 2px; }
+}
+
+/* The source of a fork above its timeline, and its mark on the row of the session. */
+.session-origin.session-lineage { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.session-origin.session-lineage > svg { color: var(--accent); }
+.session-lineage .session-lineage-source { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.session-lineage .session-lineage-source:hover { text-decoration: underline; }
+.session-lineage .session-lineage-source:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.session-lineage-mark { display: inline-flex; align-items: center; margin-left: 4px; color: var(--muted); flex: none; }

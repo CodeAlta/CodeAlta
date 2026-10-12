@@ -616,7 +616,9 @@ public sealed class SystemPromptBuilder
 
     private static string? ScratchpadFile(SystemPromptBuildRequest request)
     {
-        var session = request.Session.SessionId?.Trim();
+        // A session that was forked keeps the name of the session it comes from: the conversation it inherited names
+        // that file, and the instructions of the two are then the same text, which a provider reads from its cache.
+        var session = (request.Session.ForkedFrom?.RootSessionId ?? request.Session.SessionId)?.Trim();
         if (string.IsNullOrEmpty(session))
         {
             return null;

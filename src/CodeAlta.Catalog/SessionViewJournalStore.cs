@@ -818,6 +818,19 @@ public sealed class SessionViewJournalHeader
     [JsonPropertyName("created_by")]
     public AltaActorProvenance? CreatedBy { get; set; }
 
+    /// <summary>Gets or sets where the session comes from when it starts with the turns of another one.</summary>
+    [JsonPropertyName("forked_from")]
+    public SessionViewJournalForkOrigin? ForkedFrom { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of times the session was rewound; absent for a session that never was. A rewind writes
+    /// the header again with the next number: a reader that recognizes a journal by its first line then sees another
+    /// journal, and reads it from its start instead of from an offset it remembers.
+    /// </summary>
+    [JsonPropertyName("rewind_count")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int RewindCount { get; set; }
+
     [JsonPropertyName("working_directory")]
     public string WorkingDirectory { get; set; } = string.Empty;
 
@@ -839,6 +852,8 @@ public sealed class SessionViewJournalHeader
             ProjectRef = descriptor.ProjectRef,
             ParentSessionId = descriptor.ParentSessionId,
             CreatedBy = descriptor.CreatedBy,
+            ForkedFrom = SessionViewJournalForkOrigin.From(descriptor.ForkedFrom),
+            RewindCount = descriptor.RewindCount,
             WorkingDirectory = descriptor.WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(descriptor.Title) ? null : descriptor.Title,
             CreatedAt = descriptor.CreatedAt,
@@ -855,6 +870,8 @@ public sealed class SessionViewJournalHeader
             ProjectRef = ProjectRef,
             ParentSessionId = ParentSessionId,
             CreatedBy = CreatedBy,
+            ForkedFrom = ForkedFrom?.ToOrigin(),
+            RewindCount = RewindCount,
             WorkingDirectory = WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(Title) ? SessionId : Title,
             Status = SessionViewStatus.Active,
@@ -862,6 +879,73 @@ public sealed class SessionViewJournalHeader
             UpdatedAt = CreatedAt,
             LastActiveAt = CreatedAt,
         };
+}
+
+/// <summary>
+/// The lineage of a session that starts with the turns of another one, as the first line of its journal records it.
+/// A reader of journals that counts what sessions did, such as the statistics, leaves out the records older than
+/// <see cref="CountedFrom"/>: they are those of the source session, which are counted there.
+/// </summary>
+public sealed class SessionViewJournalForkOrigin
+{
+    [JsonPropertyName("session_id")]
+    public string SessionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("root_session_id")]
+    public string RootSessionId { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("kind")]
+    public AgentSessionForkKind Kind { get; set; }
+
+    [JsonPropertyName("turn_count")]
+    public int TurnCount { get; set; }
+
+    [JsonPropertyName("before_run_id")]
+    public string? BeforeRunId { get; set; }
+
+    [JsonPropertyName("forked_at")]
+    public DateTimeOffset ForkedAt { get; set; }
+
+    [JsonPropertyName("counted_from")]
+    public DateTimeOffset CountedFrom { get; set; }
+
+    /// <summary>Converts the lineage of a session to what its journal header records.</summary>
+    /// <param name="origin">The lineage, or null.</param>
+    /// <returns>The header value, or null.</returns>
+    public static SessionViewJournalForkOrigin? From(AgentSessionForkOrigin? origin)
+        => origin is null
+            ? null
+            : new()
+            {
+                SessionId = origin.SessionId,
+                RootSessionId = origin.RootSessionId,
+                Title = origin.Title,
+                Kind = origin.Kind,
+                TurnCount = origin.TurnCount,
+                BeforeRunId = origin.BeforeRunId,
+                ForkedAt = origin.ForkedAt,
+                CountedFrom = origin.CountedFrom,
+            };
+
+    /// <summary>Converts what a journal header records to the lineage of a session.</summary>
+    /// <returns>The lineage, or null when the header names no source session.</returns>
+    public AgentSessionForkOrigin? ToOrigin()
+        => string.IsNullOrWhiteSpace(SessionId)
+            ? null
+            : new()
+            {
+                SessionId = SessionId,
+                RootSessionId = string.IsNullOrWhiteSpace(RootSessionId) ? SessionId : RootSessionId,
+                Title = Title,
+                Kind = Kind,
+                TurnCount = TurnCount,
+                BeforeRunId = BeforeRunId,
+                ForkedAt = ForkedAt,
+                CountedFrom = CountedFrom,
+            };
 }
 
 [JsonSourceGenerationOptions(

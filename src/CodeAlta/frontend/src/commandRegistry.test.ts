@@ -118,6 +118,24 @@ test("command search ranks the slash name first, needs every word and hides inte
   assert.ok(names("session").includes("session_info") && names("session").includes("new_session"));
 });
 
+test("a session is forked and rewound by commands of the session, found by what one comes to do", () => {
+  const label = (command: { label: string }) => command.label;
+  const description = (command: { description: string }) => command.description;
+  const names = (query: string) => searchCommands(query, label, description).map(command => command.name);
+  const fork = commandDefinitions.find(command => command.id === "fork")!, rewind = commandDefinitions.find(command => command.id === "rewind")!;
+  assert.deepEqual([fork.name, fork.category, rewind.name, rewind.category], ["fork", "Session", "rewind", "Session"]);
+  // Beside the compaction, the other command that changes what a session holds.
+  const order = commandDefinitions.map(command => command.id);
+  assert.deepEqual(order.slice(order.indexOf("compact"), order.indexOf("compact") + 3), ["compact", "fork", "rewind"]);
+  assert.equal(names("/fork")[0], "fork");
+  assert.equal(names("/rewind")[0], "rewind");
+  for (const word of ["branch", "duplicate", "copy", "clone"]) assert.ok(names(word).includes("fork"), word);
+  for (const word of ["undo", "roll back", "revert"]) assert.ok(names(word).includes("rewind"), word);
+  // Neither has a key: both open a window that says what they do before anything is done.
+  assert.equal(fork.keys, undefined);
+  assert.equal(rewind.keys, undefined);
+});
+
 test("zoom takes the keys of a browser, with or without Shift for the plus key", () => {
   for (const focus of ["prompt", "text", "none"] as const) {
     assert.equal(resolveCommandKey(ctrl("="), false, focus).command, "zoomIn");

@@ -20,6 +20,25 @@ namespace CodeAlta.Tests;
 public sealed class OpenAICodexSubscriptionPipelineTests
 {
     [TestMethod]
+    public void RequestContext_OfAForkedSession_NamesItsSourceForTheCache_AndItselfEverywhereElse()
+    {
+        var fork = new CodexSubscriptionRequestContext(
+            "fork-session", new AgentRunId("run-context"), "turn", DateTimeOffset.UnixEpoch, null, new CodexTurnState(), cacheKey: "root-session");
+        var own = new CodexSubscriptionRequestContext(
+            "own-session", new AgentRunId("run-context"), "turn", DateTimeOffset.UnixEpoch, null, new CodexTurnState());
+
+        // The service takes the affinity of its prompt cache from the session-id header.
+        Assert.AreEqual("root-session", fork.CompatibilityHeaders["session-id"]);
+        Assert.AreEqual("fork-session", fork.CompatibilityHeaders["thread-id"]);
+        Assert.AreEqual("fork-session", fork.CompatibilityHeaders["x-client-request-id"]);
+        Assert.AreEqual("fork-session", fork.ClientMetadata["session_id"]);
+        Assert.AreEqual("fork-session", fork.ClientMetadata["thread_id"]);
+        StringAssert.Contains(fork.ClientMetadata["x-codex-turn-metadata"], "\"session_id\":\"fork-session\"");
+        Assert.AreEqual("own-session", own.CompatibilityHeaders["session-id"]);
+        Assert.AreEqual("own-session", own.CacheKey);
+    }
+
+    [TestMethod]
     public void RequestContext_ProjectsReservedMetadataFromImmutableTurnIdentity()
     {
         var startedAt = DateTimeOffset.FromUnixTimeMilliseconds(1_752_124_567_890);

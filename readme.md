@@ -34,6 +34,7 @@ CodeAlta Desktop brings together:
 
 - **Sessions & delegation**: run agents in split panes; resume, queue, steer and delegate work.
   In Desktop, `Enter` sends when idle and enqueues while busy; `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now (steers a busy turn).
+- **Fork & rewind**: branch a session from any turn and keep the original, or roll it back to an earlier prompt.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
 - **Work items**: review agent-proposed tasks and plans; start, defer or dismiss them.
