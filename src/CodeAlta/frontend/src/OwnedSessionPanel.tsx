@@ -32,6 +32,7 @@ import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHisto
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
+import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { PermissionModeMenu } from "./PermissionModeMenu";
 import { chosenPermissionMode, offeredPermissionModes } from "./permissionModes";
@@ -52,6 +53,8 @@ import { sendDiagnostics } from "./sendDiagnostics";
 
 // Sent prompts of this window, for Alt+Up / Alt+Down in the prompt editor.
 const promptHistory = createPromptHistory();
+// What the model list holds while the choices of the session are not known.
+const noModels: readonly { id: string; name: string }[] = [];
 
 /** What to tell the user when a Send was not accepted; the prompt stays in the composer in every case. */
 export function sendFailureMessage(status: string, reason?: string): string {
@@ -1019,12 +1022,9 @@ ${value}` : value);
           loadModelChoices();
           void runtimeScope.current?.refresh();
         }} />}
-      model={<HTMLSelect fill id={`composer-model-${sessionId}`} data-model-selector aria-label={t("Model")} value={selected?.modelId ?? ""} disabled={invalidEpoch || !!pending || loadingChoices}
-        onChange={event => select("modelId", event.target.value)} title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })}>
-        {!selected?.modelId && <option value="">{t(loadingChoices ? "Loading…" : "No model")}</option>}
-        {selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) && <option value={selected.modelId}>{loadingChoices ? t("Loading…") : `${selected.modelId} · ${t("Unverified")}`}</option>}
-        {activeChoices?.models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-      </HTMLSelect>}
+      model={<ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} providerKey={selected?.providerKey}
+        disabled={invalidEpoch || !!pending} loading={loadingChoices} onChange={modelId => select("modelId", modelId)}
+        title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />} />
       {activeChoices && selected && permissionModes.length > 0 && <PermissionModeMenu id={`composer-permission-${sessionId}`}

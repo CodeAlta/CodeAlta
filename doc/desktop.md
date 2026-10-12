@@ -905,6 +905,14 @@ selects nothing, so a Send never reaches a provider without a model while the pr
 Choosing another model starts it with its own effort. A saved model the provider does not list is
 kept and shown as **Unverified**; settings change again once a listed model is chosen.
 
+The model list (`ComposerModelPicker`, shared by a session and a draft) is a button that opens a search
+box over the models. The focus stays in the box: a search keeps the models whose name or id holds
+every word (`matchingModels`), Up, Down, Page Up and Page Down move the active model, Enter takes it,
+and Escape closes the list without closing the form. The list opens on the model in use. It shows ten
+models and scrolls for the others; **Models shown in the model list of the prompt** on the **Models**
+page of Settings changes that number (4 to 30). The number is a preference of the window
+(`modelPicker.ts`, local storage key `codealta.desktop.modelPicker.rows.v1`).
+
 Beside the chip, a small button (`PermissionModeMenu`) names the permission mode the session runs in and
 opens the modes it can be given (`SessionChoicesResponse.PermissionModes`; empty hides the button, as in
 a host that forces the review). Each mode has a name and a line that says what it does; the one the

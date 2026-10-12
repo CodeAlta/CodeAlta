@@ -1154,6 +1154,7 @@ export const messages = dictionary({
   "Loading providers…": ["Cargando proveedores…", "Chargement des fournisseurs…", "Anbieter werden geladen…", "プロバイダーを読み込み中…", "正在加载提供商…"],
   "Provider models": ["Modelos del proveedor", "Modèles du fournisseur", "Anbietermodelle", "プロバイダーのモデル", "提供商模型"],
   "Search models": ["Buscar modelos", "Rechercher des modèles", "Modelle suchen", "モデルを検索", "搜索模型"],
+  "Models shown in the model list of the prompt": ["Modelos visibles en la lista de modelos del prompt", "Modèles affichés dans la liste des modèles du prompt", "Angezeigte Modelle in der Modellliste des Prompts", "プロンプトのモデル一覧に表示するモデル数", "提示词模型列表中显示的模型数"],
   "Choose a model": ["Elegir un modelo", "Choisir un modèle", "Modell auswählen", "モデルを選択", "选择模型"],
   "Save provider connection changes before listing models.": ["Guarda los cambios de conexión del proveedor antes de listar modelos.", "Enregistrez les changements de connexion du fournisseur avant de lister les modèles.", "Speichern Sie die Verbindungsänderungen des Anbieters, bevor Sie Modelle auflisten.", "モデルを一覧表示する前にプロバイダーの接続設定の変更を保存してください。", "列出模型前请保存提供程序连接设置的更改。"],
   "Name, ID or description": ["Nombre, ID o descripción", "Nom, ID ou description", "Name, ID oder Beschreibung", "名前、ID、説明", "名称、ID 或描述"],

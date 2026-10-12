@@ -98,6 +98,7 @@ import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { useNewSessionChoices } from "./newSessionChoices";
+import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
 import { AppIcon, type IconName } from "./AppIcon";
@@ -2673,12 +2674,8 @@ function App() {
           {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
           {draftChoices.prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name}</option>)}
         </HTMLSelect>} provider={select}
-        model={<HTMLSelect fill id="composer-model-new" data-model-selector aria-label={t("Model")} value={value.modelId ?? ""}
-          disabled={locked || draftChoices.loadingModels} onChange={event => change("modelId", event.target.value)}>
-          {!value.modelId && <option value="">{t(draftChoices.loadingModels ? "Loading…" : "No model")}</option>}
-          {value.modelId && !draftChoices.models.some(model => model.id === value.modelId) && <option value={value.modelId}>{value.modelId} · {t("Unverified")}</option>}
-          {draftChoices.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-        </HTMLSelect>}
+        model={<ComposerModelPicker id="composer-model-new" value={value.modelId || null} models={draftChoices.models} providerKey={usedProvider || null}
+          disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)} />}
         reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} disabled={locked}
           onChange={next => change("reasoningEffort", next)} />} />;
     }
