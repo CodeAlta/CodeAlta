@@ -260,6 +260,8 @@ public sealed partial class SessionRuntimeService
         }, CancellationToken.None).ConfigureAwait(false);
         if (outcome.Status != "ok") return outcome;
 
+        // The live window of the session still holds the last texts of the turns that were removed.
+        _events.Display.ForgetConversation(sessionId);
         await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         if (outcome.RemovedTurns is { } kept)
         {

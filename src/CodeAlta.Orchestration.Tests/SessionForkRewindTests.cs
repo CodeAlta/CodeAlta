@@ -130,11 +130,15 @@ public sealed class SessionForkRewindTests
         var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Refactoring", CancellationToken.None);
         foreach (var prompt in new[] { "one", "two", "three" }) await SendAsync(host, session, options, prompt);
         var turns = await host.RuntimeService.ReadSessionTurnsAsync(session.SessionId);
+        Assert.IsFalse(host.RuntimeService.Display.GetSnapshot().Sessions.Single(value => value.SessionId == session.SessionId).Text.IsEmpty);
 
         var outcome = await host.RuntimeService.RewindSessionAsync(new SessionRewindRequest { SessionId = session.SessionId, BeforeRunId = turns!.Turns.Turns[1].RunId });
 
         Assert.AreEqual("ok", outcome.Status);
         Assert.AreEqual(1, outcome.KeptTurnCount);
+        // A view shows a live text until the journal holds it: those of the removed turns would never leave it.
+        var live = host.RuntimeService.Display.GetSnapshot().Sessions.Single(value => value.SessionId == session.SessionId);
+        Assert.IsTrue(live.Text.IsEmpty && live.ToolActivities.IsEmpty, "The live window of a rewound session holds nothing of what was removed.");
         Assert.AreEqual("two", outcome.NextTurn!.PromptPreview, "The prompt of the first removed turn is what a frontend puts back in the composer.");
         Assert.AreEqual(session.SessionId, outcome.Session!.SessionId);
         Assert.AreEqual("Refactoring", outcome.Session.Title);
