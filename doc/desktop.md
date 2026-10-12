@@ -316,7 +316,10 @@ Zoom** `Ctrl+0`, also `/zoom_in`, `/zoom_out` and `/reset_zoom`) zoom the whole 
 percent in Chrome's steps, and work whatever window of the app is open. A focused terminal keeps those
 keys for its program. The host applies the zoom to the view (`desktopShell.zoom`) and keeps it in
 `preferences.json` (`zoom`, written only when it is not 100), so the next start opens at the same zoom
-before the page loads.
+before the page loads. A zoom lays the page out again in a viewport of the size of the window divided by the
+zoom, on every system: the content always fills the window. On macOS this needs NeoAstra 1.3.1, whose zoom is
+the page zoom of WKWebView; an earlier one scaled the picture of the page, which left a part of the window
+empty below 100 percent.
 
 The title bar shows the zoom as a percentage, before the theme switch (`WindowZoom`). A click opens **Zoom
 out**, the percentage, which goes back to 100%, and **Zoom in**; a step that does not exist is disabled (at
