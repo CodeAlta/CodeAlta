@@ -20,6 +20,9 @@ internal sealed class JournalBuilder
 
     public string SessionId { get; }
 
+    /// <summary>The session the forks of the tests name as their source.</summary>
+    public const string ForkSourceId = "99999999-9999-9999-9999-999999999999";
+
     public string Provider { get; set; }
 
     public IReadOnlyList<string> Lines => _lines;
@@ -53,7 +56,10 @@ internal sealed class JournalBuilder
         string? createdBySession = null,
         string? automation = null,
         string title = "A title",
-        bool legacy = false)
+        bool legacy = false,
+        DateTimeOffset? countedFrom = null,
+        string forkKind = "Fork",
+        int rewindCount = 0)
     {
         var raw = new StringBuilder("{\"schema_version\":1,");
         raw.Append(legacy ? $"\"thread_id\":\"{SessionId}\"," : $"\"session_id\":\"{SessionId}\",");
@@ -82,6 +88,17 @@ internal sealed class JournalBuilder
             }
 
             raw.Append($",\"CorrelationId\":\"c\",\"CreatedAt\":\"{Json(time)}\"}}");
+        }
+
+        if (countedFrom is { } from)
+        {
+            // The lineage of a session that starts with the turns of another one; its kind is not the kind of the session.
+            raw.Append($",\"forked_from\":{{\"session_id\":\"{ForkSourceId}\",\"root_session_id\":\"{ForkSourceId}\",\"title\":\"A source\",\"kind\":\"{forkKind}\",\"turn_count\":1,\"before_run_id\":\"r\",\"forked_at\":\"{Json(time)}\",\"counted_from\":\"{Json(from)}\"}}");
+        }
+
+        if (rewindCount > 0)
+        {
+            raw.Append($",\"rewind_count\":{rewindCount}");
         }
 
         raw.Append($",\"working_directory\":\"C:\\\\placeholder\",\"title\":{Text(title)},\"created_at\":\"{Json(time)}\"}}");
@@ -307,6 +324,54 @@ internal sealed class JournalBuilder
 
     public JournalBuilder LocalMessage(DateTimeOffset time, string run, string type = "local.assistantMessage")
         => AddRaw(type, "{\"role\":\"Assistant\",\"parts\":[{\"$type\":\"reasoning\",\"value\":\"…\"}]}", time, run);
+
+    /// <summary>The index of the first line of a run: where a fork or a rewind cuts the journal before that turn.</summary>
+    public int FirstLineOf(string run)
+    {
+        var index = _lines.FindIndex(line => line.EndsWith($"\"runId\":\"{run}\"}}", StringComparison.Ordinal));
+        return index >= 0 ? index : throw new ArgumentException($"No record of run '{run}'.", nameof(run));
+    }
+
+    /// <summary>
+    /// The journal of a session that starts with the first lines of this one, as the application writes it: a header of its own
+    /// that says from when its records are counted, the records under the identifier of the new session with their times and their
+    /// runs (the header and the snapshots of the source are left out), then the snapshots of the new session.
+    /// </summary>
+    public JournalBuilder ForkTo(string sessionId, int lines, DateTimeOffset createdAt, DateTimeOffset countedFrom, string kind = "Fork", string? model = "gpt-6.1-sol")
+    {
+        var fork = new JournalBuilder(sessionId, Provider);
+        fork.Header(createdAt, title: "A fork", countedFrom: countedFrom, forkKind: kind);
+        foreach (var line in _lines.Take(lines))
+        {
+            if (!IsSnapshot(line))
+            {
+                fork.Add(line.Replace($"\"sessionId\":\"{SessionId}\",\"timestamp\"", $"\"sessionId\":\"{sessionId}\",\"timestamp\"", StringComparison.Ordinal));
+            }
+        }
+
+        return fork.LocalSnapshot(createdAt).State(createdAt, model: model);
+    }
+
+    /// <summary>
+    /// The journal of this session after a rewind, as the application writes it: its header with the count of the rewinds, the
+    /// lines before the point as they were, then new snapshots.
+    /// </summary>
+    public JournalBuilder RewindTo(int lines, int rewindCount, DateTimeOffset at)
+    {
+        var rewound = new JournalBuilder(SessionId, Provider);
+        var header = System.Text.RegularExpressions.Regex.Replace(_lines[0], ",\"rewind_count\":\\d+", string.Empty)
+            .Replace(",\"working_directory\"", $",\"rewind_count\":{rewindCount},\"working_directory\"", StringComparison.Ordinal);
+        rewound.Add(header);
+        foreach (var line in _lines.Take(lines).Skip(1))
+        {
+            rewound.Add(line);
+        }
+
+        return rewound.LocalSnapshot(at).State(at);
+    }
+
+    private static bool IsSnapshot(string line)
+        => line.Contains("\"backendEventType\":\"codealta.session", StringComparison.Ordinal) || line.Contains("\"backendEventType\":\"local.session", StringComparison.Ordinal);
 
     public byte[] ToBytes(bool trailingNewline = true)
     {
