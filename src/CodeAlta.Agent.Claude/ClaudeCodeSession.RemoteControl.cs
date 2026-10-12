@@ -200,6 +200,10 @@ internal sealed partial class ClaudeCodeSession
                     writer =>
                     {
                         writer.WriteBoolean("enabled", true);
+                        // The CLI archives the claude.ai session when its process ends, and a page open there stays
+                        // archived after a new process reattached it: the session is kept, to come back with the
+                        // next process. It is no longer archived when Remote Control is turned off or the session ends.
+                        writer.WriteBoolean("keep_session_on_exit", true);
                         if (name is not null)
                         {
                             writer.WriteString("name", name);

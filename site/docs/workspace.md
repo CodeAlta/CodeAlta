@@ -242,6 +242,9 @@ While it is on:
   (another model, effort or agent prompt for a send); the link on claude.ai normally stays the same. Closing
   CodeAlta ends it. If Claude Code stops by itself, the button turns red: the session is connected again with
   the next prompt you send here, or with **Try again** in its popover.
+- CodeAlta does not archive the session on claude.ai, so a page open there keeps working when Claude Code
+  starts again. After you turn Remote Control off, close CodeAlta or delete the session, it stays in your
+  claude.ai list as offline: archive it there when you no longer need it.
 
 Remote Control needs Claude Code signed in with your claude.ai account: it does not work with an API key.
 When CodeAlta starts again, Remote Control is off unless you turned on **Turn Remote Control back on when

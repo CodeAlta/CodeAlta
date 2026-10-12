@@ -432,7 +432,11 @@ browser or the Claude app. The provider implements `IAgentRemoteControlProvider`
 choices of a session.
 
 - **Turning it on** sends the control request `remote_control` (`enabled: true`, `name`: the title of the
-  session, `reattach_session_id`: the bridge of a process started again). The answer gives `session_url`
+  session, `reattach_session_id`: the bridge of a process started again, `keep_session_on_exit: true`). Without
+  `keep_session_on_exit` (the bridge's `neverArchive` in Claude Code 2.1.295), the CLI archives the claude.ai
+  session when its process ends; the next process un-archives it as it reattaches, but a page open on claude.ai
+  stays archived until it is reloaded. With it, no exit archives the session, also when Remote Control is turned
+  off or the session ends: it stays offline in the claude.ai list. The answer gives `session_url`
   (`https://claude.ai/code/session_…`) and `bridge_session_id` (`cse_…`). With no process running, one is
   started for it from a request `AgentSession` builds as for a compaction (no prompt, no tools: the tools of
   CodeAlta are announced at the first turn); while a turn starts one, the turn connects it. `initialize`
