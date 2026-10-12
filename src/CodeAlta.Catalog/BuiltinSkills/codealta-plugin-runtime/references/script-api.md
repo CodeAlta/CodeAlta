@@ -1,6 +1,23 @@
-# Script API quick reference
+# Script API reference
 
-The `codealta` module is supplied by the running desktop application. Import it by name; write plain JavaScript, not TypeScript or JSX. No npm install or bundle is needed. This reference describes CodeAlta's helpers, not all of React or Blueprint. Use `alta plugin api <name>` for the **C#** side.
+The `codealta` module is supplied by the running desktop application. Import it by name; write plain JavaScript, not TypeScript or JSX. No npm install or bundle is needed. **Choosing a library?** [Script libraries](script-libraries.md) lists every import name, exact version, exports, upstream API and repository (React, Blueprint, FlexLayout, Lucide), plus the libraries reached only through helpers. Use `alta plugin api <name>` for the **C#** side.
+
+## All `codealta` exports
+
+Named runtime exports only; no default export. `interfaceVersion` is **1**, also available as `alta.versions.interface`.
+
+<!-- exports: codealta -->
+| Use | Exports |
+| --- | --- |
+| Elements and hooks | `html`, `useAlta`, `useVisible`, `useTheme`, `useRpc`, `useStream` |
+| Content and links | `Markdown`, `Code`, `Diagram`, `FileLink`, `SessionLink` |
+| Icons | `Icon`, `BrandIcon`, `brandIconNames`, `isBrandIcon` |
+| Charts | `Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, `WeekdayHourHeatmap` |
+| Distribution data/options | `histogram`, `histogramOption`, `boxStats`, `boxPlotOption`, `quantile` |
+| Interface and errors | `interfaceVersion`, `AltaError` |
+<!-- /exports -->
+
+Names such as `Alta`, `ChartProps` and `RpcResult` are TypeScript types, not JavaScript imports. Other internal chart helpers (`compact`, `calendarLayout`, `seriesColor`, `sanitizeChartOption`, etc.) are **not** exported by `codealta`.
 
 ## React and HTML
 
@@ -28,6 +45,13 @@ export default function Dashboard() {
 ```
 
 `html` creates React elements; it is not `innerHTML`. Dynamic values use `${value}`, including callbacks, arrays of elements, and style objects. Use React names (`className`, `onClick`, `strokeWidth`). Close a dynamic component with `<//>` or `/>`. Pass characters such as `→` directly, not HTML entities. Give mapped elements a `key`. A script can render a scoped `<style>` element; do not style or inspect the host's private ancestors. A string assigned to `innerHTML` must first go through `alta.html(text)`, which sanitizes it and removes scripts, styles and event attributes.
+
+### Entry points and lifetime
+
+- Export a **default React component** (preferred), or `mount(root, alta)` returning an optional cleanup function, synchronously or asynchronously. If both exist, the default component wins. The script is given alongside the C# view's HTML, never as a `<script>` inside that HTML.
+- A default component replaces the HTML; a mount function fills its fragment. Replacing that fragment ends the old mount and runs it again. A reload replaces either form; `alta.closed` aborts and cleanup runs. Clear timers, observers and subscriptions; do not keep instance state in module globals.
+- `useAlta()` works only inside the component tree CodeAlta renders for the script; a separately created React root does not inherit that context. There is no global `alta`. Call hooks from components/custom hooks, not `mount` or event handlers.
+- Hidden is not closed: pause work with `useVisible()`/`alta.visible`. Hooks handle RPC visibility; read `const visible = useVisible()` before early returns and pass `visible=${visible}` to a chart. Timeline scripts start when first shown. Landing cards have no script.
 
 ## Hooks and RPC
 
@@ -74,16 +98,48 @@ Required props are in **bold**. Optional callbacks are functions, not strings.
 | `Sparkline` | **`values: (number \| null)[]`**; `width?: number` (80), `height?: number` (24), `ariaLabel?: string`, `filled?: boolean`, `className?: string` |
 | `CalendarHeatmap` | **`data: { date: string, value: number }[]`, `from: string`, `to: string`, `ariaLabel: string`**; dates are `YYYY-MM-DD`. `onSelect?: (date, value: number \| null) => void`, `describe?: (date, value) => string`, `weekStart?: number` (1 = Monday, 0 = Sunday). The callback's first argument is a **date string**, not an event or object. Unlisted days have null values; invalid/reversed date bounds throw. |
 | `WeekdayHourHeatmap` | **`matrix: number[][]`, `ariaLabel: string`**; seven rows of 24 values, first row is `weekStart` (default Monday). `onSelect?: (weekday, hour, value) => void`, `describe?: (weekday, hour, value) => string`, `weekStart?: number` |
-| `Chart` | **`option: object`, `ariaLabel: string`**; ECharts data-only option. `height?: number` (240), `renderer?: "svg" \| "canvas"`, `visible?: boolean`, `update?: "replace" \| "merge"`, `group?: string`, `hideTableToggle?: boolean`, `className?: string`. `onSelect?: (datum) => void`, where datum has `name`, `seriesName`, `seriesIndex`, `dataIndex`, `value`, `data`. |
+| `Chart` | **`option: object`, `ariaLabel: string`**; ECharts option (prefer plain data). `height?: number` (240), `renderer?: "svg" \| "canvas"`, `visible?: boolean`, `update?: "replace" \| "merge"`, `group?: string`, `hideTableToggle?: boolean`, `className?: string`. `onSelect?: (datum) => void`, where datum has `name`, `seriesName`, `seriesIndex`, `dataIndex`, `value`, `data`. `onPeriod?: ({ start, end, from, to }) => void`: start/end are percentages; from/to are axis values. `table?: { columns: string[], rows: (string \| number \| null)[][] }` overrides the inferred table. |
 
 Calendar heatmaps support keyboard arrows, Enter and Space. They draw SVG, not ECharts. Charts and heatmaps use the host's theme automatically. A chart's width follows its container.
+
+### Icons
+
+| Export | Contract |
+| --- | --- |
+| `Icon` | **`name: string`**; `size?: number` (14), `title?: string`, `className?: string`. Accepts a Lucide kebab-case name (`chart-column`), a curated brand id or a plugin-relative SVG path (`icons/star.svg`). Unknown names show a neutral icon; a title provides the accessible label. |
+| `BrandIcon` | **`name: string`** from the supported ids; `size?: number` (16), `color?: string`, `title?: string`, `className?: string`. Original brand colors by default; an explicit color draws its one-color mark. |
+| `brandIconNames` | Array of supported brand ids, sorted by display title; treat it as read-only. Use it for a picker rather than assuming every upstream brand exists. |
+| `isBrandIcon(name)` | Boolean check before passing an unknown string to `BrandIcon`. |
+
+`Icon` needs the script's React context to resolve a package SVG. Blueprint's `Icon` is a different component; use aliases when importing both. Neither `brandTitle` nor the raw SVG data is exported.
+
+### Distribution helpers
+
+All are pure functions; options are optional. Render the returned chart option with `Chart`.
+
+| Function | Input → output |
+| --- | --- |
+| `histogram(input, options?)` | `number[]` or `{ value, count }[]`; options `{ bins?: number = 20, scale?: "linear" \| "log", min?, max? }` → `{ bins: { from, to, count }[], total, excluded }`. Log scale counts positive values only; nonfinite/out-of-range values are excluded. Bins include `from`, exclude `to`, except the last includes its end. |
+| `histogramOption(result, options?)` | A histogram result; `{ name?: string = "Count", label?: (from, to) => string }` → bar-chart option. |
+| `quantile(sorted, p)` | Already sorted numeric values; fraction clamped to 0–1 → interpolated number (`NaN` if empty). Does not sort/filter input. |
+| `boxStats(values)` | Filters nonfinite values and sorts → `{ count, min, q1, median, q3, p90, max }`, or `null` without finite values. |
+| `boxPlotOption(items, options?)` | `{ name, values: number[] }[]` or items with `{ name, stats: boxStatsResult }`; `{ horizontal?: boolean, p90Name?: string = "P90", name?: string = "Distribution", log?: boolean }` → boxplot + P90 scatter option. Empty value series are omitted. |
+
+```js
+import { Chart, histogram, histogramOption, html } from "codealta";
+// In a component: values can come from useRpc().data.
+const option = histogramOption(histogram([1, 2, 2, 4, 8], { bins: 4 }), { name: "Runs" });
+html`<${Chart} option=${option} ariaLabel="Duration distribution" />`;
+```
+
+See [registered ECharts features](script-libraries.md#libraries-reached-through-codealta-helpers-only) before using an upstream chart example; not every ECharts series is loaded.
 
 ## The `alta` object
 
 - `context`: `{ pluginKey, canvasId, instanceId, spaceId, projectId, sessionId, key, input }`. Inapplicable identifiers are null; `input` is parsed JSON, not a string.
 - `visible`, `theme`, `rpc.generation`, `rpc.connected`: **signals**, with `.value` and `.subscribe(listener)` returning an unsubscribe function. In a React component use `useVisible()` / `useTheme()` instead of reading the signal once.
 - `closed`: `AbortSignal`, aborted when the content is removed/reloaded; pass it to work you start.
-- `versions`: library/interface version values. The host lends `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react`, `lucide-react`; import the same instances rather than packaging another React.
+- `versions`: frozen library/interface version values, e.g. `alta.versions["@blueprintjs/core"]`; [version and import index](script-libraries.md#imports-versions-and-upstream-references). Import the host instances rather than packaging another React.
 
 ### Theme value
 

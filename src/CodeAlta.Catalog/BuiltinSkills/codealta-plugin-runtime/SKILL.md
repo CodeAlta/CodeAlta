@@ -251,7 +251,7 @@ Write every text of the user with `PluginHtml.Encode(text)`. `PluginHtml.Command
 
 ## Canvases and script
 
-**Before writing JavaScript**, read [the script API reference](references/script-api.md). It gives the component props, callback arguments, hook results, theme fields and host methods. `alta plugin api` currently looks up **C#**, not JavaScript; do not reverse-engineer the minified application bundles to find these contracts.
+**Before writing JavaScript**, read [the script API reference](references/script-api.md) for CodeAlta's props, callbacks, hooks, theme and host methods. [Script libraries](references/script-libraries.md) is the compact import/version index with grouped exports, upstream API and GitHub links (React, Blueprint, FlexLayout, Lucide). Read only the library section you need; follow its pinned declarations for individual props. `alta plugin api` looks up **C#**, not JavaScript; do not reverse-engineer the application bundles.
 
 A canvas is a tab that a plugin provides (`GetCanvases()`): the plugin declares it, holds its state, and the tab is a view of it (`PluginCanvasContribution`: `Id`, `Title`, `Scope`, `Open`; `Services.Canvases.OpenAsync("id")` or `alta` commands ask the window for the tab). Without script a tab shows an HTML fragment, as above. With script it is drawn by a JavaScript module of the plugin:
 

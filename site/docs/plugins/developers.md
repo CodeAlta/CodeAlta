@@ -27,7 +27,7 @@ Write a plugin that shows the current git branch beside the prompt, with a comma
 
 The plugin is for all your projects: the agent creates it under `~/.alta/plugins`. Ask for a plugin *for this project* to keep it in the project instead, under `.alta/plugins`. Everything on this page works the same for both.
 
-The agent reads the `codealta-plugin-runtime` skill, which ships with CodeAlta and has this guidance with sample plugins. Its `references/script-api.md` covers the JavaScript component props, callback arguments, hooks, theme and host methods; `alta plugin api` covers C# types, not JavaScript exports. Then it works with the `alta plugin` commands of its session:
+The agent reads the `codealta-plugin-runtime` skill, which ships with CodeAlta and has this guidance with sample plugins. Its [script API reference](https://github.com/CodeAlta/CodeAlta/blob/main/src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/references/script-api.md) covers JavaScript props, callbacks, hooks, theme and host methods. Its [library index](https://github.com/CodeAlta/CodeAlta/blob/main/src/CodeAlta.Catalog/BuiltinSkills/codealta-plugin-runtime/references/script-libraries.md) lists the imports, exact versions, exports, upstream API and GitHub links for React, Blueprint, FlexLayout and Lucide. `alta plugin api` covers C# types, not JavaScript exports. Then it works with the `alta plugin` commands of its session:
 
 {.table}
 | Command | What it does |
@@ -308,7 +308,7 @@ export default function Board() {          // a React component that CodeAlta dr
 
 or `export async function mount(root, alta)`, which fills the element that holds the HTML and may return a function that is called when the content goes away.
 
-**The libraries are CodeAlta's own.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react` and `lucide-react` by their usual names and gets the very ones the window runs, so a menu or a popover opens above the tabs, and the theme, the color scheme and the zoom apply with no work. The price is their versions: when CodeAlta moves to a new major version of one, a script that used what changed needs an update. `alta.versions` tells the versions, and the `alta plugin api` and the release notes say what changed. Use `PopoverNext` for popovers. What stays the same from one release to the next is the HTML described above and the `codealta` module.
+**The libraries are CodeAlta's own.** A script imports `react`, `react-dom`, `@blueprintjs/core`, `@blueprintjs/table`, `flexlayout-react` and `lucide-react` by their usual names and gets the very ones the window runs, so a menu or a popover opens above the tabs, and the theme, the color scheme and the zoom apply with no work. The price is their versions: when CodeAlta moves to a new major version of one, a script that used what changed needs an update. `alta.versions` tells the versions; the skill's library index links their exports and upstream references. Use `PopoverNext` for popovers. What stays the same from one release to the next is the HTML described above and the `codealta` module.
 
 **The `codealta` module** gives `html` (JSX written as a template), `Markdown`, `Code` and `Diagram`, `Icon` and `BrandIcon`, `FileLink` and `SessionLink`, the charts of the window (`Chart`, `Sparkline`, `StatTile`, `CalendarHeatmap`, histograms and box plots), and the hooks `useAlta`, `useVisible` and `useTheme`.
 
