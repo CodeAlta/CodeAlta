@@ -91,5 +91,8 @@ test("session list signature changes with the sessions shown, not with their act
   assert.equal(sessionListSignature(snapshot({ ...session, updatedAt: "2026-01-02T00:00:00Z" })), shown);
   assert.notEqual(sessionListSignature(snapshot(session, { ...session, id: "b", parentSessionId: "a" })), shown, "a sub-session appeared");
   assert.notEqual(sessionListSignature(snapshot({ ...session, title: "Renamed" })), shown);
+  // A rewind made through the alta tool changes nothing else of the row: the list is still read again, and the pane of the session with it.
+  assert.notEqual(sessionListSignature(snapshot({ ...session, rewindCount: 1 })), sessionListSignature(snapshot({ ...session, rewindCount: 0 })), "the session was rewound");
+  assert.notEqual(sessionListSignature(snapshot({ ...session, forkedFromSessionId: "source", forkKind: "fork" })), sessionListSignature(snapshot({ ...session, forkedFromSessionId: null, forkKind: null })));
   assert.equal(sessionListSignature(snapshot({ ...session, id: "b" }, session)), sessionListSignature(snapshot(session, { ...session, id: "b" })));
 });

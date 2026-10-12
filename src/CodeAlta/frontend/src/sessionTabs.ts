@@ -21,6 +21,15 @@ export function resolveSessionTab(snapshot: WorkspaceSnapshot, tab: SessionTab) 
     ? row : undefined;
 }
 
+/**
+ * What the pane of a session is mounted under, and what its owners are kept by: another host, another session,
+ * or the same session after a rewind, is another pane. A rewind writes the journal of the session again, so
+ * everything the pane read of it (its rows, their offsets, where it was scrolled) is read anew.
+ */
+export function sessionPaneKey(hostEpoch: string | null | undefined, tab: SessionTab, createdAt: string | null, rewinds: number): string {
+  return JSON.stringify([hostEpoch, tabKey(tab), createdAt, rewinds]);
+}
+
 export function selectedTab(snapshot: WorkspaceSnapshot, projectId: string | null, sessionId: string | null): SessionTab | null {
   const row = snapshot.sessions.find(row => row.id === sessionId);
   if (!row) return null;

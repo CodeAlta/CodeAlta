@@ -28,6 +28,13 @@ test("a tool call is read once, kept, and found by the offsets of its row", asyn
   await cache.reader("next", "session").read("40", "30");
   assert.equal(requests.length, 4);
   assert.deepEqual(cache.usage(), { entries: 4, characters: 4 * 29 });
+  // A rewind writes the journal again: the same offsets name other records, which are read anew and asked for the same way.
+  const rewound = cache.reader("epoch", "session", 1);
+  assert.equal(rewound.peek("40", "30"), undefined);
+  await rewound.read("40", "30");
+  assert.equal(requests.length, 5);
+  assert.deepEqual(requests[4], requests[0]);
+  assert.equal(cache.reader("epoch", "session", 0).peek("40", "30"), first);
 });
 
 test("a long text is read part after part, up to the limit of the page", async () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabLimit } from "./sessionTabs";
+import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit } from "./sessionTabs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionTabLabel } from "./SessionTabStrip";
@@ -79,4 +79,17 @@ test("versioned bounded persistence validates all fields, active membership, dup
   assert.equal(many.open.length, sessionTabLimit); assert.equal(many.active?.sessionId, "79");
   for (const item of [...many.open]) many = closeSessionTab(many, item);
   assert.equal(many.closed.length, sessionTabLimit);
+});
+
+test("the pane of a session is another one after a rewind, another host or another session", () => {
+  const key = sessionPaneKey("epoch", tab("one"), "2026-10-12T10:00:00Z", 0);
+  assert.equal(sessionPaneKey("epoch", tab("one"), "2026-10-12T10:00:00Z", 0), key);
+  // A rewind writes the journal again: what the pane read of it, and where it was scrolled, is not kept.
+  assert.notEqual(sessionPaneKey("epoch", tab("one"), "2026-10-12T10:00:00Z", 1), key);
+  assert.notEqual(sessionPaneKey("epoch", tab("one"), "2026-10-12T10:00:00Z", 2), sessionPaneKey("epoch", tab("one"), "2026-10-12T10:00:00Z", 1));
+  assert.notEqual(sessionPaneKey("other", tab("one"), "2026-10-12T10:00:00Z", 0), key);
+  assert.notEqual(sessionPaneKey("epoch", tab("two"), "2026-10-12T10:00:00Z", 0), key);
+  assert.notEqual(sessionPaneKey("epoch", tab("one", null), "2026-10-12T10:00:00Z", 0), key);
+  assert.notEqual(sessionPaneKey("epoch", tab("one"), null, 0), key);
+  assert.equal(sessionPaneKey(undefined, tab("one"), null, 0), sessionPaneKey(null, tab("one"), null, 0));
 });
