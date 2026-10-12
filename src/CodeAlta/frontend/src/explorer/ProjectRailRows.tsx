@@ -125,6 +125,10 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         title={running > 0 ? `${t("New terminal")} (${t(running === 1 ? "{count} terminal" : "{count} terminals", { count: running })})` : t("New terminal")}
         onClick={() => terminals.create(project)}>
         <AppIcon name="terminal" size={15} /></button>}
+      {sessions && !project.archived && <button type="button" className="icon-button project-row-action project-session-trigger"
+        aria-label={t("New session in {name}", { name: project.name })} title={t("New session")} aria-haspopup="dialog"
+        disabled={!sessions.canCreate(project.id)} onClick={() => sessions.create(project.id)}>
+        <AppIcon name="plus" size={15} /></button>}
       {renaming?.id === project.id && renaming.form}
       {asking?.id === project.id && asking.form}
     </ProjectRowActions>{branch(project.id)}</Fragment>;

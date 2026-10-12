@@ -622,13 +622,12 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .project-import p { margin: 0; overflow-wrap: anywhere; }
 .project-import label { display: flex; align-items: start; gap: 6px; }
 .project-import label input { margin-top: 2px; }
-.session-create { display: grid; gap: 8px; min-width: 0; min-height: 0; overflow-y: auto; padding: 10px; }
-.session-create label { display: grid; gap: 5px; font-size: 12px; }
-.session-create input { min-width: 0; }
-.creation-provider { display: grid; gap: 5px; min-width: 0; max-width: 100%; }
-.creation-provider label { display: grid; gap: 5px; min-width: 0; }
-.creation-provider select { min-width: 0; max-width: 100%; }
-.creation-provider small { color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+.new-session-form { display: flex; flex-direction: column; gap: 16px; padding: 20px; min-height: 100%; min-width: 0; }
+.new-session-form .bp6-form-group { margin: 0; }
+.new-session-choices, .new-session-place { min-width: 0; }
+.new-session-choices .composer-selection { max-width: 100%; flex-wrap: wrap; }
+.new-session-place .project-context { flex-wrap: wrap; }
+.new-session-form .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; }
 .app-dialog > footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--muted); font-size: 11px; }
 kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); font: inherit; }
 

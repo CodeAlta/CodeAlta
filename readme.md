@@ -32,7 +32,7 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 
 CodeAlta Desktop brings together:
 
-- **Sessions & delegation**: run agents in split panes; resume, queue, steer and delegate work.
+- **Sessions & delegation**: create sessions from a project's **+**, choosing the agent, model and working folder; run agents in split panes, resume, queue, steer and delegate work.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
 - **Work items**: review agent-proposed tasks and plans; start, defer or dismiss them.

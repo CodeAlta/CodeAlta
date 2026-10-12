@@ -396,10 +396,22 @@ other than a message, the editor of an automation and **New space**. Such a `dia
 questions that are Blueprint dialogs (unsaved changes, closing the window, exiting) already ignore a
 click outside them.
 
-In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
+In the explorer, a project row has a **+** between its terminal button and **…**. It opens
+`NewSessionDialog`: an optional title, the same `ComposerSelectionFields` as the prompt bar, and
+`ProjectContext` with the project-folder/new-worktree/base-branch picker and branch switcher.
+**Create and open** creates without sending a prompt. The selected agent/model/reasoning is validated
+against the new session's choices and staged in `nextSendSelections` for its first Send, as with draft
+creation; it is not a backend creation-contract change. `newSessionPreferences.ts` keeps bounded,
+validated local preferences per project ID/path (or Chats), restored against current catalogs by
+`useNewSessionChoices`; unavailable saved models/providers fall back to current defaults. The dialog
+and draft share the existing per-project `workPlaces` storage, including the worktree starting branch.
+The dialog owns modal admission while unrelated dialogs still fence creation; Escape closes a picker
+before the dialog, and pending creation disables cancellation and duplicate submission.
+
+A project row has one **…** menu (also on right-click): **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
 **Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Chats** has
-the same session actions. **Search sessions…** opens the search of the window on the sessions of
+**New chat**, **Search sessions…**, and **Browse saved sessions**. **Search sessions…** opens the search of the window on the sessions of
 that project, or on the chats.
 
 The **Chats** are the sessions of no project, which the TUI calls global sessions. Their row is the
@@ -426,7 +438,7 @@ again (`explorer/sessionTree.ts` makes the list). A collapsed session hides the 
 selected session beyond a count stays listed, with the sessions it is under. A click opens
 the session, which selects its project. **Rename…** and **Delete…** act on the selected session, so in
 another project they open the session first. `Delete` on the row that has the focus does what
-**Delete…** does. The form of a new session and the
+**Delete…** does. The dialog of a new session and the
 notices of an unconfirmed action belong to the selected project.
 
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under

@@ -97,12 +97,12 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
     document.addEventListener("pointerdown", pointer);
     return () => { review.current = null; document.removeEventListener("beforetoggle", modal, true); document.removeEventListener("pointerdown", pointer); };
   }, []);
-  function sessionAction(kind: "create" | "search" | "browse", original: Review) {
+  function sessionAction(kind: "search" | "browse", original: Review) {
     const value = review.current;
     const owner = latest.current;
     if (!value || value !== original || value.details || !owner?.sessions || !current(value)
       || modalDialogOpen()
-      || !projectRowAccess(value.project, owner.current()).open || kind === "create" && !owner.sessions.canCreate(value.project.id)) return;
+      || !projectRowAccess(value.project, owner.current()).open) return;
     dismiss();
     owner.sessions[kind](value.project.id);
   }
@@ -165,7 +165,6 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
       onClose={() => queueMicrotask(() => { if (review.current === visible) dismiss(); })}
       items={[
         ...(authority?.sessions ? [
-          { key: "create", label: t("New session"), icon: "newSession" as const, disabled: !authority.sessions.canCreate(project.id), onSelect: () => sessionAction("create", visible) },
           { key: "search", label: `${t("Search sessions")}…`, icon: "search" as const, onSelect: () => sessionAction("search", visible) },
           { key: "browse", label: t("Browse saved sessions"), icon: "browse" as const, onSelect: () => sessionAction("browse", visible) },
           { key: "project", divider: true as const },

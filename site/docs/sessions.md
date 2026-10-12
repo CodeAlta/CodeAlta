@@ -20,6 +20,8 @@ The sidebar keeps running sessions visible even when their tab is closed. Closin
 
 Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and send a prompt. CodeAlta stores provider-independent session journals under `~/.alta/sessions/yyyy/mm/dd/<session-id>.jsonl`.
 
+In Desktop, click the **+** in a project's row, between the terminal button and **…**, to create a session without sending a prompt. The dialog lets you enter an optional name and use the same agent/provider/model and working-folder pickers as the prompt bar. Choose the project folder or a new worktree and its starting branch, then click **Create and open**. Your model and working-place choices are remembered for that project's next session, including after reopening the app.
+
 When reopening an existing session, CodeAlta restores local history before provider initialization has to finish. A ready compatible provider can resume or switch a CodeAlta-owned local session while it is idle; provider-native continuation state is reused only when it is safe.
 
 In CodeAlta Desktop, the links of a message work, yours and the agent's:

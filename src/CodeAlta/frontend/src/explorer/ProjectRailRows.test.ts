@@ -9,6 +9,7 @@ import { ShellLanguageContext } from "../shellLanguage";
 import { ExplorerSessions, sessionTwistKey } from "./ExplorerSessions";
 import { projectRailProjection } from "./projectRail";
 import { ProjectRailRows, type ProjectTreeView } from "./ProjectRailRows";
+import type { ProjectRowAuthority } from "./ProjectRowActions";
 import { sessionList } from "./sessionTree";
 
 const never = () => assert.fail("rendering must not act");
@@ -27,6 +28,20 @@ const tree = (expanded: readonly (string | null)[], favorites: readonly string[]
 });
 // What a row holds, from its opening tag to the next row. The first one is the row of the chats.
 const rows = (html: string) => html.split('<li class="project-action-row"').slice(1);
+
+test("the project header creates a session between the terminal and the actions menu", () => {
+  const actions: ProjectRowAuthority = { current: never, open: never, rename: never, archive: never,
+    sessions: { canCreate: (id: string | null) => id === "a", create: never, search: never, browse: never } };
+  const html = renderToStaticMarkup(createElement(ProjectRailRows, { projects: [project("a", "Alpha"), project("b", "Beta"), project("z", "Old", true)],
+    selectedId: null, onSelect: never, canRename: false, renameBusy: false, onRename: never, actions,
+    terminals: { count: () => 0, create: never } }));
+  const [, alpha, beta, old] = rows(html);
+  assert.match(alpha, /project-session-trigger" aria-label="New session in Alpha" title="New session" aria-haspopup="dialog"/);
+  assert.ok(alpha.indexOf("project-terminal-trigger") < alpha.indexOf("project-session-trigger"));
+  assert.ok(alpha.indexOf("project-session-trigger") < alpha.indexOf("project-actions-trigger"));
+  assert.match(beta, /project-session-trigger"[^>]*disabled=""/);
+  assert.doesNotMatch(old, /project-session-trigger/);
+});
 
 test("favorite projects are listed first, in the chosen order, and the others follow", () => {
   const value = snapshot([project("c", "Gamma"), project("a", "Alpha"), project("b", "Beta"), project("d", "Delta")]);
