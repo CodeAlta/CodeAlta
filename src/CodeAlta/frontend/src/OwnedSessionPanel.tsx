@@ -517,8 +517,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         queue.composer.delivered(item.id);
       }
     }
+    // A pending next-turn agent prompt is consumed by Send, not a reason to hold an idle queue.
     const idle = !composerBusy && !retainedSend && !runId && (!entry || target.coordinatorTransitionInProgress === false
-      && !entry.queueDrainInProgress && !entry.isRetiring && !entry.pendingAgentPromptId);
+      && !entry.queueDrainInProgress && !entry.isRetiring);
     if (Date.now() < holdUntil.current) return;
     const steerItem = staged.find(item => item.kind === "Steer" && item.state === "waiting");
     if (steerItem && !steering.pending(sessionId) && !staged.some(item => item.kind === "Steer" && (item.state === "sending" || item.state === "uncertain"))) {
@@ -560,16 +561,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
   }
-  function submit() {
+  function submit(queuePrompt = enqueue) {
     if (!canAdmit()) return;
     const signal = scope.current?.signal;
     sendDiagnostics.info("composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
-      inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue, busy: composerBusy, hasImages: images.length > 0 });
+      inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue: queuePrompt, busy: composerBusy, hasImages: images.length > 0 });
     if (!signal || signal.aborted || !capability.canMutate()) return;
     const retained = ownPending();
-    // While the session works, or behind prompts that already wait, the prompt joins the queue: it is never refused.
-    if (!retained && (enqueue || composerBusy || !!submissions.pending(sessionId)
+    if (!retained && !queuePrompt && composerBusy) { stagePrompt(images.length ? "Queue" : "Steer"); return; }
+    // Enqueue waits for idle; normal Send keeps its place behind prompts already waiting.
+    if (!retained && (queuePrompt || composerBusy || !!submissions.pending(sessionId)
       || staged.some(item => item.kind === "Queue" && item.state !== "failed"))) { stagePrompt("Queue"); return; }
     if (retained?.inFlight) return;
     const latest = selections.current(epoch, sessionId);
@@ -753,7 +755,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       }
     }, capability);
   }
-  // Ctrl+Enter. With a turn running the prompt steers it; without one there is nothing to steer and it is sent.
+  // The explicit Steer button targets the running turn; without one the prompt is sent.
   // An empty prompt steers with the first prompt of the queue, as the terminal UI does.
   function steerFromComposer() {
     if (pending || invalidEpoch) return;
@@ -989,7 +991,8 @@ ${value}` : value);
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
-           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, submit, steerFromComposer)) { event.preventDefault(); event.stopPropagation(); }
+           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, () => submit(false), () => submit(true),
+        navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); }
       } }}
     options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
@@ -1034,7 +1037,7 @@ ${value}` : value);
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
         disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices} />}
       <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} />
-      <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer")}</span>
+      <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · {shortcut} to enqueue", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
@@ -1048,12 +1051,12 @@ ${value}` : value);
       {composerBusy && <Button variant="minimal" onClick={steerFromComposer}
         disabled={invalidEpoch || !!pending || !text.trim() && !staged.some(item => item.kind === "Queue" && item.state === "waiting")}
         aria-label={t("Steer the running turn")}
-        title={t("Steer the running turn with this prompt (Ctrl+Enter)")}>
+        title={t("Steer the running turn with this prompt")}>
         <AppIcon name="steer" size={16} /></Button>}
       {composerBusy && <Button variant="minimal" onClick={() => stagePrompt("Queue")}
         disabled={invalidEpoch || !!pending || !text.trim() && images.length === 0}
         aria-label={t("Enqueue for the next turn")}
-        title={t("Enqueue this prompt for the next turn (Enter)")}>
+        title={t("Enqueue this prompt for the next turn ({shortcut})", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}>
         <AppIcon name="queue" size={16} /></Button>}
       <Button ref={compactTrigger} variant="minimal" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
@@ -1063,14 +1066,14 @@ ${value}` : value);
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact the conversation (Ctrl+F11)")}>
         <AppIcon name="compact" size={16} /></Button>
-      <SendSplitButton enqueue={enqueue} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
-      {(composerBusy || availableAbortRun || pendingAbortRun) ? <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
+      {(composerBusy || availableAbortRun || pendingAbortRun) && <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
-          : t("Stop the running turn")} />
-      : <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={submit} />}
+          : t("Stop the running turn")} />}
+      <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
+      <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={() => submit()} />
       </SendSplitButton>
     </ComposerSurface>
     {timelineNotices && createPortal(<>

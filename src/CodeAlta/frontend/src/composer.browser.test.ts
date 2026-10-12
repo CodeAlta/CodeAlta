@@ -13,7 +13,7 @@ const edge = browserExecutable;
 
 // Mounts the production OwnedSessionPanel with the production styles. The fixture plays the host: it takes or
 // refuses a Send, starts and ends the run, and takes steering.
-test("a prompt sent while the session works is queued or steers, and is never refused", { skip: !edge, timeout: 90_000 }, async () => {
+for (const mac of [false, true]) test(`composer sends, enqueues and explicitly steers on ${mac ? "macOS" : "Windows"}`, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -72,7 +72,7 @@ test("a prompt sent while the session works is queued or steers, and is never re
       else if(Date.now()>end)resolve({rows:fixture.rows(),sends:fixture.sendCalls.map(call=>call.text),steers:fixture.steerCalls.map(call=>call.text),
         run:fixture.run(),status:document.querySelector('.composer-status-line')?.textContent,prompt:promptText()});else setTimeout(tick,20)};tick()})`);
     const key = async (key: string, code: string, virtual: number, ctrl = false) => {
-      for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: virtual, modifiers: ctrl ? 2 : 0 });
+      for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: virtual, modifiers: ctrl ? (mac ? 4 : 2) : 0 });
     };
     const enter = (ctrl = false) => key("Enter", "Enter", 13, ctrl);
     const write = async (text: string) => {
@@ -84,13 +84,15 @@ test("a prompt sent while the session works is queued or steers, and is never re
     const rows = async () => JSON.parse(await evaluate("JSON.stringify(fixture.rows())")) as string[];
     const sends = async () => JSON.parse(await evaluate("JSON.stringify(fixture.sendCalls.map(call=>call.text))")) as string[];
     const steers = async () => JSON.parse(await evaluate("JSON.stringify(fixture.steerCalls.map(call=>call.text))")) as string[];
+    const steer = () => evaluate("document.querySelector('.composer-toolbar [aria-label=\"Steer the running turn\"]').click()");
     const running = "!!document.querySelector('.composer-toolbar [aria-label=\"Cancel observed run\"]')";
     const idle = "!!document.querySelector('.composer-toolbar [aria-label=\"Send\"]')";
     const row = (text: string) => `[...document.querySelectorAll('.composer-queue-row')].find(row=>row.querySelector('.composer-queue-preview').textContent===${JSON.stringify(text)})`;
 
     await command("Page.enable");
     await command("Runtime.enable");
-    await command("Page.addScriptToEvaluateOnNewDocument", { source: `window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ')` });
+    await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'platform',{get:()=>${JSON.stringify(mac ? "MacIntel" : "Win32")}});
+      window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ')` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -103,10 +105,20 @@ test("a prompt sent while the session works is queued or steers, and is never re
     assert.equal(await wait(`${backgroundStatus}?.textContent==='1 background task running' && !!document.querySelector('.background-tasks-spinner')`), true);
     assert.equal(await evaluate("document.querySelector('.composer-status-line').dataset.busy"), "false");
 
-    // An idle session takes the prompt at once; the Stop button then holds the Send slot.
+    // An idle session takes the prompt at once; Stop and Send now (steer) then remain separate actions.
+    // Enter still sends immediately when the split button's chosen default is Enqueue.
+    await evaluate("document.querySelector('[aria-label=\"Send options\"]').click()");
+    assert.equal(await wait("!![...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle'))"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle')).textContent.includes(" + JSON.stringify(mac ? "Cmd+Enter" : "Ctrl+Enter") + ")"), true);
+    await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle')).querySelector('a').click()");
+    assert.equal(await wait("!document.querySelector('[role=option]')"), true);
     await write("first"); await enter();
     assert.equal(await wait(`fixture.sendCalls.length===1 && ${running} && promptText()===''`), true);
     assert.equal(await evaluate("!!document.querySelector('.composer-queue-strip')"), false);
+    await evaluate("document.querySelector('[aria-label=\"Send options\"]').click()");
+    assert.equal(await wait("!![...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Send now'))"), true);
+    await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Send now')).querySelector('a').click()");
+    assert.equal(await wait("!document.querySelector('[role=option]')"), true);
 
     // Recent results never inflate the running count, which remains separate from Thinking.
     await evaluate("fixture.background(['running','running','completed','failed','stopped'])");
@@ -146,10 +158,10 @@ test("a prompt sent while the session works is queued or steers, and is never re
     await evaluate("fixture.background([])");
     assert.equal(await wait(`!${backgroundStatus}`), true);
 
-    // Enter while the session works: the prompt waits above the composer. Nothing is sent, refused or announced.
-    await write("second"); await enter();
+    // Enqueue while the session works: the prompt waits above the composer. Nothing is sent, refused or announced.
+    await write("second"); await enter(true);
     assert.equal(await wait("fixture.rows().length===1 && promptText()===''"), true);
-    await write("third"); await enter();
+    await write("third"); await enter(true);
     assert.deepEqual(await rows(), ["Queue:waiting:1:second", "Queue:waiting:1:third"]);
     assert.deepEqual(await sends(), ["first"]);
     assert.equal(await evaluate("document.querySelectorAll('.bp6-toast').length"), 0, "a prompt is never answered with a toast");
@@ -250,41 +262,54 @@ test("a prompt sent while the session works is queued or steers, and is never re
     await command("Input.insertText", { text: " yet" });
     assert.equal(await wait("!document.querySelector('.composer-status-line').textContent.includes('was not accepted')"), true, "editing clears the notice");
 
-    // Ctrl+Enter without a running turn has nothing to steer: it is a Send.
+    // The enqueue shortcut on an idle session queues and drains as a normal Send, never steering.
     const before = (await sends()).length;
     await enter(true);
     assert.equal(await wait(`fixture.sendCalls.length===${before + 1} && ${running} && promptText()===''`), true);
     assert.deepEqual([(await sends()).at(-1), await steers()], ["not taken yet", []]);
 
-    // Ctrl+Enter during a turn steers it. The row stays until the agent takes the prompt up.
-    await write("steer live"); await enter(true);
+    // The shortcut during a running turn enqueues rather than steering.
+    await write("shortcut queued"); await enter(true);
+    assert.equal(await wait("fixture.rows()[0]==='Queue:waiting:1:shortcut queued' && promptText()===''"), true);
+    assert.deepEqual(await steers(), []);
+    assert.equal((await sends()).length, before + 1);
+    await evaluate(`${row("shortcut queued")}.querySelector('.composer-queue-delete').click()`);
+    assert.equal(await wait("fixture.rows().length===0"), true);
+
+    // Enter uses Send now (steer) while busy. The row stays until the agent takes the prompt up.
+    assert.equal(await evaluate("document.querySelector('[aria-label=\"Send now (steer)\"]').title"), "Send now (steer)");
+    await write("steer live"); await enter();
     assert.equal(await wait("fixture.steerCalls.length===1 && fixture.rows()[0]==='Steer:delivering:1:steer live' && promptText()===''"), true);
     assert.equal(await evaluate("fixture.steerCalls[0].expectedRunId===fixture.run() && fixture.steerCalls[0].expectedAttachmentGeneration==='12'"), true);
     assert.equal(await evaluate(`${row("steer live")}.querySelector('.composer-queue-status').textContent`), "Steer pending");
     assert.equal(await evaluate(`!${row("steer live")}.querySelector('[aria-label="Repeat count"]') && !${row("steer live")}.querySelector('[aria-label="Edit queued prompt"]')`), true);
 
-    // Steering is listed first. An empty Ctrl+Enter steers with the first queued prompt.
-    await write("queued"); await enter();
+    // Steering is listed first. The Steer button with an empty draft uses the first queued prompt.
+    await write("queued"); await enter(true);
     assert.equal(await wait("fixture.rows().length===2"), true);
     assert.deepEqual(await rows(), ["Steer:delivering:1:steer live", "Queue:waiting:1:queued"]);
     await evaluate("document.querySelector('#session-prompt').focus()");
-    await enter(true);
+    await enter();
+    assert.deepEqual(await rows(), ["Steer:delivering:1:steer live", "Queue:waiting:1:queued"], "empty Enter must not steer queued work");
+    assert.deepEqual(await steers(), ["steer live"]);
+    await steer();
     assert.equal(await wait("fixture.steerCalls.length===2 && fixture.rows().every(row=>row.startsWith('Steer:delivering'))"), true);
     assert.deepEqual(await steers(), ["steer live", "queued"]);
 
     // The Steer now button of a queued row does the same for that row.
-    await write("later"); await enter();
+    await write("later"); await enter(true);
     assert.equal(await wait(`!!${row("later")}`), true);
     await evaluate(`${row("later")}.querySelector('[aria-label="Steer now"]').click()`);
     assert.equal(await wait("fixture.steerCalls.length===3 && fixture.rows().length===3 && fixture.rows().every(row=>row.startsWith('Steer:delivering'))"), true);
 
-    // Steering the turn cannot take becomes the next queued prompt.
+    // Clicking Send now (steer) uses the same live action; an unsupported steer becomes queued work.
     await evaluate("fixture.steerMode('refuse')");
-    await write("cannot steer"); await enter(true);
+    await write("cannot steer");
+    await evaluate("document.querySelector('[aria-label=\"Send now (steer)\"]').click()");
     assert.equal(await wait("fixture.steerCalls.length===4 && fixture.rows().at(-1)==='Queue:waiting:1:cannot steer'"), true);
     // Steering the host ran earlier, and keeps no receipt of, is not sent a second time as the next prompt.
     await evaluate("fixture.steerMode('expired')");
-    await write("already delivered"); await enter(true);
+    await write("already delivered"); await steer();
     assert.equal(await wait("fixture.steerCalls.length===5 && fixture.rows().includes('Steer:failed:1:already delivered')"), true);
     assert.equal(await evaluate("fixture.rows().filter(row=>row.endsWith(':already delivered')).length"), 1);
     await evaluate(`${row("already delivered")}.querySelector('.composer-queue-delete').click()`);
@@ -301,7 +326,7 @@ test("a prompt sent while the session works is queued or steers, and is never re
 
     // Deleting a queued prompt, and clearing the queue.
     assert.equal(await wait(running), true);
-    for (const text of ["one", "two", "three"]) { await write(text); await enter(); assert.equal(await wait(`!!${row(text)}`), true); }
+    for (const text of ["one", "two", "three"]) { await write(text); await enter(true); assert.equal(await wait(`!!${row(text)}`), true); }
     await evaluate(`${row("two")}.querySelector('.composer-queue-delete').click()`);
     assert.equal(await wait("fixture.rows().length===2"), true);
     assert.deepEqual(await rows(), ["Queue:waiting:1:one", "Queue:waiting:1:three"]);

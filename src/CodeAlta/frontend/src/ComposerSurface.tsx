@@ -90,15 +90,16 @@ export function ReasoningSlider({ value, efforts, disabled = false, onChange }: 
 }
 
 /** One send slot: the primary button performs the chosen default action and the caret chooses it. */
-export function SendSplitButton({ enqueue, onEnqueueChange, enqueueDisabled = false, optionsDisabled = false, children }: {
-  enqueue: boolean; onEnqueueChange: (value: boolean) => void; enqueueDisabled?: boolean; optionsDisabled?: boolean; children: ReactNode;
+export function SendSplitButton({ enqueue, onEnqueueChange, busy = false, enqueueDisabled = false, optionsDisabled = false, children }: {
+  enqueue: boolean; onEnqueueChange: (value: boolean) => void; busy?: boolean; enqueueDisabled?: boolean; optionsDisabled?: boolean; children: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const menu = <Menu aria-label={t("Send options")}>
-    <MenuItem roleStructure="listoption" selected={!enqueue} icon={<AppIcon name="send" size={16} />} text={t("Send now")}
+    <MenuItem roleStructure="listoption" selected={!enqueue} icon={<AppIcon name={busy ? "steer" : "send"} size={16} />} text={t(busy ? "Send now (steer)" : "Send now")}
       label="Enter" title={t("Sent immediately.")} onClick={() => onEnqueueChange(false)} />
     <MenuItem roleStructure="listoption" selected={enqueue} disabled={enqueueDisabled} icon={<AppIcon name="queue" size={16} />}
-      text={t("Enqueue until idle")} title={t("Sent as soon as the session is idle.")} onClick={() => onEnqueueChange(true)} />
+      text={t("Enqueue until idle")} label={navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter"}
+      title={t("Sent as soon as the session is idle.")} onClick={() => onEnqueueChange(true)} />
   </Menu>;
   return <ButtonGroup className="composer-send-group">
     {children}
