@@ -128,6 +128,14 @@ public sealed partial class SessionViewJournalStore
         // What a rewind removes was written before the session that keeps it exists: its own records start with the
         // first removed turn. Those of a fork start when it is created.
         var keepsRewind = kind == AgentSessionForkKind.Rewind;
+        var countedFrom = keepsRewind && point.NextTurn is { } next ? next.StartedAt : target.CreatedAt;
+        // The source may be a fork itself, rewound to before the point it was forked at: the turns it inherited are
+        // counted in its own source, and are not those of the session that keeps them either.
+        if (point.Summary.ForkedFrom?.CountedFrom is { } own && own > countedFrom)
+        {
+            countedFrom = own;
+        }
+
         var origin = new AgentSessionForkOrigin
         {
             SessionId = source.SessionId,
@@ -137,7 +145,7 @@ public sealed partial class SessionViewJournalStore
             TurnCount = point.KeptTurnCount,
             BeforeRunId = point.NextTurn?.RunId,
             ForkedAt = target.CreatedAt,
-            CountedFrom = keepsRewind && point.NextTurn is { } next ? next.StartedAt : target.CreatedAt,
+            CountedFrom = countedFrom,
         };
         target.ForkedFrom = origin;
         var basis = keepsRewind ? point.CurrentState : point.State;

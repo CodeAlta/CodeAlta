@@ -180,6 +180,63 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task ForkAnAgentCreates_IsNotASubAgentOfThatAgent_UnlessItIsGivenAParent()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        var options = Options(temp, provider);
+        var agent = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Coordinator", CancellationToken.None);
+        var source = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Review", CancellationToken.None);
+        await SendAsync(host, source, options, "one");
+        var by = new AltaActorProvenance { Kind = "agent", SourceSessionId = agent.SessionId };
+
+        var alone = await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = source.SessionId, CreatedBy = by });
+        var child = await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = source.SessionId, CreatedBy = by, ParentSessionId = agent.SessionId });
+
+        // A session an agent creates is its sub-agent; a fork continues another session and reports to none.
+        var listedAlone = await ListedAsync(host, alone.Session!.SessionId);
+        Assert.IsNull(listedAlone.ParentSessionId);
+        Assert.AreEqual(agent.SessionId, listedAlone.CreatedBy?.SourceSessionId, "Who made the fork is still recorded.");
+        Assert.AreEqual(agent.SessionId, (await ListedAsync(host, child.Session!.SessionId)).ParentSessionId);
+
+        // Its instructions are those of its source: no parent to report to, and the prompt cache is read.
+        var sourceRequest = provider.Requests.Last(request => request.SessionId == source.SessionId);
+        await SendAsync(host, listedAlone, options, "two");
+        var aloneRequest = provider.Requests.Last(request => request.SessionId == alone.Session.SessionId);
+        Assert.AreEqual(sourceRequest.DeveloperInstructions, aloneRequest.DeveloperInstructions);
+        await SendAsync(host, await ListedAsync(host, child.Session.SessionId), options, "two");
+        var childRequest = provider.Requests.Last(request => request.SessionId == child.Session.SessionId);
+        Assert.AreNotEqual(sourceRequest.DeveloperInstructions, childRequest.DeveloperInstructions, "A fork with a parent is told about it.");
+        StringAssert.Contains(childRequest.DeveloperInstructions, agent.SessionId);
+    }
+
+    [TestMethod]
+    public async Task RewindOfAFork_ToBeforeThePointItWasForkedAt_KeepsOnlyItsOwnTurnsAsItsOwn()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        var options = Options(temp, provider);
+        var source = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Review", CancellationToken.None);
+        foreach (var prompt in new[] { "one", "two" }) await SendAsync(host, source, options, prompt);
+        var fork = (await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = source.SessionId })).Session!;
+        await SendAsync(host, await ListedAsync(host, fork.SessionId), options, "three");
+        var turns = (await host.RuntimeService.ReadSessionTurnsAsync(fork.SessionId))!.Turns.Turns;
+
+        // The fork is rewound to before a turn it inherited from its source.
+        var outcome = await host.RuntimeService.RewindSessionAsync(new SessionRewindRequest { SessionId = fork.SessionId, BeforeRunId = turns[1].RunId });
+
+        Assert.AreEqual("ok", outcome.Status);
+        var kept = outcome.RemovedTurns!.ForkedFrom!;
+        // The inherited turn is counted in the first session, not in the fork and not in what its rewind keeps.
+        Assert.AreEqual(fork.ForkedFrom!.CountedFrom, kept.CountedFrom);
+        Assert.IsTrue(kept.CountedFrom > turns[1].StartedAt);
+        Assert.AreEqual(source.SessionId, kept.RootSessionId);
+        Assert.AreEqual(fork.SessionId, kept.SessionId);
+    }
+
+    [TestMethod]
     public void BranchTitle_CountsTheForksOfAFork()
     {
         Assert.AreEqual("Review (fork)", SessionRuntimeService.BranchTitle("Review", "fork"));

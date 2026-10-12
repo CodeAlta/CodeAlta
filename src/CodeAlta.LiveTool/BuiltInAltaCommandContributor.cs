@@ -2886,7 +2886,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 BeforeRunId = point.BeforeRunId,
                 Title = NormalizeOptionalText(options.Title),
                 ParentSessionId = parentSessionId,
-                CreatedBy = parentSessionId is null ? WithoutParent(forkedBy) : forkedBy,
+                CreatedBy = forkedBy,
                 WorktreeDirectory = worktree?.Folder,
                 LeaveWorktree = options.NoWorktree,
             }, context.CancellationToken).ConfigureAwait(false);
@@ -2986,7 +2986,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             SessionId = session.SessionId,
             BeforeRunId = point.BeforeRunId,
             KeepRemovedTurns = !discard,
-            CreatedBy = WithoutParent(rewoundBy),
+            CreatedBy = rewoundBy,
         }, context.CancellationToken).ConfigureAwait(false);
         if (outcome.Status != "ok")
         {
@@ -3011,12 +3011,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         });
         return AltaExitCodes.Success;
     }
-
-    // Who creates a session that is not its sub-agent. A session without a parent is listed as a child of the
-    // session that created it: the fork of an agent, or what its rewind keeps, would get the instructions of a
-    // sub-agent. The session of the caller stays in the record of the command.
-    private static AltaActorProvenance WithoutParent(AltaActorProvenance provenance)
-        => provenance with { SourceSessionId = null };
 
     // The turns of a session that exists. Without them the error is written: the session is not found, or its
     // journal is not one that has turns.

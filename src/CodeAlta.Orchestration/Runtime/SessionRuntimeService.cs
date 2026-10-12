@@ -744,7 +744,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             session.MessageCount = messageCount;
         }
 
-        var parentSessionId = ResolveParentSessionId(localState.ParentSessionId, localState.CreatedBy?.SourceSessionId);
+        var parentSessionId = ResolveParentSessionId(localState.ParentSessionId, localState.CreatedBy?.SourceSessionId, session.ForkedFrom is not null);
         if (!string.IsNullOrWhiteSpace(parentSessionId))
         {
             session.ParentSessionId = parentSessionId;
@@ -3966,7 +3966,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         var normalizedCwd = NormalizePath(cwd);
-        var parentSessionId = ResolveParentSessionId(session.ParentSessionId, session.CreatedBySessionId);
+        var parentSessionId = ResolveParentSessionId(session.ParentSessionId, session.CreatedBySessionId, session.ForkedFrom is not null);
         if (string.Equals(normalizedCwd, NormalizePath(_catalogOptions.GlobalRoot), StringComparison.OrdinalIgnoreCase))
         {
             return new SessionViewDescriptor
@@ -4201,8 +4201,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static string? AgentSource(AltaActorProvenance? submittedBy)
         => string.Equals(submittedBy?.Kind, "agent", StringComparison.OrdinalIgnoreCase) ? NormalizeOptionalText(submittedBy!.SourceSessionId) : null;
 
-    private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId)
-        => NormalizeOptionalText(parentSessionId) ?? NormalizeOptionalText(createdBySessionId);
+    // A session an agent created without naming a parent is the sub-agent of that agent. Not a fork, nor the session
+    // that keeps what a rewind removed: whoever made it, it continues another session and reports to none, unless it
+    // was given a parent. Listed as a child of its creator, it would get the instructions of a sub-agent.
+    private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId, bool forked = false)
+        => NormalizeOptionalText(parentSessionId) ?? (forked ? null : NormalizeOptionalText(createdBySessionId));
 
     private static string NormalizePath(string path)
     {
