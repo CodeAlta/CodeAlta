@@ -155,7 +155,10 @@ In the TUI, a tile opens a dialog with the details of the call and its output.
 
 {{ alta_shot "alta-desktop-prompt.webp" "alta-prompt.png" "Inline prompt editor with model controls, context usage and send actions" "The inline prompt editor keeps model controls, context usage, queue state, and send actions close to your draft." }}
 
-Press `Enter` to send and `Shift+Enter` for a new line. If the selected session is busy, `Enter` adds the prompt to the waiting list instead of dropping it. Queued prompts can be edited, repeated, steered immediately when supported, deleted, or cleared with `F10`.
+Press `Enter` to send and `Shift+Enter` for a new line. In both apps, `Enter` adds the prompt to the
+waiting list while busy. In Desktop, `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now,
+steering a busy session. Queued prompts can be edited, repeated, steered immediately when supported,
+deleted, or cleared with `F10`.
 
 ### Width of the conversation (desktop)
 
@@ -198,7 +201,11 @@ A mode you choose applies from the next prompt you send, without restarting the 
 the session when you reopen it. Switching the session to another provider takes it back to the default.
 A new session gets the choice once it has started.
 
-`Ctrl+Enter` steers a running provider session. If the provider cannot steer live, CodeAlta re-queues the prompt for the next normal turn. `F8` aborts the running turn.
+In Desktop, `Enter` sends when idle and enqueues while busy. `Cmd+Enter` on macOS or `Ctrl+Enter` on
+Windows/Linux uses **Send now**, labelled **Send now (steer)** while busy, to steer the running turn. Enqueueing while
+idle submits immediately. You can also use **Steer the running turn**. In TUI, `Ctrl+Enter`
+steers. If the provider cannot steer live, CodeAlta re-queues the prompt for the next normal turn.
+`F8` aborts the running turn.
 
 Use `F6` or the **Full Prompt** action to open a larger prompt editor. `Esc` or `Ctrl+Enter` closes it and keeps your draft.
 

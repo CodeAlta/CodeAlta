@@ -861,12 +861,14 @@ project; its `alta` tool has the `alta space` commands except `switch`.
 
 ## Composer
 
-A prompt sent while the session works is never refused. `Enter` during a running turn, or behind
-prompts that already wait, adds the prompt to the queue; `Ctrl+Enter` sends it to the running turn as
-steering, and sends it normally when no turn runs. Both wait in compact rows above the prompt card:
+A prompt sent while the session works is never refused. `Enter` sends normally when idle and
+enqueues during a running turn, regardless of the split-button selection, preserving its familiar behavior.
+`Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux uses **Send now**: a normal Send when idle,
+**Send now (steer)** during a running turn. The explicit
+**Steer the running turn** button also sends text to the running turn as steering. Both wait in compact rows above the prompt card:
 steering first, then the queue in the order it is sent. A queued row has a repeat count (stepper or
 typed number), copy, edit, **Steer now** and delete; **Clear queue** or `F10` removes the prompts
-that have not left, and `Ctrl+Enter` with an empty prompt steers with the first queued prompt.
+that have not left. The Steer button with an empty prompt steers with the first queued prompt.
 
 When the session is idle the first queued prompt leaves as a normal Send, with the selection, the
 project references and the images of that moment, also while its tab is hidden. A Send the host
@@ -885,6 +887,10 @@ next-Send agent prompt, provider, model and reasoning effort as one clickable su
 popover to change them (reasoning is a stepped slider over the model's supported efforts) and to
 browse the agent-prompt and model catalogs. Enabled-provider readiness appears in the same bar.
 The expanded prompt editor retains file insertion without reference-inspection diagnostics.
+
+Enqueueing while idle submits immediately. A pending next-turn agent-prompt selection is consumed
+by normal Send; it is not a reason to hold the frontend queue. Run, drain, transition and retirement
+checks still apply. Prompts with images enqueue instead of steering, since steering accepts text only.
 
 The model list holds the models the provider reports and the slider the efforts of the selected
 model: neither has a "default" entry, and a model without reasoning shows **None**. A draft or a
@@ -3656,7 +3662,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | No key | Worktrees (`/worktree`), the window of the git worktrees of the project in front |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
-| `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |
+| `Enter`, `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows/Linux), `Shift+Enter` | Send when idle / enqueue while busy, send now (steer while a turn runs), new line |
 | `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |
 | `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |
 | `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
@@ -3783,12 +3789,13 @@ sent, and keeps no intent for it. `sessions.receipts` pages what the host still 
 the pending commands first, which are the ones that can still be aborted or cancelled, then the
 settled ones, the most recent first.
 
-The composer visibly emphasizes **Cancel observed run** when an eligible point-in-time target
-is available, keeping **Send** as a separate secondary button. This is not a live-running indicator.
+The composer keeps **Cancel observed run** separate when an eligible point-in-time target
+is available, alongside the Send split button. This is not a live-running indicator.
 A retained original Send keeps **Retry exact request** primary; retained run cancellation instead
 reads **Retry exact cancellation**, preserving its original target and manual recovery. Neither
 presentation changes nor cancellation clear the draft or initiate runtime reads. The two controls
-keep separate identities and handlers: editor Enter still sends, Ctrl+Enter steers, and in the expanded
+keep separate identities and handlers: editor Enter sends when idle and enqueues while busy,
+Cmd+Enter (macOS) or Ctrl+Enter (Windows/Linux) sends now (steers while busy), and in the expanded
 editor Enter inserts a new line while Escape or Ctrl+Enter closes without sending. Cancellation
 signalling does not establish run completion.
 On narrow screens the labelled controls wrap rather than clip; exact-target evidence and the
@@ -4034,7 +4041,7 @@ attachment and recorded non-null run. It never creates or replaces a runtime, fa
 send/queue, or silently targets a later run. The host rechecks ownership and target identity;
 stale, retiring, transitioning, terminated or unsupported targets fail rather than retarget.
 While a turn runs, the compact composer offers a **Steer the running turn** icon beside Send; it is
-the same action as `Ctrl+Enter` (see Composer) and is disabled for empty text with nothing queued.
+the explicit steering action (see Composer) and is disabled for empty text with nothing queued.
 The composer captures the run to steer when the prompt leaves, not when the key is pressed. A pending
 Send is not an editable steering draft.
 Steering preserves the existing run's permission authority and cannot reopen a closed review
