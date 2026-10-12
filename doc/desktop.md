@@ -444,7 +444,9 @@ the click that ends a drag is swallowed, and Escape or leaving the window cancel
 `OwnedSessionCommandService.MoveSessionAsync` and `SessionRuntimeService.Move.cs`:
 
 - The session moves with the sessions it started in the same project, at every level; they move first and it
-  moves last, so a move stopped half way (`move_partial`) leaves the session where it was.
+  moves last, so a move stopped half way (`move_partial`) leaves the session where it was. Those already moved
+  stay moved and the answer names them (also for a journal that could not be replaced, `move_unconfirmed`), so
+  that their tabs and their Remote Control follow them.
 - Nothing moves while one of them runs, has queued work, waits for an answer or has background tasks of its
   provider (`session_in_use`, `interaction_pending`, `requires_recovery`). A session with Remote Control wanted
   moves: once the move is done, `OwnedSessionCommandService` attaches it again in its new folder and turns
@@ -459,6 +461,12 @@ the click that ends a drag is swallowed, and Escape or leaving the window cancel
 - The attachment of the session is retired: the next send starts it in its new folder, and its first
   attachment tells the agent in its developer instructions that it was moved, from which folder to which.
   That notice is kept in memory only: after a restart the agent learns its folder from its instructions alone.
+  A turn the retirement ended (one started from claude.ai) writes the summary its session held, with the old
+  folder, title and preview: the move writes its folder again over it, and the title and preview it gave where
+  they are still the ones it replaced (`RestoreMovedSummaryAsync`), also when the provider did not stop cleanly;
+  the session catalog is then told. The retired attachment's transition is removed whatever happens after the
+  journal was rewritten, or the session could never be attached again. A failure after that point is a warning
+  of a session that moved, never "not moved".
 - A provider that keeps its own copy of a conversation per folder moves it (`IAgentSessionRelocationProvider`,
   called through `AgentHub` without starting the provider). Claude Code keeps its transcript under
   `projects/<folder name>/` of its configuration folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`), with the
@@ -473,7 +481,12 @@ the click that ends a drag is swallowed, and Escape or leaving the window cancel
 The window shows the outcome in a toast, with the first warning of the host if there is one (the log has
 them all). The tabs of the moved sessions are pointed at their new project in every space, in the same update
 as the list that shows them there (`retargetSessionTabs`); otherwise the reconciliation of the list would drop
-them. A moved tab is a new tab of the dock, so it can open in another place of its pane.
+them: the moves whose tabs have not followed yet are kept, and each list published applies those it shows in
+their new project (`splitPendingTabMoves`), so a fresh read that fails does not lose them. For the same reason
+the background reads of the session list are held while a move runs, and done once it ends
+(`createCoalescedRead`), as is a read after a move whose own read failed. **Move to
+project…** is offered under the same locks as **Rename…** and **Delete…**; Escape during a drag also swallows
+the click of the release that follows. A moved tab is a new tab of the dock, so it can open in another place of its pane.
 
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
 **Other projects**. The star of a row and the menu of the row add and remove a favorite. A favorite is
