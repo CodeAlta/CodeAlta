@@ -38,6 +38,10 @@ internal sealed partial class WorkspaceService
         _draftPrompts = host.Commands.GetDraftPromptChoicesAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
+        _readTurns = host.Commands.ReadSessionTurnsAsync;
+        _readRecord = host.WorkspaceReads.ReadHistoryRecordAsync;
+        _forkSession = host.Commands.ForkSessionAsync;
+        _rewindSession = host.Commands.RewindSessionAsync;
     }
 
     // Only catalogs: this read does not initialize a provider, create a session or confer send authority.
@@ -130,10 +134,12 @@ internal sealed partial class WorkspaceService
         Task? create;
         Task? rename;
         Task? delete;
-        lock (_sessionGate) { _sessionsClosed = true; create = _sessionWork; rename = _renameWork; delete = _deleteWork; }
+        Task? branch;
+        lock (_sessionGate) { _sessionsClosed = true; create = _sessionWork; rename = _renameWork; delete = _deleteWork; branch = _branchWork; }
         if (create is not null) await create.ConfigureAwait(false);
         if (rename is not null) await rename.ConfigureAwait(false);
         if (delete is not null) await delete.ConfigureAwait(false);
+        if (branch is not null) await branch.ConfigureAwait(false);
     }
 
     private async Task CreateSessionOwnedAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor provider,

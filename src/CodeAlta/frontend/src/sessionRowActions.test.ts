@@ -4,7 +4,7 @@ import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { isSessionContextKey, isSessionDeleteKey, menuFocusIndex, restoreSessionMenuFocus, sessionActionAccess, type SessionMenuTarget } from "./sessionRowActions";
 
 const project: WorkspaceProject = { id: "p", name: "Project", path: "/p", archived: false };
-const row: WorkspaceSession = { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id: "s", title: "Title", fullTitle: "Title", fullTitleTruncated: false,
+const row: WorkspaceSession = { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, createdAt: null, id: "s", title: "Title", fullTitle: "Title", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "p", lineageIssue: null, workspacePath: "/p",
   providerKey: null, updatedAt: "2026-01-01T00:00:00Z" };
 const target: SessionMenuTarget = { id: "s", projectId: "p", hostEpoch: "epoch" };
