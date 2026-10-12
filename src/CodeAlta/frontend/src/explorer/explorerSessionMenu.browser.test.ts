@@ -27,7 +27,7 @@ test("the menu of a session row outside the selected scope has the lines of plug
     // A chat, while a project and one of its sessions are selected.
     await openMenu(page, "chats", "chat-2");
     await page.until(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].some(item => item.textContent.trim() === 'Statistics of this session')`, "the line of the plugin in the menu of the chat");
-    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Delete…", "Statistics of this session"]);
+    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Delete…", "Statistics of this session"]);
     assert.ok((await sessionMenuReads(page)).length > 0);
     assert.ok((await sessionMenuReads(page)).every(read => read.projectId === null && read.sessionId === "chat-2"), "the host is asked about the chat of the row, never about the selected session");
     await page.clickText('.session-tab-popup [role="menuitem"]', "Statistics of this session");
@@ -72,7 +72,7 @@ test("the menu of a session row outside the selected scope opens the session can
     // A chat, while project-a is selected: the canvas is about the chat and no project.
     await openMenu(page, "chats", "chat-2");
     await page.until(lineOf("Statistics of this session"), "the lines of the menu of the chat");
-    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Delete…", "Open Board", "Open Notes", "Statistics of this session"], "the canvases, then the lines of plugins, as in the selected scope");
+    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Delete…", "Open Board", "Open Notes", "Statistics of this session"], "the canvases, then the lines of plugins, as in the selected scope");
     assert.equal(await page.evaluate(`document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length`), 2);
     await page.clickText('.session-tab-popup [role="menuitem"]', "Open Board");
     await page.until(`explorerFixture.state.canvases.length === 1`, "the canvas of the chat");
@@ -105,7 +105,7 @@ test("the menu of a session row outside the selected scope opens the session can
     await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows again");
     await openMenu(page, "chats", "chat-1");
     await page.until(lineOf("More…"), "the line of the page of the canvases");
-    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Delete…", "Open A", "Open B", "Open C", "Open D", "More…"]);
+    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Delete…", "Open A", "Open B", "Open C", "Open D", "More…"]);
     await page.key("End", 35);
     await page.key("Enter", 13, "\r");
     await page.until(`explorerFixture.state.pages === 1`, "the page of the canvases");
@@ -119,7 +119,7 @@ test("a menu with no line of a plugin is as it was, and a line a plugin cannot u
     await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows");
     await openMenu(page, "chats", "chat-1");
     await page.until(`explorerFixture.state.reads.some(read => read.place === 'SessionMenu' && read.sessionId === 'chat-1')`, "the host asked about the row");
-    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Delete…"]);
+    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Delete…"]);
     assert.equal(await page.evaluate(`document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length`), 0, "no separator without a line under it");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed");

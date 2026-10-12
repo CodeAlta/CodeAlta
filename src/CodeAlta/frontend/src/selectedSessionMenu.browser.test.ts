@@ -83,7 +83,7 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
     };
     const pluginLine = async () => {
       await until(`${entries}.some(item=>item.textContent.trim()==='Statistics of this session')`, "the plugin line under the production provider");
-      assert.deepEqual(await evaluate(`${entries}.map(item=>item.textContent.trim())`), ["Open session", "Rename…", "Delete…", "Open Board", "Statistics of this session"]);
+      assert.deepEqual(await evaluate(`${entries}.map(item=>item.textContent.trim())`), ["Open session", "Rename…", "Fork…", "Delete…", "Open Board", "Statistics of this session"]);
       assert.equal(await evaluate("document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length"), 2, "canvas and plugin groups keep their dividers");
     };
     const assertReads = async (projectId: string | null, sessionId: string) => {
