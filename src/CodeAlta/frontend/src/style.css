@@ -740,8 +740,12 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .session-title { flex: 1; font-weight: 400; }
 .ide-shell .session-meta { flex-shrink: 0; font-size: var(--bp-typography-size-body-small); }
 .ide-shell .session-meta > span:first-child { display: none; }
-.ide-shell .session-actions-trigger { width: 22px; height: 22px; flex-basis: 22px; opacity: 0; }
-.ide-shell .session-row:hover > .session-actions-trigger, .ide-shell .session-row:focus-within > .session-actions-trigger { opacity: 1; }
+/* The padding of a button of the list would leave the three dots a few pixels: the button has none and centers them. */
+.ide-shell .session-actions-trigger { width: 24px; height: 24px; flex-basis: 24px; padding: 0; justify-content: center; border-color: transparent; background: transparent; opacity: 0; }
+.ide-shell .session-actions-trigger > svg { flex: none; }
+.ide-shell .session-actions-trigger:hover:not(:disabled), .ide-shell .session-actions-trigger[aria-expanded="true"] { border-color: var(--line-strong); background: var(--panel-3); color: var(--text); }
+.ide-shell .session-row:hover > .session-actions-trigger, .ide-shell .session-row:focus-within > .session-actions-trigger,
+.ide-shell .session-row > .session-actions-trigger[aria-expanded="true"] { opacity: 1; }
 .ide-shell .session-tooltip { display: none; }
 .ide-shell .notes-pane { flex-shrink: 0; min-height: 80px; border-top: 1px solid var(--line); margin-top: auto; }
 .ide-shell .composer-toolbar { flex-wrap: wrap; gap: 4px; }

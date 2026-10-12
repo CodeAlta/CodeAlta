@@ -113,6 +113,39 @@ test("the menu of a session row outside the selected scope opens the session can
   }, options);
 });
 
+test("the button of the actions of a session row draws its three dots at their size, on the row under the pointer and while its menu is open", { skip: !edge, timeout: 240_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
+    await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows");
+    const trigger = `document.querySelector('[data-scope="chats"] .session-actions-trigger[aria-label*="(ID: chat-1)"]')`;
+    const look = () => page.evaluate<{ box: number[]; dots: number[]; centered: boolean; opacity: string }>(`(() => {
+      const button = ${trigger}, box = button.getBoundingClientRect(), dots = button.querySelector('svg').getBoundingClientRect();
+      return { box: [box.width, box.height], dots: [dots.width, dots.height], opacity: getComputedStyle(button).opacity,
+        centered: Math.abs((dots.left + dots.right) / 2 - (box.left + box.right) / 2) < 1 && Math.abs((dots.top + dots.bottom) / 2 - (box.top + box.bottom) / 2) < 1 };
+    })()`);
+    // The padding of the buttons of the list once left the dots four pixels of the button.
+    const resting = await look();
+    assert.deepEqual(resting.dots, [16, 16], JSON.stringify(resting));
+    assert.deepEqual(resting.box, [24, 24], JSON.stringify(resting));
+    assert.ok(resting.centered, JSON.stringify(resting));
+    assert.equal(resting.opacity, "0", "a row that is neither under the pointer nor focused keeps its room for the button and does not draw it");
+
+    // The pointer on the row shows it.
+    const row = await page.evaluate<{ x: number; y: number }>(`(() => { const box = ${trigger}.closest('.session-row').getBoundingClientRect(); return { x: box.left + 40, y: box.top + box.height / 2 }; })()`);
+    await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: row.x, y: row.y });
+    await page.until(`getComputedStyle(${trigger}).opacity === '1'`, "the button on the row under the pointer");
+
+    // Its menu keeps it shown when the pointer leaves the row.
+    await openMenu(page, "chats", "chat-1");
+    await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: 2, y: 2 });
+    await page.until(`!${trigger}.closest('.session-row').matches(':hover')`, "the pointer off the row");
+    assert.equal(await page.evaluate(`${trigger}.getAttribute('aria-expanded')`), "true");
+    assert.equal(await page.evaluate(`getComputedStyle(${trigger}).opacity`), "1");
+    await page.key("Escape", 27);
+    await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed");
+  }, options);
+});
+
 test("a menu with no line of a plugin is as it was, and a line a plugin cannot use is shown as such", { skip: !edge, timeout: 240_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
