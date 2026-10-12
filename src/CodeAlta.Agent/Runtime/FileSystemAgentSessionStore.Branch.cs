@@ -234,18 +234,23 @@ public sealed partial class FileSystemAgentSessionStore
     /// <param name="point">The point of the session.</param>
     /// <param name="summary">The summary of the session after the rewind.</param>
     /// <param name="state">The state of the session after the rewind.</param>
+    /// <param name="header">The first line of the journal after the rewind; null to keep the one it has.</param>
     /// <param name="additionalSnapshots">Records written after the summary and the state.</param>
     /// <param name="cancellationToken">Cancels before the commit point.</param>
     /// <remarks>
-    /// The journal is copied (a clone where the filesystem has them), the copy is cut and completed, and a rename in the
-    /// same directory replaces the journal with it: no byte of the journal changes before that rename, and a failure
-    /// before it leaves the session as it was. The caller holds the idle-session mutation admission.
+    /// The records before the point are copied to a file beside the journal, which is completed and then renamed over
+    /// the journal: no byte of the journal changes before that rename, and a failure before it leaves the session as it
+    /// was. A reader that follows a journal from an offset it remembers recognizes a journal by its first line: the
+    /// caller gives a first line that differs from the one before, so that such a reader starts again instead of
+    /// reading on from an offset that is no longer the start of a record. The caller holds the idle-session mutation
+    /// admission.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The session changed since the point was read.</exception>
+    /// <exception cref="InvalidDataException">The first line to replace is oversized.</exception>
     /// <exception cref="IOException">Preparing or replacing the journal failed.</exception>
     /// <exception cref="OperationCanceledException">Canceled before the commit point.</exception>
     internal async Task CommitRewindAsync(AgentSessionBranchPoint point, AgentSessionSummary summary, AgentSessionState state,
-        IReadOnlyList<string> additionalSnapshots, CancellationToken cancellationToken)
+        string? header, IReadOnlyList<string> additionalSnapshots, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(point);
         ArgumentNullException.ThrowIfNull(summary);
@@ -260,16 +265,21 @@ public sealed partial class FileSystemAgentSessionStore
             var temporary = path + ".rewind-" + Guid.NewGuid().ToString("N");
             try
             {
-                if (GetFileStamp(path) is not { } stamp || stamp.Length != point.Revision.Length
-                    || stamp.LastWriteTimeUtc.Ticks != point.Revision.LastWriteUtcTicks)
-                    throw new InvalidOperationException("The session changed before it could be rewound.");
-                File.Copy(path, temporary, overwrite: false);
-                await using (var output = new FileStream(temporary, FileMode.Open, FileAccess.ReadWrite, FileShare.None, bufferSize: 4096, useAsync: true))
+                await using (var source = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, bufferSize: 1, useAsync: true))
                 {
-                    if (output.Length != point.Revision.Length || !await HasGuardAsync(output, point, cancellationToken).ConfigureAwait(false))
+                    if (GetFileStamp(path) is not { } stamp || stamp.Length != point.Revision.Length
+                        || stamp.LastWriteTimeUtc.Ticks != point.Revision.LastWriteUtcTicks
+                        || source.Length != point.Revision.Length || !await HasGuardAsync(source, point, cancellationToken).ConfigureAwait(false))
                         throw new InvalidOperationException("The session changed before it could be rewound.");
-                    output.SetLength(point.CutOffset);
-                    output.Position = point.CutOffset;
+                    await using var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, bufferSize: 1, useAsync: true);
+                    var start = 0L;
+                    if (header is not null)
+                    {
+                        start = await FindFirstLineEndAsync(source, point.CutOffset, cancellationToken).ConfigureAwait(false);
+                        await output.WriteAsync(Utf8WithoutBom.GetBytes(header + "\n"), cancellationToken).ConfigureAwait(false);
+                    }
+
+                    await CopyRangeAsync(source, start, point.CutOffset, output, cancellationToken).ConfigureAwait(false);
                     var snapshots = new List<string>(additionalSnapshots.Count + 2)
                     {
                         new AgentRawEvent(summary.ProviderId, summary.SessionId, summary.UpdatedAt, SessionSummaryEventType,
@@ -288,6 +298,8 @@ public sealed partial class FileSystemAgentSessionStore
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+                // The read handle is closed: a replacement on Windows needs it to be. The shared journal gate is still
+                // held; a path that something else changed meanwhile is refused immediately before the rename.
                 if (GetFileStamp(path) is not { } before || before.Length != point.Revision.Length
                     || before.LastWriteTimeUtc.Ticks != point.Revision.LastWriteUtcTicks)
                     throw new InvalidOperationException("The session changed before journal replacement.");
@@ -302,6 +314,48 @@ public sealed partial class FileSystemAgentSessionStore
         }, cancellationToken).ConfigureAwait(false);
         InvalidateMetadataProjectionCache(path);
         await UpsertCacheFromFileAsync(path, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    // The offset after the first line of a journal, which a new first line replaces.
+    private static async Task<long> FindFirstLineEndAsync(Stream source, long limit, CancellationToken cancellationToken)
+    {
+        const int MaximumHeaderBytes = 128 * 1024;
+        var buffer = new byte[4096];
+        source.Position = 0;
+        var position = 0L;
+        while (position < limit)
+        {
+            var read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, limit - position)), cancellationToken).ConfigureAwait(false);
+            if (read == 0) break;
+            var newline = buffer.AsSpan(0, read).IndexOf((byte)'\n');
+            if (newline >= 0) return position + newline + 1;
+            position += read;
+            if (position > MaximumHeaderBytes) throw new InvalidDataException("Session header is oversized.");
+        }
+
+        // The point is within the first line: nothing of the journal but that line is kept.
+        return limit;
+    }
+
+    private static async Task CopyRangeAsync(Stream source, long start, long end, Stream output, CancellationToken cancellationToken)
+    {
+        var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(256 * 1024);
+        try
+        {
+            source.Position = start;
+            var remaining = end - start;
+            while (remaining > 0)
+            {
+                var read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
+                if (read == 0) throw new InvalidOperationException("The session changed before it could be rewound.");
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                remaining -= read;
+            }
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private async Task<TurnScan> ScanTurnsAsync(string sessionId, CancellationToken cancellationToken)

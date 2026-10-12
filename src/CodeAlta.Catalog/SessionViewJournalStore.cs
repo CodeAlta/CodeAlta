@@ -822,6 +822,15 @@ public sealed class SessionViewJournalHeader
     [JsonPropertyName("forked_from")]
     public SessionViewJournalForkOrigin? ForkedFrom { get; set; }
 
+    /// <summary>
+    /// Gets or sets the number of times the session was rewound; absent for a session that never was. A rewind writes
+    /// the header again with the next number: a reader that recognizes a journal by its first line then sees another
+    /// journal, and reads it from its start instead of from an offset it remembers.
+    /// </summary>
+    [JsonPropertyName("rewind_count")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int RewindCount { get; set; }
+
     [JsonPropertyName("working_directory")]
     public string WorkingDirectory { get; set; } = string.Empty;
 
@@ -844,6 +853,7 @@ public sealed class SessionViewJournalHeader
             ParentSessionId = descriptor.ParentSessionId,
             CreatedBy = descriptor.CreatedBy,
             ForkedFrom = SessionViewJournalForkOrigin.From(descriptor.ForkedFrom),
+            RewindCount = descriptor.RewindCount,
             WorkingDirectory = descriptor.WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(descriptor.Title) ? null : descriptor.Title,
             CreatedAt = descriptor.CreatedAt,
@@ -861,6 +871,7 @@ public sealed class SessionViewJournalHeader
             ParentSessionId = ParentSessionId,
             CreatedBy = CreatedBy,
             ForkedFrom = ForkedFrom?.ToOrigin(),
+            RewindCount = RewindCount,
             WorkingDirectory = WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(Title) ? SessionId : Title,
             Status = SessionViewStatus.Active,

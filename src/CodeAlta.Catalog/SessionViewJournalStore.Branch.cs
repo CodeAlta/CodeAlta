@@ -91,7 +91,19 @@ public sealed partial class SessionViewJournalStore
                 ?? new SessionViewLocalState();
             // The count is of the messages that were there: it is counted again when the session is shown.
             local.MessageCount = null;
-            await store.CommitRewindAsync(point, summary, state, [CreateStateEvent(session, local).ToJson()], cancellationToken).ConfigureAwait(false);
+            // The header is written again with the count of the rewinds, from the header the journal has: a journal
+            // without one, written before sessions had headers, keeps its first record.
+            string? header = null;
+            if (await ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) is { } current
+                && current.SessionId == session.SessionId)
+            {
+                var rewound = current.ToDescriptor();
+                rewound.RewindCount = summary.RewindCount;
+                header = CreateHeaderEvent(rewound).ToJson();
+            }
+
+            session.RewindCount = summary.RewindCount;
+            await store.CommitRewindAsync(point, summary, state, header, [CreateStateEvent(session, local).ToJson()], cancellationToken).ConfigureAwait(false);
             InvalidateLatestStateCache(path);
             await _sessionCache.UpsertSessionViewStateAsync(session.SessionId, path, local, CancellationToken.None).ConfigureAwait(false);
         }

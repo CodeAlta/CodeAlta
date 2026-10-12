@@ -255,7 +255,7 @@ public sealed class AgentSessionBranchStoreTests
 
         var point = await store.ReadBranchPointAsync(Source, "run-2", null, CancellationToken.None).ConfigureAwait(false);
         var now = Start.AddHours(1);
-        await store.CommitRewindAsync(point, point.Summary with { UpdatedAt = now }, point.State with { UpdatedAt = now }, [], CancellationToken.None).ConfigureAwait(false);
+        await store.CommitRewindAsync(point, point.Summary with { UpdatedAt = now }, point.State with { UpdatedAt = now }, null, [], CancellationToken.None).ConfigureAwait(false);
 
         var events = await store.ReadEventsAsync(Source).ConfigureAwait(false);
         CollectionAssert.AreEqual(new[] { "First prompt" }, Prompts(events));
@@ -270,6 +270,29 @@ public sealed class AgentSessionBranchStoreTests
     }
 
     [TestMethod]
+    public async Task Rewind_ReplacesTheFirstLine_SoThatAReaderOfOffsetsStartsAgain()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path));
+        var session = await CreateSessionAsync(store, Source).ConfigureAwait(false);
+        var path = JournalPath(temp.Path, Source);
+        var oldHeader = new AgentRawEvent(session.ProviderId, Source, Start, "codealta.sessionHeader", JsonSerializer.SerializeToElement(new { session_id = Source })).ToJson();
+        await File.WriteAllTextAsync(path, oldHeader + "\n" + await File.ReadAllTextAsync(path).ConfigureAwait(false)).ConfigureAwait(false);
+        await AppendTurnAsync(store, session, "run-1", "First prompt").ConfigureAwait(false);
+        await AppendTurnAsync(store, session, "run-2", "Second prompt").ConfigureAwait(false);
+
+        var point = await store.ReadBranchPointAsync(Source, "run-2", null, CancellationToken.None).ConfigureAwait(false);
+        var newHeader = new AgentRawEvent(session.ProviderId, Source, Start, "codealta.sessionHeader", JsonSerializer.SerializeToElement(new { session_id = Source, rewind_count = 1 })).ToJson();
+        await store.CommitRewindAsync(point, point.Summary, point.State, newHeader, [], CancellationToken.None).ConfigureAwait(false);
+
+        var lines = await File.ReadAllLinesAsync(path).ConfigureAwait(false);
+        Assert.AreEqual(newHeader, lines[0]);
+        Assert.AreEqual(1, lines.Count(static line => line.Contains("codealta.sessionHeader", StringComparison.Ordinal)));
+        CollectionAssert.AreEqual(new[] { "First prompt" }, Prompts(await store.ReadEventsAsync(Source).ConfigureAwait(false)));
+        CollectionAssert.AreEqual(new[] { "run-1" }, (await store.ReadTurnsAsync(Source).ConfigureAwait(false)).Turns.Select(static turn => turn.RunId).ToArray());
+    }
+
+    [TestMethod]
     public async Task Rewind_ToBeforeTheFirstTurn_LeavesAnEmptyConversation()
     {
         using var temp = TestTempDirectory.Create();
@@ -280,7 +303,7 @@ public sealed class AgentSessionBranchStoreTests
         var point = await store.ReadBranchPointAsync(Source, "run-1", null, CancellationToken.None).ConfigureAwait(false);
         Assert.AreEqual(0, point.KeptTurnCount);
         Assert.IsNull(point.State.ProviderSessionId, "No turn ran yet at the point.");
-        await store.CommitRewindAsync(point, point.Summary, point.State, [], CancellationToken.None).ConfigureAwait(false);
+        await store.CommitRewindAsync(point, point.Summary, point.State, null, [], CancellationToken.None).ConfigureAwait(false);
 
         Assert.AreEqual(0, (await store.ReadEventsAsync(Source).ConfigureAwait(false)).Count);
         Assert.AreEqual("Sample session", (await store.GetSessionSummaryAsync(Source).ConfigureAwait(false))!.Title);
@@ -299,7 +322,7 @@ public sealed class AgentSessionBranchStoreTests
         var before = await File.ReadAllBytesAsync(JournalPath(temp.Path, Source)).ConfigureAwait(false);
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => store.CommitRewindAsync(point, point.Summary, point.State, [], CancellationToken.None)).ConfigureAwait(false);
+            () => store.CommitRewindAsync(point, point.Summary, point.State, null, [], CancellationToken.None)).ConfigureAwait(false);
 
         CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(JournalPath(temp.Path, Source)).ConfigureAwait(false));
     }
