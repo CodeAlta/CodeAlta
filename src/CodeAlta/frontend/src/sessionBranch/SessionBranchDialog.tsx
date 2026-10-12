@@ -87,7 +87,7 @@ function rewindLines(t: Translate, point: BranchTurn, total: number, keep: boole
       : draft ? t("The composer holds a draft, which is kept: the prompt of turn {number} is offered for you to copy instead.", { number: point.number })
       : t("The prompt of turn {number} is put back in the composer, for you to edit and send.", { number: point.number }) },
     { text: count === 1 ? t("Files changed by this turn are not restored.") : t("Files changed by these turns are not restored."), warning: true },
-    keep ? { text: t("The session as it is now is kept in a separate session, “{title} (before rewind)”.", { title }) }
+    keep ? { text: t("The session as it is now is kept in a separate session, named after this one and marked “before rewind”.") }
       : { text: t("The removed turns are deleted: they cannot be brought back."), warning: true },
   ];
 }

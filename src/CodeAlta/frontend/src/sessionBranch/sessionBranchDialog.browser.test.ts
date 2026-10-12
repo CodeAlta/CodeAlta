@@ -76,7 +76,7 @@ test("the window of a fork or a rewind lists the points of a session, says what 
       "combobox|true|Points of the session|true");
     assert.equal(await evaluate(`document.activeElement.getAttribute('aria-activedescendant')===${dialog}.querySelector('[role=option][aria-selected=true]').id`), true);
     assert.equal(await evaluate(`${dialog}.querySelector('.reference-status').textContent`), "5 turns");
-    assert.match(await evaluate<string>(consequence), /Turn 5, the last one, is removed from this session\.\nThe session then ends after turn 4\.\nThe prompt of turn 5 is put back in the composer, for you to edit and send\.\nFiles changed by this turn are not restored\.\nThe session as it is now is kept in a separate session, “Parser review \(before rewind\)”\./);
+    assert.match(await evaluate<string>(consequence), /Turn 5, the last one, is removed from this session\.\nThe session then ends after turn 4\.\nThe prompt of turn 5 is put back in the composer, for you to edit and send\.\nFiles changed by this turn are not restored\.\nThe session as it is now is kept in a separate session, named after this one and marked “before rewind”\./);
     assert.equal(await evaluate(`${act}.textContent + '|' + ${act}.disabled + '|' + ${dialog}.querySelector('.branch-keep input').checked`), "Rewind|false|true");
     assert.deepEqual(await reads(), [null]);
 
