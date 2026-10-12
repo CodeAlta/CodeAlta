@@ -12,17 +12,20 @@ internal sealed class SessionUsageService
     internal const int MaximumResponseBytes = 32 * 1024;
     private readonly Func<string, string, string?, string?, CancellationToken, Task<OwnedUsageReadResult>> _read;
     private readonly string _epoch;
+    private readonly Func<string, CancellationToken, Task<SessionUsageSummary?>>? _summary;
 
-    internal SessionUsageService(SessionRuntimeService runtime, string epoch)
-        : this(runtime.ReadOwnedUsageAsync, epoch) { }
+    internal SessionUsageService(SessionRuntimeService runtime, OwnedSessionWorkspace reads, string epoch)
+        : this(runtime.ReadOwnedUsageAsync, epoch, (id, token) => SessionUsageSummaryReader.ReadAsync(reads.ReadTimelinePageAsync, id, token)) { }
 
-    internal SessionUsageService(Func<string, string, string?, string?, CancellationToken, Task<OwnedUsageReadResult>> read, string epoch)
+    internal SessionUsageService(Func<string, string, string?, string?, CancellationToken, Task<OwnedUsageReadResult>> read, string epoch,
+        Func<string, CancellationToken, Task<SessionUsageSummary?>>? summary = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         if (!Guid.TryParseExact(epoch, "D", out var parsed) || parsed == Guid.Empty || parsed.ToString("D") != epoch)
             throw new ArgumentException("Canonical host epoch required.", nameof(epoch));
         _read = read;
         _epoch = epoch;
+        _summary = summary;
     }
 
     [NeoRpcMethod("read")]
@@ -73,6 +76,19 @@ internal sealed class SessionUsageService
                     Decimal(total.OutputTokens), Decimal(total.CachedInputTokens), Decimal(total.ReasoningTokens)) : null);
             var response = new SessionUsageResponse(state.Status, _epoch, id, state.RuntimeInstanceId.ToString("D"),
                 Decimal(state.AttachmentGeneration.Value), Decimal(state.OmittedUsageEvents), observation);
+            if (request.IncludeCurrentSession && _summary is not null)
+            {
+                SessionUsageSummary? summary = null;
+                try { summary = await _summary(id, cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception) { /* An unavailable journal must not erase the live observation or imply zero. */ }
+                var current = await _read(id, request.Scope, request.ProjectId, request.ExpectedProjectPath, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (current.Status is not ("ok" or "no_observation") || current.SessionId != id
+                    || current.RuntimeInstanceId != state.RuntimeInstanceId || current.AttachmentGeneration != state.AttachmentGeneration)
+                    return Error("stale_attachment", id);
+                response = response with { CurrentSession = summary };
+            }
             return JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.SessionUsageResponse).Length <= MaximumResponseBytes
                 ? response : Error("wire_limit", id);
         }
@@ -120,9 +136,9 @@ internal sealed class SessionUsageService
 }
 
 internal sealed record SessionUsageRequest(string ExpectedHostEpoch, string SessionId, string Scope,
-    string? ProjectId, string? ExpectedProjectPath);
+    string? ProjectId, string? ExpectedProjectPath, bool IncludeCurrentSession = false);
 internal sealed record SessionUsageResponse(string Status, string HostEpoch, string? SessionId, string? RuntimeInstanceId,
-    string? AttachmentGeneration, string? OmittedUsageEvents, SessionUsageObservation? Observation);
+    string? AttachmentGeneration, string? OmittedUsageEvents, SessionUsageObservation? Observation, SessionUsageSummary? CurrentSession = null);
 internal sealed record SessionUsageObservation(string Sequence, string? SourceUpdatedAt, string? EventTimestamp,
     string Scope, string Source, SessionUsageWindow? Window, SessionUsageOperation? LastOperation,
     bool HadInvalidValues, bool HadOmittedData, SessionUsageRateLimits? RateLimits = null, SessionUsageTotals? SessionTotal = null);
@@ -134,3 +150,5 @@ internal sealed record SessionUsageOperation(string? InputTokens, string? Output
 internal sealed record SessionUsageRateLimits(string? Name, string? PlanType, SessionUsageRateWindow? Primary, SessionUsageRateWindow? Secondary);
 internal sealed record SessionUsageRateWindow(int? UsedPercent, string? ResetsAt, string? WindowDurationMinutes);
 internal sealed record SessionUsageTotals(string TotalTokens, string InputTokens, string OutputTokens, string CachedInputTokens, string ReasoningTokens);
+internal sealed record SessionUsageSummary(SessionUsageOperation Operation, SessionUsageCost[] Costs);
+internal sealed record SessionUsageCost(string Cost, string? CostUnit);

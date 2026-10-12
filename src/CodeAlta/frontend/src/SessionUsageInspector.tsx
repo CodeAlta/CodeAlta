@@ -68,7 +68,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const [observation, setObservation] = useState<SessionUsageObservation | null>(null);
   const allowed = useSyncExternalStore(capability.subscribe, capability.canMutate);
 
-  function read() {
+  function read(includeCurrentSession = open) {
     if (!capability.canMutate()) return;
     request.current?.abort();
     const controller = new AbortController();
@@ -76,7 +76,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
     lastRead.current = Date.now();
     setPending(true);
     void sessionUsage.read({ expectedHostEpoch: target.epoch, sessionId: target.sessionId,
-      scope: target.scope, projectId: target.projectId, expectedProjectPath: target.expectedProjectPath },
+      scope: target.scope, projectId: target.projectId, expectedProjectPath: target.expectedProjectPath, includeCurrentSession },
     { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
       if (request.current !== controller || controller.signal.aborted) return;
       if (value.status === "stale_epoch" || value.hostEpoch !== target.epoch) capability.observe({ status: "stale_epoch", epoch: value.hostEpoch });
@@ -108,9 +108,9 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   useEffect(() => {
     if (!allowed) return;
     const wait = Math.max(0, lastRead.current + minimumReadInterval - Date.now());
-    const timer = setTimeout(read, wait);
+    const timer = setTimeout(() => read(), wait);
     return () => clearTimeout(timer);
-  }, [allowed, refreshKey]);
+  }, [allowed, refreshKey, open]);
   useEffect(() => () => request.current?.abort(), []);
   useEffect(() => { if (!allowed) { request.current?.abort(); setOpen(false); setSnapshot(null); setObservation(null); attachment.current = null; } }, [allowed]);
   useEffect(() => { if (copied === null) return; const timer = setTimeout(() => setCopied(null), 2500); return () => clearTimeout(timer); }, [copied]);
@@ -131,6 +131,12 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const modelName = operation?.model ?? model ?? null;
   const limits = observation?.rateLimits ?? null;
   const total = observation?.sessionTotal ?? null;
+  const currentSession = snapshot?.currentSession ?? null;
+  const sessionInput = inputTokens(currentSession?.operation);
+  const sessionSegments = operationSegments(currentSession?.operation);
+  const sessionFacts = [sessionInput && t("{count} input tokens", { count: groupedTokens(sessionInput.total) }),
+    currentSession?.operation.durationMs && t("duration {duration} ms", { duration: String(Math.round(Number(currentSession.operation.durationMs))) }),
+    ...(currentSession?.costs.map(cost => t("cost {cost}", { cost: costText(cost)! })) ?? [])].filter(Boolean);
   const updated = observation?.sourceUpdatedAt ?? observation?.eventTimestamp ?? null;
   const updatedTime = updated && !Number.isNaN(new Date(updated).getTime()) ? new Date(updated).toLocaleTimeString([], { hour12: false }) : null;
   const envelope = [observation?.window?.totalContextEnvelope && t("context window {tokens} tokens", { tokens: groupedTokens(observation.window.totalContextEnvelope) }),
@@ -152,13 +158,13 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const subscriptionNote = !shownLimits.length && asked.response?.supported ? usageNote(asked.response) : null;
   async function copy() {
     const markdown = [usageMarkdown({ provider: provider ?? null, model: modelName, usage, messages, window: observation?.window ?? null,
-      operation, rateLimits: limits, sessionTotal: total }), ...(liveCurrent || !reading ? [] : limitsMarkdown(shownLimits, plan, Date.now()))].join("\n");
+      operation, rateLimits: limits, sessionTotal: total, currentSession }), ...(liveCurrent || !reading ? [] : limitsMarkdown(shownLimits, plan, Date.now()))].join("\n");
     try { await navigator.clipboard.writeText(markdown); setCopied(true); } catch { setCopied(false); }
   }
   const operations = operationSegments(operation);
   return <>
     <Button ref={trigger} id="session-usage-trigger" data-usage-target={JSON.stringify(target)} variant="minimal" className="context-usage" data-intent={intent}
-      disabled={!allowed} aria-label={label} aria-haspopup="dialog" aria-expanded={open && allowed} title={label} onClick={() => { if (capability.canMutate()) { setOpen(true); read(); } }}>
+      disabled={!allowed} aria-label={label} aria-haspopup="dialog" aria-expanded={open && allowed} title={label} onClick={() => { if (capability.canMutate()) { setOpen(true); read(true); } }}>
       <span className="context-usage-meter" aria-hidden="true"><span style={{ width: `${percent ?? 0}%` }} /></span>
       <span className="context-usage-text">{usage ? percent === null ? summary : `${Math.round(percent)}%` : <AppIcon name="usage" size={15} />}</span>
       {usage && percent !== null && <span className="context-usage-tokens">{summary}</span>}
@@ -188,6 +194,11 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
           {operations.length ? <UsageBreakdown segments={operations} label={operation.label ?? t("Last operation")} />
             : <p className="usage-card-note">{t("No token counts were reported for this operation.")}</p>}
         </UsageCard>}
+        <UsageCard title={t("Current session")} aside={sessionFacts.join(" · ")}>
+          {sessionSegments.length ? <UsageBreakdown segments={sessionSegments} label={t("Current session")} />
+            : <p className="usage-card-note">{t(currentSession ? "No token counts were reported for this session."
+              : pending ? "Reading the usage…" : "Session costs are unavailable until recorded usage can be read.")}</p>}
+        </UsageCard>
         {(shownLimits.length > 0 || subscriptionNote || asked.loading && !liveCurrent) && <UsageCard title={t("Subscription usage")} aside={planLabel(plan)}>
           {shownLimits.length > 0 ? <UsageLimitList limits={shownLimits} />
             : <p className="usage-card-note">{subscriptionNote ? t(subscriptionNote.key, subscriptionNote.tool ? { tool: subscriptionNote.tool } : undefined) : t("Reading the usage…")}</p>}

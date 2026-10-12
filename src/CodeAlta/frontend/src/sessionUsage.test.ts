@@ -7,7 +7,7 @@ const target: UsageTarget = { epoch: "12345678-1234-1234-1234-123456789abc", ses
   projectId: "12345678-1234-1234-1234-123456789abd", expectedProjectPath: "/fixture/project" };
 const base: SessionUsageResponse = { status: "ok", hostEpoch: target.epoch, sessionId: target.sessionId,
   runtimeInstanceId: "12345678-1234-1234-1234-123456789abe", attachmentGeneration: "9223372036854775807",
-  omittedUsageEvents: "0", observation: { sequence: "9223372036854775806", source: "CodexTokenCountEvent", scope: "CurrentWindow",
+  omittedUsageEvents: "0", currentSession: null, observation: { sequence: "9223372036854775806", source: "CodexTokenCountEvent", scope: "CurrentWindow",
     sourceUpdatedAt: null, eventTimestamp: "2026-09-25T10:00:00Z", hadInvalidValues: true, hadOmittedData: true,
     window: { currentTokens: "0", tokenLimit: "9223372036854775807", messageCount: null, label: null, totalContextEnvelope: null, maxOutputTokens: null },
     lastOperation: { inputTokens: null, outputTokens: "0", cacheReadTokens: null, cacheWriteTokens: null,
@@ -58,4 +58,19 @@ test("usage refuses foreign identity, malformed/overflow values, status pollutio
   ]) assert.equal(validateUsage(target, value), null);
   assert.equal(validateUsage(target, empty)?.observation, null);
   assert.equal(validateUsage(target, { ...empty, attachmentGeneration: null }), null);
+});
+
+test("session totals validate independently of live observations and cannot pollute refusals", () => {
+  const currentSession = { operation: { ...base.observation!.lastOperation!, inputTokens: "9223372036854775807" },
+    costs: [{ cost: "0", costUnit: "AI credits" }, { cost: "1.25", costUnit: "USD" }] };
+  const response = { ...base, status: "no_observation", observation: null, currentSession };
+  assert.deepEqual(validateUsage(target, response)?.currentSession, currentSession);
+  for (const invalid of [
+    { ...currentSession, operation: { ...currentSession.operation, inputTokens: "9223372036854775808" } },
+    { ...currentSession, costs: [{ cost: "NaN", costUnit: "USD" }] },
+    { ...currentSession, costs: [{ cost: "1", costUnit: "line\nbreak" }] },
+    { ...currentSession, costs: [{ cost: null, costUnit: null }] },
+  ]) assert.equal(validateUsage(target, { ...response, currentSession: invalid }), null);
+  assert.equal(validateUsage(target, { ...response, status: "scope_mismatch", runtimeInstanceId: null,
+    attachmentGeneration: null, omittedUsageEvents: null }), null);
 });

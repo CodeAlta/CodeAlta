@@ -1113,6 +1113,20 @@ cost beside the title), rate limits (plan, primary and secondary windows with us
 percentage, window length and reset time) and the provider's session totals. **Copy as Markdown**
 copies the same content; **Refresh usage** reads again.
 
+Desktop also shows **Current session** immediately after the last operation: the same token
+breakdown, accumulated reported provider duration and costs for all recorded requests in the
+session, including earlier turns and compaction requests. Costs with different units are shown
+separately. These totals come from the full session journal, not the loaded timeline or the
+Statistics plugin, and are distinct from provider-reported session totals. Missing usage is not
+treated as zero; an unavailable or incomplete journal leaves the totals unavailable.
+
+The host reads the journal only after the existing ownership checks succeed, then rechecks the
+runtime and attachment before releasing the totals. Only `UsageUpdated` records count as
+requests; idle and compaction-completed snapshots do not count again. Repeated whole-turn
+cost/duration pairs within a run count once, while equal per-request charges still accumulate.
+The journal is read only while the details window is open (`IncludeCurrentSession`); background
+context-meter and session-info reads do not scan history.
+
 `sessionUsage.read` is an owned-only generated Desktop RPC for an existing actor and the actual host
 epoch. It requires explicit project ID/path or global scope, checks the exact persisted session header,
 confirms unarchived project ownership when applicable, and rechecks the original attachment after

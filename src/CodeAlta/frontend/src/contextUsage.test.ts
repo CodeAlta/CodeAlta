@@ -151,3 +151,14 @@ test("rate windows and the Markdown copy carry only what was reported", () => {
   assert.match(usageMarkdown({ provider: null, model: null, usage: null, messages: null, window: null, operation: null, rateLimits: null, sessionTotal: null }),
     /Waiting for usage data/);
 });
+
+test("current session uses the same disjoint breakdown and copies totals with separate cost units", () => {
+  const total = { ...observation().lastOperation!, inputTokens: "1000", cachedInputTokens: "600", cacheWriteTokens: "100",
+    outputTokens: "200", reasoningTokens: "50", durationMs: "1234" };
+  assert.deepEqual(operationSegments(total).map(segment => [segment.key, segment.tokens]),
+    [["uncachedInput", "300"], ["output", "150"], ["cacheWrite", "100"], ["cachedInput", "600"], ["reasoning", "50"]]);
+  const markdown = usageMarkdown({ provider: "copilot", model: null, usage: null, messages: null, window: null,
+    operation: null, rateLimits: null, sessionTotal: null, currentSession: { operation: total,
+      costs: [{ cost: "0.5", costUnit: "AI credits" }, { cost: "1.25", costUnit: "USD" }] } });
+  assert.match(markdown, /## Current session\n\n- input 1,000 · cache 600 · cache write 100 · output 200 · reasoning 50 · duration 1234 ms · cost 0.5 AI credits · cost 1.25 USD/);
+});

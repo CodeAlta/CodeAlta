@@ -475,6 +475,8 @@ Open it with `Ctrl+G Ctrl+U` or the context indicator of the prompt bar. The pop
 
 The last operation shows the tokens of the last request to the model as a bar in which each token is counted once: the input that came from the prompt cache, the input that was written to it, the rest of the input, the output and the reasoning. The whole input is given beside the title. For a Copilot session it also gives the cost of that request in AI credits. See [Prompt caching and the cost of a request](model-providers.md#prompt-caching-and-the-cost-of-a-request).
 
+In CodeAlta Desktop, **Current session** shows the same token breakdown for all recorded requests in the session, including earlier turns and compaction requests, along with their reported duration and accumulated costs. Costs in different units are shown separately. **Copy as Markdown** includes these session totals. Usage that the provider did not report remains unknown rather than being counted as zero.
+
 In CodeAlta Desktop, a session of Codex, Copilot or Claude Code also shows the **Subscription usage**: the limits of the plan, how much of each is used and when it starts over. See [Usage of a subscription](model-providers.md#usage-of-a-subscription).
 
 ## Session report

@@ -33,9 +33,14 @@ export function validateUsage(target: UsageTarget, input: unknown): SessionUsage
   if (!object(input) || input.hostEpoch !== target.epoch || input.sessionId !== target.sessionId ||
     typeof input.status !== "string") return null;
   if (failures.has(input.status)) return input.runtimeInstanceId === null && input.attachmentGeneration === null &&
-    input.omittedUsageEvents === null && input.observation === null ? input as unknown as SessionUsageResponse : null;
+    input.omittedUsageEvents === null && input.observation === null && input.currentSession == null ? input as unknown as SessionUsageResponse : null;
   if (input.status !== "ok" && input.status !== "no_observation" || !guid(input.runtimeInstanceId) ||
     !decimal(input.attachmentGeneration, true) || !decimal(input.omittedUsageEvents)) return null;
+  if (input.currentSession != null) {
+    const total = input.currentSession;
+    if (!object(total) || !validOperation(total.operation) || !Array.isArray(total.costs) || total.costs.length > 128 ||
+      !total.costs.every(cost => object(cost) && finiteText(cost.cost) && cost.cost !== null && label(cost.costUnit))) return null;
+  }
   if (input.status === "no_observation") return input.observation === null ? input as unknown as SessionUsageResponse : null;
   const usage = input.observation;
   if (!object(usage) || !decimal(usage.sequence, true) || !scopes.has(usage.scope as string) ||
@@ -49,10 +54,7 @@ export function validateUsage(target: UsageTarget, input: unknown): SessionUsage
       !optionalDecimal(usage.window.maxOutputTokens ?? null, true)) return null;
   }
   if (usage.lastOperation !== null) {
-    if (!object(usage.lastOperation) || !["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens",
-      "cachedInputTokens", "reasoningTokens"].every(key => optionalDecimal((usage.lastOperation as Record<string, unknown>)[key])) ||
-      !finiteText(usage.lastOperation.cost) || !finiteText(usage.lastOperation.durationMs) ||
-      !["model", "reasoningEffort", "initiator", "label", "costUnit"].every(key => label((usage.lastOperation as Record<string, unknown>)[key]))) return null;
+    if (!validOperation(usage.lastOperation)) return null;
   }
   if (usage.rateLimits != null) {
     if (!object(usage.rateLimits) || !label(usage.rateLimits.name) || !label(usage.rateLimits.planType) ||
@@ -63,6 +65,12 @@ export function validateUsage(target: UsageTarget, input: unknown): SessionUsage
       .every(key => decimal((usage.sessionTotal as Record<string, unknown>)[key]))) return null;
   }
   return input as unknown as SessionUsageResponse;
+}
+
+function validOperation(value: unknown): boolean {
+  return object(value) && ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "cachedInputTokens", "reasoningTokens"]
+    .every(key => optionalDecimal(value[key])) && finiteText(value.cost) && finiteText(value.durationMs) &&
+    ["model", "reasoningEffort", "initiator", "label", "costUnit"].every(key => label(value[key]));
 }
 
 export function usageMessage(status: string): string {

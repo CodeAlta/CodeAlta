@@ -43,6 +43,7 @@ CodeAlta Desktop brings together:
 - **Canvases**: use interactive boards, checklists and custom tools beside your conversations.
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace.
 - **Local statistics**: track activity, models, tokens, costs and tool use by project, session or sub-agent, all on your computer.
+- **Context usage**: inspect context pressure, the last operation and session-wide token usage and costs.
 - **Spaces**: group projects and tab layouts; switch spaces while agents keep working.
 - **Welcome page**: jump back to recent projects and sessions, with useful shortcuts.
 - **Built-in documentation**: read the guide beside your work, or ask an agent to help.

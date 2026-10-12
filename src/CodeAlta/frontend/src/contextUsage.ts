@@ -1,4 +1,4 @@
-import type { SessionUsageObservation, SessionUsageOperation, SessionUsageRateWindow } from "#neoastra";
+import type { SessionUsageObservation, SessionUsageOperation, SessionUsageRateWindow, SessionUsageSummary } from "#neoastra";
 
 /** Context-window occupancy for the compact composer meter. Token counts stay decimal strings (Int64-safe). */
 export type ContextUsage = Readonly<{ used: string; limit: string | null; percent: number | null }>;
@@ -175,11 +175,12 @@ export function usageMarkdown(input: {
   provider: string | null; model: string | null; usage: ContextUsage | null; messages: number | null;
   window: { totalContextEnvelope: string | null; maxOutputTokens: string | null } | null;
   operation: SessionUsageOperation | null; rateLimits: SessionUsageObservation["rateLimits"]; sessionTotal: SessionUsageObservation["sessionTotal"];
+  currentSession?: SessionUsageSummary | null;
 }): string {
   const lines = [`# ${input.provider ?? "Session"} context usage`, "", `- Model: ${input.model ?? "(default model)"}`];
   const { usage, operation, window } = input;
-  if (!usage && !operation) lines.push("- Status: Waiting for usage data from the active session.");
-  else {
+  if (!usage && !operation && !input.currentSession) lines.push("- Status: Waiting for usage data from the active session.");
+  else if (usage || operation) {
     lines.push("", input.messages !== null ? `## Context usage: ${input.messages} messages` : "## Context usage", "");
     if (usage) lines.push(`- Compaction pressure: ${usage.limit
       ? `${groupedTokens(usage.used)} / ${groupedTokens(usage.limit)} input tokens${usage.percent !== null ? ` (${usage.percent}%)` : ""}`
@@ -198,6 +199,15 @@ export function usageMarkdown(input: {
         operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
       if (tokens.length) lines.push(`- ${operation.label ?? "Last operation"}: ${tokens.join(" · ")}`);
     }
+  }
+  if (input.currentSession) {
+    const { operation: total, costs } = input.currentSession;
+    const whole = inputTokens(total);
+    const parts = [whole && `input ${groupedTokens(whole.total)}`, whole && whole.cacheRead !== "0" && `cache ${groupedTokens(whole.cacheRead)}`,
+      whole && whole.cacheWrite !== "0" && `cache write ${groupedTokens(whole.cacheWrite)}`, total.outputTokens && `output ${groupedTokens(total.outputTokens)}`,
+      total.reasoningTokens && `reasoning ${groupedTokens(total.reasoningTokens)}`, total.durationMs && `duration ${total.durationMs} ms`,
+      ...costs.map(cost => `cost ${costText(cost)}`)].filter(Boolean);
+    lines.push("", "## Current session", "", `- ${parts.join(" · ")}`);
   }
   if (input.rateLimits) {
     const english = { used: (percent: number) => `${percent}% used`, window: (minutes: string) => `${minutes}m window`, resets: (time: string) => `resets ${time}` };
