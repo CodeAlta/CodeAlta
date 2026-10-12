@@ -991,7 +991,7 @@ ${value}` : value);
         if (dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey,
           shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey,
           isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode,
-           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, () => submit(false), () => submit(true),
+           repeat: event.repeat, defaultPrevented: event.defaultPrevented }, () => submit(composerBusy), () => submit(false),
         navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); }
       } }}
     options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
@@ -1037,7 +1037,7 @@ ${value}` : value);
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
         disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices} />}
       <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} />
-      <span className="sr-only">{t("Enter to send · Shift+Enter for a new line · {shortcut} to enqueue", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
+      <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {infoControl}
       {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
@@ -1056,7 +1056,7 @@ ${value}` : value);
       {composerBusy && <Button variant="minimal" onClick={() => stagePrompt("Queue")}
         disabled={invalidEpoch || !!pending || !text.trim() && images.length === 0}
         aria-label={t("Enqueue for the next turn")}
-        title={t("Enqueue this prompt for the next turn ({shortcut})", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}>
+        title={t("Enqueue this prompt for the next turn ({shortcut})", { shortcut: "Enter" })}>
         <AppIcon name="queue" size={16} /></Button>}
       <Button ref={compactTrigger} variant="minimal" onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}

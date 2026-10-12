@@ -32,9 +32,9 @@ Click a link, or press Enter on a link that has the keyboard focus, which Tab mo
 
 ## Busy sessions and queues
 
-In Desktop, `Enter` sends immediately when idle and steers the running turn when busy.
-`Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux enqueues until idle; if already idle, the
-prompt is submitted immediately. In TUI, `Enter` queues a busy session's prompt.
+`Enter` sends immediately when idle and enqueues when busy, in both Desktop and TUI.
+In Desktop, `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now, steering a busy turn.
+Choosing **Enqueue until idle** submits the prompt immediately if already idle.
 The waiting list appears above the status line.
 
 Queued prompts can be:
@@ -45,7 +45,8 @@ Queued prompts can be:
 - cleared with `F10`;
 - converted to live steering when the provider supports it.
 
-In Desktop, `Enter` uses **Send now** (labelled **Send now (steer)** while busy), regardless of the Send options selection. Use the **Steer the running turn**
+In Desktop, `Enter` keeps its idle-send / busy-enqueue behavior regardless of the Send options selection.
+**Send now** is labelled **Send now (steer)** while busy. Use the **Steer the running turn**
 button with an empty draft to steer the first queued prompt immediately. In TUI, use `Ctrl+Enter`.
 
 In Desktop, steering accepts text only. Prompts with pasted images stay in the queue for the next turn, with their attachments intact. Their **Steer now** button is disabled; its tooltip explains why. To adjust the running turn now, send a separate text-only steering prompt.

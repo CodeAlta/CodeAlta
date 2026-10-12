@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dispatchComposerKey, dispatchExpandedComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 
-test("regular Enter sends; platform-modified Enter enqueues without sending", () => {
+test("regular Enter uses idle-send/busy-enqueue; platform-modified Enter sends now", () => {
   const actions: string[] = [];
   const send = () => actions.push("send");
-  const enqueue = () => actions.push("enqueue");
+  const enqueue = () => actions.push("idle-send/busy-enqueue");
   for (const mac of [false, true]) {
-    assert.equal(dispatchComposerKey({ key: "Enter" }, send, enqueue, mac), true);
-    assert.equal(dispatchComposerKey({ key: "Enter", ctrlKey: !mac, metaKey: mac }, send, enqueue, mac), true);
-    assert.equal(dispatchComposerKey({ key: "Enter", ctrlKey: mac, metaKey: !mac }, send, enqueue, mac), false);
+    assert.equal(dispatchComposerKey({ key: "Enter" }, enqueue, send, mac), true);
+    assert.equal(dispatchComposerKey({ key: "Enter", ctrlKey: !mac, metaKey: mac }, enqueue, send, mac), true);
+    assert.equal(dispatchComposerKey({ key: "Enter", ctrlKey: mac, metaKey: !mac }, enqueue, send, mac), false);
   }
-  assert.deepEqual(actions, ["send", "enqueue", "send", "enqueue"]);
+  assert.deepEqual(actions, ["idle-send/busy-enqueue", "send", "idle-send/busy-enqueue", "send"]);
 });
 
 test("IME confirmation, modified newlines, held keys and handled input never dispatch", () => {

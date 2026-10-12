@@ -78,7 +78,8 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         if (localDraft && dispatchComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
           altKey: event.altKey, metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing,
           keyCode: event.nativeEvent.keyCode, repeat: event.repeat, defaultPrevented: event.defaultPrevented },
-        () => { if (!localDraft.disabled) localDraft.submit(); }, () => {}, navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); return; }
+        () => { if (!localDraft.disabled) localDraft.submit(); }, () => { if (!localDraft.disabled) localDraft.submit(); },
+        navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); return; }
         if (event.key === "F6" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing
           && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault(); setExpanded(true);

@@ -12,11 +12,11 @@ export function dispatchExpandedComposerKey(event: ComposerKey, close: () => voi
 }
 
 /** Dispatch only deliberate composer actions; IME confirmation and newline gestures remain editor input. */
-export function dispatchComposerKey(event: ComposerKey, send: () => void, enqueue: () => void, mac = false): boolean {
+export function dispatchComposerKey(event: ComposerKey, enqueue: () => void, sendNow: () => void, mac = false): boolean {
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat
     || event.key !== "Enter" || event.shiftKey || event.altKey || (mac ? event.ctrlKey : event.metaKey)) return false;
-  if (mac ? event.metaKey : event.ctrlKey) enqueue();
-  else send();
+  if (mac ? event.metaKey : event.ctrlKey) sendNow();
+  else enqueue();
   return true;
 }
 

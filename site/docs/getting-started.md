@@ -226,8 +226,8 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Context usage | `Ctrl+G Ctrl+U` |
 | Session info | `Ctrl+G Ctrl+T` |
 | Reminders | `Ctrl+G Ctrl+D` or `/reminder` |
-| Enqueue until idle (Desktop) | `Cmd+Enter` on macOS; `Ctrl+Enter` on Windows/Linux |
-| Steer a running session | **Steer the running turn** button (Desktop); `Ctrl+Enter` (TUI) |
+| Send when idle / enqueue while busy | `Enter` |
+| Send now (steer while busy) | `Cmd+Enter` on macOS (Desktop); `Ctrl+Enter` on Windows/Linux (Desktop) or in TUI |
 | Abort the running turn | `F8` or `/abort` |
 | Compact idle session | `Ctrl+F11` or `/compact` |
 | Clear prompt queue | `F10` |

@@ -96,9 +96,9 @@ export function SendSplitButton({ enqueue, onEnqueueChange, busy = false, enqueu
   const { t } = useShellLanguage();
   const menu = <Menu aria-label={t("Send options")}>
     <MenuItem roleStructure="listoption" selected={!enqueue} icon={<AppIcon name={busy ? "steer" : "send"} size={16} />} text={t(busy ? "Send now (steer)" : "Send now")}
-      label="Enter" title={t("Sent immediately.")} onClick={() => onEnqueueChange(false)} />
+      label={navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter"} title={t("Sent immediately.")} onClick={() => onEnqueueChange(false)} />
     <MenuItem roleStructure="listoption" selected={enqueue} disabled={enqueueDisabled} icon={<AppIcon name="queue" size={16} />}
-      text={t("Enqueue until idle")} label={navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter"}
+      text={t("Enqueue until idle")} label="Enter"
       title={t("Sent as soon as the session is idle.")} onClick={() => onEnqueueChange(true)} />
   </Menu>;
   return <ButtonGroup className="composer-send-group">

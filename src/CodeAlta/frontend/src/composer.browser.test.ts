@@ -109,7 +109,8 @@ for (const mac of [false, true]) test(`composer sends, enqueues and explicitly s
     // Enter still sends immediately when the split button's chosen default is Enqueue.
     await evaluate("document.querySelector('[aria-label=\"Send options\"]').click()");
     assert.equal(await wait("!![...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle'))"), true);
-    assert.equal(await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle')).textContent.includes(" + JSON.stringify(mac ? "Cmd+Enter" : "Ctrl+Enter") + ")"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle')).textContent.includes('Enter')"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Send now')).textContent.includes(" + JSON.stringify(mac ? "Cmd+Enter" : "Ctrl+Enter") + ")"), true);
     await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle')).querySelector('a').click()");
     assert.equal(await wait("!document.querySelector('[role=option]')"), true);
     await write("first"); await enter();
@@ -159,9 +160,9 @@ for (const mac of [false, true]) test(`composer sends, enqueues and explicitly s
     assert.equal(await wait(`!${backgroundStatus}`), true);
 
     // Enqueue while the session works: the prompt waits above the composer. Nothing is sent, refused or announced.
-    await write("second"); await enter(true);
+    await write("second"); await enter();
     assert.equal(await wait("fixture.rows().length===1 && promptText()===''"), true);
-    await write("third"); await enter(true);
+    await write("third"); await enter();
     assert.deepEqual(await rows(), ["Queue:waiting:1:second", "Queue:waiting:1:third"]);
     assert.deepEqual(await sends(), ["first"]);
     assert.equal(await evaluate("document.querySelectorAll('.bp6-toast').length"), 0, "a prompt is never answered with a toast");
@@ -262,30 +263,38 @@ for (const mac of [false, true]) test(`composer sends, enqueues and explicitly s
     await command("Input.insertText", { text: " yet" });
     assert.equal(await wait("!document.querySelector('.composer-status-line').textContent.includes('was not accepted')"), true, "editing clears the notice");
 
-    // The enqueue shortcut on an idle session queues and drains as a normal Send, never steering.
+    // Explicit Enqueue on an idle session queues and drains as a normal Send, never steering.
     const before = (await sends()).length;
-    await enter(true);
+    await evaluate("document.querySelector('[aria-label=\"Send options\"]').click()");
+    assert.equal(await wait("!![...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle'))"), true);
+    await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Enqueue until idle')).querySelector('a').click()");
+    assert.equal(await wait("!document.querySelector('[role=option]')"), true);
+    await evaluate("document.querySelector('[aria-label=\"Enqueue\"]').click()");
     assert.equal(await wait(`fixture.sendCalls.length===${before + 1} && ${running} && promptText()===''`), true);
     assert.deepEqual([(await sends()).at(-1), await steers()], ["not taken yet", []]);
+    await evaluate("document.querySelector('[aria-label=\"Send options\"]').click()");
+    assert.equal(await wait("!![...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Send now (steer)'))"), true);
+    await evaluate("[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('Send now (steer)')).querySelector('a').click()");
+    assert.equal(await wait("!document.querySelector('[role=option]')"), true);
 
-    // The shortcut during a running turn enqueues rather than steering.
-    await write("shortcut queued"); await enter(true);
+    // Enter during a running turn enqueues rather than steering, regardless of the selected Send now action.
+    await write("shortcut queued"); await enter();
     assert.equal(await wait("fixture.rows()[0]==='Queue:waiting:1:shortcut queued' && promptText()===''"), true);
     assert.deepEqual(await steers(), []);
     assert.equal((await sends()).length, before + 1);
     await evaluate(`${row("shortcut queued")}.querySelector('.composer-queue-delete').click()`);
     assert.equal(await wait("fixture.rows().length===0"), true);
 
-    // Enter uses Send now (steer) while busy. The row stays until the agent takes the prompt up.
+    // Cmd/Ctrl+Enter uses Send now (steer) while busy. The row stays until the agent takes the prompt up.
     assert.equal(await evaluate("document.querySelector('[aria-label=\"Send now (steer)\"]').title"), "Send now (steer)");
-    await write("steer live"); await enter();
+    await write("steer live"); await enter(true);
     assert.equal(await wait("fixture.steerCalls.length===1 && fixture.rows()[0]==='Steer:delivering:1:steer live' && promptText()===''"), true);
     assert.equal(await evaluate("fixture.steerCalls[0].expectedRunId===fixture.run() && fixture.steerCalls[0].expectedAttachmentGeneration==='12'"), true);
     assert.equal(await evaluate(`${row("steer live")}.querySelector('.composer-queue-status').textContent`), "Steer pending");
     assert.equal(await evaluate(`!${row("steer live")}.querySelector('[aria-label="Repeat count"]') && !${row("steer live")}.querySelector('[aria-label="Edit queued prompt"]')`), true);
 
     // Steering is listed first. The Steer button with an empty draft uses the first queued prompt.
-    await write("queued"); await enter(true);
+    await write("queued"); await enter();
     assert.equal(await wait("fixture.rows().length===2"), true);
     assert.deepEqual(await rows(), ["Steer:delivering:1:steer live", "Queue:waiting:1:queued"]);
     await evaluate("document.querySelector('#session-prompt').focus()");
@@ -297,7 +306,7 @@ for (const mac of [false, true]) test(`composer sends, enqueues and explicitly s
     assert.deepEqual(await steers(), ["steer live", "queued"]);
 
     // The Steer now button of a queued row does the same for that row.
-    await write("later"); await enter(true);
+    await write("later"); await enter();
     assert.equal(await wait(`!!${row("later")}`), true);
     await evaluate(`${row("later")}.querySelector('[aria-label="Steer now"]').click()`);
     assert.equal(await wait("fixture.steerCalls.length===3 && fixture.rows().length===3 && fixture.rows().every(row=>row.startsWith('Steer:delivering'))"), true);
@@ -326,7 +335,7 @@ for (const mac of [false, true]) test(`composer sends, enqueues and explicitly s
 
     // Deleting a queued prompt, and clearing the queue.
     assert.equal(await wait(running), true);
-    for (const text of ["one", "two", "three"]) { await write(text); await enter(true); assert.equal(await wait(`!!${row(text)}`), true); }
+    for (const text of ["one", "two", "three"]) { await write(text); await enter(); assert.equal(await wait(`!!${row(text)}`), true); }
     await evaluate(`${row("two")}.querySelector('.composer-queue-delete').click()`);
     assert.equal(await wait("fixture.rows().length===2"), true);
     assert.deepEqual(await rows(), ["Queue:waiting:1:one", "Queue:waiting:1:three"]);
@@ -336,6 +345,13 @@ for (const mac of [false, true]) test(`composer sends, enqueues and explicitly s
     await evaluate("fixture.finishRun()");
     assert.equal(await wait(idle), true);
     assert.equal((await sends()).length, total, "a cleared queue sends nothing");
+
+    // Send now's modified shortcut runs normally when there is no active turn.
+    await write("modified idle"); await enter(true);
+    assert.equal(await wait(`fixture.sendCalls.length===${total + 1} && ${running} && promptText()===''`), true);
+    assert.equal((await sends()).at(-1), "modified idle");
+    await evaluate("fixture.finishRun()");
+    assert.equal(await wait(idle), true);
 
     assert.equal(await evaluate("document.querySelectorAll('.bp6-toast').length"), 0);
     assert.deepEqual(exceptions, []);

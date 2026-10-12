@@ -861,9 +861,10 @@ project; its `alta` tool has the `alta space` commands except `switch`.
 
 ## Composer
 
-A prompt sent while the session works is never refused. `Enter` uses **Send now** regardless of
-the split-button selection: a normal Send when idle, **Send now (steer)** during a running turn.
-`Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux always enqueues until idle. The explicit
+A prompt sent while the session works is never refused. `Enter` sends normally when idle and
+enqueues during a running turn, regardless of the split-button selection, preserving its familiar behavior.
+`Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux uses **Send now**: a normal Send when idle,
+**Send now (steer)** during a running turn. The explicit
 **Steer the running turn** button also sends text to the running turn as steering. Both wait in compact rows above the prompt card:
 steering first, then the queue in the order it is sent. A queued row has a repeat count (stepper or
 typed number), copy, edit, **Steer now** and delete; **Clear queue** or `F10` removes the prompts
@@ -3573,7 +3574,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | No key | Worktrees (`/worktree`), the window of the git worktrees of the project in front |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
-| `Enter`, `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows/Linux), `Shift+Enter` | Send now (steer while a turn runs), enqueue until idle, new line |
+| `Enter`, `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows/Linux), `Shift+Enter` | Send when idle / enqueue while busy, send now (steer while a turn runs), new line |
 | `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |
 | `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |
 | `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
@@ -3705,7 +3706,8 @@ is available, alongside the Send split button. This is not a live-running indica
 A retained original Send keeps **Retry exact request** primary; retained run cancellation instead
 reads **Retry exact cancellation**, preserving its original target and manual recovery. Neither
 presentation changes nor cancellation clear the draft or initiate runtime reads. The two controls
-keep separate identities and handlers: editor Enter sends, Cmd+Enter (macOS) or Ctrl+Enter (Windows/Linux) enqueues, and in the expanded
+keep separate identities and handlers: editor Enter sends when idle and enqueues while busy,
+Cmd+Enter (macOS) or Ctrl+Enter (Windows/Linux) sends now (steers while busy), and in the expanded
 editor Enter inserts a new line while Escape or Ctrl+Enter closes without sending. Cancellation
 signalling does not establish run completion.
 On narrow screens the labelled controls wrap rather than clip; exact-target evidence and the

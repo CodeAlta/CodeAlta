@@ -1448,7 +1448,7 @@ export const messages = dictionary({
   "{count} canceled": ["{count} canceladas", "{count} annulé(s)", "{count} abgebrochen", "{count} キャンセル", "{count} 已取消"],
   "Modified files": ["Archivos modificados", "Fichiers modifiés", "Geänderte Dateien", "変更されたファイル", "已修改文件"],
   "Image read": ["Imagen leída", "Image lue", "Bild gelesen", "読み取った画像", "已读取的图像"],
-  "Enter to send · Shift+Enter for a new line · {shortcut} to enqueue": ["Enter para enviar · Shift+Enter nueva línea · {shortcut} para poner en cola", "Enter pour envoyer · Shift+Enter nouvelle ligne · {shortcut} pour mettre en file", "Enter zum Senden · Shift+Enter für neue Zeile · {shortcut} zum Einreihen", "Enter で送信 · Shift+Enter で改行 · {shortcut} でキューに追加", "Enter 发送 · Shift+Enter 换行 · {shortcut} 加入队列"],
+  "Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)": ["Enter para enviar o encolar si está ocupado · Shift+Enter nueva línea · {shortcut} para enviar ahora (dirigir)", "Enter pour envoyer ou mettre en file si occupé · Shift+Enter nouvelle ligne · {shortcut} pour envoyer maintenant (orienter)", "Enter zum Senden oder Einreihen bei laufendem Durchgang · Shift+Enter für neue Zeile · {shortcut} zum sofortigen Senden (steuern)", "Enter で送信、実行中はキューに追加 · Shift+Enter で改行 · {shortcut} で今すぐ送信 (誘導)", "Enter 发送，忙碌时加入队列 · Shift+Enter 换行 · {shortcut} 立即发送 (引导)"],
   "Cancel transfer": ["Cancelar transferencia", "Annuler le transfert", "Übertragung abbrechen", "転送をキャンセル", "取消转移"],
   "Session configuration": ["Configuración de la sesión", "Configuration de la session", "Sitzungskonfiguration", "セッション設定", "会话配置"],
   "Agent prompt": ["Instrucciones del agente", "Instructions de l’agent", "Agenten-Prompt", "エージェントプロンプト", "智能体提示词"],
