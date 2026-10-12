@@ -115,6 +115,10 @@ internal sealed class CodeAltaFrontendComposition
         var notesService = new RuntimeAltaNotesService(
             runtimeService,
             () => UiDispatch.Invoke(uiDispatcher, () => sessionStateCoordinator?.GetSelectedSession()?.SessionId));
+        // The bookmarks of sessions and of their messages, for `alta bookmark`. The desktop application shows them.
+        var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(sessionCatalog.JournalStore.ApplicationDatabase,
+            new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(sessionCatalog.JournalStore.CreateSessionStore()));
+        runtimeService.SessionDeleted += bookmarks.ForgetSession;
         var altaServices = new AltaServiceCollection()
             .Add(catalogOptions)
             .Add(sessionCatalog.TextFiles)
@@ -132,7 +136,8 @@ internal sealed class CodeAltaFrontendComposition
             .Add<IReadOnlyList<ModelProviderDescriptor>>(providerDescriptors)
             .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())
             // The tasks and the plans of the projects, for `alta task` and `alta plan`. The desktop application shows them.
-            .Add(new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, catalogOptions.StateRoot));
+            .Add(new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, catalogOptions.StateRoot))
+            .Add(bookmarks);
         if (modelProviderRegistry is not null)
         {
             altaServices.Add(modelProviderRegistry);

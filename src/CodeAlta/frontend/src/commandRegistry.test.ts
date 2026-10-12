@@ -31,6 +31,9 @@ test("single-stroke gestures follow the terminal key map and work inside the pro
     assert.equal(resolveCommandKey(key("F10"), false, focus).command, "clearQueue");
     assert.equal(resolveCommandKey(ctrl("F11"), false, focus).command, "compact");
     assert.equal(resolveCommandKey(key("F3"), false, focus).command, "messagePrevious");
+    // With Shift, the same keys go from one bookmarked message to the next.
+    assert.equal(resolveCommandKey(key("F3", { shiftKey: true }), false, focus).command, "bookmarkPrevious");
+    assert.equal(resolveCommandKey(key("F4", { shiftKey: true }), false, focus).command, "bookmarkNext");
     assert.equal(resolveCommandKey(ctrl("F4"), false, focus).command, "messageLatest");
     assert.equal(resolveCommandKey(key("F6"), false, focus).command, "expandPrompt");
     assert.equal(resolveCommandKey(key("F1"), false, focus).command, "help");
@@ -56,7 +59,7 @@ test("Ctrl+G starts a chord completed with or without Ctrl; an unknown second ke
   assert.deepEqual(resolveCommandKey(key("Control", { ctrlKey: true }), true, "prompt"), { command: null, chord: true, handled: false });
   const expected: [string, string][] = [["t", "sessionInfo"], ["d", "reminders"], ["u", "usage"], ["o", "models"], ["r", "providers"],
     ["h", "prompts"], ["k", "skills"], ["n", "plugins"], ["y", "mcp"], ["l", "logs"], ["a", "about"], ["w", "settings"],
-    ["s", "focusSidebar"], ["p", "focusPrompt"], ["g", "toggleNavigator"]];
+    ["s", "focusSidebar"], ["p", "focusPrompt"], ["g", "toggleNavigator"], ["f", "bookmarks"]];
   for (const [second, command] of expected) {
     assert.deepEqual(resolveCommandKey(ctrl(second), true, "prompt"), { command, chord: false, handled: true }, second);
     assert.deepEqual(resolveCommandKey(key(second), true, "none"), { command, chord: false, handled: true }, second);

@@ -809,6 +809,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(session.SessionId))
         {
             deleted = await _agentSessionCatalog.DeleteSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+            if (deleted) NotifySessionDeleted(session.SessionId);
         }
 
         session.Status = SessionViewStatus.Archived;

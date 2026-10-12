@@ -521,7 +521,7 @@ Under **Automatic cleanup**, **Clear scratchpad on startup** is on by default. *
 sessions** is set to **After 3 months** by default. Enter a positive whole number or use the increment/decrement
 buttons or arrow keys, then choose days, weeks, months or years. Valid changes save on leaving
 the field, pressing Enter, stepping or choosing a unit; incomplete and invalid entries do not save.
-Choose **Never** to disable session retention without forgetting the saved duration.
+Choose **Never** to disable session retention without forgetting the saved duration. A session that has a [bookmark]({{site.basepath}}/docs/bookmarks/) is kept.
 
 Automatic session cleanup runs once at startup on supported local Windows storage, after open
 sessions and drafts have been restored and protected. Incomplete restoration or unsupported storage

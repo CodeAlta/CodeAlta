@@ -38,6 +38,7 @@ CodeAlta Desktop brings together:
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
 - **Work items**: review agent-proposed tasks and plans; start, defer or dismiss them.
+- **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues; start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.
 - **Canvases**: use interactive boards, checklists and custom tools beside your conversations.

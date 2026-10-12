@@ -295,16 +295,23 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (element) selection.pauseAt(element.scrollTop);
     setFollowing(false);
   }
-  // Shows the user message of a journal offset at the top of the timeline, when the window holds it. The reader
-  // is then where they chose to be, not at the end.
-  function showRow(key: string): boolean {
+  // Shows the message of a journal offset at the top of the timeline, when the window holds it. The reader
+  // is then where they chose to be, not at the end. With `mark`, the row is pointed out for a moment.
+  function showRow(key: string, mark = false): boolean {
     const element = elementRef.current;
-    const row = /^\d+$/u.test(key) ? element?.querySelector<HTMLElement>(`[data-prompt-offset="${key}"]`) : null;
+    const row = /^\d+$/u.test(key) ? element?.querySelector<HTMLElement>(`[data-row-offset="${key}"], [data-prompt-offset="${key}"]`) : null;
     if (!element || !row) return false;
     element.scrollTop += row.getBoundingClientRect().top - element.getBoundingClientRect().top - 8;
     messageAnchor.current = null;
     selection.pauseAt(element.scrollTop);
     setFollowing(false);
+    if (mark) {
+      // Asked for twice, the mark is drawn again from its start.
+      row.removeAttribute("data-revealed");
+      void row.offsetWidth;
+      row.setAttribute("data-revealed", "true");
+      row.addEventListener("animationend", () => row.removeAttribute("data-revealed"), { once: true });
+    }
     return true;
   }
   // Where the timeline is, and what puts it back there: a window that moved it to show a row gives it back as it was.

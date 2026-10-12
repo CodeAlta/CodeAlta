@@ -5,6 +5,19 @@ namespace CodeAlta.Orchestration.Runtime;
 
 public sealed partial class SessionRuntimeService
 {
+    /// <summary>
+    /// Raised with the identifier of a session after it was deleted on purpose, by the user or by a command. It is
+    /// not raised for a session that automatic retention removed.
+    /// </summary>
+    public event Action<string>? SessionDeleted;
+
+    // What keeps something about a session (its bookmarks) drops it; a handler that fails does not undo the deletion.
+    private void NotifySessionDeleted(string sessionId)
+    {
+        try { SessionDeleted?.Invoke(sessionId); }
+        catch (Exception) { /* The session is deleted whatever a listener does. */ }
+    }
+
     // The command owner excludes new owned sends/queues while this original runs. The actor
     // rechecks coordinator state at the retirement claim and again at the journal removal.
     internal Task<string> DeleteOwnedCatalogSessionAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle)
@@ -70,7 +83,7 @@ public sealed partial class SessionRuntimeService
         }, CancellationToken.None).ConfigureAwait(false);
         if (preparation.Busy) return "session_in_use";
         if (preparation.Work is not null) await preparation.Work.ConfigureAwait(false);
-        return await actor.QueryAsync(async token =>
+        var outcome = await actor.QueryAsync(async token =>
         {
             if (_transitions.ContainsKey(sessionId) || _entries.ContainsKey(sessionId)) return "session_in_use";
             var checkedScope = await ValidateAsync(token).ConfigureAwait(false);
@@ -78,5 +91,7 @@ public sealed partial class SessionRuntimeService
             return await _agentSessionCatalog.DeleteSessionAsync(sessionId, token).ConfigureAwait(false)
                 ? "ok" : "delete_unconfirmed";
         }, CancellationToken.None).ConfigureAwait(false);
+        if (outcome == "ok") NotifySessionDeleted(sessionId);
+        return outcome;
     }
 }

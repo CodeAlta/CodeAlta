@@ -150,6 +150,9 @@ export const automations = Object.freeze({ list: noAutomations, refresh: noAutom
 // The demo has no project folder to keep tasks and plans in.
 export const workItems = Object.freeze({ list: async () => ({ status: "unavailable", projects: [], settings: null }), read: unavailable, act: unavailable,
   saveSettings: unavailable, watch: unavailable });
+// The demo has no host that keeps bookmarks.
+export const bookmarks = Object.freeze({ list: async () => ({ status: "unavailable", bookmarks: [], truncated: false }), add: unavailable, rename: unavailable, remove: unavailable,
+  resolve: unavailable, watch: unavailable });
 // The demo has no repository whose issues could be read.
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
 export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }) });

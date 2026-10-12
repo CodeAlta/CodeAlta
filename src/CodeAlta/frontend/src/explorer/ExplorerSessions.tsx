@@ -71,7 +71,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, menuEntries, deleteAsks = true, onMore, onFewer, tree }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, menuEntries, actionEntries, deleteAsks = true, onMore, onFewer, tree }: {
   /** The sessions listed, and what stands for the sub-agents that are not. */
   entries: readonly SessionListEntry[];
   /** Whether the scope is the global sessions, and not a project. */
@@ -89,6 +89,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
   /** What the menu of a row has after its own lines and before those of plugins, for the session of that row. */
   menuEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
+  /** What the menu of a row does with its session besides its own lines, listed before the line that deletes it. */
+  actionEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
   /** Whether deleting a session asks first, which its menu says. */
   deleteAsks?: boolean;
   onMore: () => void;
@@ -142,6 +144,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
             { key: "fork", label: t("Fork…"), icon: "branch", disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
+            ...(actionEntries?.(session) ?? []),
             { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
             ...(menuEntries?.(session) ?? []),
             ...pluginEntries,

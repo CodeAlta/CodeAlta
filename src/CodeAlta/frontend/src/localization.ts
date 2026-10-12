@@ -2,6 +2,7 @@ import { landingMessages } from "./landing/messages";
 import { statisticsMessages } from "./statistics/messages";
 import { worktreeMessages } from "./worktrees/messages";
 import { documentationMessages } from "./documentation/messages";
+import { bookmarkMessages } from "./bookmarks/messages";
 import { storageMessages } from "./storage/messages";
 import { sessionBranchMessages } from "./sessionBranch/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
@@ -2346,6 +2347,7 @@ export const messages = dictionary({
   ...documentationMessages,
   ...storageMessages,
   ...sessionBranchMessages,
+  ...bookmarkMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

@@ -3337,6 +3337,68 @@ The prompt of a run is one of the commands the host keeps a receipt of, with the
 the reminders. A run is refused, before a session is created for it, only while as many commands are
 pending as the host keeps (256); it runs again at its next trigger.
 
+## Bookmarks
+
+A **bookmark** marks a whole session, or one message of its timeline (a prompt of the user or a message
+of the assistant), so that it is found again. The sources are `CodeAlta.Catalog/Bookmarks/` (the store
+and the service), `Desktop/Rpc/BookmarksRpc.cs` (host), `frontend/src/bookmarks/` (page) and
+`BuiltInAltaCommandContributor.Bookmarks.cs` (`alta bookmark`; see `doc/live-tool.md`).
+
+- **What a bookmark holds.** The session, and for a message what names it for good: the run of its turn
+  and the id of its content, read by the host from the journal. The byte offset of the record is kept
+  only as the place to look first: a provider change and a rewind rewrite the header of a journal and
+  move every record after it. The bookmark also keeps the beginning of the message as plain text, when
+  the message was written, the name the user gave it (none at first), and the title its session had.
+  Bookmarks are in the application database (owner `bookmarks`), under the state root: the developer
+  instance has its own, as it has its own sessions.
+- **Which rows.** A message of the user or of the assistant that the journal holds whole
+  (`canBookmark`: a completed content record with a numeric key). A row that is being written, the echo
+  of a prompt being sent, a tool call, a status row and a card of a plugin have no bookmark button.
+- **In the timeline.** The button is among the actions of the row, shown as they are under the pointer
+  or with the keyboard focus in the row; it stays drawn, filled, once the message is bookmarked. The
+  rows do not receive the bookmarks as properties: each follows its own mark in a store of the pane
+  (`timelineBookmarks.ts`), which matches the bookmarks of the session with the records of the loaded
+  window by run and content id, so that a bookmark renders one row again. The host sends the content id
+  as the timeline entries carry it.
+- **The rail.** `BookmarkRail` draws one mark for each bookmarked message of the session at the right
+  edge of the timeline, in the order of the conversation, centered in its height; a session without one
+  has no rail. A mark shows a card (whose message it is, its name, its date) under the pointer or with
+  the focus, and goes to its message when pressed. The marks of the messages in view are lit; this is
+  read from the layout once a frame at most, while the timeline scrolls or changes size. Up, Down, Home
+  and End move through the marks. `Shift+F3` / `Shift+F4` go to the bookmark before or after the rows in
+  view (`bookmarkStep`); a bookmark whose message is older than the loaded window counts as before.
+- **Going to a message.** The page asks the host where the message is now (`bookmarks.resolve`), opens
+  the session, and leaves a request for its pane (`revealRequests.ts`, one at a time, each its own
+  object). The history of the pane (`History`, `reveal` / `onReveal`) answers at once when its window
+  holds the offset; otherwise it reads older history a chunk of turns at a time (`revealStep`) until it
+  does, then the timeline puts the message at its top and points it out for a moment
+  (`data-revealed`). A window that slid away from the end of the journal reads the newest history
+  first. While a session works its journal changes under the read: the newest history is read again,
+  which keeps what was loaded, a few times before the request fails. A message the session no longer
+  holds (it was rewound past it) is said in a toast, and the bookmark stays until it is removed.
+- **A session.** **Bookmark session** / **Remove session bookmark** is in the menu of a session row,
+  before **Delete**, and `/bookmark` does the same for the session in front. A bookmarked session has a
+  small mark on its row (`SessionBookmarkMark`, which follows that one fact).
+- **The tab.** `Ctrl+G` then `Ctrl+F`, the bookmark icon of the activity rail or `/bookmarks` open the
+  **Bookmarks** tab, one tab of no project like Work items (`view: "bookmarks"`). It lists the bookmarks
+  of every project and space: by project (the chats are a group), then by session, the project and the
+  session with the newest bookmark first, and the messages of a session in the order of its
+  conversation (`groupBookmarks`). A row says whose message it is, its name, what follows it and when it
+  was written; pressing it goes to the message. The name of a bookmark is edited in place (an empty name
+  gives it back the beginning of its message) and a bookmark is removed with the button beside it,
+  without a question. A search looks in the names, the messages, the titles of the sessions and the
+  names of the projects; a filter keeps the messages or the sessions.
+- **Sessions that go away.** Deleting a session on purpose removes its bookmarks
+  (`SessionRuntimeService.SessionDeleted`). The retention of sessions keeps a session that has a
+  bookmark, of its own or of one of its messages (`DesktopBookmarks`, `doc/session-retention-runtime.md`).
+  A session that is gone otherwise is marked **Session deleted** in the tab: its bookmarks lead nowhere
+  and are removed by hand. A list of sessions that cannot be read never marks one as gone.
+- **The link to the host.** `bookmarksHub.ts` lists the bookmarks when it connects and each time the
+  host tells that they changed (`bookmarks.watch`), so a bookmark an agent adds with `alta bookmark add`
+  appears without a refresh; a change made in the window is shown at once and confirmed by the list
+  that follows. The window of the application does not follow the hub: the tab, the rail and the marks
+  do.
+
 ## Work items
 
 A **work item** is something left to do in a project: a **task** an agent proposed, or a **plan**
@@ -3668,6 +3730,9 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
 | `Ctrl+G` then `Ctrl+I` | Work items (`/work_items`) |
 | `Ctrl+G` then `Ctrl+B` | Issues and pull requests (`/issues`) |
+| `Ctrl+G` then `Ctrl+F` | Bookmarks (`/bookmarks`), the tab of the bookmarks of every project |
+| `Shift+F3` / `Shift+F4` | Previous / next bookmarked message of the session (`/bookmark_prev`, `/bookmark_next`) |
+| No key | Bookmark Session (`/bookmark`): bookmarks the session in front, or removes its bookmark |
 | `Ctrl+G` then `C` | Statistics (`/statistics`), the dashboards of the numbers of all the sessions |
 | `Ctrl+G` then `Ctrl+V`, `Ctrl+G` then `1`…`9` | Go to Space (`/space`, opens the space switch), show the space at that place of the list (Default is 1) |
 | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` (also from a terminal) | Previous / next space (`/space_prev`, `/space_next`) |

@@ -164,6 +164,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `pluginScript/`: what runs the script of plugins (the `alta` object, the module loader, the error boundary, the `html` tag, the components of the `codealta` module).
 - `lent/`: the entries of the libraries lent to plugins and the `codealta` module (below).
 - `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
+- `bookmarks/`: the bookmarks (the link to the host, the tab that lists them, the marks of the rows of a timeline and the rail beside it, the requests that show a message of a timeline).
 
 Rules for these sources:
 

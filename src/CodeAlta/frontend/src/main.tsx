@@ -46,7 +46,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, canvasTab, canvasesTab, documentationTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -242,12 +242,35 @@ import { PluginButtons } from "./pluginButtons/PluginButtons";
 import { SessionRowMenu } from "./pluginButtons/pluginMenu";
 import { PluginButtonsActiveContext, PluginButtonsContext, createHiddenButtons, type PluginButtonContext, type PluginButtonView, type PluginButtonsHost } from "./pluginButtons/pluginButtonModel";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
+import { bookmarks as bookmarksApi } from "#neoastra";
+import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
+import { createBookmarksHub, type BookmarksHub } from "./bookmarks/bookmarksHub";
+import { createRevealRequests, type RevealOutcome, type RevealRequest, type RevealRequests } from "./bookmarks/revealRequests";
+import { createTimelineBookmarks, TimelineBookmarksContext } from "./bookmarks/timelineBookmarks";
+import { BookmarkRail } from "./bookmarks/BookmarkRail";
+import { BookmarksPanel } from "./bookmarks/BookmarksPanel";
+import { SessionBookmarkMark } from "./bookmarks/SessionBookmarkMark";
+import "./bookmarks/bookmarks.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
   latestReady: () => boolean; latest: () => void; cancelLatest: () => void;
   /** Scrolls to a user message, by the journal offset that keys its row; false when the loaded window does not hold it. */
-  showRow: (key: string) => boolean }>;
+  showRow: (key: string) => boolean;
+  /** Goes to the bookmarked message before or after the rows in view; false when there is none that way. */
+  stepBookmark: (direction: -1 | 1) => boolean }>;
+
+/**
+ * What a pane of a session asks about bookmarks: the list the host keeps, the requests that show a message of a
+ * timeline, and the two things a pane does with a bookmark, which the window of the application carries through.
+ */
+type SessionBookmarkHost = Readonly<{ hub: BookmarksHub; reveals: RevealRequests;
+  /** Bookmarks the message of a row of a session, or removes the bookmark it has. */
+  toggleMessage: (sessionId: string, rowKey: string, bookmarkId: string | null) => void;
+  /** Goes to what a bookmark marks. */
+  go: (bookmark: Bookmark) => void;
+  /** Says that the message of a request could not be shown. */
+  unshown: (outcome: RevealOutcome) => void }>;
 
 /**
  * What a pane of a session asks for a fork or a rewind of its session: the requests that open the window, and the
@@ -259,6 +282,7 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const noSubscription = () => () => { };
+const noBookmarkProjects: readonly { id: string; name: string }[] = [];
 type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "storage";
 type SettingsSection = Exclude<View, "workspace">;
 
@@ -1790,6 +1814,46 @@ function App() {
     const session = shown.sessions.find(candidate => candidate.id === id) ?? catalog.current?.sessions.find(candidate => candidate.id === id);
     if (session) revealSession(session);
   }
+  // The bookmarks: the sessions and the messages the user marked to find them again. This window lists them and is told
+  // when they change. It does not follow them itself: the tab, the rail of a timeline and the mark of a row do.
+  const bookmarkActions = useRef<Pick<SessionBookmarkHost, "toggleMessage" | "go" | "unshown">>({ toggleMessage: () => { }, go: () => { }, unshown: () => { } });
+  const [bookmarkHost] = useState<SessionBookmarkHost>(() => ({ hub: createBookmarksHub(bookmarksApi), reveals: createRevealRequests(),
+    toggleMessage: (...request) => bookmarkActions.current.toggleMessage(...request), go: bookmark => bookmarkActions.current.go(bookmark),
+    unshown: outcome => bookmarkActions.current.unshown(outcome) }));
+  useEffect(() => terminalEpoch ? bookmarkHost.hub.connect(terminalEpoch) : undefined, [bookmarkHost, terminalEpoch]);
+  const bookmarkNotice = (message: MessageKey) => showToast({ message: t(message), intent: "warning", icon: "warning-sign", timeout: 6000 });
+  const bookmarkRefused = (status: string) => bookmarkNotice(status === "not_bookmarkable" ? "This message cannot be bookmarked."
+    : status === "limit" ? "There are too many bookmarks. Remove some first." : "The bookmark could not be added.");
+  // Goes to what a bookmark marks: its session, and for a message its place in the timeline. The host says where the
+  // message is now; the pane of the session reads its history up to it.
+  async function goToBookmark(bookmark: Bookmark) {
+    const target = await bookmarkHost.hub.resolve(bookmark.id);
+    if (!creationAlive.current) return;
+    if (target.status === "session_missing") { bookmarkNotice("The session of this bookmark no longer exists."); return; }
+    if (target.status !== "ok" && target.status !== "gone" || !target.sessionId) { bookmarkNotice("The bookmark could not be opened."); return; }
+    if (target.status === "gone") bookmarkNotice("The bookmarked message is no longer in its session.");
+    else if (target.offset) bookmarkHost.reveals.open(target.sessionId, target.offset);
+    await openAutomationSession(target.sessionId);
+  }
+  // The bookmark of the whole session: added, or removed when it has one.
+  async function toggleSessionBookmark(id: string) {
+    const held = sessionBookmarks(bookmarkHost.hub.getSnapshot().bookmarks, id).session;
+    const outcome = held ? await bookmarkHost.hub.remove(held.id) : await bookmarkHost.hub.add(id);
+    if (!outcome.ok && creationAlive.current) { if (held) bookmarkNotice("The bookmark could not be changed."); else bookmarkRefused(outcome.status); }
+  }
+  bookmarkActions.current = {
+    go: bookmark => void goToBookmark(bookmark),
+    toggleMessage: (id, rowKey, bookmarkId) => void (bookmarkId ? bookmarkHost.hub.remove(bookmarkId) : bookmarkHost.hub.add(id, rowKey)).then(outcome => {
+      if (!outcome.ok && creationAlive.current) { if (bookmarkId) bookmarkNotice("The bookmark could not be changed."); else bookmarkRefused(outcome.status); }
+    }),
+    unshown: outcome => bookmarkNotice(outcome === "missing" ? "The bookmarked message is no longer in its session." : "The history of the session could not be read up to the bookmarked message."),
+  };
+  // The line of the menu of a session row: read when the menu opens, which is when it is drawn.
+  const sessionBookmarkEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
+    if (!owned || !bookmarkHost.hub.getSnapshot().available) return [];
+    const held = sessionBookmarks(bookmarkHost.hub.getSnapshot().bookmarks, session.id).session;
+    return [{ key: "bookmark", label: t(held ? "Remove session bookmark" : "Bookmark session"), icon: held ? "bookmarkRemove" : "bookmarkAdd", onSelect: () => void toggleSessionBookmark(session.id) }];
+  };
   // The tasks agents propose and the plans of the projects: this window lists them and is told when they change.
   const [workHub] = useState(() => createWorkItemsHub(workItemsApi));
   useEffect(() => terminalEpoch ? workHub.connect(terminalEpoch) : undefined, [workHub, terminalEpoch]);
@@ -2088,6 +2152,7 @@ function App() {
     const ownedSession = session && owned;
     switch (command) {
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
+      case "bookmarkPrevious": case "bookmarkNext": case "bookmarkSession": return ownedSession && bookmarkHost.hub.getSnapshot().available;
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
@@ -2096,7 +2161,7 @@ function App() {
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
-      case "automations": case "workItems": case "issues": case "canvases": case "documentation": return owned;
+      case "automations": case "workItems": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
@@ -2141,6 +2206,13 @@ function App() {
       case "issues": openFile(issuesTab); break;
       case "canvases": openFile(canvasesTab); break;
       case "documentation": openDocumentation(); break;
+      case "bookmarks": openFile(bookmarksTab); break;
+      case "bookmarkSession": if (selectedSession) void toggleSessionBookmark(selectedSession.id); break;
+      case "bookmarkPrevious": case "bookmarkNext": {
+        const pane = timelineCommand.current;
+        if (pane?.sessionId === selectedSession?.id && !pane?.stepBookmark(command === "bookmarkNext" ? 1 : -1)) bookmarkNotice("There is no other bookmark that way.");
+        break;
+      }
       case "newSpace": setSpaceDialog(true); break;
       case "goToSpace": setSpaceMenuRequest(value => value + 1); break;
       case "previousSpace": case "nextSpace":
@@ -2436,6 +2508,7 @@ function App() {
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
       {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
         title={carriedBy(work, session.id).map(item => item.title).join("\n")}><AppIcon name="task" size={12} /></span>}
+      <SessionBookmarkMark hub={bookmarkHost.hub} sessionId={session.id} />
       <WorktreeBadge session={session} />
       {session.forkedFromSessionId && <SessionLineageMark lineage={sessionLineage(session)!} />}
       <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
@@ -2451,7 +2524,7 @@ function App() {
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} menuEntries={session => sessionCanvasEntries(session, project)} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action) => openScopeSession(scope, session, action)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={sessionBookmarkEntries} deleteAsks={confirms.sessionDelete}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
 
@@ -3119,6 +3192,8 @@ function App() {
               active={!!fileTabs.active && isIssuesTab(fileTabs.active)} aria-label={t("Issues")} title={`${t("Issues")} (Ctrl+G, Ctrl+B)`} onClick={() => openFile(issuesTab)} />
             <Button variant="minimal" size="small" icon={<AppIcon name="canvases" size={16} />} className="activity-canvases" disabled={!owned}
               active={!!fileTabs.active && isCanvasesTab(fileTabs.active)} aria-label={t("Canvases")} title={t("Canvases")} onClick={() => openFile(canvasesTab)} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="bookmark" size={16} />} className="activity-bookmarks" disabled={!owned}
+              active={!!fileTabs.active && isBookmarksTab(fileTabs.active)} aria-label={t("Bookmarks")} title={`${t("Bookmarks")} (Ctrl+G, Ctrl+F)`} onClick={() => openFile(bookmarksTab)} />
             <PluginButtons place="Rail" context={pluginButtonContext} />
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
           </nav>
@@ -3294,6 +3369,7 @@ function App() {
                   { key: "fork", label: t("Fork…"), icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
+                  ...sessionBookmarkEntries(session),
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
@@ -3338,7 +3414,7 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace session={row} canAdmit={admitted} rewinds={rewinds} branch={owned ? branchHost : null}
+              <SessionWorkspace session={row} canAdmit={admitted} rewinds={rewinds} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
@@ -3393,6 +3469,11 @@ function App() {
               ? <DocumentationPanel key={fileTabKey(tab)} hub={documentationHub} visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)}
                 onOpenSession={id => void openAutomationSession(id)} onProviders={() => navigate("providers")}
                 onNotice={message => showToast({ message, intent: "warning", icon: "info-sign", timeout: 5000 })} />
+              : isBookmarksTab(tab)
+              // The bookmarks are the application's, whatever the space shown: each names its project among all of them.
+              ? <BookmarksPanel key={fileTabKey(tab)} hub={bookmarkHost.hub} projects={(catalog.current ?? snapshot)?.projects ?? noBookmarkProjects}
+                onActivate={() => activateFile(tab)} onGo={bookmarkHost.go} onOpenSession={id => void openAutomationSession(id)}
+                onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} />
               : isIssuesTab(tab)
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
@@ -3741,12 +3822,14 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, lineage }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage }: {
   canAdmit: () => boolean;
   /** The number of times the session was rewound: what was read of its journal before a rewind is not what it holds now. */
   rewinds?: number;
   /** The fork and the rewind of this session; null where it cannot be changed. */
   branch?: SessionBranchHost | null;
+  /** The bookmarks of the messages of this session; null where the host keeps none. */
+  bookmarks?: SessionBookmarkHost | null;
   /** Where the session comes from when it is a fork, shown above its timeline. */
   lineage?: ReactNode;
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
@@ -3860,7 +3943,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           : { key: action === "messageFirst" ? "First retained message (not necessarily the first journal message): {label}" : "Retained message: {label}", parameters: result.label === undefined ? undefined : { label: result.label } });
       },
       latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel,
-      showRow: key => { newest.cancel(); return timeline.showRow(key); } };
+      showRow: key => { newest.cancel(); return timeline.showRow(key); }, stepBookmark: direction => bookmarkStep.current?.(direction) ?? false };
     timelineCommand.current = command;
     return () => { if (timelineCommand.current === command) timelineCommand.current = null; };
   });
@@ -3918,6 +4001,19 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     const before = timeline.position();
     return () => timeline.restorePosition(before);
   }, [branchRequest]);
+  // The bookmarks of the messages of this timeline: its rows follow their own mark, and its rail lists them.
+  // A host that keeps no bookmarks offers none: the rows have no button for them.
+  const bookmarksKept = useSyncExternalStore(bookmarks ? bookmarks.hub.subscribe : noSubscription, () => bookmarks?.hub.getSnapshot().available ?? false);
+  const bookmarkMarks = useMemo(() => bookmarks && bookmarksKept ? createTimelineBookmarks((rowKey, bookmarkId) => bookmarks.toggleMessage(session.id, rowKey, bookmarkId)) : null,
+    [bookmarks, bookmarksKept, session.id]);
+  const bookmarkStep = useRef<((direction: -1 | 1) => boolean) | null>(null);
+  // A message of this session to show: the history reads up to it, then the timeline goes there and points it out.
+  const revealRequest = useSyncExternalStore(bookmarks ? bookmarks.reveals.subscribe : noSubscription, () => bookmarks?.reveals.forSession(session.id) ?? null);
+  const onReveal = useCallback((request: RevealRequest, outcome: RevealOutcome) => {
+    bookmarks?.reveals.done(request);
+    if (outcome === "shown") { newest.cancel(); if (timeline.showRow(request.offset, true)) return; outcome = "missing"; }
+    bookmarks?.unshown(outcome);
+  }, [bookmarks, newest.cancel, timeline.showRow]);
   const toolOutputs = useMemo(() => pluginEpoch === null ? undefined : toolRecords.outputs.session(pluginEpoch, session.id),
     [toolRecords, pluginEpoch, session.id]);
   const ownWidth = useSessionWidthStyle(session.id);
@@ -3946,13 +4042,13 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <PluginPaneContext.Provider value={timelinePane}><History observing={observing} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
+        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
-          live={ownedSession ? live?.snapshot?.session ?? null : null} /></PluginPaneContext.Provider>
+          live={ownedSession ? live?.snapshot?.session ?? null : null} /></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
@@ -3967,6 +4063,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
         <SessionNotesOverlay observing={observing} sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
           fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} />
         {workCards}
+        {bookmarks && bookmarkMarks && <BookmarkRail sessionId={session.id} hub={bookmarks.hub} marks={bookmarkMarks} scroll={timeline.elementRef} onGo={bookmarks.go} step={bookmarkStep} />}
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
         {/* Message navigation is announced to assistive technology only: nothing is written above the prompt. */}
