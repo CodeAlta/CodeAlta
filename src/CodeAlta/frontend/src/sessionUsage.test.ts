@@ -74,3 +74,13 @@ test("session totals validate independently of live observations and cannot poll
   assert.equal(validateUsage(target, { ...response, status: "scope_mismatch", runtimeInstanceId: null,
     attachmentGeneration: null, omittedUsageEvents: null }), null);
 });
+
+test("verified saved-session totals need runtime identity but never fabricate an attachment", () => {
+  const saved = { ...base, status: "saved_session", observation: null, attachmentGeneration: null, omittedUsageEvents: null,
+    currentSession: { operation: base.observation!.lastOperation!, costs: [{ cost: "1.25", costUnit: "usd" }] } };
+  assert.equal(validateUsage(target, saved)?.currentSession?.costs[0].cost, "1.25");
+  for (const invalid of [{ ...saved, runtimeInstanceId: null }, { ...saved, attachmentGeneration: "1" },
+    { ...saved, observation: base.observation }, { ...saved, omittedUsageEvents: "0" },
+    { ...saved, sessionId: "foreign" }, { ...saved, currentSession: { ...saved.currentSession, costs: [{ cost: "NaN", costUnit: "usd" }] } }])
+    assert.equal(validateUsage(target, invalid), null);
+});

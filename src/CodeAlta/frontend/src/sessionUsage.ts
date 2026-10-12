@@ -1,7 +1,7 @@
 import type { SessionUsageResponse } from "#neoastra";
 
 export type UsageTarget = Readonly<{ epoch: string; sessionId: string; scope: "global" | "project";
-  projectId: string | null; expectedProjectPath: string | null }>;
+  projectId: string | null; expectedProjectPath: string | null; createdAt?: string | null }>;
 
 const max64 = 9223372036854775807n;
 const scopes = new Set(["Unknown", "CurrentWindow", "LastOperation", "SessionTotal", "Compaction", "Truncation", "RateLimitOnly"]);
@@ -10,7 +10,7 @@ const sources = new Set(["Unknown", "CopilotSessionUsageInfo", "CopilotAssistant
   "CodexAccountRateLimitsUpdated", "RecoveredHistory", "LocalProviderUsage"]);
 const failures = new Set(["invalid_request", "missing_session", "scope_mismatch", "transition", "stale_attachment",
   "metadata_missing", "metadata_incomplete", "metadata_invalid", "metadata_mismatch", "missing_project", "ambiguous_project",
-  "incomplete_project", "invalid_project", "archived_project", "read_failed", "wire_limit", "closed", "stale_epoch"]);
+  "incomplete_project", "invalid_project", "archived_project", "read_failed", "wire_limit", "closed", "stale_epoch", "metadata_unavailable", "project_unverified"]);
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const guid = (value: unknown): value is string => typeof value === "string" &&
   /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value) && value !== "00000000-0000-0000-0000-000000000000";
@@ -34,13 +34,15 @@ export function validateUsage(target: UsageTarget, input: unknown): SessionUsage
     typeof input.status !== "string") return null;
   if (failures.has(input.status)) return input.runtimeInstanceId === null && input.attachmentGeneration === null &&
     input.omittedUsageEvents === null && input.observation === null && input.currentSession == null ? input as unknown as SessionUsageResponse : null;
-  if (input.status !== "ok" && input.status !== "no_observation" || !guid(input.runtimeInstanceId) ||
-    !decimal(input.attachmentGeneration, true) || !decimal(input.omittedUsageEvents)) return null;
+  if (!["ok", "no_observation", "saved_session"].includes(input.status) || !guid(input.runtimeInstanceId)) return null;
   if (input.currentSession != null) {
     const total = input.currentSession;
     if (!object(total) || !validOperation(total.operation) || !Array.isArray(total.costs) || total.costs.length > 128 ||
       !total.costs.every(cost => object(cost) && finiteText(cost.cost) && cost.cost !== null && label(cost.costUnit))) return null;
   }
+  if (input.status === "saved_session") return input.observation === null && input.attachmentGeneration === null && input.omittedUsageEvents === null
+    ? input as unknown as SessionUsageResponse : null;
+  if (!decimal(input.attachmentGeneration, true) || !decimal(input.omittedUsageEvents)) return null;
   if (input.status === "no_observation") return input.observation === null ? input as unknown as SessionUsageResponse : null;
   const usage = input.observation;
   if (!object(usage) || !decimal(usage.sequence, true) || !scopes.has(usage.scope as string) ||

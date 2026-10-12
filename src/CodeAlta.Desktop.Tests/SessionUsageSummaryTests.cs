@@ -69,6 +69,60 @@ public sealed class SessionUsageSummaryTests
     }
 
     [TestMethod]
+    public async Task SavedSessionTotalsDoNotRequireAnActorAndScopeIsVerifiedTwice()
+    {
+        const string epoch = "11111111-1111-4111-8111-111111111111";
+        const string createdAt = "2026-10-12T18:58:50.797343+00:00";
+        var runtime = Guid.NewGuid();
+        var checks = 0;
+        var reads = 0;
+        var total = new SessionUsageSummary(new("100", "20", null, null, null, null, null, null), []);
+        var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("missing_session", runtime, "session", null, null, 0)), epoch,
+            (_, _) => { reads++; return Task.FromResult<SessionUsageSummary?>(total); },
+            (id, time, scope, project, path, _) =>
+            {
+                checks++;
+                Assert.AreEqual(DateTimeOffset.Parse(createdAt), time);
+                Assert.AreEqual("global", scope);
+                Assert.IsNull(project);
+                Assert.IsNull(path);
+                return Task.FromResult(new OwnedRuntimeObservation("ok", new(runtime, id, false, null)));
+            });
+        var result = await service.ReadAsync(new(epoch, "session", "global", null, null, true, createdAt), default);
+        Assert.AreEqual("saved_session", result.Status);
+        Assert.AreEqual(total, result.CurrentSession);
+        Assert.IsNull(result.Observation);
+        Assert.IsNull(result.AttachmentGeneration);
+        Assert.AreEqual(2, checks);
+        Assert.AreEqual(1, reads);
+    }
+
+    [TestMethod]
+    public async Task SavedSessionRefusesUnverifiedScopeOrChangedOwnershipWithoutReleasingTotals()
+    {
+        const string epoch = "11111111-1111-4111-8111-111111111111";
+        var runtime = Guid.NewGuid();
+        var reads = 0;
+        var checks = 0;
+        var request = new SessionUsageRequest(epoch, "session", "global", null, null, true, "2026-10-12T18:58:50Z");
+        SessionUsageService Service(Func<OwnedRuntimeObservation> observe) => new(
+            (_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("missing_session", runtime, "session", null, null, 0)), epoch,
+            (_, _) => { reads++; return Task.FromResult<SessionUsageSummary?>(new(new("100", null, null, null, null, null, null, null), [])); },
+            (_, _, _, _, _, _) => { checks++; return Task.FromResult(observe()); });
+        var service = Service(() => new("scope_mismatch", null));
+        Assert.AreEqual("scope_mismatch", (await service.ReadAsync(request, default)).Status);
+        Assert.AreEqual(0, reads);
+        checks = 0;
+        service = Service(() => checks == 1 ? new("ok", new(runtime, "session", false, null)) : new("archived_project", null));
+        var changed = await service.ReadAsync(request, default);
+        Assert.AreEqual("archived_project", changed.Status);
+        Assert.IsNull(changed.CurrentSession);
+        Assert.AreEqual(1, reads);
+        Assert.AreEqual("invalid_request", (await service.ReadAsync(request with { CreatedAt = "bad" }, default)).Status);
+        Assert.AreEqual(1, reads);
+    }
+
+    [TestMethod]
     public async Task SummaryRequiresOwnedAttachmentAndIsRecheckedAfterHistoryRead()
     {
         const string epoch = "11111111-1111-4111-8111-111111111111";

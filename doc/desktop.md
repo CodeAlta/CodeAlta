@@ -1126,9 +1126,14 @@ requests; idle and compaction-completed snapshots do not count again. Repeated w
 cost/duration pairs within a run count once, while equal per-request charges still accumulate.
 The journal is read only while the details window is open (`IncludeCurrentSession`); background
 context-meter and session-info reads do not scan history.
+Saved sessions do not need a live attachment to show these totals: their header creation time,
+scope and project ownership are verified before and after reading the journal. Such replies
+are marked `saved_session`, with no live observation or attachment generation. Live provider
+usage uses the serialized source name `LocalProviderUsage`, matching the frontend validator.
 
-`sessionUsage.read` is an owned-only generated Desktop RPC for an existing actor and the actual host
-epoch. It requires explicit project ID/path or global scope, checks the exact persisted session header,
+`sessionUsage.read` is an owned-only generated Desktop RPC for the actual host epoch. Its live
+observation requires an existing actor; saved-session totals do not. It requires explicit project
+ID/path or global scope, checks the exact persisted session header,
 confirms unarchived project ownership when applicable, and rechecks the original attachment after
 asynchronous reads. It returns the last admitted usage event: numeric counters as decimal strings,
 bounded single-line text (model, effort, initiator, labels, plan; anything longer than 128 characters

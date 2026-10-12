@@ -76,7 +76,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
     lastRead.current = Date.now();
     setPending(true);
     void sessionUsage.read({ expectedHostEpoch: target.epoch, sessionId: target.sessionId,
-      scope: target.scope, projectId: target.projectId, expectedProjectPath: target.expectedProjectPath, includeCurrentSession },
+      scope: target.scope, projectId: target.projectId, expectedProjectPath: target.expectedProjectPath, includeCurrentSession, createdAt: target.createdAt ?? null },
     { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
       if (request.current !== controller || controller.signal.aborted) return;
       if (value.status === "stale_epoch" || value.hostEpoch !== target.epoch) capability.observe({ status: "stale_epoch", epoch: value.hostEpoch });
@@ -89,14 +89,14 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
       }
       if (verified.runtimeInstanceId) runtime.current = verified.runtimeInstanceId;
       setSnapshot(verified);
-      setStatus(verified.status === "ok" ? null : { raw: usageMessage(verified.status) });
+      setStatus(verified.status === "ok" || verified.status === "saved_session" ? null : { raw: usageMessage(verified.status) });
       const identity = verified.attachmentGeneration ? `${verified.runtimeInstanceId}:${verified.attachmentGeneration}` : null;
       if (verified.status === "ok" && verified.observation) {
         const sameAttachment = attachment.current === identity;
         attachment.current = identity;
         const incoming = verified.observation;
         setObservation(previous => sameAttachment ? mergeUsageObservation(previous, incoming) : incoming);
-      } else if (identity && attachment.current !== identity) {
+      } else if (verified.status === "saved_session" || identity && attachment.current !== identity) {
         attachment.current = identity; setObservation(null);
       }
     }).catch(() => {

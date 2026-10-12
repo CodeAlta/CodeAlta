@@ -477,6 +477,8 @@ The last operation shows the tokens of the last request to the model as a bar in
 
 In CodeAlta Desktop, **Current session** shows the same token breakdown for all recorded requests in the session, including earlier turns and compaction requests, along with their reported duration and accumulated costs. Costs in different units are shown separately. **Copy as Markdown** includes these session totals. Usage that the provider did not report remains unknown rather than being counted as zero.
 
+These totals also work when you open a saved session; you do not need to send a message or resume it first.
+
 In CodeAlta Desktop, a session of Codex, Copilot or Claude Code also shows the **Subscription usage**: the limits of the plan, how much of each is used and when it starts over. See [Usage of a subscription](model-providers.md#usage-of-a-subscription).
 
 ## Session report
