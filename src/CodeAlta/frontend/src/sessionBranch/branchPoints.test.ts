@@ -5,7 +5,7 @@ import { branchRows, canBranchFrom, composerPrompt, forkConsequence, initialSele
 
 const turn = (number: number, values: Partial<BranchTurn> = {}): BranchTurn => ({ number, runId: `run-${number}`, status: "completed",
   startedAt: `2026-10-12T10:${String(number).padStart(2, "0")}:00Z`, endedAt: `2026-10-12T10:${String(number).padStart(2, "0")}:30Z`,
-  promptOffset: String(number * 1000), prompt: `prompt ${number}`, promptTruncated: false, sourceSessionId: null, answersQuestion: false,
+  promptOffset: String(number * 1000), prompt: `prompt ${number}`, promptTruncated: false, sourceSessionId: null, answersQuestion: false, startedByProvider: false,
   steers: 0, assistantMessages: 1, toolCalls: 0, compactions: 0, ...values });
 const job = "[CodeAlta background job]\nJob: job-1\nTitle: Build\nCommand: dotnet build\nResult: succeeded (exit code 0) after 12 s\n\nok";
 const delegated = "[CodeAlta delegated-agent message]\nSource session: child-1\nKind: result\n\nThe review is done.";
@@ -16,6 +16,7 @@ test("who started a turn: the user, an agent, the answer to a question or a back
   assert.equal(turnSender(turn(1, { sourceSessionId: "parent" })), "agent");
   assert.equal(turnSender(turn(1, { prompt: delegated })), "agent");
   assert.equal(turnSender(turn(1, { answersQuestion: true })), "answer");
+  assert.equal(turnSender(turn(1, { startedByProvider: true })), "provider");
   assert.equal(turnSender(turn(1, { prompt: job })), "job");
   // What the list shows of such a prompt is what the timeline shows: no envelope.
   assert.equal(turnText(turn(1, { prompt: delegated })), "The review is done.");
@@ -127,6 +128,7 @@ test("only a prompt the user wrote, kept in the journal, gets the actions of a f
   assert.equal(canBranchFrom(user), true);
   assert.equal(canBranchFrom({ ...user, delegated: true }), false);
   assert.equal(canBranchFrom({ ...user, jobResult: { jobId: "job-1" } }), false);
+  assert.equal(canBranchFrom({ ...user, providerPrompt: true }), false);
   assert.equal(canBranchFrom({ ...user, category: "assistant" }), false);
   // A prompt being sent and a live row have no journal offset yet.
   assert.equal(canBranchFrom({ ...user, key: "outgoing:abc" }), false);

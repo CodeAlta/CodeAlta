@@ -136,7 +136,7 @@ test("a host that changed ends the authority of the window: nothing more is sent
 
 test("the turns of a session are read by page, and a page of another session or host is refused", async () => {
   const turn = { number: 7, runId: "run-7", status: "completed", startedAt: "2026-10-12T10:00:00Z", endedAt: null, promptOffset: "70", prompt: "p", promptTruncated: false,
-    sourceSessionId: null, answersQuestion: false, steers: 0, assistantMessages: 1, toolCalls: 2, compactions: 0 };
+    sourceSessionId: null, answersQuestion: false, startedByProvider: false, steers: 0, assistantMessages: 1, toolCalls: 2, compactions: 0 };
   const page = (overrides = {}) => ({ status: "ok", hostEpoch: epoch, sessionId: "s1", turns: [turn], total: 7, activeRunId: null, revision: null, ...overrides });
   const requests: unknown[] = [];
   const abort = new AbortController();

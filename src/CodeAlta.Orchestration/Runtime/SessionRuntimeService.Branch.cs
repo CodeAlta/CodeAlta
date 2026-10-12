@@ -306,10 +306,20 @@ public sealed partial class SessionRuntimeService
         }
 
         // The title the list shows for the source, also when it was never named.
-        var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(source.SessionId, cancellationToken).ConfigureAwait(false);
+        var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+        var metadata = await store.GetSessionAsync(source.SessionId, cancellationToken).ConfigureAwait(false);
         var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
         var listed = metadata is null ? source.Title : ListedTitle(metadata, source.Kind, ProjectOf(source, projects));
-        target.Title = BranchTitle(listed, suffix);
+        // Several forks of one session are told apart in a list: the second is "(fork 2)", as the fork of a fork is.
+        var taken = new HashSet<string>(StringComparer.Ordinal);
+        await foreach (var other in store.ListSessionsAsync(filter: null, cancellationToken: cancellationToken).ConfigureAwait(false))
+        {
+            if (NormalizeOptionalText((other.Details as RawApiSessionMetadataDetails)?.Title) is { } saved) taken.Add(saved);
+        }
+
+        var name = BranchTitle(listed, suffix);
+        while (taken.Contains(name)) name = BranchTitle(name, suffix);
+        target.Title = name;
         return target;
     }
 

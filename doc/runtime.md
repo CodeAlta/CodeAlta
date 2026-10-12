@@ -1177,8 +1177,13 @@ record, and it is named by the **run id** of the turn it precedes, never by a co
 reads the turns of a journal (`FileSystemAgentSessionStore.ReadTurnsAsync`, `SessionRuntimeService.ReadSessionTurnsAsync`):
 it reads a record by its two ends only (`AgentJournalRecordText`: the discriminators in the first 160 bytes, the shared
 fields in the last 512), so a scan costs the reading of the file whatever the size of a record, holds one read buffer, and
-does not hold the journal gate while it reads. Nothing of it is cached. A turn that runs is never part of a fork and
-cannot be removed: the point after the last turn of a session that runs is the start of the turn in progress.
+does not hold the journal gate while it reads. Nothing of it is cached: on a journal of 233 MiB with 400 turns, one
+record of 24 MiB among them, the turns are read in about 30 ms, and the whole session is forked in about 100 ms (an SSD,
+October 2026). A turn that runs is never part of a fork and cannot be removed: the point after the last turn of a
+session that runs is the start of the turn in progress. A turn says who started it: the session of an agent
+(`SourceSessionId`), the answer to a question (`AskId`), or the provider by itself (`StartedByProvider`: the content
+identifier of such a prompt starts with `provider:` instead of `user:`); a frontend offers the prompts a person wrote
+as points to continue from, and hands only those back to its composer.
 
 **Fork** (`SessionRuntimeService.ForkSessionAsync`, `SessionViewJournalStore.ForkAsync`,
 `FileSystemAgentSessionStore.CommitForkAsync`). The journal of the new session is written beside its final place and
@@ -1196,7 +1201,8 @@ renamed, which is the commit point:
   of the source (provider, model, effort, agent prompt, permission mode) and none of its queued prompts.
 
 The source is not written and may run. The fork is a stored session: no provider is started, and it is attached when it
-is first used. It is not a child of its source: `ParentSessionId` stays what the caller gives (none by default), and where
+is first used. Without a title it is named after its source, "<title> (fork)", then "(fork 2)" for the next fork of
+that session or for a fork of the fork, so that the forks of one session are told apart in a list. It is not a child of its source: `ParentSessionId` stays what the caller gives (none by default), and where
 it comes from is recorded apart, in `AgentSessionSummary.ForkedFrom` (`AgentSessionForkOrigin`: the source, the session at
 the start of the chain of forks, the title of the source, the number of turns kept, the run of the point, the time) and
 as `forked_from` in the header.

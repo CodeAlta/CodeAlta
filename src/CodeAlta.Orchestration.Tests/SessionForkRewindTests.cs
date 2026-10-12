@@ -68,10 +68,14 @@ public sealed class SessionForkRewindTests
         CollectionAssert.AreEqual(new[] { "one", "two", "three", "five" }, UserTexts(after));
         Assert.IsNull(after.PromptCacheKey);
 
+        // A second fork of the same session is told apart from the first.
+        var sibling = await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = source.SessionId });
+        Assert.AreEqual("Review (fork 2)", sibling.Session!.Title);
+
         // A fork of the fork keeps the key of the first session, and is named after the fork.
         var second = await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = fork.SessionId });
         Assert.AreEqual("ok", second.Status);
-        Assert.AreEqual("Review (fork 2)", second.Session!.Title);
+        Assert.AreEqual("Review (fork 3)", second.Session!.Title);
         Assert.AreEqual(fork.SessionId, second.Session.ForkedFrom!.SessionId);
         Assert.AreEqual(source.SessionId, second.Session.ForkedFrom.RootSessionId);
         Assert.AreEqual(3, second.KeptTurnCount);

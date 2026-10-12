@@ -2768,6 +2768,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 prompt = TurnPrompt(turn),
                 promptTruncated = IsTurnPromptTruncated(turn),
                 sourceSessionId = turn.SourceSessionId,
+                startedByProvider = turn.StartedByProvider ? true : (bool?)null,
                 steers = turn.SteerCount,
                 assistantMessages = turn.AssistantMessageCount,
                 toolCalls = turn.ToolCallCount,

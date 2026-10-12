@@ -68,6 +68,7 @@ internal sealed partial class WorkspaceService
                 cut || turn.PromptTruncated,
                 ValidScopeValue(turn.SourceSessionId, 256) ? turn.SourceSessionId : null,
                 turn.AskId is not null,
+                turn.StartedByProvider,
                 turn.SteerCount,
                 turn.AssistantMessageCount,
                 turn.ToolCallCount,
@@ -199,7 +200,7 @@ internal sealed partial class WorkspaceService
     {
         if (turn is null) return (null, false);
         // A prompt an agent sent, or the answer to a question, is not one the user wrote: nothing to continue from.
-        if (turn.SourceSessionId is not null || turn.AskId is not null) return (null, false);
+        if (turn.SourceSessionId is not null || turn.AskId is not null || turn.StartedByProvider) return (null, false);
         var text = turn.PromptPreview;
         var cut = turn.PromptTruncated;
         if (cut && turn.PromptOffset is { } offset && _readRecord is not null)
@@ -268,9 +269,12 @@ internal sealed partial class WorkspaceService
 
 internal sealed record WorkspaceSessionTurnsRequest(string ExpectedHostEpoch, string SessionId, int? BeforeTurn = null);
 
-/// <summary>One turn of a session. <paramref name="Status"/> is completed, failed, unfinished or running.</summary>
+/// <summary>
+/// One turn of a session. <paramref name="Status"/> is completed, failed, unfinished or running.
+/// <paramref name="StartedByProvider"/> is true for a turn the provider started by itself, whose prompt nobody wrote.
+/// </summary>
 internal sealed record WorkspaceSessionTurn(int Number, string RunId, string Status, DateTimeOffset StartedAt, DateTimeOffset? EndedAt,
-    string? PromptOffset, string Prompt, bool PromptTruncated, string? SourceSessionId, bool AnswersQuestion, int Steers,
+    string? PromptOffset, string Prompt, bool PromptTruncated, string? SourceSessionId, bool AnswersQuestion, bool StartedByProvider, int Steers,
     int AssistantMessages, int ToolCalls, int Compactions);
 
 /// <summary>A page of turns in session order. <paramref name="Total"/> is the number of turns of the session.</summary>

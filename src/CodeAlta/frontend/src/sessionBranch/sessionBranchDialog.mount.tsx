@@ -59,7 +59,7 @@ Object.assign(window, { branchFixture: { state,
   /** The turns of the session, the newest last, and the run in progress. */
   turns(values: Partial<BranchTurn>[], running: string | null = null) {
     turns = values.map((value, index) => ({ number: index + 1, runId: `run-${index + 1}`, status: "completed", startedAt: "2026-10-12T10:00:00Z", endedAt: "2026-10-12T10:00:30Z",
-      promptOffset: String((index + 1) * 1000), prompt: `prompt ${index + 1}`, promptTruncated: false, sourceSessionId: null, answersQuestion: false, steers: 0,
+      promptOffset: String((index + 1) * 1000), prompt: `prompt ${index + 1}`, promptTruncated: false, sourceSessionId: null, answersQuestion: false, startedByProvider: false, steers: 0,
       assistantMessages: 1, toolCalls: 0, compactions: 0, ...value }));
     activeRunId = running;
   },

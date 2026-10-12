@@ -58,6 +58,12 @@ public sealed record AgentSessionTurn
     /// <summary>Gets the question the prompt answers, when it answers one.</summary>
     public string? AskId { get; init; }
 
+    /// <summary>
+    /// Gets a value indicating whether the provider started the turn by itself (a background command of an agent CLI
+    /// ended): its prompt is a message of the host, which nobody wrote.
+    /// </summary>
+    public bool StartedByProvider => PromptContentId?.StartsWith(ProviderPromptPrefix, StringComparison.Ordinal) == true;
+
     /// <summary>Gets the number of messages sent while the turn ran, after its prompt.</summary>
     public int SteerCount { get; init; }
 
@@ -72,6 +78,9 @@ public sealed record AgentSessionTurn
 
     /// <summary>The most characters <see cref="PromptPreview"/> holds.</summary>
     public const int PromptPreviewLength = 2000;
+
+    /// <summary>What the content identifier of the prompt of a turn the provider started by itself starts with.</summary>
+    public const string ProviderPromptPrefix = "provider:";
 }
 
 /// <summary>The turns of a session, read from one revision of its journal.</summary>

@@ -1505,6 +1505,10 @@ public sealed class ClaudeCodeSessionTests
             "Claude Code started a turn by itself: Background command \"Run the tests\" completed (exit code 0)",
             shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.User).Content);
         Assert.AreEqual(1, process.UserMessages.Count);
+        // Nobody wrote that message: the turns of the session say so, for what offers prompts to continue from.
+        var turns = (await new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path)).ReadTurnsAsync(session.SessionId)).Turns;
+        Assert.IsFalse(turns[0].StartedByProvider);
+        Assert.IsTrue(turns.Single(turn => turn.RunId == secondRun.Value).StartedByProvider);
         CollectionAssert.AreEqual(
             new[] { AgentActivityPhase.Requested, AgentActivityPhase.Started, AgentActivityPhase.Completed },
             shown.OfType<AgentActivityEvent>().Where(static e => e.ActivityId == "toolu_bg").Select(static e => e.Phase).ToArray());

@@ -7,13 +7,20 @@ import { parseJobResult } from "../jobResult";
 export type BranchMode = "fork" | "rewind";
 export type BranchTurn = WorkspaceSessionTurn;
 
-/** Who started a turn: the user, another agent session, the answer to a question an agent asked, or a background job that ended. */
-export type TurnSender = "you" | "agent" | "answer" | "job";
+/**
+ * Who started a turn: the user, another agent session, the answer to a question an agent asked, a background job
+ * that ended, or the provider by itself (a background command of an agent CLI ended).
+ */
+export type TurnSender = "you" | "agent" | "answer" | "job" | "provider";
+
+/** What the content id of the prompt of a turn the provider started by itself starts with, as the host writes it. */
+export const providerPromptPrefix = "provider:";
 
 const delegatedMarker = "[CodeAlta delegated-agent message]";
 const jobMarker = "[CodeAlta background job]";
 
-export function turnSender(turn: Pick<BranchTurn, "sourceSessionId" | "answersQuestion" | "prompt">): TurnSender {
+export function turnSender(turn: Pick<BranchTurn, "sourceSessionId" | "answersQuestion" | "prompt"> & Partial<Pick<BranchTurn, "startedByProvider">>): TurnSender {
+  if (turn.startedByProvider) return "provider";
   if (turn.answersQuestion) return "answer";
   if (turn.prompt.startsWith(jobMarker)) return "job";
   return turn.sourceSessionId || turn.prompt.startsWith(delegatedMarker) ? "agent" : "you";
@@ -126,15 +133,16 @@ export function rewindBlock(point: BranchTurn | null, facts: Readonly<{ canMutat
 }
 
 /** A row of the timeline as far as the actions of a fork or a rewind are concerned. */
-export type BranchableItem = Readonly<{ key: string; category: string; eventType: string; delegated?: boolean; jobResult?: unknown }>;
+export type BranchableItem = Readonly<{ key: string; category: string; eventType: string; delegated?: boolean; jobResult?: unknown; providerPrompt?: boolean }>;
 
 /**
  * Whether a row of the timeline is a prompt the user wrote and the journal holds: the one a session can be
- * forked from or rewound to. A message of another agent, the result of a background job, a prompt being sent
- * and a live row are not.
+ * forked from or rewound to. A message of another agent, the result of a background job, the message of a turn
+ * the provider started by itself, a prompt being sent and a live row are not.
  */
 export function canBranchFrom(item: BranchableItem): boolean {
-  return item.category === "user" && item.eventType === "contentCompleted" && !item.delegated && !item.jobResult && /^\d+$/u.test(item.key);
+  return item.category === "user" && item.eventType === "contentCompleted" && !item.delegated && !item.jobResult && !item.providerPrompt
+    && /^\d+$/u.test(item.key);
 }
 
 /**
