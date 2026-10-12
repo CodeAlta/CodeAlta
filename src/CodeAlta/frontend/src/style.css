@@ -573,6 +573,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .expanded-prompt-dialog p { margin: 0; color: var(--muted); font-size: 12px; }
 .app-dialog { width: min(620px, 100%); max-height: min(720px, calc(100vh - 48px)); display: flex; flex-direction: column; padding: 18px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 15px; background: var(--panel); box-shadow: var(--shadow); }
 .session-info-dialog { width: min(560px, calc(100vw - 32px)); color: var(--text); overflow-y: auto; }
+.project-delete-dialog p { overflow-wrap: anywhere; }
+.project-delete-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .permission-review-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); box-sizing: border-box; color: var(--text); overflow-y: auto; }
 .permission-review-dialog > * { flex-shrink: 0; min-width: 0; }
 .permission-review-dialog pre, .permission-review-dialog dd, .permission-review-dialog p { white-space: pre-wrap; overflow-wrap: anywhere; }

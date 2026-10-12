@@ -2,6 +2,49 @@ namespace CodeAlta.Orchestration.Runtime;
 
 public sealed partial class OwnedSessionCommandService
 {
+    /// <summary>Deletes an exact confirmed project and its journals, never the project's working files.</summary>
+    /// <remarks>Reserves command admission until completion. Running or retained commands refuse deletion.
+    /// A failure after removal starts can leave some sessions deleted; it must not be retried automatically.</remarks>
+    /// <param name="projectId">Exact catalog identity.</param>
+    /// <param name="projectPath">Exact catalog folder.</param>
+    /// <param name="confirmedName">Project display name shown in the confirmation.</param>
+    /// <param name="expectedArchived">Archive state shown in the confirmation.</param>
+    /// <returns>ok, closed, busy, scope_missing, has_children, session_in_use or delete_unconfirmed.</returns>
+    /// <exception cref="ArgumentException">A required identity or confirmation is blank.</exception>
+    public Task<string> DeleteCatalogProjectAsync(string projectId, string projectPath, string confirmedName, bool expectedArchived)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(confirmedName);
+        lock (_gate)
+        {
+            if (_closed || _retained) return Task.FromResult("closed");
+            // A project can own sessions not present in the Desktop's bounded snapshot.
+            // Reserve globally, rather than trusting that visible list to exclude pending work.
+            if (_deleteWork is not null || _active.Count != 0 || _steering.Count != 0 || _compacting.Count != 0
+                || _abortingRuns.Count != 0 || _queueing.Count != 0 || _remoteControlling.Count != 0
+                || _operations.Values.Any(operation => !operation.Released) || _queues.Values.Any(operation => !operation.Released))
+                return Task.FromResult("busy");
+            var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _deleteWork = completion.Task;
+            _ = DeleteCatalogProjectOwnedAsync(projectId, projectPath, confirmedName, expectedArchived, completion);
+            return completion.Task;
+        }
+    }
+
+    private async Task DeleteCatalogProjectOwnedAsync(string projectId, string projectPath, string confirmedName,
+        bool expectedArchived, TaskCompletionSource<string> completion)
+    {
+        try
+        {
+            completion.TrySetResult(await _runtime.DeleteOwnedCatalogProjectAsync(projectId, projectPath, confirmedName, expectedArchived,
+                sessionId => Asks.List(sessionId).Head is not null)
+                .ConfigureAwait(false));
+        }
+        catch (Exception) { completion.TrySetResult("delete_unconfirmed"); }
+        finally { lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; } }
+    }
+
     /// <summary>Reserves one exact-session journal deletion. Caller cancellation is owned by the waiting bridge only.</summary>
     /// <remarks>Refuses retained commands and refuses active runtime sessions rather than terminating a run or losing queued work.</remarks>
     /// <param name="sessionId">Exact catalog session identity.</param>

@@ -44,6 +44,8 @@ import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
+import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
+import { ProjectDeleteDialog } from "./ProjectDeleteDialog";
 import { browserActivation } from "./sessionBrowser";
 import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, automationsTab, canvasTab, canvasesTab, documentationTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
@@ -565,6 +567,10 @@ function App() {
   const [scrollMemory] = useState(createTimelineScrollMemory);
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
   const [projectArchive] = useState(() => createProjectArchive(workspace.archiveProject));
+  const projectDeleteRpc = useRef(workspace.deleteProject);
+  projectDeleteRpc.current = (request, options) => workspace.deleteProject(request, options)
+    .then(reply => { mutation?.capability.observe({ status: reply.status, epoch: reply.hostEpoch }); return reply; });
+  const [projectDeletion] = useState(() => createProjectDeletion((request, options) => projectDeleteRpc.current(request, options)));
   const [projectRename] = useState(() => createProjectRename(workspace.readProjectName, workspace.renameProject));
   const [projectRenameTarget, setProjectRenameTarget] = useState<ProjectNameTarget | null>(null);
   const [projectRenameName, setProjectRenameName] = useState("");
@@ -2966,6 +2972,54 @@ function App() {
     } finally { if (creationAlive.current) setArchiveBusy(false); }
   }
 
+  const [projectDeleteTarget, setProjectDeleteTarget] = useState<ProjectDeleteTarget | null>(null);
+  const [projectDeleteBusy, setProjectDeleteBusy] = useState(false);
+  const [projectDeleteMessage, setProjectDeleteMessage] = useState("");
+  function projectDeleteScope(): ProjectDeleteTarget | null {
+    const matches = currentSnapshot.current?.projects.filter(project => project.id === selectedScope.current);
+    const project = matches?.length === 1 ? matches[0] : null;
+    if (!project || !owned || !mutation?.capability.canMutate() || !currentHostEpoch.current
+      || settingsVisible.current || currentView.current !== "workspace") return null;
+    return { epoch: currentHostEpoch.current, id: project.id, path: project.path, name: project.name, archived: project.archived,
+      generation: browserRevision.current + projectRenameGeneration.current };
+  }
+  function beginProjectDelete() {
+    const target = projectDeleteScope();
+    if (!target || projectDeletion.locked || projectArchive.locked || archiveBusy || projectRenamePending.current || !!projectRenameTarget
+      || deletingPending.current || renamingPending.current || batchDeletion.locked()) return;
+    setProjectDeleteMessage("");
+    setProjectDeleteTarget(Object.freeze(target));
+  }
+  async function deleteConfirmedProject() {
+    const target = projectDeleteTarget;
+    if (!target || projectDeletion.locked) return;
+    setProjectDeleteBusy(true);
+    setProjectDeleteMessage("");
+    try {
+      const outcome = await projectDeletion.confirm(target, projectDeleteScope());
+      if (!creationAlive.current) return;
+      if (outcome !== "confirmed") {
+        setProjectDeleteMessage(outcome === "uncertain"
+          ? t("Deletion could not be confirmed. Some sessions may already be deleted. Inspect the project and reload the window; no retry will be sent.")
+          : outcome === "refused" ? t("Deletion was refused. Finish running sessions and pending work, check for sub-agents in other projects, then refresh and try again.")
+            : t("The project changed. Close this dialog and review the project again."));
+        return;
+      }
+      setProjectDeleteTarget(null);
+      // Do not redirect a newer selection when this original finishes.
+      if (projectDeleteCurrent(target, projectDeleteScope())) selectProject(null);
+      if (currentHostEpoch.current !== target.epoch || !mutation?.capability.canMutate()) return;
+      const version = browserRevision.current;
+      try {
+        const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+        if (creationAlive.current && currentHostEpoch.current === target.epoch && mutation.capability.canMutate()
+          && version === browserRevision.current && fresh.configured) publishWorkspaceState({ kind: "ready", snapshot: fresh });
+      } catch {
+        showToast({ message: t("Project deletion was confirmed, but the project list could not be refreshed. Reload the window."), intent: "warning", timeout: 8000 });
+      }
+    } finally { if (creationAlive.current) setProjectDeleteBusy(false); }
+  }
+
   // Settings pages also edit the selected project's settings when it can be written.
   const settingsProject = selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null;
   // The folder of the color schemes of the user, in the code editor: the host finds it, and the window leaves Settings.
@@ -2996,6 +3050,9 @@ function App() {
           epoch={owned && (currentProjectWritable() || !!snapshot && archivedProjectScope(snapshot, projectId)) ? status!.hostEpoch! : null}
           read={readReminders} readDetail={readReminderDetail} actions={reminderActions} mutationAllowed={!!mutation?.capability.canMutate()}
           canMutate={() => !!mutation?.capability.canMutate()} /></RemindersDialog>}
+      {projectDeleteTarget && <ProjectDeleteDialog target={projectDeleteTarget} busy={projectDeleteBusy}
+        disabled={projectDeletion.locked || !projectDeleteCurrent(projectDeleteTarget, projectDeleteScope())} error={projectDeleteMessage}
+        onConfirm={() => void deleteConfirmedProject()} onCancel={() => { if (!projectDeleteBusy) setProjectDeleteTarget(null); }} />}
       <div className={`workspace-shell${railVisible ? " project-rail-open" : ""}`} ref={workspaceShell} style={{
           "--explorer-width": `${ideWidth.width}px`,
         } as CSSProperties}>
@@ -3043,7 +3100,9 @@ function App() {
               <MenuItem icon={<AppIcon name="open" size={15} />} text={`${t("Open project")}…`} label="Ctrl+O" onClick={() => setDialog("project")} />
               <MenuItem icon={<AppIcon name="archive" size={15} />} text={t(confirms.projectArchive ? selectedProject?.archived ? "Unarchive project…" : "Archive project…"
                 : selectedProject?.archived ? "Unarchive project" : "Archive project")}
-                disabled={!selectedProject || !owned || !mutation?.capability.canMutate() || archiveBusy || projectArchive.locked} onClick={beginProjectArchive} />
+                disabled={!selectedProject || !owned || !mutation?.capability.canMutate() || archiveBusy || projectArchive.locked || projectDeletion.locked} onClick={beginProjectArchive} />
+              <MenuItem intent="danger" icon={<AppIcon name="trash" size={15} />} text={t("Delete project…")}
+                disabled={!projectDeleteScope() || projectDeletion.locked || projectArchive.locked || archiveBusy} onClick={beginProjectDelete} />
             </Menu>}>
               <Button variant="minimal" size="small" className="rail-action" icon={<AppIcon name="ellipsis" size={18} />} aria-label={t("Project actions")} title={t("Project actions")} />
             </PopoverNext>}
@@ -3092,8 +3151,8 @@ function App() {
               generation: browserRevision.current + projectRenameGeneration.current, modalGeneration: creationGeneration.current,
               canMutate: owned && !!mutation?.capability.canMutate(),
               locked: projectRenamePending.current || !!uncertainProjectRename.current || projectRenameLocked
-                || !!projectRenameTarget || projectArchive.locked || !!projectOpening.getSnapshot() }),
-              open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive,
+                 || !!projectRenameTarget || projectArchive.locked || projectDeletion.locked || !!projectDeleteTarget || !!projectOpening.getSnapshot() }),
+               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive, delete: beginProjectDelete,
               worktrees: owned ? project => openWorktrees(project) : undefined,
               canvases: owned ? { list: () => canvasMenuItems(canvasCatalog, "Project"), open: (item, project) => openCanvas(item, { project: { id: project.id, path: project.path }, sessionId: null }),
                 all: () => openFile(canvasesTab) } : undefined,
@@ -3102,6 +3161,7 @@ function App() {
             editor={owned ? { open: id => fileTabs.open.some(tab => isEditorTab(tab) && tab.projectId === id),
               unsaved: project => fileEditors.dirty(fileTabKey(editorTab(project))), show: project => openProjectEditor(project) } : undefined} />}
           {projectArchive.uncertain && <p role="alert" className="notice error-text">{t("A change of a project archive could not be confirmed. Check the project, and reload the window before archiving again.")}</p>}
+           {projectDeletion.uncertain && !projectDeleteTarget && <p role="alert" className="notice error-text">{t("Deletion could not be confirmed. Some sessions may already be deleted. Inspect the project and reload the window; no retry will be sent.")}</p>}
           {projectRenameNotice && !projectRenaming && <p role="alert" className="notice error-text">{workflowNotice(language.locale, projectRenameNotice)}</p>}
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
           <SpaceActivityBar spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} calls={calls}

@@ -11,6 +11,31 @@ public sealed class SessionJobServiceTests
     private static readonly string Folder = Path.GetTempPath();
 
     [TestMethod]
+    public async Task ExplicitDeletionAllowsSettledHistoryButNotRunningWorkersOrPendingDelivery()
+    {
+        var shell = new FakeShell();
+        var delivering = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var jobs = new SessionJobService((_, _) => { delivering.TrySetResult(); return release.Task; }, shell.Start);
+        var job = jobs.Start(Request("session", "fixture")).Job!;
+        var settled = jobs.WhenSettledAsync(job.Id);
+        try
+        {
+            Assert.IsNull(jobs.TryReserveDeletion("session"));
+            shell.Processes[^1].Exit(0);
+            await delivering.Task.WaitAsync(Wait);
+            Assert.AreEqual(0, jobs.CountRunning("session"));
+            Assert.IsNull(jobs.TryReserveDeletion("session"));
+        }
+        finally { shell.Processes[^1].Exit(0); release.TrySetResult("queued"); }
+        await settled.WaitAsync(Wait);
+        Assert.IsNotNull(jobs.Get(job.Id));
+        using var reservation = jobs.TryReserveDeletion("session");
+        Assert.IsNotNull(reservation);
+        Assert.AreEqual("session_retiring", jobs.Start(Request(" session ", "fixture")).Status);
+    }
+
+    [TestMethod]
     public async Task SessionRetention_PendingDeliveryOutlivesBoundedHistory()
     {
         var shell = new FakeShell();

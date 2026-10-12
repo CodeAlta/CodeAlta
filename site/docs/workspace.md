@@ -42,6 +42,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 - The `…` button of a project or a session, or a right-click, opens its menu.
 - **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session.
 - **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.
+- **Delete project…** in the project's menu (or the Projects header menu for the selected project) removes it from CodeAlta and permanently deletes all its saved sessions, including sub-agents. It works for archived projects too. A dialog always asks first and names the project and its folder; **Cancel** has the focus. The source folder, files and git worktrees are kept. Finish running sessions and pending work first. A sub-agent in another project must be handled separately; deletion will not orphan it. If deletion cannot be confirmed, some sessions may already be gone: inspect the project and reload the window rather than retrying. Saved Statistics are not erased.
 - A session that has [sub-agents](sessions.md#sub-agents) lists them under it, and has an arrow of its own to show or hide them.
 - A session with a bolt was started by an [automation](automations.md).
 - A session with a tree mark works in a [worktree](worktrees.md).

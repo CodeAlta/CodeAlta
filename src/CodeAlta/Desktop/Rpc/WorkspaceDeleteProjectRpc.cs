@@ -1,0 +1,54 @@
+using NeoAstra.Rpc;
+
+namespace CodeAlta.Desktop.Rpc;
+
+internal sealed partial class WorkspaceService
+{
+    private readonly Func<string, string, string, bool, Task<string>>? _deleteProject;
+    private Task<WorkspaceDeleteProjectResponse>? _projectDeleteWork;
+
+    internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, CodeAlta.Catalog.ProjectCatalog catalog, string epoch,
+        Func<string, string, string, bool, Task<string>> deleteProject) : this(reads, catalog, epoch)
+    {
+        ArgumentNullException.ThrowIfNull(deleteProject);
+        _deleteProject = deleteProject;
+    }
+
+    /// <summary>Removes a confirmed catalog project and its sessions, not the source folder.</summary>
+    [NeoRpcMethod("deleteProject", TimeoutMilliseconds = 600_000)]
+    public async Task<WorkspaceDeleteProjectResponse> DeleteProjectAsync(WorkspaceDeleteProjectRequest request, CancellationToken cancellationToken)
+    {
+        WorkspaceDeleteProjectResponse Reply(string status) => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath);
+        if (_deleteProject is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256)
+            || !ValidProjectPath(request.ProjectPath) || !ValidScopeValue(request.ConfirmedName, 256)) return Reply("invalid_scope");
+        if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
+        if (!request.Confirmed) return Reply("confirmation_required");
+        cancellationToken.ThrowIfCancellationRequested();
+        Task<WorkspaceDeleteProjectResponse> work;
+        lock (_importGate)
+        {
+            if (CatalogAdmissionClosed) return Reply("closed");
+            if (CatalogAdmissionBusy || _deleteWork is not null || _renameWork is not null) return Reply("busy");
+            var completion = new TaskCompletionSource<WorkspaceDeleteProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _projectDeleteWork = work = completion.Task;
+            _ = DeleteProjectOwnedAsync(request, completion);
+        }
+        return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task DeleteProjectOwnedAsync(WorkspaceDeleteProjectRequest request, TaskCompletionSource<WorkspaceDeleteProjectResponse> completion)
+    {
+        try
+        {
+            var status = await _deleteProject!(request.ProjectId, request.ProjectPath, request.ConfirmedName, request.ExpectedArchived).ConfigureAwait(false);
+            completion.TrySetResult(new(status, _importEpoch, request.ProjectId, request.ProjectPath));
+        }
+        catch (Exception) { completion.TrySetResult(new("delete_unconfirmed", _importEpoch, request.ProjectId, request.ProjectPath)); }
+        finally { lock (_importGate) { if (ReferenceEquals(_projectDeleteWork, completion.Task)) _projectDeleteWork = null; } }
+    }
+}
+
+internal sealed record WorkspaceDeleteProjectRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath,
+    string ConfirmedName, bool ExpectedArchived, bool Confirmed);
+internal sealed record WorkspaceDeleteProjectResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath);

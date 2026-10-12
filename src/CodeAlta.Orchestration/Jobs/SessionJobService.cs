@@ -144,6 +144,19 @@ public sealed class SessionJobService : IAsyncDisposable
         }
     }
 
+    // Explicit project deletion permits settled job history, but not an original worker or delivery still in flight.
+    internal IDisposable? TryReserveDeletion(string sessionId)
+    {
+        lock (_gate)
+        {
+            if (_closed || _jobs.Values.Any(job => string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)
+                    && job.Run is not { IsCompletedSuccessfully: true })
+                || _pendingDeliveries.Any(job => string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
+                || !_retiringSessions.Add(sessionId)) return null;
+            return new RetirementReservation(this, sessionId);
+        }
+    }
+
     private sealed class RetirementReservation(SessionJobService owner, string sessionId) : IDisposable
     {
         private int _released;

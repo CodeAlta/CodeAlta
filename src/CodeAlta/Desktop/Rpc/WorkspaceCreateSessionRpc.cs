@@ -38,6 +38,7 @@ internal sealed partial class WorkspaceService
         _draftPrompts = host.Commands.GetDraftPromptChoicesAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
+        _deleteProject = host.Commands.DeleteCatalogProjectAsync;
     }
 
     // Only catalogs: this read does not initialize a provider, create a session or confer send authority.

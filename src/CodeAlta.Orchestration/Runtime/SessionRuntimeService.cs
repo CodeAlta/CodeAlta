@@ -1061,6 +1061,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(options);
 
+        using var projectCreation = ClaimProjectCreation(project);
+
         ValidateDiscoveryPaths(null, options, project);
 
         var requestedProjectId = project.Id;

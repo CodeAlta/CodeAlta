@@ -5,25 +5,161 @@ namespace CodeAlta.Orchestration.Runtime;
 
 public sealed partial class SessionRuntimeService
 {
+    // Shares the runtime identity gate with session/lineage admission.
+    private readonly HashSet<string> _deletingProjectPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _deletedProjectIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _projectCreations = new(StringComparer.OrdinalIgnoreCase);
+
+    private IDisposable ClaimProjectCreation(ProjectDescriptor project)
+    {
+        var path = NormalizePath(project.ProjectPath);
+        lock (_identityGate)
+        {
+            if (_deletingProjectPaths.Contains(path) || _deletedProjectIds.Contains(project.Id))
+                throw new InvalidOperationException("The project is being deleted or has been deleted.");
+            _projectCreations[path] = _projectCreations.GetValueOrDefault(path) + 1;
+            return new ProjectCreationLease(this, path);
+        }
+    }
+
+    private sealed class ProjectCreationLease(SessionRuntimeService owner, string path) : IDisposable
+    {
+        public void Dispose()
+        {
+            lock (owner._identityGate)
+                if (--owner._projectCreations[path] == 0) owner._projectCreations.Remove(path);
+        }
+    }
+
     // The command owner excludes new owned sends/queues while this original runs. The actor
     // rechecks coordinator state at the retirement claim and again at the journal removal.
     internal Task<string> DeleteOwnedCatalogSessionAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle)
         => AdmitAsync(() => DeleteOwnedCatalogSessionBodyAsync(sessionId, projectId, workspacePath, confirmedTitle), CancellationToken.None);
 
-    private async Task<string> DeleteOwnedCatalogSessionBodyAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle)
+    internal Task<string> DeleteOwnedCatalogProjectAsync(string projectId, string projectPath, string confirmedName, bool expectedArchived,
+        Func<string, bool> hasPendingAsk)
+        => AdmitAsync(() => DeleteOwnedCatalogProjectBodyAsync(projectId, projectPath, confirmedName, expectedArchived, hasPendingAsk), CancellationToken.None);
+
+    private async Task<string> DeleteOwnedCatalogProjectBodyAsync(string projectId, string projectPath, string confirmedName, bool expectedArchived,
+        Func<string, bool> hasPendingAsk)
+    {
+        lock (_identityGate)
+        {
+            if (_projectCreations.ContainsKey(projectPath) || !_deletingProjectPaths.Add(projectPath)) return "busy";
+        }
+        var claims = new List<IDisposable>();
+        try
+        {
+            var ownership = await _projectCatalog.ReadBoundedOwnershipAsync(projectId, projectPath, CancellationToken.None).ConfigureAwait(false);
+            if (ownership.Status != ProjectOwnershipStatus.Match) return "scope_missing";
+            var project = await _projectCatalog.GetByIdAsync(projectId, CancellationToken.None).ConfigureAwait(false);
+            if (project is null || project.Id != projectId || project.ProjectPath != projectPath
+                || project.DisplayName != confirmedName || project.Archived != expectedArchived) return "scope_missing";
+            var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+            var all = new List<AgentSessionMetadata>();
+            await foreach (var metadata in store.ListSessionsForDeletionAsync(CancellationToken.None).ConfigureAwait(false))
+                all.Add(metadata);
+            var sessions = all.Where(metadata => ProjectSession(metadata, projectPath)).ToArray();
+            var ids = sessions.Select(metadata => metadata.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Do not orphan descendants in another project or global scope.
+            if (all.Any(metadata => !ids.Contains(metadata.SessionId) && HasProjectParent(metadata, ids))) return "has_children";
+            // Children go first so even a partial failure keeps their surviving parents.
+            // Cyclic lineage cannot be safely ordered: refuse before deleting anything.
+            var remaining = sessions.ToDictionary(session => session.SessionId, StringComparer.OrdinalIgnoreCase);
+            var ordered = new List<AgentSessionMetadata>();
+            while (remaining.Count > 0)
+            {
+                var leaves = remaining.Values.Where(session => !remaining.Values.Any(candidate => candidate.SessionId != session.SessionId
+                    && HasProjectParent(candidate, session.SessionId))).ToArray();
+                if (leaves.Length == 0 || leaves.Any(session => HasProjectParent(session, session.SessionId)))
+                    return "has_children";
+                foreach (var leaf in leaves) { ordered.Add(leaf); remaining.Remove(leaf.SessionId); }
+            }
+            foreach (var session in sessions)
+            {
+                if (hasPendingAsk(session.SessionId)) return "session_in_use";
+                var jobClaim = Jobs.TryReserveDeletion(session.SessionId);
+                if (jobClaim is null) return "session_in_use";
+                claims.Add(jobClaim);
+                var runtimeClaim = TryClaimRuntimeRetirement(session.SessionId);
+                if (runtimeClaim is null) return "session_in_use";
+                claims.Add(runtimeClaim);
+                if ((await Permissions.ListWaitingSessionsAsync().ConfigureAwait(false)).Contains(session.SessionId, StringComparer.OrdinalIgnoreCase)
+                    || (await Permissions.ListAsync().ConfigureAwait(false)).Any(item => string.Equals(item.Handle.SessionId, session.SessionId, StringComparison.OrdinalIgnoreCase)))
+                    return "session_in_use";
+                var busy = await GetActorForWork(session.SessionId).QueryAsync(_ => ValueTask.FromResult(
+                    _transitions.ContainsKey(session.SessionId) || _remoteControlWanted.ContainsKey(session.SessionId)
+                    || _entries.TryGetValue(session.SessionId, out var entry)
+                    && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.BackgroundTasks.Any(task => task.Outcome is null))), CancellationToken.None).ConfigureAwait(false);
+                if (busy) return "session_in_use";
+            }
+            var removed = false;
+            foreach (var session in ordered)
+            {
+                var result = await DeleteOwnedCatalogSessionBodyAsync(session.SessionId, projectId, projectPath, confirmedName, ids).ConfigureAwait(false);
+                if (result != "ok") return removed ? "delete_unconfirmed" : result;
+                removed = true;
+                lock (_identityGate) _retiredSessionIds.Add(session.SessionId);
+            }
+            // Never remove the catalog entry while a newly discovered journal still belongs to it.
+            await foreach (var metadata in store.ListSessionsForDeletionAsync(CancellationToken.None).ConfigureAwait(false))
+                if (ProjectSession(metadata, projectPath) || HasProjectParent(metadata, ids)) return "delete_unconfirmed";
+            var current = await _projectCatalog.GetByIdAsync(projectId, CancellationToken.None).ConfigureAwait(false);
+            if (current is null || current.ProjectPath != projectPath || current.DisplayName != confirmedName || current.Archived != expectedArchived)
+                return removed ? "delete_unconfirmed" : "scope_missing";
+            ownership = await _projectCatalog.ReadBoundedOwnershipAsync(projectId, projectPath, CancellationToken.None).ConfigureAwait(false);
+            if (ownership.Status != ProjectOwnershipStatus.Match) return "delete_unconfirmed";
+            if (!await _projectCatalog.DeleteAsync(current, CancellationToken.None).ConfigureAwait(false)) return "delete_unconfirmed";
+            lock (_identityGate) _deletedProjectIds.Add(projectId);
+            return "ok";
+        }
+        finally
+        {
+            foreach (var claim in claims) claim.Dispose();
+            lock (_identityGate) _deletingProjectPaths.Remove(projectPath);
+        }
+    }
+
+    private static bool ProjectSession(AgentSessionMetadata metadata, string projectPath)
+        => (metadata.Context?.Cwd ?? metadata.WorkspacePath) is { Length: > 0 } path
+            && string.Equals(NormalizePath(path), NormalizePath(projectPath), StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasProjectParent(AgentSessionMetadata metadata, IReadOnlySet<string> ids)
+        => metadata.ParentSessionId is { } parent && ids.Contains(parent)
+            || metadata.CreatedBySessionId is { } creator && ids.Contains(creator)
+            || metadata.ViewState?.ParentSessionId is { } viewParent && ids.Contains(viewParent);
+
+    private static bool HasProjectParent(AgentSessionMetadata metadata, string id)
+        => string.Equals(metadata.ParentSessionId, id, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(metadata.CreatedBySessionId, id, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(metadata.ViewState?.ParentSessionId, id, StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string> DeleteOwnedCatalogSessionBodyAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle,
+        IReadOnlySet<string>? projectSessions = null)
     {
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
         async Task<string> ValidateAsync(CancellationToken token)
         {
             var metadata = await store.GetSessionAsync(sessionId, token).ConfigureAwait(false);
-            if (metadata is null || metadata.WorkspacePath != workspacePath) return "session_missing";
-            var projects = await _projectCatalog.LoadAsync(token).ConfigureAwait(false);
-            var session = TryCreateRecoverableSession(metadata, projects);
-            if (session is null || session.SessionId != sessionId || session.ProjectRef != projectId
-                || session.Kind != (projectId is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession))
-                return "session_missing";
-            // The title the list shows: for a session that was never named, the first line of its summary.
-            if (ListedTitle(metadata, session.Kind, ProjectOf(session, projects)) != confirmedTitle) return "session_missing";
+            if (metadata is null) return "session_missing";
+            if (projectSessions is not null)
+            {
+                if (!projectSessions.Contains(sessionId) || !ProjectSession(metadata, workspacePath)) return "session_missing";
+            }
+            else
+            {
+                if (metadata.WorkspacePath != workspacePath) return "session_missing";
+                var projects = await _projectCatalog.LoadAsync(token).ConfigureAwait(false);
+                var session = TryCreateRecoverableSession(metadata, projects);
+                if (session is null || session.SessionId != sessionId || session.ProjectRef != projectId
+                    || session.Kind != (projectId is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession))
+                    return "session_missing";
+                // The title the list shows: for a session that was never named, the first line of its summary.
+                if (ListedTitle(metadata, session.Kind, ProjectOf(session, projects)) != confirmedTitle) return "session_missing";
+            }
+            // The project worker already checked every descendant from disk and holds all
+            // lineage claims. Do not reparse the entire store once for every batch member.
+            if (projectSessions is not null) return "ok";
             await foreach (var candidate in store.ListSessionsAsync(filter: null, cancellationToken: token).ConfigureAwait(false))
             {
                 if (candidate.SessionId != sessionId &&
@@ -42,7 +178,8 @@ public sealed partial class SessionRuntimeService
         {
             if (_transitions.ContainsKey(sessionId)) return ValueTask.FromResult((Busy: true, Work: (Task?)null));
             if (!_entries.TryGetValue(sessionId, out var entry)) return ValueTask.FromResult((Busy: false, Work: (Task?)null));
-            if (entry.HasActiveRun || entry.QueueDrainInProgress)
+            if (entry.HasActiveRun || entry.QueueDrainInProgress || projectSessions is not null
+                && (_remoteControlWanted.ContainsKey(sessionId) || entry.BackgroundTasks.Any(task => task.Outcome is null)))
                 return ValueTask.FromResult((Busy: true, Work: (Task?)null));
             var retirement = _forwarding.RetireAsync(entry.Attachment);
             var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
