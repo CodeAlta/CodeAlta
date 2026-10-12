@@ -74,6 +74,8 @@ test("mounted production Notes and proposal overlays cooperate without replacing
     await command("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     await command("Page.navigate", { url: pathToFileURL(join(root, "fixture.html")).href });
     await wait("!!window.overlays && !!document.querySelector('.session-notes-window')");
+    // The first message of a session is a prompt: its heading has Fork and Rewind before the time.
+    assert.equal(await evaluate("document.querySelectorAll('.message-actions .branch-from-message').length"), 2);
 
     for (const width of [1080, 480, 320]) {
       await t.test(`default and restored Notes chip clears the first timestamp at ${width}px`, async () => {

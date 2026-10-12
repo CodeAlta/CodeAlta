@@ -773,13 +773,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .message-error { --card-color: var(--red); }
 .ide-shell .message-status { --card-color: var(--green); }
 .ide-shell .message-plugin { --card-color: var(--bp-palette-gold-4); }
-.ide-shell .message-heading { min-height: 20px; gap: 8px; margin-bottom: 2px; font-size: 12px; }
+/* One line: in a narrow pane the time is cut short (its title has it whole) instead of going under the title,
+   where the Notes chip is. */
+.ide-shell .message-heading { min-height: 20px; flex-wrap: nowrap; gap: 8px; margin-bottom: 2px; font-size: 12px; }
 .ide-shell .message-heading strong { color: var(--card-color, var(--text)); }
 .ide-shell .message-heading > span:first-child { display: inline-flex; flex-shrink: 0; gap: 6px; max-width: 45%; overflow: hidden; white-space: nowrap; }
 .ide-shell .message-heading small { font-size: var(--bp-typography-size-body-small); }
-.ide-shell .message-actions { margin-left: auto; flex-shrink: 0; }
+.ide-shell .message-actions { margin-left: auto; }
 .ide-shell .message-actions time { font-size: var(--bp-typography-size-body-small); color: var(--muted); }
-.ide-shell .message-actions > button { opacity: 0; pointer-events: none; padding: 2px; width: 20px; height: 20px; border-radius: 4px; border: 0; background: var(--panel-2); color: var(--muted); }
+.ide-shell .message-actions > button { flex-shrink: 0; opacity: 0; pointer-events: none; padding: 2px; width: 20px; height: 20px; border-radius: 4px; border: 0; background: var(--panel-2); color: var(--muted); }
 .ide-shell .timeline-message:hover .message-actions > button, .ide-shell .timeline-message:focus-within .message-actions > button { opacity: 1; pointer-events: auto; }
 .ide-shell .timeline-compact { padding-block: 3px; }
 .timeline-single-row { display: contents; }

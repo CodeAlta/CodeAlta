@@ -1605,7 +1605,9 @@ automatically, refreshes every ten seconds after the previous read completes, an
 notes, cleared notes and no notes event share the same empty result; a failed read is distinct.
 There is no editing, automatic mutation retry or browser persistence. This feature does not require ask opt-in.
 
-The default Notes position leaves the first message heading clear. Proposal cards sit to the left of
+The default Notes position leaves the first message heading clear. That heading is one line at every
+width: in a narrow pane the time beside the actions of the message is cut short (its tooltip has it
+whole) instead of going under the title, where Notes is. Proposal cards sit to the left of
 Notes, or to its right if Notes was dragged left. When neither side fits, proposals use a scrollable
 bottom strip in the timeline, and Notes is temporarily clamped above it. This does not overwrite saved
 Notes geometry or change either overlay's collapsed state; removing the proposals releases that space.
