@@ -70,6 +70,19 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private int _syncedAssistants;
     private string? _pendingPreamble;
 
+    // The last entry of the transcript of the CLI: an assistant message or the result of a tool.
+    private string? _leaf;
+
+    // A session that was just forked or rewound: the conversation the CLI is started on is resumed at an entry
+    // (--resume-session-at), as another conversation for a fork (--fork-session). Until the CLI answered: a transcript
+    // changes only when a prompt is written to it, so a process started again before that starts the same way.
+    private bool _branchPending;
+    private bool _branchFork;
+    private string? _branchAt;
+    // The conversation the branch starts from: a fork is reported under another identifier as soon as the CLI
+    // starts, before its transcript exists.
+    private string? _branchSource;
+
     private ModelProviderId _providerId;
     private AgentProviderRunContext? _run;
     private IReadOnlyDictionary<string, AgentToolDefinition> _exposedTools = new Dictionary<string, AgentToolDefinition>(StringComparer.Ordinal);
@@ -293,20 +306,33 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             var priorUsers = users - trailing;
             var bound = _conversationBound;
             _conversationBound = true;
-            if (!bound && persisted is not null && persisted.Assistants == assistants && persisted.Users <= priorUsers)
+            var branch = request.State.ProviderBranch;
+            // A fork of a whole conversation needs no entry to resume at. Any other point does: a state recorded
+            // before entries were followed has none, and the conversation is then told to a new one as text.
+            var resumable = branch is null || persisted?.Leaf is not null || branch is { Kind: AgentProviderBranchKind.Fork, AtEnd: true };
+            if (!bound && persisted is not null && persisted.Assistants == assistants && persisted.Users <= priorUsers && resumable)
             {
                 // The transcript of the CLI holds the conversation: it is resumed.
                 _claudeSessionId = persisted.SessionId;
                 _pendingPreamble = null;
                 _instructions = null;
                 _instructionsHash = persisted.Instructions;
-                _costTotal = persisted.Cost;
+                _leaf = persisted.Leaf;
+                _branchPending = branch is not null;
+                _branchFork = branch?.Kind == AgentProviderBranchKind.Fork;
+                _branchAt = branch is null ? null : persisted.Leaf;
+                _branchSource = branch is null ? null : persisted.SessionId;
+                // The CLI counts the cost of a conversation from its start, also of what a fork or a rewind leaves
+                // out: the next turn is counted from what the conversation cost when it was last written.
+                _costTotal = branch is null ? persisted.Cost : ClaudeCodeProviderState.ReadCost(branch.CurrentProviderState) ?? persisted.Cost;
             }
             else
             {
                 // A new session, or one whose history another provider wrote or rewrote: the CLI starts a new
                 // conversation and is told what was said before.
                 _claudeSessionId = null;
+                _leaf = null;
+                _branchPending = false;
                 _pendingPreamble = priorUsers > 0 || assistants > 0
                     ? ClaudeCodePrompts.CreateHistoryPreamble([.. conversation.Take(conversation.Count - trailing)])
                     : null;
@@ -387,7 +413,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         // Claude Code keeps the system prompt a conversation started with: what is appended here is read by a
         // new conversation only. A conversation that is resumed is told what changed with its next prompt.
         var appendSystemPrompt = CreateAppendSystemPrompt(request);
-        if (_claudeSessionId is { } resumeSessionId)
+        if ((_branchPending ? _branchSource : _claudeSessionId) is { } resumeSessionId)
         {
             try
             {
@@ -396,10 +422,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             }
             catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
             {
-                // The transcript is gone (another folder, another machine, a cleaned profile): the conversation
-                // starts again in the CLI, with what CodeAlta recorded of it as context.
+                // The transcript is gone (another folder, another machine, a cleaned profile), or the CLI does not
+                // resume it at the entry it was given: the conversation starts again in the CLI, with what CodeAlta
+                // recorded of it as context.
                 await CloseConnectionAsync().ConfigureAwait(false);
                 _claudeSessionId = null;
+                _leaf = null;
+                _branchPending = false;
                 _pendingPreamble = ClaudeCodePrompts.CreateHistoryPreamble(WithoutTrailingUsers(request.Conversation));
             }
         }
@@ -417,6 +446,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         _claudeSessionId = newSessionId;
+        _leaf = null;
         _instructions = appendSystemPrompt;
         _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
         _costTotal = 0;
@@ -557,7 +587,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             permissionMode = _permissionMode;
         }
 
-        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning, delegatesToSessions: hasGateway, withoutApiKey: _withoutApiKey, permissionMode: permissionMode);
+        var branches = _branchPending && resumeSessionId is not null;
+        var launch = ClaudeCodeLauncher.Create(executable, _options, key, newSessionId, resumeSessionId, withTools: true, _showReasoning, delegatesToSessions: hasGateway, withoutApiKey: _withoutApiKey, permissionMode: permissionMode,
+            forkSession: branches && _branchFork, resumeAt: branches ? _branchAt : null);
         var channel = Channel.CreateUnbounded<TurnEvent>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var generation = Interlocked.Increment(ref _generation);
         var transport = _transportFactory.Start(launch);
@@ -963,7 +995,12 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 /// <param name="Assistants">The assistant messages of the conversation the CLI wrote.</param>
 /// <param name="Instructions">The hash of the instructions of CodeAlta the conversation was told last.</param>
 /// <param name="Cost">The cost of the conversation at its last result, from which the cost of the next turn is counted.</param>
-internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int Assistants, string? Instructions = null, double? Cost = null)
+/// <param name="Leaf">
+/// The identifier of the last entry of the transcript when the state was recorded: where the CLI is told to resume
+/// the conversation at, for a session that is forked at that point or rewound to it. Null in a state recorded before
+/// entries were followed.
+/// </param>
+internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int Assistants, string? Instructions = null, double? Cost = null, string? Leaf = null)
 {
     private const string Kind = "claude-code";
 
@@ -981,8 +1018,18 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
             (int)(ClaudeCodeJson.GetInt64(element, "users") ?? 0),
             (int)(ClaudeCodeJson.GetInt64(element, "assistants") ?? 0),
             ClaudeCodeJson.GetString(element, "instructions"),
-            ClaudeCodeJson.GetDouble(element, "cost"));
+            ClaudeCodeJson.GetDouble(element, "cost"),
+            ClaudeCodeJson.GetString(element, "leaf"));
     }
+
+    /// <summary>Reads the cost of a conversation from a state, whatever else it holds.</summary>
+    /// <param name="state">A provider state, or null.</param>
+    /// <returns>The cost, or null when the state is not one of this provider or has none.</returns>
+    public static double? ReadCost(JsonElement? state)
+        => state is { ValueKind: JsonValueKind.Object } element
+            && string.Equals(ClaudeCodeJson.GetString(element, "kind"), Kind, StringComparison.Ordinal)
+                ? ClaudeCodeJson.GetDouble(element, "cost")
+                : null;
 
     public JsonElement ToJson()
         => ClaudeCodeJson.Build(writer =>
@@ -1000,6 +1047,11 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
             if (Cost is { } cost)
             {
                 writer.WriteNumber("cost", cost);
+            }
+
+            if (Leaf is not null)
+            {
+                writer.WriteString("leaf", Leaf);
             }
 
             writer.WriteEndObject();

@@ -55,6 +55,8 @@ internal static class ClaudeCodeLauncher
     /// <param name="delegatesToSessions">Whether what the model delegates goes to child sessions of CodeAlta: the CLI then starts without its own subagent tool.</param>
     /// <param name="withoutApiKey">Whether the CLI is started without the API key of the environment, to sign in with the user's login.</param>
     /// <param name="permissionMode">The permission mode of the session, or <see langword="null" /> for the one of the provider.</param>
+    /// <param name="forkSession">Whether the resumed conversation is continued as another one, which the CLI names: the resumed one stays as it is.</param>
+    /// <param name="resumeAt">The entry of the transcript the resumed conversation is cut after, or <see langword="null" /> to resume all of it.</param>
     public static ClaudeCodeLaunch Create(
         string executable,
         ClaudeCodeModelProviderRuntimeOptions options,
@@ -65,7 +67,9 @@ internal static class ClaudeCodeLauncher
         bool showReasoning = false,
         bool delegatesToSessions = false,
         bool withoutApiKey = false,
-        string? permissionMode = null)
+        string? permissionMode = null,
+        bool forkSession = false,
+        string? resumeAt = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
         ArgumentNullException.ThrowIfNull(options);
@@ -109,6 +113,21 @@ internal static class ClaudeCodeLauncher
         if (!string.IsNullOrWhiteSpace(resumeSessionId))
         {
             arguments.Add($"--resume={resumeSessionId}");
+            if (forkSession)
+            {
+                // The session of CodeAlta was forked from another one: the CLI copies the conversation of that one
+                // under an identifier it reports, and leaves its transcript untouched.
+                arguments.Add("--fork-session");
+            }
+
+            if (!string.IsNullOrWhiteSpace(resumeAt))
+            {
+                // Messages up to and including that entry are kept. The option is not in the help of the CLI; it is
+                // the one the Agent SDK gives for its resumeSessionAt. Without --fork-session the entries after it
+                // stay in the transcript, off the conversation, from the next prompt on.
+                arguments.Add("--resume-session-at");
+                arguments.Add(resumeAt.Trim());
+            }
         }
         else if (!string.IsNullOrWhiteSpace(newSessionId))
         {

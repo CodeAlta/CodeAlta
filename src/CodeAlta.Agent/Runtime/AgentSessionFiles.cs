@@ -228,4 +228,11 @@ public enum AgentProviderBranchKind
 /// </summary>
 /// <param name="Kind">Whether the session is another one than the one the provider knows, or the same one cut.</param>
 /// <param name="AtEnd">Whether the point is the end of the conversation as the provider has it: nothing follows it there.</param>
-public sealed record AgentProviderBranch(AgentProviderBranchKind Kind, bool AtEnd);
+public sealed record AgentProviderBranch(AgentProviderBranchKind Kind, bool AtEnd)
+{
+    /// <summary>
+    /// Gets what the provider recorded at the end of the conversation the session continues from, when that is later
+    /// than the point: a provider that counts what a conversation cost in total reads there what was counted already.
+    /// </summary>
+    public JsonElement? CurrentProviderState { get; init; }
+}

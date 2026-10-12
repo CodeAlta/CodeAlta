@@ -188,7 +188,17 @@ public sealed partial class SessionViewJournalStore
         var summary = point.Summary;
         return string.Equals(state.ProviderKey, summary.ProviderKey, StringComparison.OrdinalIgnoreCase)
             && string.Equals(state.ProtocolFamily, summary.ProtocolFamily, StringComparison.OrdinalIgnoreCase)
-                ? state with { ProviderBranch = new(kind, atEnd) }
+                ? state with
+                {
+                    ProviderBranch = new(kind, atEnd)
+                    {
+                        // Only when the conversation went on after the point, for the same provider.
+                        CurrentProviderState = ReferenceEquals(point.CurrentState, basis)
+                            || !string.Equals(point.CurrentState.ProviderKey, summary.ProviderKey, StringComparison.OrdinalIgnoreCase)
+                                ? null
+                                : point.CurrentState.ProviderState,
+                    },
+                }
                 : state with
                 {
                     ProviderKey = summary.ProviderKey,
