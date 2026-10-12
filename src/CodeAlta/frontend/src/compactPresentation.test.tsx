@@ -5,6 +5,7 @@ import { TimelineMessage, commandPreview } from "./TimelineMessage";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import type { TimelineItem } from "./timeline";
 import { FileChangeInspection } from "./FileChangeInspection";
+import { parseJobResult } from "./jobResult";
 
 const record: TimelineItem = { key: "42", eventType: "sessionUpdate", category: "status", icon: "usage",
   title: "Idle", subtitle: null, timestamp: "2026-09-27T10:00:00Z", markdown: "Context: 48%\n\nInput tokens: 94449",
@@ -30,6 +31,18 @@ test("tool cards keep output statistics separate from clipped previews and expos
     toolPhase: "failed", toolOutput: "incomplete preview" }} />);
   assert.match(unknown, /tool-outcome[^>]*>Failed/);
   assert.doesNotMatch(unknown, /tool-output-stats/);
+});
+
+test("background-job results are compact clickable cards, not inline command and output blocks", () => {
+  const job = parseJobResult("[CodeAlta background job]\nJob: job-1234\nTitle: Verify the build\nCommand: dotnet test " + "--filter Long ".repeat(30)
+    + "\nResult: succeeded (exit code 0) after 10 min 45 s\n\nOutput:\n```\nprivate output body\n```")!;
+  const html = renderToStaticMarkup(<TimelineMessage item={{ ...record, category: "user", title: "Background job", icon: "terminal",
+    jobResult: job, markdown: job.body, summary: job.title, subtitle: job.result }} />);
+  assert.match(html, /message-job timeline-compact/);
+  assert.match(html, /tool-tile-title[^>]*aria-haspopup="dialog"/);
+  assert.match(html, /Verify the build/);
+  assert.match(html, /succeeded \(exit code 0\) after 10 min 45 s/);
+  assert.doesNotMatch(html, /private output body|<pre|markdown-content|long-message-toggle/);
 });
 
 test("status rows are compact and details are dialog actions, not permanent disclosures", () => {

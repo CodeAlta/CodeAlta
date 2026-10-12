@@ -446,6 +446,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(ToolCallResponse))]
 [JsonSerializable(typeof(ToolCallObserveRequest))]
 [JsonSerializable(typeof(ToolCallOutputItem))]
+[JsonSerializable(typeof(BackgroundJobDetailsRequest))]
+[JsonSerializable(typeof(BackgroundJobDetailsResponse))]
 [JsonSerializable(typeof(McpHostRequest))]
 [JsonSerializable(typeof(McpHostEnableRequest))]
 [JsonSerializable(typeof(McpHostResponse))]

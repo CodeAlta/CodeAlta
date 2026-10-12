@@ -13,7 +13,7 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { markdownLinks, modelCatalog, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
+import { markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -422,6 +422,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const openRemoteLink = useCallback((url: string) => {
     void markdownLinks.open({ expectedHostEpoch: epoch, address: url, sessionId, projectId: null, directory: null }, { timeoutMilliseconds: 8_000 }).catch(() => { /* The link is shown to copy. */ });
   }, [epoch, sessionId]);
+  const readBackgroundJob = useCallback((jobId: string, signal: AbortSignal) => toolCalls.readJob({ expectedEpoch: epoch, sessionId, jobId }, { signal }), [epoch, sessionId]);
   const stopBackgroundTask = useCallback(async (taskId: string) => {
     if (!capability.canMutate()) return;
     // The answer is not shown: the task leaves the list when its provider stopped it.
@@ -971,7 +972,7 @@ ${value}` : value);
           : compacting ? t("Compacting…")
           : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</span>
       <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
-        renderOutput={props => <BackgroundJobDialog {...props} outputs={toolOutputs} />} /></>}
+        renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
       onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: t("Ask CodeAlta to work on this project…"), onKeyDown: event => {

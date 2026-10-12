@@ -207,6 +207,33 @@ public sealed class DesktopToolCallsTests
         Assert.AreEqual(new ToolCallOutputItem("ok", string.Empty, "0", "0", true, true), foreign.Single());
     }
 
+    [TestMethod]
+    public async Task ReadJob_ServesTheCommandOnlyToItsSessionAndCurrentHost()
+    {
+        await using var jobs = new CodeAlta.Orchestration.Jobs.SessionJobService(start: (_, _, _) => new JobProcess(Task.FromResult(0)));
+        var service = new ToolCallsService((_, _, _) => Task.FromResult<AgentEvent?>(null), null, Epoch) { Jobs = jobs };
+        var command = "dotnet test\n  --filter " + new string('x', 4000);
+        var job = jobs.Start(new() { SessionId = "session", Command = command, Folder = Path.GetTempPath(), Title = "All tests", Timeout = TimeSpan.FromMinutes(5) }).Job!;
+
+        var response = service.ReadJob(new(Epoch, "session", job.Id), CancellationToken.None);
+        Assert.AreEqual("ok", response.Status);
+        Assert.AreEqual(new BackgroundJobDetails(job.Id, "All tests", command, Path.GetTempPath(), 300), response.Job);
+        Assert.IsTrue(JsonSerializer.Serialize(response, DesktopJsonContext.Default.BackgroundJobDetailsResponse).Contains("\"timeoutSeconds\":300", StringComparison.Ordinal));
+        Assert.AreEqual("unavailable", new ToolCallsService().ReadJob(new(Epoch, "session", job.Id), CancellationToken.None).Status);
+        Assert.AreEqual("stale_epoch", service.ReadJob(new("old", "session", job.Id), CancellationToken.None).Status);
+        Assert.AreEqual("invalid", service.ReadJob(new(Epoch, " ", job.Id), CancellationToken.None).Status);
+        Assert.AreEqual("invalid", service.ReadJob(new(Epoch, "session", "tool-call"), CancellationToken.None).Status);
+        foreach (var request in new BackgroundJobDetailsRequest[] { new(Epoch, "another", job.Id), new(Epoch, "session", "job-missing") })
+        {
+            var refused = service.ReadJob(request, CancellationToken.None);
+            Assert.AreEqual("missing_job", refused.Status);
+            Assert.IsNull(refused.Job, "A foreign or missing job leaks no command, title or path.");
+        }
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => service.ReadJob(new(Epoch, "session", job.Id), canceled.Token));
+    }
+
     private sealed class JobProcess(Task<int> exit) : CodeAlta.Orchestration.Jobs.IShellCommandProcess
     {
         public int? ProcessId => null;

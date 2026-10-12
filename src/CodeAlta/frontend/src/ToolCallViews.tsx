@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { Button, Tab, Tabs, Tag } from "@blueprintjs/core";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { Tab, Tabs, Tag } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { DiffRows } from "./changes/DiffPreview";
 import { highlightCode } from "./codeHighlight";
@@ -15,23 +15,7 @@ import { altaEnvelope, argumentEntries, changedFiles, formatDuration, highlightD
   type ShellResult, type ToolArguments, type ToolCall } from "./toolCall";
 import type { ToolOutputState } from "./toolOutput";
 import { ToolTerminal } from "./ToolTerminal";
-
-/** The shell language a command of this system is written in, for its colors. */
-const shellLanguage = typeof navigator !== "undefined" && navigator.platform.startsWith("Win") ? "powershell" : "bash";
-
-/** Copies a text; the icon confirms it for a moment. */
-export function CopyButton({ text, label }: { text: string; label: string }) {
-  const { t } = useShellLanguage();
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1600);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  return <Button variant="minimal" size="small" className="tool-copy" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />}
-    aria-label={label} title={copied ? t("Copied") : label}
-    onClick={() => void navigator.clipboard?.writeText(text).then(() => setCopied(true), () => { /* Nothing is copied. */ })} />;
-}
+import { CommandBlock, CopyButton, shellLanguage } from "./ToolCallChrome";
 
 /** A text in the colors of its language, when it has one the page knows. */
 export function CodeBlock({ text, language }: { text: string; language?: string | null }) {
@@ -46,17 +30,6 @@ export function CodeLines({ lines, start, language }: { lines: readonly string[]
     {lines.map((line, index) => <div key={index} className="tool-code-line"><span className="tool-code-number">{start + index}</span>
       {html ? <span className="tool-code-text" dangerouslySetInnerHTML={{ __html: html[index] || " " }} /> : <span className="tool-code-text">{line || " "}</span>}
     </div>)}
-  </div>;
-}
-
-/** The command a call runs, as it is typed at a prompt. */
-export function CommandBlock({ command, language = shellLanguage }: { command: string; language?: string }) {
-  const { t } = useShellLanguage();
-  const html = useMemo(() => highlightCode(command, language), [command, language]);
-  return <div className="tool-command">
-    <span className="tool-command-prompt" aria-hidden="true">❯</span>
-    <pre className="tool-command-text" tabIndex={0} aria-label={t("Command")}>{html !== null ? <code dangerouslySetInnerHTML={{ __html: html }} /> : <code>{command}</code>}</pre>
-    <CopyButton text={command} label={t("Copy command")} />
   </div>;
 }
 

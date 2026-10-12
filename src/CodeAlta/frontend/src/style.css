@@ -199,15 +199,28 @@ h1, h2, h3, p { margin-top: 0; }
 .background-tasks-spinner { display: inline-block; flex: none; width: 12px; height: 12px; border: 2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-right-color: currentColor; border-radius: 50%; animation: background-tasks-spin 1s linear infinite; }
 @keyframes background-tasks-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .background-tasks-spinner { animation: none; } }
-.background-tasks { display: grid; gap: 6px; width: 340px; max-width: calc(100vw - 32px); padding: 10px 12px; }
+.background-tasks { display: grid; gap: 10px; width: 420px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 12px; }
+.background-tasks > header { display: flex; align-items: center; gap: 8px; color: var(--user-accent); font-size: 13px; }
+.background-tasks > header > span:last-child { margin-left: auto; color: var(--muted); font-size: 11px; }
+.background-tasks-list { display: grid; gap: 12px; max-height: min(380px, 60dvh); overflow-y: auto; }
+.background-tasks-section { display: grid; gap: 5px; min-width: 0; }
 .background-tasks h6 { margin: 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-.background-tasks ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 260px; overflow-y: auto; }
-.background-tasks li { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.background-task-icon { display: inline-flex; flex: none; color: var(--muted); }
-.background-task-text { display: grid; flex: 1 1 auto; min-width: 0; }
-.background-task-text strong, .background-task-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.background-task-text strong { font-weight: 500; }
-.background-task-text small { color: var(--muted); }
+.background-tasks ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.background-tasks li { display: flex; align-items: center; min-width: 0; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--user-accent) 5%, var(--panel)); }
+.background-task-open, .background-task-info { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 9px; border: 0; border-radius: 5px; background: transparent; color: var(--text); text-align: left; font: inherit; }
+.background-task-open { cursor: pointer; }
+.background-task-open:hover { background: color-mix(in srgb, var(--user-accent) 12%, transparent); }
+.background-task-open:focus-visible { outline: 2px solid var(--user-accent); outline-offset: -2px; }
+.background-task-open > svg { flex: none; color: var(--muted); }
+.background-task-icon { display: inline-flex; flex: none; color: var(--user-accent); }
+.background-task-text { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.background-task-text strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; line-height: 17px; }
+.background-task-meta { display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--muted); font-size: 11px; }
+.background-task-elapsed { margin-left: auto; font-variant-numeric: tabular-nums; }
+.background-tasks [data-state="running"] .background-task-state { color: var(--accent); }
+.background-tasks [data-state="completed"] .background-task-state { color: var(--green); }
+.background-tasks [data-state="failed"] .background-task-state { color: var(--red); }
+.background-task-stop { flex: none; margin-right: 5px; }
 .new-session-welcome { container-type: inline-size; padding: 0 8px; }
 .welcome-content { min-height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px 0; text-align: center; color: var(--muted); }
 .welcome-content p { max-width: 100%; margin: 4px 0; overflow-wrap: anywhere; }
@@ -867,6 +880,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell [data-tool-background="failed"] { --tool-outcome-color: var(--red); }
 .ide-shell [data-tool-background="stopped"] { --tool-outcome-color: var(--muted); }
 .ide-shell .message-tool .tool-tile-title strong, .ide-shell .message-tool .avatar, .ide-shell .tool-command-preview, .ide-shell .tool-state-dot, .ide-shell .tool-outcome { color: var(--tool-outcome-color, var(--muted)); }
+/* A host job completion keeps its purple timeline identity in a compact, inspectable card. */
+.ide-shell .message-job { --card-color: var(--user-accent); width: 100%; box-sizing: border-box; padding-block: 4px; cursor: pointer; }
+/* Keep the timestamp at the far right; the preview/result span roughly two 280px tool columns and their gap. */
+.ide-shell .message-job > .message-body > :is(.tool-command-preview, .tool-argument-preview, .tool-result-summary) { max-width: 568px; }
+.ide-shell .message-job .message-heading { flex-wrap: nowrap; gap: 3px; }
+.ide-shell .message-job .message-heading > span:first-child { min-width: 0; max-width: none; flex: 1; }
+.ide-shell .message-job .tool-tile-title { font: inherit; }
+.job-result-outcome { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.job-result-output > .tool-command { margin-bottom: 10px; }
 /* Blueprint owns control appearance and state styling. These rules only fit its
    controls into the shell; the root Classes.DARK follows the theme preference. */
 .bp6-html-select { min-width: 0; max-width: 100%; }

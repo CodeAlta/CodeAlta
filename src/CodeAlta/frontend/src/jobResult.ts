@@ -11,6 +11,10 @@ export type JobResult = Readonly<{
   result: string;
   /** Whether the command succeeded. */
   succeeded: boolean;
+  /** The tool-style outcome, when the host's result is recognized. A timeout is a failure, not a success. */
+  phase: "completed" | "failed" | "canceled" | null;
+  /** The recorded output as Markdown, including any notice that only its end was kept. */
+  output: string;
   /** What is shown of the prompt: the command and the end of its output, as Markdown. */
   body: string;
 }>;
@@ -36,6 +40,9 @@ export function parseJobResult(text: string | null | undefined): JobResult | nul
   const output = lines.slice(index + 1).join("\n").trim();
   // The command in a fence longer than any run of backticks it has.
   const fence = "`".repeat(Math.max(3, ...[...(command ?? "").matchAll(/`+/g)].map(run => run[0].length + 1)));
-  return { jobId, title: fields.get("Title") ?? null, command, result, succeeded: result.startsWith("succeeded"),
+  const succeeded = result.startsWith("succeeded");
+  const phase = succeeded ? "completed" : result.startsWith("failed") || result.startsWith("timed out") ? "failed"
+    : result.startsWith("stopped") ? "canceled" : null;
+  return { jobId, title: fields.get("Title") ?? null, command, result, succeeded, phase, output,
     body: [command ? `${fence}\n${command}\n${fence}` : null, output || null].filter(part => part !== null).join("\n\n") };
 }

@@ -48,6 +48,24 @@ test("TUI status-only updates do not become timeline cards", () => {
   assert.deepEqual(buildTimelineItems(["Idle", "UsageUpdated", "Shutdown"].map(kind => entry({ eventType: "sessionUpdate", kind }))), []);
 });
 
+test("job cards retain prompt identity and every recorded fact for their details", () => {
+  const text = "[CodeAlta background job]\nJob: job-1234\nTitle: Build tests\nCommand: dotnet test\nResult: failed (exit code 1) after 12 s\n\nOutput:\n```\nassertion failure\n```";
+  const [item] = buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text })]);
+  assert.equal(item.category, "user");
+  assert.equal(item.title, "Background job");
+  assert.equal(item.summary, "Build tests");
+  assert.equal(item.summaryIsCode, false);
+  assert.equal(item.jobResult?.jobId, "job-1234");
+  assert.equal(item.jobResult?.phase, "failed");
+  assert.equal(item.jobResult?.command, "dotnet test");
+  assert.match(item.jobResult!.output, /assertion failure/);
+  assert.match(item.copyMarkdown!, /Build tests\n\nfailed \(exit code 1\) after 12 s\n\n```\ndotnet test/);
+  const [untitled] = buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text: text.replace("Title: Build tests\n", "") })]);
+  assert.equal(untitled.summary, "dotnet test");
+  assert.equal(untitled.summaryIsCode, true);
+  assert.equal(buildTimelineItems([entry({ eventType: "contentCompleted", kind: "Assistant", text })])[0].jobResult, undefined);
+});
+
 test("the records of a tool call make one row, with what its details and its live output are found by", () => {
   const base = { eventType: "activity", kind: "ToolCall", activityId: "call", name: "shell_command", text: null } as const;
   const requested = entry({ ...base, offset: "10", phase: "Requested", timestamp: "2026-09-22T10:00:00Z" });

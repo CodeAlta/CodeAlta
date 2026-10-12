@@ -583,17 +583,27 @@ shows more than a task of a provider, because CodeAlta owns its process:
 - The list keeps a job for ten minutes after it ended (`listedBackgroundTasks`), with **Succeeded**,
   **Failed** and its exit code, or **Stopped**; the status line then says **No background tasks running**
   with a static terminal icon. It still opens those recent results, without implying work is active.
-- A job has a button that opens what it writes in a window (`BackgroundJobDialog`): the output as it
-  comes, in the read-only terminal of a tool call, with the time it has run, its exit code and **Stop**.
+- The popup groups **Running** and **Recent** jobs. Each host job's whole row is a button that opens
+  `BackgroundJobDialog`, the same window used by its timeline card, with **Output** and **Details** tabs.
+  Its separate **Stop** button does not open the window; provider tasks have no host-output action.
+  Enter/Space opens a job; closing returns focus to the list's trigger. The window shows the command,
+  output as it comes in the read-only terminal of a tool call, duration, exit code and **Stop**.
+  `toolCalls.readJob` reads the full command and execution context on demand, guarded by host epoch and
+  session identity, without enlarging runtime updates. Unavailable details are indicated explicitly.
   The output is followed through `toolCalls.observe` with the identity of the job in the place of a
   call (`ToolCallsService.Jobs`), so the page keeps one store for both; a job of another session is not
   served.
 - **Stop** goes the same way as for a task of a provider; `SessionRuntimeService.StopBackgroundTaskAsync`
   sends an identity that starts with `job-` to the jobs. A job the user stops tells its session so,
   unless the job was started with `--notify success` or `never`.
-- The prompt that tells the end of a job is a row of the timeline titled **Background job**, with the
-  result as its subtitle, the command and the end of the output (`jobResult.ts`), not a prompt of the
-  user.
+- The prompt that tells the end of a job keeps its history identity but appears as a compact, clickable
+  **Background job** card (`jobResult.ts`, `TimelineMessage`), not an expanded user message. The title or
+  command preview and outcome stay on the card; command, result (including exit code and duration),
+  recorded output and job identity open in the shared `BackgroundJobDialog` through `TimelineDetails`.
+  The outer card and header fill the timeline row, with the timestamp at the far right; only the preview
+  and outcome have a compact width. Shared command/copy/status controls come from `ToolCallChrome`. This is the recorded
+  prompt, not a live job lookup: output-tail notices and truncation warnings remain visible after a restart.
+  Enter/Space opens the title button; Escape or a backdrop press closes the window and restores focus.
 - The question before the application exits counts a session whose job runs with the sessions that
   run (`CountSessionsAtWork`): exiting ends the commands.
 

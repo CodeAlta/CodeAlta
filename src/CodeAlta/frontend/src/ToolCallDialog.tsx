@@ -9,10 +9,11 @@ import { useShellLanguage } from "./shellLanguage";
 import type { TimelineItem } from "./timeline";
 import type { TimelineImageSource } from "./timelineImages";
 import { altaEnvelope, callDuration, changedFiles, countLines, formatDuration, formatSize, outputShape, parseArguments, parseShellResult,
-  toolCallFromItem, toolCallFromRecord, toolFamily, type ToolCall, type ToolCallRecord, type ToolFamily, type ToolState } from "./toolCall";
+  toolCallFromItem, toolCallFromRecord, toolFamily, type ToolCall, type ToolCallRecord, type ToolFamily } from "./toolCall";
 import type { ToolCallRead, ToolCallReader } from "./toolCallReader";
 import { useToolOutput, type ToolOutputs } from "./toolOutput";
 import { DetailsView, EditView, GenericView, ReadView, ShellView, ToolImages } from "./ToolCallViews";
+import { ToolStateTag } from "./ToolCallChrome";
 
 /** The icon that stands for a call: what it does when that is known, a tool otherwise. */
 export function toolIcon(call: Pick<ToolCall, "name" | "kind">, family: ToolFamily): IconName {
@@ -28,16 +29,6 @@ export function toolIcon(call: Pick<ToolCall, "name" | "kind">, family: ToolFami
   if (call.kind === "McpToolCall" || name.startsWith("mcp__")) return "server";
   if (call.kind === "Subagent" || call.kind === "CollabAgentToolCall") return "assistant";
   return "tool";
-}
-
-/** How far a call is, as a tag: its tile and its details say it the same way. */
-export function ToolStateTag({ state }: { state: ToolState }) {
-  const { t } = useShellLanguage();
-  return <Tag minimal round className="tool-state" data-state={state}
-    intent={state === "running" ? "primary" : state === "completed" ? "success" : state === "failed" ? "danger" : "none"}
-    icon={state === "running" ? <ActivitySpinner size={11} /> : undefined}>
-    {t(state === "running" ? "Running" : state === "completed" ? "Completed" : state === "failed" ? "Failed" : state === "canceled" ? "Canceled" : "Pending")}
-  </Tag>;
 }
 
 // The whole record of a call. While the record of a new phase is read, the one of the previous phase stays:

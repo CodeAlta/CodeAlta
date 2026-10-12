@@ -11,7 +11,7 @@ const prompt = (result: string, rest: string, title: string | null = "CI of the 
 test("the prompt that tells the end of a background job is read as what it is", () => {
   const read = parseJobResult(prompt("succeeded (exit code 0) after 3 min 12 s", "Output:\n```\nqueued\nall checks passed\n```"));
   assert.deepEqual(read, { jobId: "job-1a2b3c4d", title: "CI of the pull request", command: "gh run watch 12 --exit-status",
-    result: "succeeded (exit code 0) after 3 min 12 s", succeeded: true,
+    result: "succeeded (exit code 0) after 3 min 12 s", succeeded: true, phase: "completed", output: "Output:\n```\nqueued\nall checks passed\n```",
     body: "```\ngh run watch 12 --exit-status\n```\n\nOutput:\n```\nqueued\nall checks passed\n```" });
 
   const failed = parseJobResult(prompt("failed (exit code 1) after 12 s", "The command wrote nothing.", null).replaceAll("\n", "\r\n"));
@@ -22,6 +22,18 @@ test("the prompt that tells the end of a background job is read as what it is", 
   // A command with a fence of its own is shown inside a longer one.
   const fenced = parseJobResult(prompt("succeeded (exit code 0) after 1 s", "Output:\n```\nok\n```").replace("gh run watch 12 --exit-status", "echo '```'"));
   assert.ok(fenced?.body.startsWith("````\necho '```'\n````"));
+});
+
+test("job results distinguish failures, timeouts and stops without dropping the output-tail notice", () => {
+  const tail = "End of the output (`alta job output job-1a2b3c4d` reads more):\n````\n<script>alert(1)</script>\n```\n````";
+  for (const [result, phase] of [["failed (exit code 3) after 12 s", "failed"], ["timed out and was stopped after 30 min 0 s", "failed"],
+    ["stopped before it ended after 1 s", "canceled"], ["unknown result", null]] as const) {
+    const read = parseJobResult(prompt(result, tail))!;
+    assert.equal(read.phase, phase);
+    assert.equal(read.result, result);
+    assert.equal(read.output, tail);
+    assert.equal(read.succeeded, false);
+  }
 });
 
 test("any other prompt is not the end of a job", () => {

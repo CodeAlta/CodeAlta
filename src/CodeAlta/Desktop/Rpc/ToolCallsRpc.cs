@@ -110,6 +110,23 @@ internal sealed class ToolCallsService
             call.ReadFiles, call.ModifiedFiles), null);
     }
 
+    /// <summary>Reads the command and execution context of a host job belonging to the requested session.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    [NeoRpcMethod("readJob")]
+    public BackgroundJobDetailsResponse ReadJob(BackgroundJobDetailsRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Jobs is null) return new("unavailable", null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
+        if (!Identity(request.SessionId) || !Identity(request.JobId) || !request.JobId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase))
+            return new("invalid", null);
+        cancellationToken.ThrowIfCancellationRequested();
+        var job = Jobs.Get(request.JobId);
+        if (job is null || !string.Equals(job.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase)) return new("missing_job", null);
+        return new("ok", new(job.Id, job.Title, job.Command, job.Folder, job.Timeout is { } timeout ? (int)Math.Ceiling(timeout.TotalSeconds) : null));
+    }
+
     /// <summary>Streams what a running tool call writes: what it wrote so far, then each addition, until it ends.</summary>
     [NeoRpcMethod("observe")]
     public NeoRpcChannel<ToolCallOutputItem> Observe(ToolCallObserveRequest request, CancellationToken cancellationToken)
@@ -319,6 +336,25 @@ internal sealed record ToolCallText(string Text, int Length, bool More);
 /// <param name="SessionId">The selected session.</param>
 /// <param name="ActivityId">The activity identity of the call, as its history row or its live row reported it.</param>
 internal sealed record ToolCallObserveRequest(string ExpectedEpoch, string SessionId, string ActivityId);
+
+/// <summary>Asks for a host job's command and execution context, without adding them to every runtime update.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page is attached to.</param>
+/// <param name="SessionId">The session that owns the job.</param>
+/// <param name="JobId">The identity of the background job.</param>
+internal sealed record BackgroundJobDetailsRequest(string ExpectedEpoch, string SessionId, string JobId);
+
+/// <summary>The immutable execution context of a background job; state and output remain observed separately.</summary>
+/// <param name="JobId">The job's identity.</param>
+/// <param name="Title">The full supplied title, if any.</param>
+/// <param name="Command">The whole command, bounded by the job service's command limit.</param>
+/// <param name="WorkingDirectory">The folder the command runs in.</param>
+/// <param name="TimeoutSeconds">The allowed running time rounded up to seconds, if limited.</param>
+internal sealed record BackgroundJobDetails(string JobId, string? Title, string Command, string WorkingDirectory, int? TimeoutSeconds);
+
+/// <summary>A job read, or a refusal with no job data.</summary>
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c> or <c>missing_job</c>.</param>
+/// <param name="Job">The execution context, only for an admitted read.</param>
+internal sealed record BackgroundJobDetailsResponse(string Status, BackgroundJobDetails? Job);
 
 /// <summary>One item of the output of a running tool call.</summary>
 /// <param name="Status"><c>ok</c>, or <c>unavailable</c>, <c>invalid</c>, <c>stale_epoch</c>, <c>capacity</c> or <c>observation_failed</c>.</param>

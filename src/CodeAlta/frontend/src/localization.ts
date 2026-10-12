@@ -566,6 +566,7 @@ export const messages = dictionary({
   "Empty folder": ["Carpeta vacía", "Dossier vide", "Leerer Ordner", "空のフォルダー", "空文件夹"],
   "1 match": ["1 coincidencia", "1 correspondance", "1 Treffer", "1 件一致", "1 个匹配项"],
   "No output": ["Sin salida", "Aucune sortie", "Keine Ausgabe", "出力なし", "无输出"],
+  "Only the latest output is retained.": ["Solo se conserva la salida más reciente.", "Seule la sortie la plus récente est conservée.", "Nur die neueste Ausgabe wird aufbewahrt.", "最新の出力のみが保持されます。", "仅保留最新的输出。"],
   "Waiting for output…": ["Esperando la salida…", "En attente de la sortie…", "Warten auf Ausgabe…", "出力を待機中…", "正在等待输出…"],
   "The rest is too long to show.": ["El resto es demasiado largo para mostrarlo.", "La suite est trop longue pour être affichée.", "Der Rest ist zu lang für die Anzeige.", "残りは長すぎるため表示できません。", "其余部分过长，无法显示。"],
   "Lines {start}–{end}": ["Líneas {start}–{end}", "Lignes {start}–{end}", "Zeilen {start}–{end}", "{start}～{end} 行", "第 {start}–{end} 行"],

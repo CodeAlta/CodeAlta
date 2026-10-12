@@ -3,20 +3,27 @@ import { useLayoutEffect, useRef } from "react";
 import type { TimelineItem } from "./timeline";
 import { MarkdownContent } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
-import { AppIcon } from "./AppIcon";
+import { BackgroundJobDialog } from "./BackgroundJobDialog";
 import { useShellLanguage } from "./shellLanguage";
 import { CodePreview } from "./CodePreview";
 import { DiffPreview } from "./changes/DiffPreview";
 import { isDialogBackdrop } from "./dialogBackdrop";
 
+type TimelineDetailsProps = { item: TimelineItem; current: () => boolean; onClose: () => void };
+
 // Immutable supplied presentation only: opening this dialog grants no RPC or mutation authority. The links of
 // its texts are followed by the opener of the window, as those of a message are. A command that the fragment of a
 // plugin card runs closes the dialog: what a command shows (a tab, a dialog of its own) would be behind it.
-export function TimelineDetails({ item, current, onClose }: { item: TimelineItem; current: () => boolean; onClose: () => void }) {
+export function TimelineDetails(props: TimelineDetailsProps) {
+  return props.item.jobResult ? <BackgroundJobDialog {...props} /> : <MessageDetails {...props} />;
+}
+
+function MessageDetails({ item, current, onClose }: TimelineDetailsProps) {
   const { t } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const composing = useRef(false);
+  const title = item.title;
   useLayoutEffect(() => {
     const element = dialog.current!;
     if (!current()) { onClose(); return; }
@@ -26,13 +33,14 @@ export function TimelineDetails({ item, current, onClose }: { item: TimelineItem
     return () => { document.removeEventListener("beforetoggle", retire, true); if (element.open) element.close(); };
   }, []);
   useLayoutEffect(() => { if (!current()) onClose(); });
-  return <dialog ref={dialog} className="app-dialog timeline-details-dialog" aria-label={`${t("Details")} · ${item.title}`}
+  return <dialog ref={dialog} className="app-dialog timeline-details-dialog" aria-label={`${t("Details")} · ${title}`}
     onClick={event => { if (!composing.current && isDialogBackdrop(event)) onClose(); }}
     // Effect replay can reopen the element before cleanup's queued close event arrives.
     onClose={event => { if (!event.currentTarget.open) onClose(); }} onCancel={event => { event.preventDefault(); if (!composing.current) onClose(); }}
     onCompositionStart={() => { composing.current = true; }} onCompositionEnd={() => { composing.current = false; }}
     onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); if (!event.repeat && !composing.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) onClose(); } }}>
-    <AppWindowSurface storageKey="codealta.desktop.window.timeline-details.v1" title={item.title} preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
+    <AppWindowSurface storageKey="codealta.desktop.window.timeline-details.v1" title={title}
+      preferredSize={viewport => ({ width: Math.min(900, viewport.width - 40), height: Math.min(640, viewport.height - 40) })}
       onClose={onClose} closeLabel={t("Close")} closeRef={close}>
     <div className="dialog-panes">
     {item.html && <section className="detail-pane"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null }} onCommand={onClose} /></section>}

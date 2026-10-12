@@ -1,4 +1,4 @@
-import { createContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { backgroundTaskElapsed, backgroundTaskEnd, backgroundTaskIcon, backgroundTaskKind, listedBackgroundTasks,
@@ -44,6 +44,7 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
 }) {
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [stopping, setStopping] = useState<ReadonlySet<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
   // The job whose output is shown, as it was last listed: its window stays when the job leaves the list.
@@ -66,31 +67,47 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
     setStopping(current => new Set(current).add(id));
     void onStop(id).catch(() => {}).finally(() => setTimeout(() => setStopping(current => { const next = new Set(current); next.delete(id); return next; }), 4000));
   };
-  const output = shown && renderOutput ? renderOutput({ task: shown, disabled: disabled || stopping.has(shown.id), onStop: stop, onClose: () => setShown(null) }) : null;
+  const output = shown && renderOutput ? renderOutput({ task: shown, disabled: disabled || stopping.has(shown.id), onStop: stop, onClose: () => {
+    setShown(null);
+    requestAnimationFrame(() => { if (trigger.current?.isConnected && !document.querySelector('dialog[open]')) trigger.current.focus(); });
+  } }) : null;
   if (listed.length === 0) return output;
   const running = listed.filter(task => task.state === "running").length;
   const label = running === 0 ? t("No background tasks running") : t(running === 1 ? "1 background task running" : "{count} background tasks running", { count: running });
   const list = <div className="background-tasks" role="group" aria-label={t("Background tasks")}>
-    <h6>{t("Background tasks")}</h6>
-    <ul>{listed.map(task => {
-      const kind = t(backgroundTaskKind(task.kind));
-      const end = backgroundTaskEnd(task.state);
-      const elapsed = end ? null : backgroundTaskElapsed(task.startedAt, now);
-      const state = end ? task.exitCode !== null && task.state === "failed" ? `${t(end)} · ${t("Exit code {code}", { code: task.exitCode })}` : t(end) : elapsed;
-      return <li key={task.id} data-state={task.state}>
-        <span className="background-task-icon" title={kind}><AppIcon name={backgroundTaskIcon(task.kind)} size={14} /></span>
-        <span className="background-task-text"><strong title={task.description ?? undefined}>{task.description ?? kind}</strong>
-          <small>{kind}{state ? ` · ${state}` : ""}</small></span>
-        {task.job && renderOutput && <Button variant="minimal" size="small" icon={<AppIcon name="openExternal" size={13} />}
-          aria-label={t("Show the output of this job")} title={t("Show the output of this job")} onClick={() => { setShown(task); setOpen(false); }} />}
-        {task.state === "running" && <Button variant="minimal" size="small" icon={<AppIcon name="stop" size={13} />} disabled={disabled || stopping.has(task.id)}
-          aria-label={t("Stop this background task")} title={t("Stop this background task")} onClick={() => stop(task.id)} />}
-      </li>;
-    })}</ul>
+    <header><AppIcon name="terminal" size={16} /><strong>{t("Background tasks")}</strong><span>{listed.length}</span></header>
+    <div className="background-tasks-list">{(["running", "recent"] as const).map(group => {
+      const members = listed.filter(task => (task.state === "running") === (group === "running"));
+      return members.length > 0 && <section className="background-tasks-section" key={group}>
+        <h6>{t(group === "running" ? "Running" : "Recent")}</h6>
+        <ul>{members.map(task => {
+          const kind = t(backgroundTaskKind(task.kind));
+          const end = backgroundTaskEnd(task.state);
+          const elapsed = backgroundTaskElapsed(task.startedAt, task.endedAt ? Date.parse(task.endedAt) : now);
+          const content = <><span className="background-task-icon" title={kind}><AppIcon name={backgroundTaskIcon(task.kind)} size={16} /></span>
+            <span className="background-task-text"><strong>{task.description ?? kind}</strong>
+              <span className="background-task-meta"><span className="background-task-state">{t(end ?? "Running")}</span>
+                {task.exitCode !== null && <span>{t("Exit code {code}", { code: task.exitCode })}</span>}
+                {!task.job && <span>{kind}</span>}{elapsed && <span className="background-task-elapsed">{elapsed}</span>}</span></span>
+            {task.job && renderOutput && <AppIcon name="chevronRight" size={14} />}</>;
+          return <li key={task.id} data-state={task.state}>
+            {task.job && renderOutput ? <button type="button" className="background-task-open" title={task.description ?? kind}
+              aria-label={`${t("Show the output of this job")} · ${task.description ?? kind}`} aria-haspopup="dialog"
+              onClick={() => { setShown(task); setOpen(false); }}
+              // Like timeline cards, open on release so Enter cannot also activate the window's Close button.
+              onKeyDown={event => { if (event.key === "Enter" || event.key === " " && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
+              onKeyUp={event => { if (event.key === "Enter" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) event.currentTarget.click(); }}>{content}</button>
+              : <div className="background-task-info" title={task.description ?? kind}>{content}</div>}
+            {task.state === "running" && <Button variant="minimal" size="small" className="background-task-stop" icon={<AppIcon name="stop" size={13} />} disabled={disabled || stopping.has(task.id)}
+              aria-label={t("Stop this background task")} title={t("Stop this background task")} onClick={() => stop(task.id)} />}
+          </li>;
+        })}</ul>
+      </section>;
+    })}</div>
   </div>;
   return <>
-    <PopoverNext isOpen={open} onInteraction={next => setOpen(next)} placement="top-start" content={list} popoverClassName="background-tasks-popover">
-      <Button variant="minimal" size="small" className="background-tasks-status" data-running={running > 0 ? "true" : undefined}
+    <PopoverNext isOpen={open} onInteraction={next => setOpen(next)} placement="top-start" content={list} popoverClassName="background-tasks-popover" shouldReturnFocusOnClose={!shown}>
+      <Button ref={trigger} variant="minimal" size="small" className="background-tasks-status" data-running={running > 0 ? "true" : undefined}
         icon={running > 0 ? <span className="background-tasks-spinner" aria-hidden="true" /> : <AppIcon name="terminal" size={13} />}>{label}</Button>
     </PopoverNext>
     {output}

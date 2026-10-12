@@ -1,6 +1,6 @@
 import type { HistoryResponse } from "#neoastra";
 import { parseDelegatedMessage } from "./delegatedMessage";
-import { parseJobResult } from "./jobResult";
+import { parseJobResult, type JobResult } from "./jobResult";
 import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { projectFileChanges, type FileChanges } from "./fileChanges";
@@ -53,8 +53,8 @@ export type TimelineItem = Readonly<{
   delegated?: boolean;
   /** The session a delegated prompt comes from, when it is known: the row names it by its title. */
   sourceSessionId?: string;
-  /** For the prompt CodeAlta gives a session when one of its background jobs ended: whether the command succeeded. */
-  jobResult?: "succeeded" | "ended";
+  /** The recorded result of a background job, shown as a compact card with its facts and output in a window. */
+  jobResult?: JobResult;
 }>;
 
 /**
@@ -205,7 +205,11 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     if (normalizedKind === "user") {
       category = "user"; icon = delegated ? "branch" : job ? "terminal" : "user"; title = delegated ? "Agent message" : job ? "Background job" : "You";
       if (delegated) markdown = delegated.body;
-      if (job) markdown = job.body;
+      if (job) {
+        markdown = job.body;
+        summary = job.title || job.command || job.jobId;
+        summaryIsCode = !job.title && !!job.command;
+      }
     }
     else if (normalizedKind === "assistant") { category = "assistant"; icon = "assistant"; title = "Assistant"; }
     else if (normalizedKind.startsWith("reasoning")) { category = "reasoning"; icon = "brain"; title = normalizedKind === "reasoningsummary" ? "Reasoning summary" : "Reasoning"; }
@@ -308,7 +312,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     metadata,
     truncated: entry.textTruncated || entry.detailsTruncated,
     bodyOmitted: entry.bodyOmitted,
-    copyMarkdown,
+    copyMarkdown: job ? [job.title, job.result, job.body].filter(Boolean).join("\n\n") : copyMarkdown,
     fileChanges: projectFileChanges(entry),
     images: category === "user" ? projectTimelineImages(entry.images) : category === "image" ? toolImages : undefined,
     toolCall: entry.eventType === "activity" && entry.activityId && category === "tool" ? { providerId: entry.providerId, runId: entry.runId,
@@ -322,7 +326,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolChanges: entry.tool?.added != null && entry.tool.removed != null ? { added: entry.tool.added, removed: entry.tool.removed } : undefined,
     toolExitCode: entry.tool?.exitCode,
     delegated: delegated ? true : undefined,
-    jobResult: job ? job.succeeded ? "succeeded" : "ended" : undefined,
+    jobResult: job ?? undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
   };
 }

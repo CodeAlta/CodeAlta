@@ -60,12 +60,15 @@ function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps)
 export const TimelineMessage = memo(function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource,
   rowKey, onOpenTool, toolOutputs }: TimelineMessageProps) {
   const { t, locale } = useShellLanguage();
+  const job = item.jobResult;
+  toolTile ||= !!job;
+  const clickableTile = item.category === "tool" || !!job;
   // The links of the text of a message are followed while the row is the one that is shown: a relative path
   // starts from the folder its session works in.
   const openLink = useContext(MessageLinksContext);
   const linkScope = useContext(MarkdownLinkScopeContext);
   const messageLink = openLink ? (address: string) => { if (canInspect?.() ?? true) openLink(address, linkScope); } : null;
-  const state = item.category === "tool" ? toolState(item.toolPhase) : null;
+  const state = job?.phase ?? (item.category === "tool" ? toolState(item.toolPhase) : null);
   // A call that started a task only says that it returned: what its task does in the background is said beside.
   const backgroundCalls = useContext(BackgroundCallsContext);
   const background = item.category === "tool" && state === "completed" && item.toolCall ? backgroundCalls.get(item.toolCall.activityId) : undefined;
@@ -147,9 +150,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     }, 1600);
   }
   const hasDetails = !!(body || item.detailMarkdown || item.details || item.metadata.length || item.detailSections?.length);
-  const compact = ["status", "reasoning", "tool", "file", "prompt", "plugin"].includes(item.category);
+  const compact = !!job || ["status", "reasoning", "tool", "file", "prompt", "plugin"].includes(item.category);
   const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
-  const codePreview = item.category === "tool" && item.summaryIsCode
+  const codePreview = clickableTile && item.summaryIsCode
     ? commandPreview(excerpt) : null;
   const toolOutput = live?.last || item.toolOutput;
   const outcome = ({ completed: "Completed", failed: "Failed", canceled: "Canceled", requested: "Pending",
@@ -168,19 +171,23 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     if (callWindow) onOpenTool!(rowKey!, origin);
     else setDetails({ item, origin, current: canInspect });
   }
-  return <article className={`message timeline-message message-${item.category}${compact ? " timeline-compact" : ""}`}
+  return <article className={`message timeline-message message-${job ? "job" : item.category}${compact ? " timeline-compact" : ""}`}
     onClick={event => {
-      if (item.category === "tool" && hasDetails && toolTrigger.current && !event.defaultPrevented
+      if (clickableTile && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
-    data-tool-phase={item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-job-result={item.jobResult} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
-        <span>{item.category === "tool" && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup="dialog"
-          onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
+        <span>{clickableTile && hasDetails ? <button ref={toolTrigger} type="button" className="tool-tile-title" aria-haspopup="dialog"
+          aria-label={job ? `${title} · ${item.summary} · ${job.result}` : undefined}
+          // Open on Enter's release: opening on its press focuses the window's Blueprint Close button,
+          // which would interpret that same release as its own activation and immediately close it.
+          onKeyDown={event => { if (event.key === "Enter" || event.key === " " && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
+          onKeyUp={event => { if (event.key === "Enter" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) openDetails(event.currentTarget); }}
           onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}>{state === "running" || background === "running"
-            ? <ActivitySpinner size={10} className="tool-state-spinner" /> : <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
+            ? <ActivitySpinner size={10} className="tool-state-spinner" /> : !job && <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
           : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}
           {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}</span>
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null, whenShown: true }} /></div>
@@ -188,7 +195,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : item.summary ? excerpt : <MarkdownContent source={excerpt} onOpenLink={null} />}</div>}
         {!toolTile && item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
         <span className="message-actions">
-          {hasDetails && !callWindow && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
+          {hasDetails && !callWindow && !job && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
             onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
             onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><AppIcon name="info" size={15} /></button>}
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
@@ -202,6 +209,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         ? <div className="tool-argument-preview" data-path title={item.summary}><bdi>{item.summary}</bdi></div>
         : <div className="tool-argument-preview">{commandPreview(item.summary)}</div>)}
       {toolTile && <div className="tool-result-summary">
+        {job && <span className="tool-outcome job-result-outcome" title={job.result}>{job.result}</span>}
         {outcome && <span className="tool-outcome">{t(background ? backgroundOutcome[background] : outcome)}</span>}
         {!!item.toolExitCode && <span className="tool-exit-code">{t("Exit code {code}", { code: item.toolExitCode })}</span>}
         {item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
