@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { waitForBrowserPort } from "./browserTarget";
+import { browserVariable, endBrowser, findBrowser, waitForBrowserPort } from "./browserTarget";
 
 test("an existing empty DevTools file is still a pending browser launch", async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-browser-startup-"));
@@ -57,4 +57,30 @@ test("spawn errors and missing port deadlines are reported, not retried", async 
     await assert.rejects(failed, /synthetic spawn failure/);
     await assert.rejects(waitForBrowserPort(root, new ChildProcess(), 100), /timed out after 100 ms.*ENOENT/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("the browser is the one the variable names, else the first Edge of the system", () => {
+  const mac = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+  const own = join("/Users/me", "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge");
+  assert.equal(findBrowser({}, "/Users/me", path => path === mac || path === own), mac);
+  assert.equal(findBrowser({}, "/Users/me", path => path === own), own);
+  assert.equal(findBrowser({}, "/home/me", path => path === "/usr/bin/microsoft-edge-stable" || path === "/opt/microsoft/msedge/msedge"), "/usr/bin/microsoft-edge-stable");
+  assert.equal(findBrowser({}, "C:/Users/me", path => path.endsWith("/Program Files/Microsoft/Edge/Application/msedge.exe")), "C:/Program Files/Microsoft/Edge/Application/msedge.exe");
+  assert.equal(findBrowser({}, "/home/me", () => false), undefined);
+  assert.equal(findBrowser({ [browserVariable]: "  " }, "/home/me", () => false), undefined);
+  // A browser that was asked for is not looked for: one that is missing fails at its start, it is not skipped.
+  assert.equal(findBrowser({ [browserVariable]: " /opt/chromium/chrome " }, "/Users/me", path => path === mac), "/opt/chromium/chrome");
+});
+
+test("an owned browser is ended before its profile is removed", async () => {
+  const browser = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  const gone = new Promise<void>(resolve => browser.once("exit", () => resolve()));
+  await new Promise(resolve => browser.once("spawn", resolve));
+  await endBrowser(browser);
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([gone, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("the process is still there")), 5000); })]);
+  clearTimeout(timer);
+  assert.ok(browser.exitCode !== null || browser.signalCode !== null);
+  await endBrowser(browser); // One that is gone, or was never started, is nothing to end.
+  await endBrowser(undefined);
 });

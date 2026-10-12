@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 
 const edge = browserExecutable;
 
@@ -138,21 +138,23 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     await evaluate("markdownFixture.linkRect()");
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
-    assert.deepEqual(await evaluate("markdownFixture.state.external"), Array(6).fill("https://remote.invalid/safe"), "One host action per normal, Cmd, Ctrl, Shift, middle and Enter gesture");
+    // On macOS a Ctrl+click is the gesture of the context menu: the page gets no click, and nothing is opened.
+    const gestures = process.platform === "darwin" ? 5 : 6;
+    assert.deepEqual(await evaluate("markdownFixture.state.external"), Array(gestures).fill("https://remote.invalid/safe"), "One host action per normal, Cmd, Ctrl, Shift, middle and Enter gesture");
     await evaluate("document.querySelector('.markdown-content a').addEventListener('click', event => event.preventDefault(), { once: true })");
     await activate();
     await evaluate("markdownFixture.renderGranted('assistant', false)"); await activate();
     await evaluate("markdownFixture.renderGranted('tool')");
     // The inline preview of a compact row is not where a link is followed.
     assert.equal(await evaluate("!!document.querySelector('.markdown-content a')"), true); await activate();
-    assert.equal(await evaluate("markdownFixture.state.external.length"), 6);
+    assert.equal(await evaluate("markdownFixture.state.external.length"), gestures);
     // The message of the user has links too: the files it names, and the pages.
     await evaluate("markdownFixture.renderGranted('user', true, '[Program.cs](src/Program.cs#L3) <a href=\"src/authored.cs\">authored</a>')"); await activate();
-    assert.deepEqual(await evaluate("markdownFixture.state.external.splice(6)"), ["src/Program.cs#L3"], "A link of the Markdown to a file is followed as it is written");
+    assert.deepEqual(await evaluate(`markdownFixture.state.external.splice(${gestures})`), ["src/Program.cs#L3"], "A link of the Markdown to a file is followed as it is written");
     assert.equal(await evaluate("document.querySelectorAll('.markdown-content a[href]').length"), 1, "An <a> written in HTML names no file");
     await evaluate(`markdownFixture.renderGranted('assistant', true, '<details><summary><a href="https://remote.invalid/safe">Documentation</a></summary><p>Details</p></details>')`);
     await activate();
-    assert.equal(await evaluate("markdownFixture.state.external.length"), 7, "Granted summary anchor opens without also toggling the disclosure");
+    assert.equal(await evaluate("markdownFixture.state.external.length"), gestures + 1, "Granted summary anchor opens without also toggling the disclosure");
     assert.equal(await evaluate("document.querySelector('.markdown-content details').open"), false);
     // In a block of HTML the anchor keeps its code block; in a paragraph the parser moves the anchor inside the `pre`, which then has no Copy.
     await evaluate(`markdownFixture.renderGranted('assistant', true, '<div><a href="https://remote.invalid/safe"><pre><code>linked code</code></pre></a></div>')`);
@@ -164,7 +166,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     assert.deepEqual(await evaluate(`markdownFixture.state.copies.slice(${copiesBefore})`), ["linked code", "linked code"], "Mouse and keyboard Copy retain their action once each inside an anchor");
-    assert.equal(await evaluate("markdownFixture.state.external.length"), 7, "Code-copy must not also open its enclosing link");
+    assert.equal(await evaluate("markdownFixture.state.external.length"), gestures + 1, "Code-copy must not also open its enclosing link");
     await check();
     // A document is wrapped in its source: its lines follow each other, where a message breaks them.
     await evaluate("markdownFixture.render('one\\ntwo', false)");
@@ -188,7 +190,7 @@ test("production MarkdownContent retains useful HTML without resource or app aut
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    if (browser?.pid) { const killer = spawn("taskkill", ["/F", "/T", "/PID", String(browser.pid)], { stdio: "ignore", windowsHide: true }); await new Promise(resolve => killer.once("exit", resolve)); }
+    await endBrowser(browser);
     await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });

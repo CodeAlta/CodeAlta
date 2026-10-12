@@ -181,12 +181,23 @@ Rules for these sources:
 passed, skipped or TODO test. Test diagnostics, stdout/stderr, cancellations and module crashes remain
 visible, and failures still return a nonzero exit code. Use `npm run test:verbose` for the full test tree.
 Both scripts bound test-file concurrency to two, instead of starting one headless Edge per CPU core.
-Browser fixtures share `browserTarget.ts`: guest-mode startup flags prevent OS sign-in attempts, and
+Browser fixtures share `browserTarget.ts`. `browserExecutable` is the Edge of the system, looked for where
+it is installed on Windows, macOS (`/Applications` and `~/Applications`) and Linux (`/usr/bin/microsoft-edge`,
+`/usr/bin/microsoft-edge-stable`, `/opt/microsoft/msedge/msedge`); the tests skip only where none is found.
+`CODEALTA_TEST_BROWSER` names another Chromium to drive: its path is taken as it is, so a browser that was
+asked for and is missing fails the tests at its start instead of skipping them. Guest-mode startup flags
+prevent OS sign-in attempts, and
 `waitForBrowserPort` waits through missing, empty or partial `DevToolsActivePort` files within a
 five-second wall-clock deadline. Pipe stderr so failures include its bounded tail, the child PID,
 exit/signal and last file probe. A successful launcher exit may precede readiness; a nonzero exit or
 spawn error fails the test. Keep fixture-owned process/profile cleanup; never hide failures with
-automatic relaunches or skips.
+automatic relaunches or skips. A test that has to know its browser is gone before it removes the profile
+ends it with `endBrowser`, never with a command of one system (`taskkill` ends the whole tree on Windows,
+the process is killed elsewhere).
+
+The browser tests run on three systems with three fonts and their own gestures. Assert what the product
+promises (an order, "no overlap", "shorter than"), not a margin that one font gives, and name the system
+where a gesture differs: on macOS a Ctrl+click opens the context menu and gives the page no `click`.
 `npm run build` and `npm run build:demo` run Vite with `--logLevel warn`, retaining warnings and errors
 without the asset-size listing. NeoAstra invokes the same build script from the desktop `.csproj`.
 
