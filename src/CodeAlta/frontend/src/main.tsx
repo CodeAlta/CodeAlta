@@ -174,6 +174,7 @@ import { publishSessionRetention, watchSessionRetention } from "./sessionRetenti
 import { SessionRetentionGate } from "./SessionRetentionGate";
 import { reloadsAfterClose, rpcSessionClosed, sessionRecoveryKey } from "./sessionRecovery";
 import { installKeyboardClickGuard } from "./keyboardClickGuard";
+import { installContextClickGuard } from "./contextClickGuard";
 import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, WindowControls } from "./windowChrome";
 import { WindowZoom, zoomWindow } from "./WindowZoom";
 import { createPluginEventsRead } from "./pluginEvents";
@@ -4410,6 +4411,7 @@ function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {
 }
 
 installKeyboardClickGuard(window);
+installContextClickGuard(window);
 // The host says first what this window is for: the workspace, or the repair of a configuration file that
 // cannot be loaded. The start-up screen stays until one of them has something to show.
 function Root() {

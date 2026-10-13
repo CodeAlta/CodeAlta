@@ -41,7 +41,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 - Click a project to select it and write the prompt of a new session in it. This does not show or hide its sessions: its arrow does.
 - Click a session to look at it, and double-click it to keep its tab (see [Tabs you look at and tabs you keep](#tabs-you-look-at-and-tabs-you-keep)).
 - Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open. The last one opens a [terminal](#terminal-desktop).
-- The `…` button of a project or a session, or a right-click, opens its menu.
+- The `…` button of a project or a session, or a right-click (also `Ctrl`+click on macOS), opens its menu.
 - **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session.
 - **Move to project…** in the menu of a session, `/move_to_project` in the search, or dragging its row onto another project, moves the session to that project. See [Move a session to another project](sessions.md#move-a-session-to-another-project).
 - **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.

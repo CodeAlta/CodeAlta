@@ -374,7 +374,9 @@ at the top right of the timeline expands/collapses their floating panel without 
 composer. The panel (or its collapsed disclosure) can be dragged anywhere over the timeline and the open
 panel resized; its size and position are kept across collapse/expand and saved locally, relative to the
 pane's top-right corner, and its header restores the default. There is no nested notes dock or notes divider.
-Project and session rows open floating action menus from their **…** button, context menu or Shift+F10; the
+Project and session rows open floating action menus from their **…** button, context menu or Shift+F10. On
+macOS a Ctrl+click is a context-menu request like a right click: WebKit also sends the `click` of that press,
+which `contextClickGuard.ts` stops for the whole window, so the row is not opened behind its menu. The
 Projects header has a sort/actions menu (with **Open project…**) and a **+** button that adds a
 project folder with the operating system's folder dialog. The Explorer has no filter of its own: a project or
 a session is looked for in the search of the window (see "Search"). A dot-matrix spinner on a
