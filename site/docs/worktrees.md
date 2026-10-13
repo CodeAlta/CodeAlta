@@ -16,10 +16,11 @@ You create and remove worktrees in CodeAlta Desktop. A session that works in one
 ## Start a session in a worktree
 
 1. Open a new session in a project that is a git repository.
-   In Desktop, you can also click the **+** in the project's row and choose the worktree in the creation dialog.
 2. Under the prompt, click **Project folder** and choose **New worktree**.
 3. Keep **Current commit**, or choose the branch to start from.
 4. Send your prompt.
+
+The form that the **+** on the row of a project opens has the same **Project folder** choice: see [Starting and reopening work](sessions.md#starting-and-reopening-work).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
   <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The choice under the prompt of a new session: Project folder or New worktree, the branch to start from and the folder of the worktree" loading="lazy">
