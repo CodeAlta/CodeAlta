@@ -569,6 +569,34 @@ test("the prompt of a new session takes the transient tab from the session looke
   assert.equal(model.getNodeById(sessionDraftNodeId), undefined);
 });
 
+test("a prompt that is left with something typed keeps the place of the transient tab, and what replaces it comes after", () => {
+  const names = (draft: DraftTab) => draft.projectId === null ? "New chat" : "New session - Project";
+  // The prompt of the project is in the transient tab, between two sessions.
+  const start = () => {
+    const model = createSessionTabModel();
+    const state: SessionTabs = { ...openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two")), active: null };
+    reconcileSessionTabModel(model, { ...state, scope: scopeP }, label, undefined, undefined, names);
+    model.doAction(Actions.moveNode(sessionDraftNodeId, pane(model).getId(), DockLocation.CENTER, 1, true));
+    return { model, state };
+  };
+
+  // The chats are selected: the prompt of the project gets its tab where it was, and the one of the chats is after it.
+  let { model, state } = start();
+  state = openDraftTab(state, scopeP);
+  reconcileSessionTabModel(model, { ...state, scope: chats }, label, undefined, undefined, names);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), draftNodeId(scopeP), sessionDraftNodeId, sessionNodeId(tab("two"))]);
+  assert.deepEqual(transient(model), [sessionDraftNodeId]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionDraftNodeId);
+
+  // A session is looked at instead: it takes the transient tab, after the prompt that is kept.
+  ({ model, state } = start());
+  state = openSessionTab(openDraftTab(state, scopeP), tab("three"), "preview");
+  reconcileSessionTabModel(model, { ...state, scope: scopeP }, label, undefined, undefined, names);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), draftNodeId(scopeP), sessionNodeId(tab("three")), sessionNodeId(tab("two"))]);
+  assert.deepEqual(transient(model), [sessionNodeId(tab("three"))]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionNodeId(tab("three")));
+});
+
 test("a prompt that is kept has a tab of its own, where the transient one was, beside the prompts of other scopes", () => {
   const model = createSessionTabModel();
   const names = (draft: DraftTab) => draft.projectId === null ? "New chat" : "New session - Project";

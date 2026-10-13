@@ -106,13 +106,20 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
       if ((node.getConfig()?.preview === true) !== preview) model.doAction(Actions.updateNodeAttributes(id, { config: { preview } }));
     }
   }
+  // What is in the transient tab now: the prompt of the scope, or the session that is looked at. A prompt that gets a
+  // tab of its own while it is not the one shown is the one that was just left with something typed in it: it takes
+  // that place, and what replaced it comes after it.
+  const lookedAt = open.find(tab => isPreviewTab(state, tab));
+  const replaced = model.getNodeById(transientDraft ? sessionDraftNodeId : lookedAt ? sessionNodeId(lookedAt) : "");
   for (const draft of drafts) {
     const id = draftNodeId(draft);
     const name = draftLabel(draft);
     const node = model.getNodeById(id);
     if (node instanceof TabNode) { if (node.getName() !== name) model.doAction(Actions.renameTab(id, name)); continue; }
     // The prompt that was in the transient tab keeps its place when it is given a tab of its own.
-    const at = !state.active && id === shownDraft ? place() : { pane: home(), index: -1 };
+    const beside = replaced?.getParent();
+    const at = !state.active && id === shownDraft ? place()
+      : beside instanceof TabSetNode ? { pane: beside.getId(), index: beside.getChildren().indexOf(replaced!) } : { pane: home(), index: -1 };
     model.doAction(Actions.addTab({ type: "tab", id, name, component: "new-session", config: { preview: false } }, at.pane, DockLocation.CENTER, at.index, false));
   }
   for (const file of openFiles) {

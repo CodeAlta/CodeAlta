@@ -77,7 +77,7 @@ In the desktop app, going through your sessions does not open a tab for each of 
 | Look at a session | Click it. It opens in the tab with the italic title. |
 | Keep a session open | Double-click it in the sidebar, or double-click the title of its tab. Typing in its prompt keeps it too. |
 | Start a new session in a project | Click the project: its new-session prompt takes the tab with the italic title. |
-| Keep the prompt of a new session open | Double-click the project, or the title of that tab. Several projects can each keep theirs. |
+| Keep the prompt of a new session open | Double-click the project, or the title of that tab. Several projects can each keep theirs. A prompt you have typed in is kept too: when you click another project or a session, it stays in a tab named after its project. |
 
 A session you create is kept from the start. Closing a tab never deletes a session.
 

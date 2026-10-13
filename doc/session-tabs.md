@@ -153,6 +153,18 @@ only when a session of it is shown, so that the session is in view.
   of `[projectId, path]`), where the transient one was. Several scopes can have
   theirs, 16 at most. The tab is closed like any other; what was typed stays with
   its scope.
+- A prompt that has a text or pictures keeps its tab by itself, as what is typed
+  keeps the tab of a session that is looked at: when the prompt of another scope,
+  or a session, takes its place, it gets a tab of its own (the effect on
+  `leftPrompt` in `main.tsx`). The tab stays where the transient one was, and
+  what replaced it comes after it (`reconcileSessionTabModel`). An empty prompt
+  leaves its place as before. The prompt a session was just started from keeps
+  no tab, since the session takes its place, and a prompt whose tab is closed
+  (its own, the transient one, or several tabs at once) stays closed whatever is
+  typed in it.
+- Escape with no window open closes nothing (`runShortcut`): it does not end
+  the view a session is being created from, so a creation started from the
+  prompt is still confirmed when the host answers.
 - The composer of a new session belongs to the window and to the selected scope:
   it is drawn in the tab of the prompt that is in front. The tab of another scope
   that is visible in a split says what it is, and showing it selects its scope.
