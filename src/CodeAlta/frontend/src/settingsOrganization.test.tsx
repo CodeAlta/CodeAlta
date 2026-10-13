@@ -13,7 +13,7 @@ const library: ColorSchemeLibrary = { status: "ok", directory: null, problems: [
   remove: async () => ({ status: "unavailable", message: null }) };
 const noop = () => {};
 
-test("all sixteen former Appearance preferences have exactly one home", () => {
+test("Appearance, General and Permissions preferences each have exactly one home", () => {
   const appearance = renderToStaticMarkup(<AppearanceSettings theme="dark" setTheme={noop} darker setDarker={noop}
     sort="recent" setSort={noop} desktopCollapsed setDesktopCollapsed={noop} recentSessionCount={17} setRecentSessionCount={noop}
     subAgentCount={9} setSubAgentCount={noop} sessionWidth={75} setSessionWidth={noop} notices={{}}
@@ -24,7 +24,7 @@ test("all sixteen former Appearance preferences have exactly one home", () => {
   const permissions = renderToStaticMarkup(<PermissionSettings permissions={null} confirms={{ sessionDelete: false, projectArchive: false, set: noop }} />);
   const homes = [
     [appearance, ["Theme", "Darker dark theme", "Color scheme", "Sort projects", "Recent session display count (1–50)",
-      "Sub-agent display count (1–50)", "Collapse desktop project rail", "Width of the conversation", "Changes are shown"]],
+      "Sub-agent display count (1–50)", "Collapse desktop project rail", "Width of the conversation", "Entry appearance", "Changes are shown"]],
     [general, ["Language", "Show the welcome page at startup", "Animate the welcome page", "Turn Remote Control back on when CodeAlta starts", "When the window is closed"]],
     [permissions, ["Ask before deleting a session", "Ask before archiving a project"]],
   ] as const;

@@ -164,6 +164,12 @@ Timeline entries are grouped so the important parts stay visible:
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;
 - statistics cards summarize timing, tools, usage, and other plugin-projected details.
 
+In CodeAlta Desktop, turn on **Settings > Appearance > Entry appearance** to customize how different kinds of timeline entries stand out. It is off by default. The initial preset keeps your prompts, agent messages, final answers, file changes and plans at full strength with visible borders. Intermediate answers and tool calls use 70% opacity, with borders appearing on hover or keyboard focus. Reasoning, system prompts, status messages and plugin cards use 50% opacity without outer borders. Hover and focus show content at full strength; no type has a shadow by default. Errors, warnings, requests that need your attention and failed or canceled operations retain their original appearance.
+
+In **Customize**, select an entry type and adjust its **Normal** and **Hover / keyboard focus** appearance: content opacity, background tint, outer border and a subtle shadow. Existing colors follow your color scheme. Left accents can stay undimmed, and hover or focus cannot lower content opacity. The previews show both states using example entries.
+
+Highlighting also works without dimming: leave content opacity at 100% and adjust the background, border or shadow. Changes apply immediately. **Reset type** restores the initial preset for the selected type; **Reset all** restores it for every type. Switching the feature off and on keeps your customizations. If a change cannot be saved, a notice explains that it still applies in this window.
+
 Use `F3` / `F4` to jump between previous and next user or assistant messages. Use `Ctrl+F3` to jump to the first message and `Ctrl+F4` to return to the bottom.
 
 The desktop timeline opens on the latest messages of a session. Use **Load previous messages** at the top to read earlier turns.
@@ -632,7 +638,7 @@ The **Appearance** page has three sections:
 
 - **Theme and colors**: **Dark**, **Light**, or **Auto** (which follows the operating system); **Darker dark theme** for deeper backgrounds with the same text and accents; and one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own.
 - **Explorer**: project sorting, recent-session and sub-agent counts, and whether the project rail is collapsed.
-- **Conversation and changes**: the conversation width and its reset, and whether changes are shown one file at a time or all at once.
+- **Conversation and changes**: the conversation width and its reset, **Entry appearance**, and whether changes are shown one file at a time or all at once.
 
 The **General** page contains:
 

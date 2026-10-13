@@ -1,17 +1,20 @@
 import { matchesOutgoingText } from "./outgoingEcho";
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Button, ButtonGroup, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
 import { workspace, type HistoryRequest, type SessionDisplayView, type SessionPluginEvent } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
+import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { historyCanRetry, historyMessage, historySettled, loadHistory, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
 import { liveTextItem, liveToolItem } from "./liveTimeline";
 import { orderTimelineRows, reconcileTimeline, type ReconciledRow } from "./reconcileTimeline";
 import { groupTimelineTools } from "./toolGroups";
-import { groupHistorySource, sameTimelineGroup, type HistorySources, type TimelineGroupProps } from "./timelineGroupView";
+import { emphasisProperties, groupEntryTypes } from "./timelineEmphasis/timelineEmphasis";
+import { useTimelineEmphasis } from "./timelineEmphasis/useTimelineEmphasis";
+import type { HistorySources } from "./timelineGroupView";
+import { TimelineGroupView } from "./TimelineEntryGroup";
 import { latestNotes, latestUsageText } from "./timeline";
 import { pluginEventItems, pluginEventsWindow, type PluginEventsRead } from "./pluginEvents";
-import { TimelineMessage } from "./TimelineMessage";
 import { useShellLanguage } from "./shellLanguage";
 import { HistorySource, type HistorySourceTarget } from "./HistorySource";
 import type { OutgoingMessage } from "./sessionOperations";
@@ -47,26 +50,6 @@ type HistoryTarget = { request: HistoryRequest; explicitOlder: boolean; explicit
 const publicationRecords = 300, publicationInterval = 400;
 const noEntries: HistoryTimeline["entries"] = [];
 
-/** One row of the timeline on its own, or a run of tool calls under one heading. */
-const TimelineGroupView = memo(function TimelineGroupView(props: TimelineGroupProps) {
-  const { sessionId, group, echoImages, readImages, toolOutputs, canInspect, onOpenSource, onOpenTool, promptKeys, onBranch } = props;
-  const { t } = useShellLanguage();
-  return <div className={group.tools ? "timeline-tool-group" : "timeline-single-row"} role={group.tools ? "group" : undefined}
-    aria-label={group.tools ? t("Tools") : undefined}>
-    {group.tools && <div className="timeline-tool-group-heading"><AppIcon name="tool" size={14} /><span>{t("Tool calls")}</span><span className="tool-group-counts">{t("{count} call(s)", { count: group.rows.length })}
-      {(["completed", "failed", "started", "canceled"] as const).map(phase => {
-        const count = group.rows.filter(row => (row.source === "history" ? row.item.toolPhase : row.source === "liveTool" ? row.row.phase.toLowerCase() : null) === phase).length;
-        return count > 0 ? <span key={phase} data-phase={phase}> · {t(phase === "completed" ? "{count} done" : phase === "failed" ? "{count} failed" : phase === "started" ? "{count} running" : "{count} canceled", { count })}</span> : null;
-      })}</span></div>}
-    {group.rows.map(item => item.source === "history" ? <TimelineMessage key={`${sessionId}:${item.key}`} item={item.item} canInspect={canInspect} toolTile={group.tools}
-    imageSource={!item.item.images ? undefined : echoImages.get(item.key) ?? (item.item.eventType !== "plugin" ? readImages?.(item.item.key) : undefined)}
-    rowKey={item.key} onOpenTool={onOpenTool} toolOutputs={toolOutputs} onBranch={onBranch && promptKeys?.has(item.item.key) ? onBranch : undefined}
-    onOpenSource={onOpenSource} historySource={groupHistorySource(props, item.item.key)} />
-    : <TimelineMessage key={`${sessionId}:${item.key}`} item={item.source === "liveText" ? liveTextItem(item.row) : liveToolItem(item.row)} canInspect={canInspect} toolTile={group.tools}
-      rowKey={item.key} onOpenTool={onOpenTool} toolOutputs={toolOutputs} />)}
-  </div>;
-}, sameTimelineGroup);
-
 /**
  * The rows of the timeline: the persisted and live records, the prompts being sent and the cards plugins
  * derive, in order, with consecutive tool calls grouped. It is rendered again only when one of these
@@ -92,6 +75,8 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   promptKeys?: ReadonlySet<string>; onBranch?: (promptOffset: string, mode: BranchMode) => void;
 }) {
   const { t } = useShellLanguage();
+  const [emphasis] = useTimelineEmphasis();
+  const emphasisStyle = useMemo(() => emphasisProperties(emphasis) as CSSProperties, [emphasis]);
   // The window of a tool call is held here, by the key of its row: the row changes while the call runs
   // (a live row, then the records of the journal) and the window follows it.
   const [openTool, setOpenTool] = useState<{ sessionId: string; key: string; origin: HTMLButtonElement } | null>(null);
@@ -143,6 +128,8 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   for (const item of pluginItems) items.push({ source: "history", key: item.key, item });
   orderTimelineRows(items);
   const groups = groupTimelineTools(items, entries);
+  const backgroundCalls = useContext(BackgroundCallsContext);
+  const entryTypes = groupEntryTypes(groups, backgroundCalls);
   const opened = openTool?.sessionId === sessionId ? items.find(row => row.key === openTool.key) : undefined;
   if (opened) openedItem.current = opened.source === "history" ? opened.item : opened.source === "liveTool" ? liveToolItem(opened.row) : openedItem.current;
   // A row that left the window (older history slid away) keeps its details open on what it last was.
@@ -150,8 +137,8 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   const toolImages = shownTool?.toolCall?.images?.length && shownTool.toolCall.outputOffset ? readImages?.(shownTool.toolCall.outputOffset) : undefined;
   return <SystemPromptReaderContext.Provider value={readPrompt ?? null}>
     {items.length === 0 && empty && <div className="empty-history">{t("No visible events in this history.")}</div>}
-    <div className="messages">
-      {groups.map(group => <TimelineGroupView key={`${sessionId}:${group.key}`} sessionId={sessionId} group={group} revision={revision} sources={sources}
+    <div className={`messages${emphasis.enabled ? " timeline-appearance-enabled" : ""}`} style={emphasisStyle}>
+      {groups.map(group => <TimelineGroupView key={`${sessionId}:${group.key}`} sessionId={sessionId} group={group} entryType={entryTypes.get(group.key) ?? "status"} revision={revision} sources={sources}
         echoImages={echoImages} readImages={readImages} toolOutputs={toolOutputs} canInspect={canInspect} onOpenSource={onOpenSource} onOpenTool={openToolWindow}
         promptKeys={promptKeys} onBranch={onBranch} />)}
     </div>

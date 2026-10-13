@@ -756,7 +756,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .messages { gap: 8px; padding-bottom: 0; }
 .ide-shell .conversation { margin-top: 0; }
 .ide-shell .session-workspace { padding-top: 4px; padding-bottom: 0; }
-.ide-shell .timeline-message { position: relative; display: flex; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-left: 2px solid var(--card-color, var(--muted)); border-radius: var(--bp-surface-border-radius); background: color-mix(in srgb, var(--card-color, var(--muted)) 8%, var(--panel)); margin-bottom: 6px; }
+.ide-shell .timeline-message { position: relative; display: flex; gap: 8px; padding: 6px 12px; border: 1px solid var(--entry-active-border, var(--line)); border-left: 2px solid var(--entry-accent-color, var(--card-color, var(--muted))); border-radius: var(--bp-surface-border-radius); background: color-mix(in srgb, var(--card-color, var(--muted)) var(--entry-active-tint, 8%), var(--panel)); box-shadow: var(--entry-active-elevation, none); margin-bottom: 6px; }
 /* The timeline is compact: its rows are spaced by the list alone, the same for every kind of card. */
 .ide-shell .messages { gap: 6px; }
 .ide-shell .messages .timeline-message { margin-bottom: 0; }
@@ -782,7 +782,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .timeline-message:hover .message-actions > button, .ide-shell .timeline-message:focus-within .message-actions > button { opacity: 1; pointer-events: auto; }
 .ide-shell .timeline-compact { padding-block: 3px; }
 .timeline-single-row { display: contents; }
-.ide-shell .timeline-tool-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 9px; background: color-mix(in srgb, var(--panel-2) 60%, transparent); }
+.ide-shell .timeline-tool-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--entry-active-border, var(--line)); border-radius: 9px; background: var(--entry-active-background, color-mix(in srgb, var(--panel-2) 60%, transparent)); box-shadow: var(--entry-active-elevation, none); }
 .ide-shell .timeline-tool-group-heading { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
 .ide-shell .timeline-tool-group > .message { min-width: 0; margin: 0; padding: 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .ide-shell .timeline-tool-group .message-heading { flex-wrap: wrap; gap: 4px 8px; }
@@ -839,7 +839,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .file-card-path small { padding-right: 74px; }
 .ide-shell .file-change-inspection li > .file-counts { position: absolute; right: 4px; bottom: 2px; font: 12px/16px "Cascadia Code", Consolas, monospace; pointer-events: none; }
 .ide-shell .timeline-tool-group { gap: 2px 8px; padding: 4px 8px; }
-.ide-shell .timeline-tool-group > .message { border: 0; padding: 2px; max-width: none; background: transparent; }
+.ide-shell .timeline-tool-group > .message { border: 0; padding: 2px; max-width: none; background: transparent; box-shadow: none; }
 .ide-shell .timeline-tool-group .message-heading { flex-wrap: nowrap; gap: 3px; }
 .ide-shell .timeline-tool-group .message-heading > span:first-child { min-width: 0; width: auto; max-width: none; flex: 1; overflow: hidden; }
 .ide-shell .tool-tile-title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/18px "Cascadia Code", Consolas, monospace; }
@@ -2315,7 +2315,7 @@ dialog.tool-call-dialog .app-window-body .tool-record > h4 { margin: 0 0 4px; co
 .tool-paths { margin: 0; padding-left: 18px; font: 12px/1.6 var(--bp-typography-family-mono); overflow-wrap: anywhere; }
 /* The row of a system prompt: one line that opens its window wherever it is pressed. */
 .ide-shell .message-prompt { --card-color: var(--accent); cursor: pointer; transition: background-color 120ms; }
-.ide-shell .message-prompt:hover:not(:has(dialog[open])) { background: color-mix(in srgb, var(--card-color) 15%, var(--panel)); }
+.ide-shell .message-prompt:hover:not(:has(dialog[open])) { background: color-mix(in srgb, var(--card-color) var(--entry-active-tint, 15%), var(--panel)); }
 .ide-shell .message-prompt .tool-tile-title { font: inherit; }
 .ide-shell .message-prompt .message-heading > span:first-child { flex-shrink: 1; min-width: 0; max-width: none; }
 .ide-shell .message-prompt .message-heading small { overflow: hidden; text-overflow: ellipsis; }

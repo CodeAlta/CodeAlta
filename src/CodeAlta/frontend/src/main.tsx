@@ -170,6 +170,7 @@ import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persi
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
 import { AppearanceSettings, themeIcons } from "./AppearanceSettings";
+import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis";
 import { StorageSettings } from "./storage/StorageSettings";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
 import { storage } from "#neoastra";
@@ -220,6 +221,7 @@ import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
+import "./timelineEmphasis/timelineEmphasis.css";
 import "./editor/editor.css";
 import "./explorer/explorer.css";
 import "./terminal/terminal.css";
@@ -4555,4 +4557,4 @@ function Root() {
 }
 
 // The window of a system prompt compares two prompts with the diff editor, which the application brings.
-createRoot(document.getElementById("root")!).render(<StrictMode><SystemPromptDiffContext.Provider value={SystemPromptDiff}><Root /></SystemPromptDiffContext.Provider></StrictMode>);
+createRoot(document.getElementById("root")!).render(<StrictMode><SystemPromptDiffContext.Provider value={SystemPromptDiff}><TimelineEmphasisProvider><Root /></TimelineEmphasisProvider></SystemPromptDiffContext.Provider></StrictMode>);
