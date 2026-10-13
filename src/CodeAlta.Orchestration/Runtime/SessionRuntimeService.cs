@@ -2774,9 +2774,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // while that is its mode and nobody named it, so a change of mode reaches the next prompt without attaching the
     // session again. It starts with words that name it: Claude Code is told which paragraph no longer applies by them.
     internal const string SessionTitleGuidance =
-        "Session title: CodeAlta lists this session under a short title. When you answer the first prompt, and later only when the main subject of the session has changed, start your answer with a line `"
+        "Session title: you choose the short title CodeAlta lists this session under. Begin the first message you write in this session with a line that holds only `"
         + AgentSessionTitleTag.Opening + "Title in a few words" + AgentSessionTitleTag.Closing
-        + "` (at most 60 characters, plain text, in the language of the user). CodeAlta removes that line from what is shown. Do not write the tag otherwise, and never explain it.";
+        + "` (at most 60 characters, plain text, in the language of the user), before any other text and before any tool call. Write such a line again later only when the main subject of the session has changed. CodeAlta removes these lines from what is shown: never mention or explain them.";
 
     // An attachment that follows the setting takes the mode the setting has now: a change of the setting reaches a
     // session with its next prompt, without attaching it again. Runs on the actor of the session.

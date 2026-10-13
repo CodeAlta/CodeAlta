@@ -398,8 +398,19 @@ function App() {
     // The first prompt of a session titles it when its run starts: the list is read once that is written.
     if (!was && running) setTimeout(() => readSessionList.current(), 1_500);
   };
+  // A session also runs with no tab on it (a sub-agent, a prompt sent by the alta tool): the activity of the host
+  // says when one starts and when it ends, and its title is read then as the one of a session of a tab is.
+  const hostRuns = useMemo(() => spacesState.sessions.filter(session => session.running).map(session => session.sessionId).sort().join("\n"), [spacesState.sessions]);
+  const hostRunsNow = useRef(hostRuns);
   useEffect(() => {
-    const timer = setInterval(() => { if (liveRuns.current.size > 0) readSessionList.current(); }, 10_000);
+    if (hostRunsNow.current === hostRuns) return;
+    hostRunsNow.current = hostRuns;
+    readSessionList.current();
+    const timer = setTimeout(() => readSessionList.current(), 1_500);
+    return () => clearTimeout(timer);
+  }, [hostRuns]);
+  useEffect(() => {
+    const timer = setInterval(() => { if (liveRuns.current.size > 0 || hostRunsNow.current) readSessionList.current(); }, 10_000);
     return () => clearInterval(timer);
   }, []);
   const [projectId, writeProjectId] = useState<string | null>(null);
