@@ -34,7 +34,7 @@ Click a link, or press Enter on a link that has the keyboard focus, which Tab mo
 
 In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.
 
-- Choose **Move to project…** in the menu of the session, then the project. Or drag the row of the session onto the row of the project in the sidebar.
+- Choose **Move to project…** in the menu of the session (or `/move_to_project` in the search), then the project. Or drag the row of the session onto the row of the project in the sidebar.
 - The sessions it started in its project, its [sub-agents](#sub-agents), move with it.
 - A session can move only while it is idle: not while it runs, waits for an answer, has queued prompts or has background tasks.
 - A session with [Remote Control](workspace.md#remote-control-claude-code) on restarts in its new folder with Remote Control on again.

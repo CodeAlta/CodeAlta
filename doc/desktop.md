@@ -464,7 +464,10 @@ the click that ends a drag is swallowed, and Escape or leaving the window cancel
   `projects/<folder name>/` of its configuration folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`), with the
   CLI's own folder naming (`ClaudeCodeProjectFolders`): the transcript and its companion folder are copied,
   checked and the source deleted (`ClaudeCodeTranscriptRelocation`), so that `--resume` started in the new
-  folder finds the real conversation. A transcript that cannot be moved is a warning, never a failure: the
+  folder finds the real conversation. Two folder names can be one folder (users link the folders of the
+  worktrees of a repository, often as junctions, so that they share conversations): a probe file created in
+  one and looked for in the other tells it, and such a transcript is left where it is. The CLI also records
+  its Remote Control bridge in the transcript, so a moved transcript keeps the claude.ai link. A transcript that cannot be moved is a warning, never a failure: the
   session then goes on in a new conversation of the CLI seeded with the history CodeAlta recorded.
 
 The window shows the outcome in a toast, with the first warning of the host if there is one (the log has
