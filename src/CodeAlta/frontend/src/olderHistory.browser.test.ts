@@ -30,7 +30,7 @@ const still = (page: Page) => page.evaluate<number>(`new Promise(resolve => {
 })`);
 /** Turns the wheel over the timeline: up with a negative distance. */
 const wheel = (page: Page, deltaY: number) => page.command("Input.dispatchMouseEvent", { type: "mouseWheel", x: 500, y: 400, deltaX: 0, deltaY });
-/** Presses the mouse in the timeline, where nothing takes the keyboard: the keys then scroll the timeline. */
+/** Presses the mouse in the timeline, on a place that is no control: the timeline takes the keyboard, and the keys then scroll it. */
 async function press(page: Page, y = 400) {
   await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: 500, y });
   await page.command("Input.dispatchMouseEvent", { type: "mousePressed", x: 500, y, button: "left", clickCount: 1 });
@@ -96,9 +96,24 @@ test("going up in a timeline reads the turns before, a chunk at a time, and the 
     assert.equal(await page.evaluate(reads), one);
     assert.equal(await page.evaluate(firstTurn), 7);
 
-    // Home, with the keyboard on nothing after a press in the timeline: the view goes to the top of what is
-    // loaded, the chunk before is read, and the reader stays on the first row that was loaded.
+    // A press in the timeline gives it the keyboard, not the panel of the tab around it: the keys scroll it.
     await press(page);
+    assert.equal(await page.evaluate(`document.activeElement === ${scroller}`), true, "the press gives the timeline the keyboard");
+    assert.equal(await page.evaluate(`getComputedStyle(${scroller}).outlineStyle`), "none", "without a ring");
+    const pressed = await page.evaluate<number>(`${scroller}.scrollTop`);
+    await page.key("ArrowDown", 40);
+    await page.until(`${scroller}.scrollTop > ${pressed}`, "Arrow Down scrolls the timeline");
+    await page.key("PageDown", 34);
+    await still(page);
+    const down = await page.evaluate<number>(`${scroller}.scrollTop`);
+    assert.ok(down > pressed + 100, "Page Down scrolls the timeline by a page");
+    await page.key("PageUp", 33);
+    await page.until(`${scroller}.scrollTop < ${down} - 100`, "Page Up scrolls it back");
+    await still(page);
+    assert.equal(await page.evaluate(firstTurn), 7, "away from the top of what is loaded, the keys read nothing");
+
+    // Home: the view goes to the top of what is loaded, the chunk before is read, and the reader stays on the
+    // first row that was loaded.
     await page.key("Home", 36);
     await turnsFrom(page, 5, "the chunk before, after Home");
     // The chunk may arrive while the view is still on its way: it ends where it was going, on that row.
@@ -163,24 +178,33 @@ test("a short latest turn, a read that fails, a timeline behind another tab, and
     await pause(900);
     assert.equal(await page.evaluate(reads), one);
 
-    // A key going up does the same after a press in the timeline. As in the window, where the panel of a tab is
-    // focusable, the press leaves the keyboard on what holds the timeline, not on nothing.
-    await page.evaluate(`olderFixture.show({ sessionId: 'long' })`);
-    await turnsFrom(page, 9, "another session");
-    await page.evaluate(`olderFixture.show({ sessionId: 'short' })`);
-    await page.until(`${ready} && document.querySelectorAll('.timeline-message').length === 2`, "the short turn again");
-    await still(page);
-    await page.evaluate(`document.querySelector('.ide-shell').tabIndex = -1`);
+    // A key going up does the same, with the keyboard on what holds the timeline after a press in it: the panel
+    // of the tab has it when something gave it back to the panel since.
+    const shortAgain = async () => {
+      await page.evaluate(`olderFixture.show({ sessionId: 'long' })`);
+      await turnsFrom(page, 9, "another session");
+      await page.evaluate(`olderFixture.show({ sessionId: 'short' })`);
+      await page.until(`${ready} && document.querySelectorAll('.timeline-message').length === 2`, "the short turn again");
+      await still(page);
+    };
+    await shortAgain();
+    await press(page);
+    await page.evaluate(`document.querySelector('.ide-shell').focus()`);
+    assert.equal(await page.evaluate(`document.activeElement === document.querySelector('.ide-shell')`), true);
+    await page.key("PageUp", 33);
+    await turnsFrom(page, 5, "the chunk before, after Page Up on the panel");
+    assert.equal(await page.evaluate(atEnd), true);
+
+    // And with the keyboard in the timeline, where the press puts it.
+    await shortAgain();
     const again = await page.evaluate<number>(reads);
     await press(page);
     await pause(300);
-    assert.equal(await page.evaluate(`document.activeElement === document.querySelector('.ide-shell')`), true, "the press puts the keyboard on the panel");
+    assert.equal(await page.evaluate(`document.activeElement === ${scroller}`), true, "the press gives the timeline the keyboard");
     assert.equal(await page.evaluate(reads), again, "a press reads nothing");
     await page.key("PageUp", 33);
     await turnsFrom(page, 5, "the chunk before, after Page Up");
     assert.equal(await page.evaluate(atEnd), true);
-    await page.evaluate(`document.querySelector('.ide-shell').removeAttribute('tabindex'); document.activeElement.blur()`);
-    await press(page);
 
     // A read that fails is shown as it was, and is not tried again by itself.
     await page.evaluate(`olderFixture.state.failures.push('history_changed')`);

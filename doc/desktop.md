@@ -1491,8 +1491,10 @@ events. What came before is read in two ways:
 - **Going up.** When the reader goes up and the first loaded row is within a screen above the view (600 px
   in a shorter view, `nearTimelineTop`), the timeline reads one chunk: at least 300 records, of which it
   keeps the whole turns. The reader goes up with the wheel, `Arrow Up`, `Page Up`, `Home` or `Shift+Space`
-  (with the keyboard in the timeline, or, after a press in it, on nothing or on what holds it: the panel of a
-  tab is focusable and takes such a press, and the keys do not scroll the timeline then), a touch, the scrollbar, `Ctrl+F3`,
+  (with the keyboard in the timeline, which a press in it gives it: the scroller is focusable, `tabIndex` -1
+  and no ring, because the keys scroll from what has the keyboard upwards and the panel of the tab around it,
+  focusable too, would take the press and leave the keys scrolling nothing; or, after such a press, with the
+  keyboard on nothing or on that panel, where the keys only ask for the turns before), a touch, the scrollbar, `Ctrl+F3`,
   and `F3` on the first loaded message. One chunk is read at a time and each one needs a move up
   (`olderHistoryStep`), so a timeline that nobody scrolls reads nothing more. A latest turn shorter than the
   view has nothing to scroll: there the move up itself asks, and the view is not filled when the session

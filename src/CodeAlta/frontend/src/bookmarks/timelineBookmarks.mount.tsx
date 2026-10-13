@@ -104,7 +104,7 @@ function Pane() {
   }, [timeline.showRow]);
   return <div className="ide-shell" style={{ height: "100%" }}><div className="session-workspace" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
     <div className="session-timeline-area" style={{ position: "relative", flex: "1 1 auto", minHeight: 0 }}>
-      <div className="timeline-scroll" ref={timeline.elementRef} style={{ height: "100%", overflowY: "auto" }} onScroll={event => timeline.scroll(event.currentTarget)}
+      <div className="timeline-scroll" tabIndex={-1} ref={timeline.elementRef} style={{ height: "100%", overflowY: "auto" }} onScroll={event => timeline.scroll(event.currentTarget)}
         onWheel={timeline.wheel} onKeyDown={timeline.keyDown} onPointerDown={timeline.pointerDown} onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd}>
         <TimelineBookmarksContext.Provider value={marks}>
           <History sessionId={sessionId} read={read as never} live={null} onNotesChange={noop} onSettled={onSettled}

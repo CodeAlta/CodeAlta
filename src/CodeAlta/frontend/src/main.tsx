@@ -4424,7 +4424,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
         {lineage}
         <div className="session-timeline-area" data-ask={askMode}>
         <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
-        <div className="timeline-scroll" ref={timeline.elementRef}
+        {/* A press in the timeline gives it the keyboard, so that the keys scroll it: the panel of the tab around
+            it would take the press otherwise, and the keys scroll from what has the keyboard upwards. */}
+        <div className="timeline-scroll" tabIndex={-1} ref={timeline.elementRef}
           onScroll={event => { newest.onScroll(); if (!newest.pending()) timeline.scroll(event.currentTarget); }}
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}

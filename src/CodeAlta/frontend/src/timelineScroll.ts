@@ -167,16 +167,17 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     };
     const end = (event: globalThis.PointerEvent) => endScrollbarDrag(event.pointerId);
     const blur = () => { endScrollbarDrag(undefined, false); touchStart.current = null; };
-    // After a press in the timeline that focuses nothing in it, the keys scroll it but are not sent to it: they
-    // are seen here, so that going up with nothing left to scroll still reads the turns before. The keyboard is
-    // then on nothing, or on what holds the timeline: the panel of its tab is focusable and takes such a press.
+    // A press in the timeline gives it the keyboard (it is focusable), and its own handler sees the keys. When the
+    // keyboard is not in it after such a press (on nothing once what had it left the page, or on what holds the
+    // timeline, such as the panel of its tab), the keys are not sent to it: they are seen here, so that going up
+    // with nothing left to scroll still reads the turns before.
     const press = (event: globalThis.PointerEvent) => {
       pressedInside.current = event.target instanceof Node && !!elementRef.current?.contains(event.target);
     };
     const key = (event: globalThis.KeyboardEvent) => {
       if (!pressedInside.current || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-      const focused = document.activeElement;
-      if (focused && focused !== document.body && !focused.contains(elementRef.current)) return;
+      const focused = document.activeElement, element = elementRef.current;
+      if (focused && focused !== document.body && (focused === element || !focused.contains(element))) return;
       if (["ArrowUp", "PageUp", "Home"].includes(event.key) || event.key === " " && event.shiftKey) moveUp();
     };
     window.addEventListener("pointermove", move);

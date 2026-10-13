@@ -272,6 +272,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
    Markdown/code retain their own line heights; translated text can still wrap.
    The outer access scroller opts out of anchoring; this viewport keeps its own. */
 .timeline-scroll { flex: 1 1 0; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px var(--session-proposals-reserved, 0px) 0; line-height: 1.5; }
+/* A press gives the timeline the keyboard so that the keys scroll it; it is not a stop of the Tab key and shows no ring. */
+.timeline-scroll:focus { outline: none; }
 .composer-resize-bar { flex: 0 0 auto; display: flex; align-items: center; min-height: 4px; margin: 0 4px; }
 .composer-resize-bar .quiet-button { flex: 0 0 auto; padding: 2px 7px; font-size: 11px; }
 .composer-splitter { flex: 1 1 auto; position: relative; height: 2px; cursor: row-resize; touch-action: none; background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat; outline: 0; }

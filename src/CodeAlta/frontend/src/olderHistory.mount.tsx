@@ -68,9 +68,11 @@ function Pane({ sessionId, observing }: { sessionId: string; observing: boolean 
   const onSettled = useCallback(() => settled.current(), []);
   fixture.navigate = timeline.navigateMessage;
   fixture.showTurn = turn => timeline.showRow(journals[sessionId].find(entry => entry.contentId === `user:${turn}`)!.offset);
-  return <div className="ide-shell" style={{ height: "100%" }}><div className="session-workspace" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+  // As in the window: the panel of the tab that holds the pane is focusable, and so is the timeline, which takes
+  // the keyboard of a press in it.
+  return <div className="ide-shell" role="tabpanel" tabIndex={-1} style={{ height: "100%" }}><div className="session-workspace" style={{ height: "100%", display: "flex", flexDirection: "column" }}>
     <div className="session-timeline-area" style={{ position: "relative", flex: "1 1 auto", minHeight: 0 }}>
-      <div className="timeline-scroll" data-following={timeline.following} ref={timeline.elementRef} style={{ height: "100%", overflowY: "auto" }}
+      <div className="timeline-scroll" tabIndex={-1} data-following={timeline.following} ref={timeline.elementRef} style={{ height: "100%", overflowY: "auto" }}
         onScroll={event => timeline.scroll(event.currentTarget)} onWheel={timeline.wheel} onKeyDown={timeline.keyDown} onPointerDown={timeline.pointerDown}
         onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
         <History sessionId={sessionId} observing={observing} read={read as never} live={null} onNotesChange={noop} onSettled={onSettled}
