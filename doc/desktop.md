@@ -877,7 +877,8 @@ edits when leaving, including editors opened after the toast appeared or while i
 Personal, Open source, Experiments, Learning, Clients; a name, an icon and a color in one click, the
 names already taken are not offered), the name, the icon, the color, "What it is for" and a checklist of
 the projects. A space created from the title bar is shown at once. An empty space says "No project in
-this space yet." with **Add projects…**, which opens Settings → Spaces.
+this space yet." with **Add projects…**, which opens the folder picker, just like **+** in the
+Projects header. **Organize spaces…** remains available in the space switch.
 
 **Implementation.**
 

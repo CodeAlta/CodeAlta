@@ -8,7 +8,8 @@ export { projectFiles, projectGit } from "../demo-api";
 const space = (id: string, name: string, projectIds: string[], look: Partial<SpaceItem> = {}): SpaceItem =>
   ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, ...look });
 // The default space holds both projects of the fixture; Work has the second one.
-const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work", ["other"], { icon: "briefcase", color: "#2d72d2" })];
+const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work",
+  localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" })];
 const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; tell: (event: SpacesEvent) => void; sessions: object[] } = { shown: [], assigned: [], tell: () => { }, sessions: [] };
 Object.assign(window, { spacesFixture: fixture });
 const done = async () => ({ status: "ok", message: null, space: null });
