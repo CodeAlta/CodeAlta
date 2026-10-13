@@ -1353,9 +1353,30 @@ returns the whole final text. The page writes `finalText.slice(written)` at the 
 (`PromptInput.insertAtCaret`, one undo step) and shows the live text as a Monaco decoration that is never part
 of the prompt. One dictation runs in the window (`speech/speech.ts`, its state in `speech/speechStore.ts`). A
 click on the button, `F9` (`/dictate`), `Escape` in that composer and a dictation started in another composer
-stop it with what was being spoken; a send, a prompt that becomes read-only, a pane that is hidden or closed
-and Settings opening stop it with `cancel`, so nothing is written into a prompt that has left. While the model
+stop it with what was being spoken; a prompt that becomes read-only, a pane that is hidden or closed and
+Settings opening stop it with `cancel`, so nothing is written into a prompt that has left. While the model
 loads the button already shows a recording: the host keeps the audio it is sent meanwhile.
+
+**Sending.** By default a dictation only writes (`[speech] send = "manual"`). A send asked while the composer
+records (Enter, Send, Ctrl/Cmd+Enter, Enqueue, Steer) first stops the dictation, waits for the last words to
+be written (10 seconds at most), then does the send that was asked, in both modes. With `send = "on_stop"`, a
+stop by the user with the button or `F9` then sends the prompt when at least three words were dictated;
+`Escape` stops without sending, and no stop the user did not ask for sends. The decisions are plain functions
+in `speech/stopping.ts`. A dictation that hears nothing for 30 seconds after its last sound stops by itself,
+keeps its text and sends nothing.
+
+**The microphone the page listens to.** The page keeps the chosen input device in its own storage, with its id
+and its label (`speech/microphones.ts`): device ids belong to the WebView profile, so the normal and the
+developer instance each have theirs, and nothing of it is in `config.toml`. A device whose id changed is found
+again by its label; one that is gone falls back to the system device with one toast. Until a microphone is
+confirmed in the window, the first press of the button opens the setup popover (`MicrophoneChoice`) and does
+not record: the device list with a live level, the model, and **Start dictation** or **Download**. The Speech
+page has the same list with **Test**. The list needs a granted capture to have its labels, so the page opens
+the microphone briefly to read it. A default device can be a virtual one that gives exact silence without any
+error: the popover and Test say "No sound comes from this microphone." after 3 seconds flat, and a dictation
+that got no sound at all in its first 8 seconds shows one warning with a way to choose another device. A
+noise-gated microphone also gives exact zeros between sentences, which is why the warning waits and is only
+about a microphone that never gave anything.
 
 **Download.** `SpeechInstaller` owns one download at a time, for the application and not for a window:
 `watch` replays its state and closing the stream never stops it. What it installs, under
@@ -1383,7 +1404,8 @@ download. Its folder is `custom-<owner>-<name>-<hash of the address>`.
 **The microphone.** `DesktopApplication.DecidePermission` allows `Microphone` once, to a document of the
 application, while `[speech] enabled` is true, and denies every other permission; the setting is read at each
 request and nothing is kept in the profile of the view. The origin is checked on every platform: since
-NeoAstra 1.4.0 the views of WebKitGTK give it too, and have media capture turned on. The macOS bundle has `NSMicrophoneUsageDescription`.
+NeoAstra 1.4.0 the views of WebKitGTK give it too, and have media capture turned on. WebView2 asks at every
+capture; WebKit (macOS, Linux) keeps the answer of the host for the document and asks again for a new one. The macOS bundle has `NSMicrophoneUsageDescription`.
 The button is hidden when the service is not available (an instance on explicit roots stays off the network),
 when the engine has no package for the platform, when the feature is off and when the view has no
 `navigator.mediaDevices`.
