@@ -354,6 +354,29 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
     }
 
+    /// <inheritdoc />
+    public async Task<bool> ApplyPermissionModeNowAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var permissionMode = PermissionMode;
+        ActiveRun? run;
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // The next turns of a run in progress request it.
+            run = _activeRun;
+            if (run is not null) run.PermissionMode = permissionMode;
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+
+        // A provider that keeps a process is told now, with or without a run: a turn it starts by itself follows it too.
+        return _turnExecutor is IAgentProviderPermissionMode provider
+            && await provider.SetRunningPermissionModeAsync(SessionId, permissionMode, cancellationToken).ConfigureAwait(false);
+    }
+
     // The tasks are the state of a provider that runs now: they are told to those who listen and are neither
     // kept in the history of the session nor recorded, so that a session read again later shows none. The
     // event names no run: the tasks go on outside the runs.

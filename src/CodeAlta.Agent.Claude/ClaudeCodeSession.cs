@@ -452,6 +452,22 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _costTotal = 0;
     }
 
+    // Puts the running CLI in a new permission mode now, during a turn or between turns (a turn it starts by itself
+    // then follows it), without starting it again: that would end a turn. A CLI that refuses keeps its mode until the
+    // next turn of the user, which starts it again in the new one if it must; meanwhile CodeAlta answers what it asks
+    // by the new mode.
+    internal async Task<bool> SetRunningPermissionModeAsync(string? permissionMode, CancellationToken cancellationToken)
+    {
+        var mode = NormalizePermissionMode(permissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
+        lock (_gate)
+        {
+            _permissionMode = mode;
+        }
+
+        return _connection is { IsClosed: false } connection
+            && await SwitchPermissionModeAsync(connection, mode, cancellationToken).ConfigureAwait(false);
+    }
+
     // Puts the running CLI in the permission mode of the turn, null being the one of the user's settings. Returns
     // false when it cannot be: the CLI is then started again in that mode.
     private async Task<bool> SwitchPermissionModeAsync(ClaudeCodeConnection connection, string? permissionMode, CancellationToken cancellationToken)

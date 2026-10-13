@@ -319,6 +319,46 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task PermissionModeChosenDuringOrBetweenTurns_SwitchesTheCli_AndARefusalDoesNotStartItAgain()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cli = new ClaudeCodeFakeCli
+        {
+            OnUserMessage = async (process, message) =>
+            {
+                started.TrySetResult();
+                await held.Task.ConfigureAwait(false);
+                process.EmitTextTurn("msg_1", "ok", message);
+            },
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        // The agent session reaches it through the interface of the providers that take a mode at once.
+        IAgentProviderPermissionMode modes = executor;
+        var request = CreateRequest([User("one")]);
+        Assert.IsFalse(await modes.SetRunningPermissionModeAsync(request.SessionId, "acceptEdits", CancellationToken.None), "No turn runs yet.");
+        var turn = ExecuteAsync(executor, request);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var process = cli.Last;
+
+        // The turn runs: its CLI is switched at once.
+        Assert.IsTrue(await modes.SetRunningPermissionModeAsync(request.SessionId, "acceptEdits", CancellationToken.None));
+        Assert.AreEqual("acceptEdits", process.PermissionMode);
+
+        // A CLI not launched in bypass refuses to be put in it: it is not started again, which would end the turn.
+        Assert.IsFalse(await modes.SetRunningPermissionModeAsync(request.SessionId, "bypassPermissions", CancellationToken.None));
+        held.SetResult();
+        await turn;
+        Assert.AreEqual(1, cli.Processes.Count);
+        Assert.AreEqual("acceptEdits", process.PermissionMode);
+
+        // Between turns, the CLI that waits is switched at once too: a turn it starts by itself follows the mode.
+        Assert.IsTrue(await modes.SetRunningPermissionModeAsync(request.SessionId, "default", CancellationToken.None));
+        Assert.AreEqual("default", process.PermissionMode);
+        Assert.AreEqual(1, cli.Processes.Count);
+    }
+
+    [TestMethod]
     public async Task ChangeOfPermissionMode_SwitchesTheRunningCliWithoutARestart()
     {
         var cli = new ClaudeCodeFakeCli { SettingsPermissionMode = "auto" };

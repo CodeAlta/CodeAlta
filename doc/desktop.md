@@ -1024,11 +1024,14 @@ session runs in has a check. The mode a session without one runs in
 application) is marked **Default** in the list, and choosing it gives the session no mode of its own; a
 default a session cannot be given (`plan`, which stays provider-wide) has an entry of its own. The button
 is quiet while the session runs in the default mode and stands out when it has a mode of its own. A
-saved mode that is no longer offered stays shown as **Unverified**. The choice travels with the next Send
-(`SessionSelection.PermissionMode`: an id, or `"provider"` to go back to the default; absent keeps the
-session's); the host keeps it in the session's local state (`permission_mode`), reads the policy of the
-send from it (see "Permission modes"), and for Claude Code switches the running CLI with
-`set_permission_mode`, restarting it only when the CLI refuses. A provider switch clears it. New-session
+saved mode that is no longer offered stays shown as **Unverified**. A choice applies at once, also while
+the session runs (`sessions.setPermissionMode`: an id, or `"provider"` to go back to the default): the host
+keeps it in the session's local state (`permission_mode`), the requests of the session follow it from then
+on, those that wait for the user and that it grants are allowed (see "Permission modes"), and for Claude
+Code the running CLI is switched with `set_permission_mode`. Before a turn the CLI is restarted when it
+refuses; during a turn it is not, since that would end the turn. When the host refuses the choice, the
+button shows the mode in force again and a toast says why. A send can still carry a mode
+(`SessionSelection.PermissionMode`; absent keeps the session's). A provider switch clears it. New-session
 drafts have no button: the choice appears once the session exists.
 
 The provider indicator is a compact active-provider count, green when ready and orange when
@@ -4097,9 +4100,14 @@ the providers that run the tools of CodeAlta are offered `default`, `acceptEdits
 `bypassPermissions`, and Claude Code its own list, which has them. For Claude Code the mode is also
 given to the CLI, which decides what it asks at all.
 
-One send reads the policy once, after its session is prepared (the mode a send chooses is saved by
-then), so its setup and its cleanup agree: a change applies to what the sessions do next rather than to
-what is already running. A send whose policy is `Approve` has no permission execution, and its requests
+A send reads the policy after its session is prepared (the mode a send chooses is saved by then) to
+decide whether it has a permission execution; each of its requests then follows the policy the session
+has when it comes (`OwnedPermissionExecution.FollowsSessionPolicy`), so a change of mode applies to a
+running send at once, in both directions. A change of mode also answers the requests of the session that
+wait for the user and that the new policy grants (`SessionPermissionService.GrantWaitingOwnedAsync`: all
+of them for `Approve`, the file changes for `AcceptEdits`, none for `Review`); a question to the user, such
+as Claude's `AskUserQuestion` or an `alta ask`, is not a permission request and is never answered. A send
+whose policy is `Approve` has no permission execution, and its requests
 reach the default handler of the host, which answers with the policy of their session. That handler
 also answers the requests outside a send of the window (a prompt the host queued, a session another
 session drives with `alta session send`, a turn the provider starts): it approves what the policy

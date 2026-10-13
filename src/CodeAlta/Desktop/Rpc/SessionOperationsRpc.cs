@@ -255,6 +255,23 @@ internal sealed class SessionOperationsService
         return new(await _commands.StopBackgroundTaskAsync(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
     }
 
+    // The permission mode applies at once, also to a run in progress: it leaves no receipt, and the choices of the
+    // session read it afterwards.
+    [NeoRpcMethod("setPermissionMode")]
+    public async Task<SessionPermissionModeResult> SetPermissionModeAsync(SessionPermissionModeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null);
+            if (!Identity(request.SessionId, 256) || !Identity(request.PermissionMode, 256)) return new("invalid_request", _epoch, request.SessionId, null);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null);
+        }
+        var result = await _commands.SetPermissionModeAsync(request.SessionId, request.PermissionMode, cancellationToken).ConfigureAwait(false);
+        return new(result.Status, _epoch, request.SessionId, result.PermissionMode);
+    }
+
     // Remote Control acts on the provider at once, outside the runs: it leaves no receipt. Its state is read in the
     // runtime state of the session, which follows the provider.
     [NeoRpcMethod("setRemoteControl")]

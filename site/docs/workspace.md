@@ -237,8 +237,11 @@ Beside that picker, a small button names the permission mode of the session and 
 The mode marked **Default** in the list is the one a session runs in when you choose none: the mode of
 its provider when it has one, otherwise the default mode of the application, which is **Bypass
 permissions** unless you change it in Settings > Permissions (see [Tool permissions](#tool-permissions)).
-A mode you choose applies from the next prompt you send, without restarting the session, and stays with
-the session when you reopen it. Switching the session to another provider takes it back to the default.
+A mode you choose applies at once, also to a turn that is running: what the session asks next follows
+the new mode, and a request that already waits is answered when the new mode allows it (**Bypass
+permissions** allows them all, **Accept edits** the file changes). Questions the agent asks you are left for
+you. The mode does not restart the session, and stays with it when you reopen it. Switching the session
+to another provider takes it back to the default.
 A new session gets the choice once it has started.
 
 In Desktop, `Enter` sends when idle and enqueues while busy. `Cmd+Enter` on macOS or `Ctrl+Enter` on
@@ -760,7 +763,7 @@ Agents ask for permission before running commands or changing files. **Auto appr
 In the desktop app, each session has a [permission mode](#agent-prompt-model-and-permissions). Settings >
 Permissions sets the **Default mode**, for the sessions that have none of their own: **Bypass permissions**
 (the default: requests are approved automatically) or **Ask first**. A change applies to what the sessions
-do next; a turn you sent while its session asked keeps asking until it ends. An agent runs with the
+ask from then on, also in a turn that is running. An agent runs with the
 privileges of CodeAlta: a mode decides what you are asked, it is not a sandbox.
 
 When a session asks, the request appears on top of its prompt, with the command and its folder, or the

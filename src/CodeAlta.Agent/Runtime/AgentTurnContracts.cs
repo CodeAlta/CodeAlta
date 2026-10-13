@@ -62,6 +62,22 @@ internal interface IAgentProviderInitiatedTurns
 }
 
 /// <summary>
+/// A turn executor whose provider can put the turn of a session that runs now in another permission mode (an agent
+/// CLI that decides by itself what it asks before using a tool).
+/// </summary>
+internal interface IAgentProviderPermissionMode
+{
+    /// <summary>
+    /// Puts the process of a session in a permission mode now, during a turn or between turns, without starting it again.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="permissionMode">One of the permission modes of the provider, or null for the one it is configured with.</param>
+    /// <param name="cancellationToken">Cancels the wait for the provider.</param>
+    /// <returns>Whether the provider took the mode; when it did not, its next turn requests it.</returns>
+    Task<bool> SetRunningPermissionModeAsync(string sessionId, string? permissionMode, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// A turn executor whose provider goes on working for a session in the background, outside its turns (an agent
 /// CLI with a command that still runs).
 /// </summary>

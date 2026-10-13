@@ -1980,12 +1980,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ownedCommand: true, askExecution: askExecution, askSubmission: askSubmission), CancellationToken.None);
 
     /// <summary>
-    /// Saves the permission mode of an owned session and gives it to its attachment, which is not attached again:
-    /// its next run requests the mode.
+    /// Saves the permission mode of an owned session and gives it to its attachment, which is not attached again. It
+    /// applies at once, also to a run in progress: the requests of the session follow it from now on, those that wait
+    /// for the user and that it grants are allowed, and its provider is told where it can be, between runs as during one.
     /// </summary>
     /// <param name="session">The session, resolved by the owner.</param>
     /// <param name="permissionMode">One of the permission modes of its provider, or null for the one the provider is configured with.</param>
-    /// <exception cref="InvalidOperationException">The attachment runs, drains its queue, or is not owned.</exception>
+    /// <exception cref="InvalidOperationException">The attachment is not owned.</exception>
     /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
     internal Task SetOwnedPermissionModeAsync(SessionViewDescriptor session, string? permissionMode)
     {
@@ -1996,13 +1997,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             while (true)
             {
                 ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
-                var transition = await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
+                var (transition, attached) = await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
                 {
                     // An attachment that is being made reads the saved mode: it is waited for, then given the new one.
-                    if (_transitions.TryGetValue(session.SessionId, out var pending)) return (Task?)pending;
+                    if (_transitions.TryGetValue(session.SessionId, out var pending)) return ((Task?)pending, (AgentSessionHandleId?)null);
                     if (_entries.TryGetValue(session.SessionId, out var entry) && (entry.IsTerminated || entry.Attachment.IsRetiring)) entry = null;
-                    if (entry is not null && (entry.HasActiveRun || entry.QueueDrainInProgress || !HasOwnedCommandDefaults(entry)))
-                        throw new InvalidOperationException("Cannot change configuration of an active or externally owned attachment.");
+                    // A run in progress, or a queue that drains, takes the new mode at once: its requests follow the mode
+                    // the session has when they come.
+                    if (entry is not null && !HasOwnedCommandDefaults(entry))
+                        throw new InvalidOperationException("Cannot change configuration of an externally owned attachment.");
                     if (entry is not null)
                     {
                         await _agentHub.SetPermissionModeAsync(entry.SessionHandleId, permissionMode, actorCancellationToken).ConfigureAwait(false);
@@ -2022,13 +2025,37 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     }
 
                     session.PermissionMode = permissionMode;
-                    return (Task?)null;
+                    return ((Task?)null, entry is not null ? entry.SessionHandleId : (AgentSessionHandleId?)null);
                 }, CancellationToken.None).ConfigureAwait(false);
-                if (transition is null) return;
+                if (transition is null)
+                {
+                    // Outside the actor of the session: the provider may take a moment to answer.
+                    await ApplyPermissionModeNowAsync(session.SessionId, attached).ConfigureAwait(false);
+                    return;
+                }
                 // Its failure belongs to the one that attaches.
                 await transition.ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).ConfigureAwait(false);
             }
         }, CancellationToken.None);
+    }
+
+    // What a new mode changes for the requests of a session at once: those that wait for the user and that it grants
+    // are allowed, and its attachment is told, so that what its provider decides by itself follows it too, during a
+    // run and between runs. A provider that cannot be told takes the mode at its next turn; meanwhile the host answers
+    // its requests by it.
+    private async Task ApplyPermissionModeNowAsync(string sessionId, AgentSessionHandleId? attached)
+    {
+        if (_sessionPermissionModes)
+            await Permissions.GrantWaitingOwnedAsync(sessionId, GetPermissionPolicy(sessionId)).ConfigureAwait(false);
+        if (attached is not { } handle) return;
+        try
+        {
+            await _agentHub.ApplyPermissionModeNowAsync(handle, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException or IOException or TimeoutException)
+        {
+            // The attachment went away meanwhile: the next one reads the saved mode.
+        }
     }
 
     // Fixed default-policy check only; per-operation association remains in the permission mailbox.

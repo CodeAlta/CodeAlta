@@ -164,11 +164,13 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     /// </summary>
     public AgentPermissionRequestHandler OwnedDefaultPermissionHandler { get; }
 
-    // The default decision of one send that no owned execution reviews: the policy is read now, so the send keeps it
-    // until it ends, as a send with an owned execution does. The policy of its session, when it has one, is the one
-    // the send started with; otherwise the automatic approval of the host decides.
+    // The default decision of one send that no owned execution reviews. A session with a mode of its own follows the
+    // mode it has at each request, as a request outside a send does: a change of the mode applies to the running send
+    // at once, and a request a mode that asks no longer grants waits on the card of the session. Without one, the
+    // automatic approval of the host, read now, decides until the send ends.
     internal AgentPermissionRequestHandler CreateSendDefaultPermissionHandler(SessionPermissionPolicy? policy)
     {
+        if (policy is not null && SessionPolicy is not null) return OwnedDefaultPermissionHandler;
         var autoApprove = policy is { } own ? own == SessionPermissionPolicy.Approve : _autoApproveOwnedPermissions();
         return (_, token) => Task.FromResult(new AgentPermissionDecision(
             token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
@@ -202,6 +204,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         internal bool AutoApprove { get; init; }
         // Whether the file changes of this send are granted while its commands are reviewed.
         internal bool ApproveFileChanges { get; init; }
+        // Whether this send follows the mode its session has at each request rather than the three flags above, read
+        // when it started: a session with a mode of its own, whose change applies to the running send at once.
+        internal bool FollowsSessionPolicy { get; init; }
         internal bool EnableUserInput { get; init; }
         internal HashSet<PendingUserInput> InputDeliveries { get; } = [];
         internal HashSet<PendingPermission> Deliveries { get; } = [];
@@ -225,7 +230,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             return execution;
         }, null);
 
-    // The same for a send of a session that has a policy of its own, read once when the send starts.
+    // The same for a send of a session that has a policy of its own: the flags are the policy the send starts with,
+    // and each request then follows the policy the session has when it comes.
     internal ValueTask<OwnedPermissionExecution?> CreateOwnedExecutionAsync(Guid operationId, string sessionId,
         CancellationToken token, SessionPermissionPolicy policy, bool enableUserInput)
         => ExecuteAsync<OwnedPermissionExecution?>(() =>
@@ -239,6 +245,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 AutoApprove = policy == SessionPermissionPolicy.Approve,
                 ApproveFileChanges = policy == SessionPermissionPolicy.AcceptEdits,
                 EnableUserInput = enableUserInput,
+                FollowsSessionPolicy = SessionPolicy is not null,
             };
             _ownedExecutions.Add(operationId, execution);
             return execution;
@@ -296,12 +303,13 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
-            if ((execution.AutoApprove || (execution.ApproveFileChanges && request is AgentFileChangePermissionRequest))
+            var (reviewCommands, autoApprove, approveFileChanges) = Grants(execution);
+            if ((autoApprove || (approveFileChanges && request is AgentFileChangePermissionRequest))
                 && CanUse(execution) && !cancellationToken.IsCancellationRequested
                 && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
                 && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId))
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
-            if (!execution.ReviewCommands || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
+            if (!reviewCommands || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
                 || !HasOwnedDeliveryCapacity(execution)) return null;
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
             var snapshot = OwnedSnapshot(handle, request);
@@ -318,6 +326,44 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         launch.TrySetResult();
         return delivery is null ? new(AgentPermissionDecisionKind.Deny) : await delivery.ConfigureAwait(false);
     }
+
+    // What a send grants and reviews for one request: the policy its session has now when it follows it, the flags it
+    // started with otherwise.
+    private (bool ReviewCommands, bool AutoApprove, bool ApproveFileChanges) Grants(OwnedPermissionExecution execution)
+    {
+        if (!execution.FollowsSessionPolicy || SessionPolicy is not { } policyOf)
+            return (execution.ReviewCommands, execution.AutoApprove, execution.ApproveFileChanges);
+        var policy = policyOf(execution.SessionId);
+        return (policy != SessionPermissionPolicy.Approve, policy == SessionPermissionPolicy.Approve, policy == SessionPermissionPolicy.AcceptEdits);
+    }
+
+    /// <summary>
+    /// Answers the permission requests of a session that wait for the user and that a new policy of the session
+    /// grants: all of them for <see cref="SessionPermissionPolicy.Approve"/>, the file changes for
+    /// <see cref="SessionPermissionPolicy.AcceptEdits"/>, none for <see cref="SessionPermissionPolicy.Review"/>. Only
+    /// the requests of sends that follow the policy of their session are answered; a question to the user is not a
+    /// permission request and is never answered.
+    /// </summary>
+    /// <param name="sessionId">The session whose policy changed.</param>
+    /// <param name="policy">The policy it has now.</param>
+    /// <returns>How many requests were allowed.</returns>
+    internal ValueTask<int> GrantWaitingOwnedAsync(string sessionId, SessionPermissionPolicy policy)
+        => ExecuteAsync(() =>
+        {
+            if (policy == SessionPermissionPolicy.Review || string.IsNullOrWhiteSpace(sessionId)) return 0;
+            var allowed = 0;
+            // A copy: an answer leaves the set when its delivery ends, which is a later message of this mailbox.
+            foreach (var pending in _ownedDeliveries.ToArray())
+            {
+                if (pending.OwnedExecution is not { FollowsSessionPolicy: true } execution || execution.SessionId != sessionId) continue;
+                if (policy == SessionPermissionPolicy.AcceptEdits && pending.Snapshot.Kind != FileChangeKind) continue;
+                if (Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.AllowOnce)) allowed++;
+            }
+            return allowed;
+        }, 0);
+
+    // The kind of a file change request, as its snapshot keeps it.
+    private const string FileChangeKind = "fileChange";
 
     // Keep retained provider delegates independent of a runtime send's compiler-generated closure
     // (which also owns captured entries, handle uses and linked cancellation sources).

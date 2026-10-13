@@ -633,7 +633,11 @@ mode of its own (`AgentSessionCreateOptions.PermissionMode`, `AgentTurnRequest.P
 composer of the desktop application, which overrides `permission_mode` for that session; `plan` is not offered
 for a session. The CLI is launched with the session's mode, else the provider's. Before a turn whose mode
 differs from the one the running CLI has, the session sends `set_permission_mode`, and restarts the CLI with
-`--permission-mode` only when that request fails. A session that goes back to no mode returns the CLI to the
+`--permission-mode` only when that request fails. A mode chosen while the CLI runs, during a turn or between turns
+(a turn the CLI starts by itself, such as one for a background command, then follows it), is sent to it at
+once (`IAgentPermissionModeProvider.ApplyPermissionModeNowAsync`, `IAgentProviderPermissionMode`); a CLI that
+refuses it then is not restarted, since that would end the turn: it takes the mode at the next turn, and meanwhile
+the host answers what it asks by the new mode. A session that goes back to no mode returns the CLI to the
 mode of the user's settings, learned from `initialize` (`current_permission_mode`), else restarts it. The
 orchestration keeps the session's mode in its saved local state (`permission_mode`, also in the SQLite cache),
 reads it at every attach and clears it on a provider switch.
