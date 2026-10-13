@@ -60,8 +60,8 @@ public sealed class WorkspaceMoveSessionTests
             Assert.AreEqual(otherPath, listed.WorkspacePath);
             Assert.AreEqual("project", listed.ScopeKind, "The header and the summary agree: the session is listed in the scope of its new project.");
             Assert.AreEqual("Named", listed.Title);
-            Assert.AreEqual($"Project session for {other.DisplayName}.", fresh.Sessions.Single(session => session.Id == unnamed.SessionId).Title,
-                "A session that was never named is listed by the summary it was created with: that of its new project.");
+            Assert.AreEqual(other.DisplayName, fresh.Sessions.Single(session => session.Id == unnamed.SessionId).Title,
+                "A session that still has the title it was created with is listed by that title: the name of its new project.");
             Assert.AreEqual(otherPath, (await host.RuntimeService.ResolveOwnedSessionAsync(named.SessionId, CancellationToken.None))?.WorkingDirectory);
             await rpc.CloseSessionsAsync();
             await rpc.CloseImportsAsync();
@@ -165,7 +165,7 @@ public sealed class WorkspaceMoveSessionTests
                 var listed = (await new WorkspaceService(global).SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(value => value.Id == session.SessionId);
                 Assert.AreEqual("project", listed.ScopeKind, "The summary and the header agree again: the session is listed in its new project.");
                 Assert.AreEqual(other.Id, listed.ProjectId);
-                Assert.AreEqual($"Project session for {other.DisplayName}.", listed.Title);
+                Assert.AreEqual(other.DisplayName, listed.Title);
                 // The catalog was told: it shows the session where it went, not where the ended turn put it.
                 AgentSessionMetadata? cataloged = null;
                 await foreach (var value in host.AgentSessionCatalog.ListSessionsAsync()) if (value.SessionId == session.SessionId) cataloged = value;

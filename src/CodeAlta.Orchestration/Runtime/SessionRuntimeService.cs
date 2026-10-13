@@ -502,11 +502,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         var descriptor = entry.ToDescriptor();
         // The session that runs writes its title: the title it has now, and who chose it, are the ones it saved.
-        if ((await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))?.Details
-            is RawApiSessionMetadataDetails { TitleSource: { } titleSource } details && NormalizeOptionalText(details.Title) is { } savedTitle)
+        // A journal that cannot be read leaves the title the session was attached with.
+        try
         {
-            descriptor.Title = savedTitle;
-            descriptor.TitleSource = titleSource;
+            if ((await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))?.Details
+                is RawApiSessionMetadataDetails { TitleSource: { } titleSource } details && NormalizeOptionalText(details.Title) is { } savedTitle)
+            {
+                descriptor.Title = savedTitle;
+                descriptor.TitleSource = titleSource;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
+        {
         }
 
         var localState = await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, cancellationToken).ConfigureAwait(false);
