@@ -54,7 +54,6 @@ CodeAlta Desktop brings together:
 - **Copilot compatibility**: reuse `.github` instructions, skills and agents unchanged.
 - **UI automation**: let agents see and drive CodeAlta through built-in tools or MCP.
 - **Storage**: manage [local disk usage and cleanup](https://codealta.github.io/docs/workspace/#storage).
-- **Project cleanup**: delete a project and its saved sessions after confirmation, including archived projects, without deleting source files.
 
 <p align="center">
   <img src="site/img/alta-home.png" alt="CodeAlta TUI with the projects sidebar, a session timeline, and the prompt editor" width="920">

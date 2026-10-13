@@ -7,12 +7,12 @@ const target: ProjectDeleteTarget = { epoch: "epoch", id: "p", path: "/p", name:
 const reply = (request: WorkspaceDeleteProjectRequest, status = "ok"): WorkspaceDeleteProjectResponse => ({ status,
   hostEpoch: request.expectedHostEpoch, projectId: request.projectId, projectPath: request.projectPath });
 
-test("deletion confirms exact archived and unarchived projects, not a visible session list", async () => {
+test("deletion names the exact project, archived or not", async () => {
   const calls: WorkspaceDeleteProjectRequest[] = [];
   const owner = createProjectDeletion(async request => { calls.push(request); return reply(request); });
   for (const archived of [true, false]) {
     const scope = { ...target, archived };
-    assert.equal(await owner.confirm(scope, scope), "confirmed");
+    assert.equal(await owner.confirm(scope, scope), "deleted");
     assert.deepEqual(calls.at(-1), { expectedHostEpoch: target.epoch, projectId: target.id, projectPath: target.path,
       confirmedName: target.name, expectedArchived: archived, confirmed: true });
     assert.equal(Object.isFrozen(calls.at(-1)), true);
@@ -20,7 +20,7 @@ test("deletion confirms exact archived and unarchived projects, not a visible se
   assert.equal(owner.locked, false);
 });
 
-test("changed scope or navigation ABA does not send a delete", async () => {
+test("a project that changed since it was asked about is not deleted", async () => {
   let calls = 0;
   const owner = createProjectDeletion(async request => { calls++; return reply(request); });
   for (const current of [null, { ...target, epoch: "other" }, { ...target, id: "other" }, { ...target, path: "/other" },
@@ -31,7 +31,7 @@ test("changed scope or navigation ABA does not send a delete", async () => {
   assert.equal(calls, 0);
 });
 
-test("held original excludes duplicates; lost and partial replies stay locked across selection changes", async () => {
+test("one deletion at a time, and a failed one can be asked again", async () => {
   let finish!: (value: WorkspaceDeleteProjectResponse) => void;
   let calls = 0;
   const owner = createProjectDeletion(() => { calls++; return new Promise(resolve => { finish = resolve; }); });
@@ -39,24 +39,26 @@ test("held original excludes duplicates; lost and partial replies stay locked ac
   assert.equal(owner.locked, true);
   assert.equal(await owner.confirm(target, target), null);
   finish({ status: "delete_unconfirmed", hostEpoch: target.epoch, projectId: target.id, projectPath: target.path });
-  assert.equal(await original, "uncertain");
-  assert.equal(owner.uncertain, true);
-  const other = { ...target, id: "other" };
-  assert.equal(await owner.confirm(other, other), null);
-  assert.equal(calls, 1);
+  assert.equal(await original, "failed");
+  assert.equal(owner.locked, false);
+  const again = owner.confirm(target, target);
+  finish({ status: "ok", hostEpoch: target.epoch, projectId: target.id, projectPath: target.path });
+  assert.equal(await again, "deleted");
+  assert.equal(calls, 2);
 });
 
-test("definite refusals unlock; mismatched success and transport failure do not", async () => {
-  for (const status of ["busy", "closed", "scope_missing", "has_children", "session_in_use", "confirmation_required"]) {
+test("each refusal says why", async () => {
+  const outcomes = { busy: "inUse", session_in_use: "inUse", has_children: "children", scope_missing: "changed", invalid_scope: "changed",
+    closed: "failed", confirmation_required: "failed", delete_unconfirmed: "failed", stale_epoch: "failed" };
+  for (const [status, outcome] of Object.entries(outcomes)) {
     const owner = createProjectDeletion(async request => reply(request, status));
-    assert.equal(await owner.confirm(target, target), "refused");
+    assert.equal(await owner.confirm(target, target), outcome, status);
     assert.equal(owner.locked, false);
   }
   for (const rpc of [async (request: WorkspaceDeleteProjectRequest) => ({ ...reply(request), projectId: "other" }),
-    async (request: WorkspaceDeleteProjectRequest) => reply(request, "stale_epoch"),
     async () => { throw new Error("response lost"); }]) {
     const owner = createProjectDeletion(rpc);
-    assert.equal(await owner.confirm(target, target), "uncertain");
-    assert.equal(owner.locked, true);
+    assert.equal(await owner.confirm(target, target), "failed");
+    assert.equal(owner.locked, false);
   }
 });

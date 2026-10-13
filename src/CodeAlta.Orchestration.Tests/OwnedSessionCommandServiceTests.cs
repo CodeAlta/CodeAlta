@@ -74,15 +74,21 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsNotNull(project);
         Assert.AreEqual("busy", await f.Observe(f.Host.Commands.DeleteCatalogSessionAsync(
             f.SessionId, project.Id, f.ProjectRoot, "Owned fixture")));
-        Assert.AreEqual("busy", await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(
+        Assert.AreEqual("session_in_use", await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(
             project.Id, f.ProjectRoot, project.DisplayName, project.Archived)));
+        // A run in one project does not keep another project from being deleted.
+        var idle = await f.Observe(f.Host.ProjectCatalog.UpsertFromPathAsync(
+            Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(f.ProjectRoot)!, "idle-project")).FullName));
+        Assert.AreEqual("ok", await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(
+            idle.Id, idle.ProjectPath, idle.DisplayName, idle.Archived)));
+        Assert.IsNull(await f.Observe(f.Host.ProjectCatalog.GetByIdAsync(idle.Id)));
         var state = await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId));
         var queued = f.Host.Commands.AdmitQueue(new("retained-queue", f.SessionId,
             state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "queued input"));
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, queued.Kind);
         Assert.AreEqual("busy", await f.Observe(f.Host.Commands.DeleteCatalogSessionAsync(
             f.SessionId, project.Id, f.ProjectRoot, "Owned fixture")));
-        Assert.AreEqual("busy", await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(
+        Assert.AreEqual("session_in_use", await f.Observe(f.Host.Commands.DeleteCatalogProjectAsync(
             project.Id, f.ProjectRoot, project.DisplayName, project.Archived)));
         Assert.IsNotNull(await f.Observe(f.Host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(f.SessionId)));
         var cancellation = f.Host.Commands.AdmitCancelQueue(new("cancel-retained", queued.Receipt!.OperationId));

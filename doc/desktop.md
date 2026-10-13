@@ -530,29 +530,23 @@ is no longer that one. After a deletion the row that takes the place of the dele
 so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
 is hidden.
 
-**Delete project…** is also in the Projects header menu for the selected project. Unlike single-session
-deletion and archiving, it always opens `ProjectDeleteDialog`, including for an archived project. The
-dialog names the exact project and folder, states that all sessions (including sub-agents) are permanently
-deleted and that source files and git worktrees remain. Cancel is focused; there is no “do not ask again”.
-`projectDeletion.ts` retains one original request and locks further project deletions after a lost,
-partial or mismatched response, even across dialog/selection changes. Confirmed success refreshes the
-catalog and lets existing tab reconciliation remove deleted session tabs; it redirects only the original
-still-selected project. File editors and terminals are not deleted or force-closed.
+**Delete project…**, in the menu of a project and in the menu of the Projects header for the selected
+project, archived or not, asks in that same popover, every time: it has no **Do not ask again**, and
+**Cancel** has the focus, so Enter leaves everything as it is (`always` of `ConfirmPopover`). **Delete**
+removes the project from the catalog and deletes its sessions (`workspace.deleteProject`,
+`projectDeletion.ts`); its folder, its files and its git worktrees are not touched, the tabs of its
+sessions close, and Saved Statistics are kept. What refuses it is said in the popover: a session of the
+project that runs or waits for an answer (the sessions of the other projects go on), or a session of
+another project that was started from one of the project. A deletion that fails part of the way keeps
+the project listed with the sessions that are left, and can be asked again.
 
-`workspace.deleteProject` validates epoch, exact ID/path/name/archive state and explicit confirmation.
-The host uses `ListSessionsForDeletionAsync` to enumerate journals directly from disk, bypassing the
-projection cache and refusing unreadable, unscoped, duplicate or linked evidence rather than silently
-omitting it. It checks complete unique catalog
-ownership, refuses foreign descendants or cyclic lineage, reserves command, runtime/lineage and job
-admission, and preflights active work and interactions before any deletion. Children are removed first
-through the existing exact journal/idle-attachment deletion path, and the catalog descriptor is removed
-last after an empty-membership recheck. Project creation shares an identity-gated reservation; stale
-descriptors of deleted projects cannot recreate them in that runtime. Current command reservation is
-conservative: retained work in other scopes can also refuse deletion. Bridge cancellation abandons only
-the wait; shutdown joins the original. Session removal is not a transaction: late failures retain the
-project entry where possible and report `delete_unconfirmed`. This does not provide cross-process CAS
-against external catalog/journal writers. Ordinary journal deletion leaves its existing ancillary-file
-cleanup policy unchanged, and Saved Statistics remain.
+The host (`SessionRuntimeService.DeleteOwnedCatalogProjectBodyAsync`) reads the journals from disk
+(`ListSessionsForDeletionAsync`: the list of the window is bounded), checks that the project is still
+the one that was named (id, folder, name, archived), holds new sends while it works, deletes the
+sessions the way a single session is deleted, children first, and removes the project file last, once
+no journal of the project is left. The normal and the developer instance share the projects and not the
+sessions: a project deleted in one of them leaves on disk the sessions the other has for it, and they
+are listed again when its folder is added again.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. It is the transient

@@ -3,7 +3,7 @@ namespace CodeAlta.Orchestration.Runtime;
 public sealed partial class OwnedSessionCommandService
 {
     /// <summary>Deletes an exact confirmed project and its journals, never the project's working files.</summary>
-    /// <remarks>Reserves command admission until completion. Running or retained commands refuse deletion.
+    /// <remarks>Reserves command admission until completion. A session of the project that runs, or retained commands, refuse deletion.
     /// A failure after removal starts can leave some sessions deleted; it must not be retried automatically.</remarks>
     /// <param name="projectId">Exact catalog identity.</param>
     /// <param name="projectPath">Exact catalog folder.</param>
@@ -19,12 +19,10 @@ public sealed partial class OwnedSessionCommandService
         lock (_gate)
         {
             if (_closed || _retained) return Task.FromResult("closed");
-            // A project can own sessions not present in the Desktop's bounded snapshot.
-            // Reserve globally, rather than trusting that visible list to exclude pending work.
-            if (_deleteWork is not null || _active.Count != 0 || _steering.Count != 0 || _compacting.Count != 0
-                || _abortingRuns.Count != 0 || _queueing.Count != 0 || _remoteControlling.Count != 0
-                || _operations.Values.Any(operation => !operation.Released) || _queues.Values.Any(operation => !operation.Released))
-                return Task.FromResult("busy");
+            // The reservation holds every session while the project is deleted. Work that already goes on refuses the
+            // deletion only when it is of a session of the project, which the runtime asks about once it has read
+            // them from disk: the sessions of the other projects go on.
+            if (_deleteWork is not null) return Task.FromResult("busy");
             var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             _deleteWork = completion.Task;
             _ = DeleteCatalogProjectOwnedAsync(projectId, projectPath, confirmedName, expectedArchived, completion);
@@ -38,7 +36,7 @@ public sealed partial class OwnedSessionCommandService
         try
         {
             completion.TrySetResult(await _runtime.DeleteOwnedCatalogProjectAsync(projectId, projectPath, confirmedName, expectedArchived,
-                sessionId => Asks.List(sessionId).Head is not null)
+                sessionId => { lock (_gate) return IsOwnerBusy(sessionId) || Asks.List(sessionId).Head is not null; })
                 .ConfigureAwait(false));
         }
         catch (Exception) { completion.TrySetResult("delete_unconfirmed"); }
