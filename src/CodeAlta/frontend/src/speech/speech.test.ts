@@ -29,7 +29,7 @@ async function window(options: Parameters<typeof createFixtureHost>[0] = { insta
   const host = createFixtureHost(options), microphone = createFixtureMicrophone();
   const preferences = "preference" in more ? createFixturePreferences(more.preference) : createFixturePreferences();
   const notices: string[] = [], noticed: SpeechNotice[] = [];
-  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences, silenceAfter: more.silenceAfter, warnAfter: more.warnAfter, sendWait: more.sendWait,
+  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences, silenceAfter: more.silenceAfter, warnAfter: more.warnAfter, sendWait: more.sendWait, idleAfter: more.idleAfter,
     notify: notice => { notices.push(notice.message); noticed.push(notice); } });
   const disconnect = speech.connect(host.epoch);
   windows.push(disconnect);
@@ -746,4 +746,38 @@ test("a send does not wait for ever: it goes when the stop fails, and after the 
   host.state.hold = false; host.release();
   await early;
   assert.equal(status(), "idle");
+});
+
+test("the microphone is not left open: a dictation that hears nothing for a long time stops, keeps what it heard and sends nothing", async () => {
+  const { host, microphone, speech, notices, status } = await window({ installed: ["parakeet-tdt-0.6b-v3"], send: "on_stop" }, { idleAfter: 500 });
+  const { state, sent, sink } = sendingPrompt();
+  speech.toggle("a", sink);
+  await settle();
+  const focused = state.focused;
+  microphone.speak();
+  host.hear("Enough words to be sent, had the user stopped.", "");
+  await settle();
+  // A sound now and then keeps it open, however long it lasts: the silence is counted from the last sound.
+  for (let turn = 0; turn < 5; turn++) { await wait(200); microphone.silence(); microphone.speak(); }
+  assert.equal(status(), "recording", "a second of dictation with sounds 200 ms apart");
+  // Then nothing but the exact silence of a microphone that removes noise.
+  for (let turn = 0; turn < 4; turn++) { await wait(200); microphone.silence(); }
+  await settle();
+  assert.deepEqual([status(), microphone.open(), host.state.stops.map(request => request.cancel)], ["idle", false, [false]]);
+  // What it heard is kept, nothing is sent and nothing is said: the button is back, that is all.
+  assert.deepEqual([state.text, sent, notices, state.focused], ["Enough words to be sent, had the user stopped.", [], [], focused]);
+
+  // A microphone that never gives a sound stops after the same delay, counted from when it opened.
+  speech.toggle("a", sink);
+  await settle();
+  await wait(700);
+  assert.deepEqual([status(), microphone.open()], ["idle", false]);
+  // A dictation the user stops before that leaves no watch behind.
+  speech.toggle("a", sink);
+  await settle();
+  speech.stop("a");
+  await settle();
+  const stops = host.state.stops.length;
+  await wait(700);
+  assert.equal(host.state.stops.length, stops);
 });

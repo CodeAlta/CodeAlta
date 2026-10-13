@@ -548,6 +548,30 @@ test("the user chooses what a dictation they stop does to the prompt: keep it, o
   }, [], [["speechFixture.installed", model], ["codealta.desktop.speech.microphone.v1", JSON.stringify({ device: null, confirmed: true })]]);
 });
 
+test("a dictation that hears nothing for a long time stops by itself, keeps its words and sends nothing", { skip: !edge, timeout: 120_000 }, async () => {
+  await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click }) => {
+    await until(`${view()} === 'idle'`, "the microphone");
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'recording'`, "the recording");
+    assert.equal(await evaluate(`${mic()}.title`), "Stop dictation and send (F9) — NVIDIA Broadcast");
+    await evaluate(`${f}.microphone.speak(); ${f}.host.hear('Enough words to be sent, had the user stopped.', '')`);
+    await until(`${text()} === 'Enough words to be sent, had the user stopped.'`, "the words written");
+    // The keyboard goes elsewhere meanwhile: a stop the user did not ask for does not take it back.
+    await evaluate("document.querySelector('[data-send=\"b\"]').focus()");
+    // Sounds keep it open; then the exact silence of a microphone nobody speaks into.
+    for (let turn = 0; turn < 4; turn++) { await new Promise(resolve => setTimeout(resolve, 250)); await evaluate(`${f}.microphone.speak()`); }
+    assert.equal(await evaluate(`${view()}`), "recording", "a second of sounds 250 ms apart");
+    await evaluate(`${f}.microphone.silence()`);
+    await until(`${view()} === 'idle' && !${f}.microphone.open()`, "the dictation stopped by the silence");
+    assert.deepEqual(await evaluate(`[${f}.host.state.stops.map(request => request.cancel), ${text()}, ${f}.composers.a.sent, ${toast}, document.activeElement?.matches('[data-send="b"]')]`),
+      [[false], "Enough words to be sent, had the user stopped.", [], [], true]);
+    // The next press dictates again, into the same prompt.
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'recording'`, "a dictation again");
+  }, [], [["speechFixture.installed", model], ["speechFixture.send", "on_stop"], ["speechFixture.idleAfter", "700"],
+    ["codealta.desktop.speech.microphone.v1", JSON.stringify({ device: null, confirmed: true })]]);
+});
+
 test("the Speech settings page turns it on and off, chooses and downloads a model, and removes one", { skip: !edge, timeout: 120_000 }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, shot }) => {
     const state = `${f}.host.state`, page = "document.querySelector('.speech-settings')";

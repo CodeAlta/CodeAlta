@@ -17,8 +17,11 @@ import { useSpeechInstall } from "./useSpeechInstall";
 
 // What a test asks of the page before it loads: a model that is already in the cache, and how long a dictation may
 // hear nothing before it is said (a test does not sit through eight seconds; the others never see the notice).
-const host = createFixtureHost({ installed: localStorage.getItem("speechFixture.installed")?.split(",") ?? [] }), microphone = createFixtureMicrophone();
+const host = createFixtureHost({ installed: localStorage.getItem("speechFixture.installed")?.split(",") ?? [], send: localStorage.getItem("speechFixture.send") ?? undefined });
+const microphone = createFixtureMicrophone();
 const warnAfter = Number(localStorage.getItem("speechFixture.warnAfter")) || 600_000;
+// And how long it may hear nothing before it stops by itself.
+const idleAfter = Number(localStorage.getItem("speechFixture.idleAfter")) || 600_000;
 type ComposerState = { text: string; changes: string[]; sent: string[]; setDisabled: (value: boolean) => void; setVisible: (value: boolean) => void };
 const composers: Record<string, ComposerState> = {};
 const fixture = { host, microphone, composers, opened: [] as string[], renders: 0, speech: null as Speech | null,
@@ -63,7 +66,7 @@ function Fixture() {
   const [showComposers, setComposers] = useState(true);
   const [showSettings, setSettings] = useState(false);
   const [size, setSize] = useState({ width: 760, height: 620 });
-  const speech = useSpeechInstall(host.api, host.epoch, locale, { microphones: microphone.microphones, silenceAfter: 300, warnAfter, sendWait: 1_500 });
+  const speech = useSpeechInstall(host.api, host.epoch, locale, { microphones: microphone.microphones, silenceAfter: 300, warnAfter, sendWait: 1_500, idleAfter });
   fixture.renders++;
   Object.assign(fixture, { speech, setLocale, setComposers, setSettings, setSize });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>

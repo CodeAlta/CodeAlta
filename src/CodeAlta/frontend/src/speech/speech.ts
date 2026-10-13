@@ -6,7 +6,7 @@ import { dictationSilenceDelay, microphoneStorageKey, noSound, readMicrophone, r
 import { createSpeechStore, dictationFailure, idleDictation, installView, silenceNotice, withDictation, withInstall, withMonitor, withoutHost,
   type SpeechNotice, type SpeechState } from "./speechStore";
 import { unwritten } from "./spokenText";
-import { sendsOnStop, type StopReason } from "./stopping";
+import { idleStopDelay, sendsOnStop, silentTooLong, type StopReason } from "./stopping";
 
 /** The part of the host a window dictates with. */
 export type SpeechApi = Pick<typeof speech, "read" | "install" | "cancelInstall" | "watch" | "start" | "append" | "listen" | "stop">;
@@ -36,6 +36,8 @@ export type SpeechDependencies = Readonly<{
   warnAfter?: number;
   /** How long a send waits for the last words of a dictation; ten seconds by default. */
   sendWait?: number;
+  /** How long a dictation may hear nothing, since its last sound, before it stops by itself; thirty seconds by default. */
+  idleAfter?: number;
 }>;
 
 // One dictation, from the click that starts it until the host has given its last word. It outlives its place
@@ -56,6 +58,8 @@ type Running = {
   loudest: number; silence: ReturnType<typeof setTimeout> | undefined;
   /** The whole text it wrote: what decides whether there is enough to send. */
   text: string;
+  /** When it last heard a sound, the watch of a long silence, and whether that silence is what ended it. */
+  lastSound: number; idle: ReturnType<typeof setTimeout> | undefined; quiet: boolean;
   /** A send of its composer waits for its last words: told when it has ended. */
   settled?: { readonly ended: Promise<void>; readonly resolve: () => void };
 };
@@ -69,7 +73,7 @@ const pageStorage = { read: () => localStorage.getItem(microphoneStorageKey), wr
  * Speech to prompt of one window: what the host tells of the models and of a download, the microphone the
  * user chose, and the one dictation. It is made once by the window and given to the composers through `SpeechContext`.
  */
-export function createSpeech({ api, microphones, notify, preferences = pageStorage, silenceAfter = silenceDelay, warnAfter = dictationSilenceDelay, sendWait = 10_000 }: SpeechDependencies) {
+export function createSpeech({ api, microphones, notify, preferences = pageStorage, silenceAfter = silenceDelay, warnAfter = dictationSilenceDelay, sendWait = 10_000, idleAfter = idleStopDelay }: SpeechDependencies) {
   const store = createSpeechStore();
   store.update(state => ({ ...state, microphone: readMicrophone(preferences.read) }));
   const levels = new Set<(level: number, owner: string | null) => void>();
@@ -159,7 +163,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     running.ended = true;
     live.delete(running);
     running.settled?.resolve();
-    clearTimeout(running.silence);
+    clearTimeout(running.silence); clearTimeout(running.idle);
     running.capture?.stop(); running.capture = null;
     running.listening.abort();
     const sink = running.sink;
@@ -169,8 +173,9 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     current = null;
     level(0, running.owner);
     store.update(state => ({ ...state, dictation: idleDictation }));
-    // The keyboard goes back to the prompt after a dictation that recorded, not after a click that only asked something.
-    if (running.id && !running.abandoned) sink?.focus();
+    // The keyboard goes back to the prompt after a dictation that recorded, not after a click that only asked something,
+    // and not after one that stopped by itself: the user is elsewhere by then.
+    if (running.id && !running.abandoned && !running.quiet) sink?.focus();
   }
 
   /**
@@ -181,7 +186,8 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     if (cancel && !running.abandoned) { running.abandoned = true; running.sink?.interim(""); }
     if (running.ended || running.stopping) return;
     running.stopping = true;
-    clearTimeout(running.silence);
+    running.quiet = reason === "silence";
+    clearTimeout(running.silence); clearTimeout(running.idle);
     running.capture?.stop(); running.capture = null;
     if (shown(running)) { level(0, running.owner); store.update(state => withDictation(state, { status: "finishing" })); }
     const id = running.id, at = epoch;
@@ -230,7 +236,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     // One use of the microphone at a time: a level that is shown gives it up.
     stopMonitor();
     const running: Running = { owner, sink, listening: new AbortController(), id: null, capture: null, written: 0, sequence: 0,
-      stopping: false, abandoned: false, ended: false, told: false, loudest: 0, silence: undefined, text: "" };
+      stopping: false, abandoned: false, ended: false, told: false, loudest: 0, silence: undefined, text: "", lastSound: 0, idle: undefined, quiet: false };
     current = running; live.add(running);
     store.update(state => ({ ...state, asking: null, dictation: { status: "starting", owner, partial: "", microphone: null } }));
     let reply: { status: string; id: string | null };
@@ -269,10 +275,21 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
           if (running.stopping || running.ended || !noSound([running.loudest], warnAfter, warnAfter)) return;
           notify(silenceNotice(ready.label ? shortMicrophoneName(ready.label) : null, running.owner));
         }, warnAfter);
+        // The microphone is not left open: a dictation that hears nothing for a long time stops by itself, keeps what
+        // it heard and sends nothing. The silence is counted from the last sound.
+        running.lastSound = Date.now();
+        const watch = () => {
+          if (running.stopping || running.ended) return;
+          const quiet = Date.now() - running.lastSound;
+          if (silentTooLong(quiet, idleAfter)) void finish(running, false, "silence");
+          else running.idle = setTimeout(watch, Math.max(50, idleAfter - quiet));
+        };
+        running.idle = setTimeout(watch, idleAfter);
       },
       onChunk(chunk) {
         if (running.stopping || running.ended) return;
         if (chunk.peak > running.loudest) running.loudest = chunk.peak;
+        if (chunk.peak > silencePeak) running.lastSound = Date.now();
         if (shown(running)) level(chunk.level, running.owner);
         // Not awaited: the host puts the chunks back in order. One it refuses is the last one sent.
         const refused = () => { if (!running.stopping && !running.ended) void finish(running, false, "ended"); };

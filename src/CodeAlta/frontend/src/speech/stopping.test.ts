@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { charactersToSend, enoughToSend, sendMode, sendModes, sendsOnStop, spokenWords, wordsToSend, type StopReason } from "./stopping";
+import { charactersToSend, enoughToSend, idleStopDelay, sendMode, sendModes, sendsOnStop, silentTooLong, spokenWords, wordsToSend, type StopReason } from "./stopping";
 
 test("the words of a dictation are counted by the spaces between them", () => {
   assert.equal(spokenWords(""), 0);
@@ -43,4 +43,17 @@ test("only a dictation the user stopped with the button is sent, and only in the
   for (const mode of [undefined, null, "", "always", "ON_STOP"]) assert.equal(sendsOnStop(mode, "button", text), false, String(mode));
   assert.deepEqual([...sendModes], ["manual", "on_stop"]);
   assert.deepEqual([sendMode("on_stop"), sendMode("manual"), sendMode("else"), sendMode(null), sendMode(undefined)], ["on_stop", "manual", "manual", "manual", "manual"]);
+});
+
+test("a dictation that has heard nothing since its last sound for the whole delay stops by itself", () => {
+  assert.equal(idleStopDelay, 30_000);
+  assert.equal(silentTooLong(0), false);
+  assert.equal(silentTooLong(29_999), false);
+  assert.equal(silentTooLong(30_000), true);
+  assert.equal(silentTooLong(3_600_000), true);
+  // The delay is a parameter: the silence is counted from the last sound, whatever the length of the dictation.
+  assert.equal(silentTooLong(4_999, 5_000), false);
+  assert.equal(silentTooLong(5_000, 5_000), true);
+  // A stop for silence never sends, in the mode that sends either.
+  assert.equal(sendsOnStop("on_stop", "silence", "Enough words to be sent by the user."), false);
 });

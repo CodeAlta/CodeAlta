@@ -58,3 +58,15 @@ export function enoughToSend(text: string): boolean {
 export function sendsOnStop(mode: string | null | undefined, reason: StopReason, written: string): boolean {
   return sendMode(mode) === "on_stop" && reason === "button" && enoughToSend(written);
 }
+
+/** How long a dictation may hear nothing before it stops by itself: the microphone is not left open. */
+export const idleStopDelay = 30_000;
+
+/**
+ * Whether a dictation has heard nothing for too long. `sinceSound` is the time since its last sound, or since
+ * its microphone opened when it never heard one: a microphone that removes noise gives exact silence between
+ * two sentences, so the silence is measured from the last sound and not from the start.
+ */
+export function silentTooLong(sinceSound: number, delay = idleStopDelay): boolean {
+  return sinceSound >= delay;
+}
