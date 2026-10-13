@@ -146,6 +146,25 @@ public sealed class RuntimeDisplayProjection
         }
     }
 
+    /// <summary>
+    /// Removes what the retained window of a session holds of its conversation: its texts and its tool activities.
+    /// For a session that was rewound: the runs they belong to are no longer in its journal, and a view that shows a
+    /// live text until the journal holds it would show them again, after the turns that were kept.
+    /// </summary>
+    /// <param name="sessionId">The session; one that has no retained window is left alone.</param>
+    internal void ForgetConversation(string sessionId)
+    {
+        lock (_gate)
+        {
+            if (_closed || !ValidIdentity(sessionId) || !_sessions.TryGetValue(sessionId, out var session)) return;
+            if (session.Text.IsEmpty && session.ToolActivities.IsEmpty) return;
+            var revision = _revision + 1;
+            _sessions[session.SessionId] = session with { Revision = revision, Text = [], ToolActivities = [] };
+            _revision = revision;
+            foreach (var signal in _subscribers) signal.Writer.TryWrite(true);
+        }
+    }
+
     internal void Complete()
     {
         lock (_gate)

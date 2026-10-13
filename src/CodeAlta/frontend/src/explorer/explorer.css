@@ -9,6 +9,15 @@
 /* Icons have the color of what they stand for; the name follows the selection. */
 .ide-shell .project-icon, .ide-shell .session-icon { display: inline-flex; flex: none; }
 .ide-shell .project-action-row > button:first-child > strong { flex: 0 1 auto; min-width: 0; }
+/* A project row a dragged session can be dropped on, while the session is over it. */
+.ide-shell .project-action-row[data-over] > button:first-child { background-color: color-mix(in srgb, var(--accent) 24%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
+body.session-row-dragging, body.session-row-dragging * { cursor: grabbing !important; user-select: none; }
+/* The session being dragged, under the pointer; it shows whether the row below takes it. */
+.session-drag-ghost { position: fixed; z-index: 1000; pointer-events: none; display: inline-flex; align-items: center; gap: 6px;
+  max-width: 280px; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-2); color: var(--muted);
+  font-size: 12px; box-shadow: 0 4px 12px rgb(0 0 0 / 25%); opacity: 0.92; }
+.session-drag-ghost > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-drag-ghost[data-over] { border-color: var(--accent); color: var(--text); }
 
 /* The favorite projects are listed first, under a title of their own. */
 .ide-shell .project-list > .project-section { display: flex; align-items: center; gap: 5px; margin: 0; padding: 6px 8px 3px; color: var(--muted);

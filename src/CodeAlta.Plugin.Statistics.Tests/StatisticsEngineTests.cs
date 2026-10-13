@@ -1282,4 +1282,102 @@ public sealed class StatisticsEngineTests
         Assert.AreEqual(HistoryState.Done, harness.Engine.Status.State);
         Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "a", "tui"), await harness.Store.DumpAsync());
     }
+
+    private static async Task<string[]> RunsOfAsync(EngineHarness harness, string sessionId)
+        => [.. await harness.Store.Store.ReadAsync(sql => sql.Query(
+            $"SELECT run_id FROM {harness.Store.Store.Prefix}run WHERE session_id = @p0 ORDER BY start_ms",
+            static reader => reader.GetString(0),
+            sessionId))];
+
+    [TestMethod]
+    public async Task AFork_AddsOnlyItsOwnTurnsToTheTotals()
+    {
+        // Small chunks: the turns a fork inherited are passed over across several commits.
+        await using var harness = await EngineHarness.CreateAsync(configure: static options => options.ChunkBytes = 1200);
+        var source = EngineHarness.Session("a", Today9, runs: 3);
+        harness.Journals.Set(source, EngineHarness.EndOf(source, Today9, 3));
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(3L, await harness.SumAsync("usage_q", "requests"));
+        Assert.AreEqual(6000L, await harness.SumAsync("usage_q", "input_tokens"));
+
+        // Forked before its third turn: the new session starts with the first two, and nothing more was spent.
+        var created = Today9.AddMinutes(30);
+        var fork = source.ForkTo("f", source.FirstLineOf("a-run2"), created, created);
+        harness.Journals.Set(fork, created);
+        harness.Engine.Signal("f");
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(3L, await harness.SumAsync("usage_q", "requests"));
+        Assert.AreEqual(6000L, await harness.SumAsync("usage_q", "input_tokens"));
+        Assert.AreEqual(3L, await harness.SumAsync("activity_year", "runs_started"));
+        Assert.AreEqual(2L, await harness.Store.CountAsync("session"), "The fork is a session.");
+        Assert.AreEqual(0, (await RunsOfAsync(harness, "f")).Length, "The turns it starts with are those of its source.");
+
+        // The fork and its source each go on with a turn of their own.
+        harness.Journals.Append("f", EngineHarness.More("f", created.AddMinutes(5), tag: "own"), created.AddMinutes(6));
+        harness.Journals.Append("a", EngineHarness.More("a", created.AddMinutes(10)), created.AddMinutes(11));
+        harness.Engine.Signal("f");
+        harness.Engine.Signal("a");
+        await harness.Engine.DrainAsync();
+
+        Assert.AreEqual(5L, await harness.SumAsync("usage_q", "requests"));
+        Assert.AreEqual(8000L, await harness.SumAsync("usage_q", "input_tokens"));
+        CollectionAssert.AreEqual(new[] { "f-own0" }, await RunsOfAsync(harness, "f"));
+        CollectionAssert.AreEqual(new[] { "a-run0", "a-run1", "a-run2", "a-more0" }, await RunsOfAsync(harness, "a"));
+        Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "a", "f"), await harness.Store.DumpAsync());
+        await harness.Store.VerifyRollupsAsync();
+
+        // Nothing changes when the application starts again and looks at the journals.
+        var dump = await harness.Store.DumpAsync();
+        await harness.RestartAsync();
+        await harness.Engine.DrainAsync();
+        Assert.AreEqual(dump, await harness.Store.DumpAsync());
+    }
+
+    [TestMethod]
+    public async Task ARewoundSession_IsReadAgainFromItsStart_AndLosesTheRemovedTurns()
+    {
+        await using var harness = await EngineHarness.CreateAsync();
+        var session = EngineHarness.Session("a", Today9, runs: 3);
+        harness.Journals.Set(session, EngineHarness.EndOf(session, Today9, 3));
+        await harness.Engine.ChooseHistoryAsync(HistoryChoice.All);
+        await harness.Engine.DrainAsync();
+        var read = (await harness.Store.Store.GetJournalAsync("a"))!;
+        Assert.AreEqual(session.ToBytes().Length, read.Offset);
+
+        // Rewound to before its second turn, and a new session keeps what is removed. Then the session goes on, and its journal
+        // becomes longer than it was: only its first line tells that it is not the file that was read.
+        var at = Today9.AddMinutes(30);
+        var kept = session.ForkTo("k", session.Lines.Count, at, Today9.AddMinutes(10).AddSeconds(1), kind: "Rewind");
+        var rewound = EngineHarness.AddRuns(session.RewindTo(session.FirstLineOf("a-run1"), 1, at), at.AddMinutes(5), 3, tag: "again");
+        Assert.IsTrue(rewound.ToBytes().Length > read.Offset, "The saved offset is inside the new file.");
+        harness.Journals.Set(kept, at);
+        harness.Journals.Set(rewound, at.AddMinutes(26));
+        harness.Engine.Signal("a");
+        harness.Engine.Signal("k");
+        await harness.Engine.DrainAsync();
+
+        CollectionAssert.AreEqual(new[] { "a-run0", "a-again0", "a-again1", "a-again2" }, await RunsOfAsync(harness, "a"));
+        CollectionAssert.AreEqual(new[] { "a-run1", "a-run2" }, await RunsOfAsync(harness, "k"), "The removed turns are counted in the session that keeps them.");
+        Assert.AreEqual(6L, await harness.SumAsync("usage_q", "requests"), "Three turns before the rewind and three after: none twice, none lost.");
+        Assert.AreEqual(12000L, await harness.SumAsync("usage_q", "input_tokens"));
+        Assert.AreEqual(6L, await harness.SumAsync("activity_year", "runs_completed"));
+        Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "a", "k"), await harness.Store.DumpAsync());
+        await harness.Store.VerifyRollupsAsync();
+
+        // A second rewind changes one digit of the first line, which keeps its length. It is found when the application starts
+        // again, without a signal, and what it removed is discarded.
+        var again = EngineHarness.AddRuns(rewound.RewindTo(rewound.FirstLineOf("a-again1"), 2, at.AddMinutes(40)), at.AddMinutes(45), 3, tag: "third");
+        Assert.AreEqual(rewound.Lines[0].Length, again.Lines[0].Length);
+        Assert.IsTrue(again.ToBytes().Length > rewound.ToBytes().Length);
+        harness.Journals.Set(again, at.AddMinutes(70));
+        await harness.RestartAsync();
+        await harness.Engine.DrainAsync();
+
+        CollectionAssert.AreEqual(new[] { "a-run0", "a-again0", "a-third0", "a-third1", "a-third2" }, await RunsOfAsync(harness, "a"));
+        Assert.AreEqual(7L, await harness.SumAsync("usage_q", "requests"));
+        Assert.AreEqual(await ReferenceDumpAsync(harness.Journals, "a", "k"), await harness.Store.DumpAsync());
+        await harness.Store.VerifyRollupsAsync();
+    }
 }

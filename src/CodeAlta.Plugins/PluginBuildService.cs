@@ -387,7 +387,8 @@ public sealed partial class PluginBuildService : IPluginBuildService
     /// <summary>
     /// Reads the errors and the warnings of the compiler, of MSBuild and of NuGet from the output of a build:
     /// lines such as <c>C:\plugins\notes\plugin.cs(6,27): error CS0103: … [project]</c>. A file of the package is
-    /// named by its path in the package folder. A line that the build prints twice is kept once.
+    /// named by its path in the package folder, also when that folder is reached through a link: the build names
+    /// its files by the folder with its links followed. A line that the build prints twice is kept once.
     /// </summary>
     /// <param name="output">The standard output of the build.</param>
     /// <param name="packageDirectory">The folder of the package.</param>
@@ -398,6 +399,7 @@ public sealed partial class PluginBuildService : IPluginBuildService
         ArgumentException.ThrowIfNullOrWhiteSpace(packageDirectory);
         var diagnostics = new List<PluginBuildDiagnostic>();
         var seen = new HashSet<(string?, int, int, string?, string)>();
+        var folder = new PackageFolder(packageDirectory);
         foreach (var raw in output.Split('\n'))
         {
             var match = BuildDiagnosticLine().Match(raw.Trim());
@@ -422,7 +424,7 @@ public sealed partial class PluginBuildService : IPluginBuildService
             }
 
             // "CSC", "MSBUILD" and an empty origin name the tool, not a file.
-            var file = origin.Length == 0 || origin.IndexOfAny(['\\', '/', '.']) < 0 ? null : RelativeToPackage(origin, packageDirectory);
+            var file = origin.Length == 0 || origin.IndexOfAny(['\\', '/', '.']) < 0 ? null : RelativeToPackage(origin, folder);
             var diagnostic = new PluginBuildDiagnostic
             {
                 Severity = match.Groups["severity"].Value == "error" ? PluginDiagnosticSeverity.Error : PluginDiagnosticSeverity.Warning,
@@ -439,17 +441,81 @@ public sealed partial class PluginBuildService : IPluginBuildService
         return diagnostics;
     }
 
-    private static string RelativeToPackage(string file, string packageDirectory)
+    private static string RelativeToPackage(string file, PackageFolder folder)
     {
         try
         {
             if (!Path.IsPathFullyQualified(file)) return file.Replace('\\', '/');
-            var relative = Path.GetRelativePath(packageDirectory, file);
-            return relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) ? file : relative.Replace('\\', '/');
+            return Below(folder.Directory, file) ?? (folder.WithoutLinks is { } resolved ? Below(resolved, file) : null) ?? file;
         }
         catch (ArgumentException)
         {
             return file;
+        }
+
+        static string? Below(string directory, string file)
+        {
+            var relative = Path.GetRelativePath(directory, file);
+            return relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) ? null : relative.Replace('\\', '/');
+        }
+    }
+
+    /// <summary>
+    /// The folder of a package as it was given, and as the system names it once every link on the way is followed.
+    /// The build runs in that folder and reports the files below it in the second form (the temporary folder of
+    /// macOS is below <c>/var</c>, a link to <c>/private/var</c>). The links are read once, and only for a file
+    /// that is not below the folder as it was given.
+    /// </summary>
+    private sealed class PackageFolder(string directory)
+    {
+        private const int MaximumLinks = 40; // What the systems follow before they report a loop.
+        private string? _withoutLinks;
+        private bool _read;
+
+        public string Directory { get; } = directory;
+
+        /// <summary>Gets the folder with its links followed; null when it has none or cannot be read.</summary>
+        public string? WithoutLinks
+        {
+            get
+            {
+                if (_read) return _withoutLinks;
+                _read = true;
+                return _withoutLinks = Follow(Directory);
+            }
+        }
+
+        private static string? Follow(string directory)
+        {
+            try
+            {
+                var given = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+                var path = given;
+                for (var links = 0; links <= MaximumLinks; links++)
+                {
+                    var root = Path.GetPathRoot(path);
+                    if (string.IsNullOrEmpty(root)) return null;
+                    var names = path[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+                    var current = root;
+                    string? followed = null;
+                    for (var index = 0; index < names.Length && followed is null; index++)
+                    {
+                        current = Path.Combine(current, names[index]);
+                        // The target of a link can be below another link: the walk starts again on what replaces it.
+                        if (new DirectoryInfo(current).ResolveLinkTarget(returnFinalTarget: false) is { } target)
+                            followed = Path.GetFullPath(Path.Combine([target.FullName, .. names[(index + 1)..]]));
+                    }
+
+                    if (followed is null) return path == given ? null : path;
+                    path = Path.TrimEndingDirectorySeparator(followed);
+                }
+
+                return null;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                return null;
+            }
         }
     }
 

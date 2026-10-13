@@ -51,6 +51,20 @@ public sealed class SessionViewDescriptor
     public AltaActorProvenance? CreatedBy { get; set; }
 
     /// <summary>
+    /// Gets or sets where the session comes from when it starts with the turns of another one: the session it was
+    /// forked from, or the session whose rewind it keeps. Lineage only; null for a session that started empty.
+    /// </summary>
+    [JsonPropertyName("forked_from")]
+    public CodeAlta.Agent.Runtime.AgentSessionForkOrigin? ForkedFrom { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of times the session was rewound. A view of the session that holds what it read of its
+    /// conversation reads it again when this number changes.
+    /// </summary>
+    [JsonPropertyName("rewind_count")]
+    public int RewindCount { get; set; }
+
+    /// <summary>
     /// Gets or sets the session working directory: the folder the session belongs to, which is the folder of its
     /// project for a project session. It names the session's project and does not change.
     /// </summary>

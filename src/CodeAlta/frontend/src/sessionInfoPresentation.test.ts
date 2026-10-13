@@ -6,7 +6,7 @@ import type { SessionInfoView } from "./sessionInfo";
 
 test("inspection translations have six-locale labels while canonical Copy keeps literal data and bounds", () => {
   const info: SessionInfoView = { id: "Unknown", title: "Saved metadata", titleTruncated: true, scope: "Global",
-    scopeWarning: "literal warning", path: "/Saved metadata/<file>", worktree: null, provider: "Unknown", updatedAt: null, createdAt: null, canCopyId: true };
+    scopeWarning: "literal warning", path: "/Saved metadata/<file>", worktree: null, provider: "Unknown", updatedAt: null, createdAt: null, canCopyId: true, lineage: null };
   const observations = { runtime: [["Observation", "raw backend error <literal>"], ["Observed model / reasoning", "Unknown / High"]] as const,
     usage: [["Observation", "no_observation"]] as const };
   const canonical = canonicalInfoCopy(info, false, observations)!;
@@ -25,4 +25,8 @@ test("inspection translations have six-locale labels while canonical Copy keeps 
   assert.equal(infoFieldLabel("Observed model / reasoning"), "Observed model / reasoning");
   assert.equal(infoFieldLabel("free-form backend label"), null);
   assert.equal(canonicalInfoCopy({ ...info, title: "x".repeat(32769) }, false, observations), null);
+  // A fork names where it comes from; a session that is none has no such line.
+  assert.doesNotMatch(canonical, /Origin/);
+  assert.ok(canonicalInfoCopy({ ...info, lineage: { kind: "fork", sourceId: "source-id", title: "Review <parser>", turnCount: 4 } }, false, observations)!
+    .includes("Recorded creation time\nNot recorded or unavailable\nOrigin\nForked from Review <parser> (started with 4 turns); session source-id"));
 });

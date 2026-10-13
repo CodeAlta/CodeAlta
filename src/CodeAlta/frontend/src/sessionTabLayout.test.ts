@@ -3,15 +3,15 @@ import test from "node:test";
 import { Actions, DockLocation, RowNode, TabNode, TabSetNode } from "flexlayout-react";
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { closeSessionTab, emptySessionTabs, openSessionTab, sessionTabLimit, type SessionTab } from "./sessionTabs";
-import { createSessionTabModel, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, tabMiddleClickAction } from "./sessionTabLayout";
+import { closeDraftTab, closePreviewTab, closeSessionTab, emptySessionTabs, openDraftTab, openSessionTab, pinSessionTab, sessionTabLimit, type DraftTab, type SessionTab, type SessionTabs } from "./sessionTabs";
+import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
 import { activateFileTab, canvasTab, changesTab, closeFileTab, documentationTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
   projects: [{ id: "p", name: "Project", path: "/p", archived: false }], sessions: ["one", "two"].map(id => ({
     id, title: id, fullTitle: id, fullTitleTruncated: false, workspacePath: "/p", scopeKind: "project", projectId: "p",
-    messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, updatedAt: "2026-09-27T00:00:00Z", parentSessionId: null, lineageIssue: null, providerKey: null,
+    messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, createdAt: null, updatedAt: "2026-09-27T00:00:00Z", parentSessionId: null, lineageIssue: null, providerKey: null,
   })) };
 const label = (value: SessionTab | null) => value?.sessionId ?? "Prompt draft";
 const both = () => openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"));
@@ -491,4 +491,128 @@ test("middle-click canvas and Documentation closes still go through file-tab own
     assert.deepEqual(fileTabAction(action, files, () => true), { kind: "close", file });
     assert.equal(fileTabAction(action, files, () => false), null, "An obsolete owner cannot close a tab.");
   }
+});
+
+// The ids of the tabs of the first pane, in the order they are shown.
+const pane = (model: ReturnType<typeof createSessionTabModel>) => { let found: TabSetNode | undefined; model.visitNodes(node => { if (node instanceof TabSetNode) found ??= node; }); return found!; };
+const strip = (model: ReturnType<typeof createSessionTabModel>) => pane(model).getChildren().map(node => node.getId());
+const transient = (model: ReturnType<typeof createSessionTabModel>) => {
+  const ids: string[] = [];
+  model.visitNodes(node => { if (node instanceof TabNode && node.getConfig()?.preview === true) ids.push(node.getId()); });
+  return ids;
+};
+const scopeP: DraftTab = { projectId: "p", path: "/p" }, chats: DraftTab = { projectId: null, path: null };
+
+test("a selected session without a tab is looked at in the transient tab, unless it is opened to be kept", () => {
+  const kept = openSessionTab(emptySessionTabs(), tab("one"));
+  const looked = sessionTabPresentation(kept, snapshot, "p", "two");
+  assert.deepEqual(looked.open, [tab("one"), tab("two")]);
+  assert.deepEqual([looked.active, looked.preview, looked.scope], [tab("two"), tab("two"), scopeP]);
+  assert.equal(sessionTabPresentation(kept, snapshot, "p", "two", "permanent").preview ?? null, null);
+  // A session that has a tab is shown as it is, whatever it is opened for.
+  assert.equal(sessionTabPresentation(kept, snapshot, "p", "one").preview ?? null, null);
+  assert.deepEqual(sessionTabPresentation(looked, snapshot, "p", "two", "preview").preview, tab("two"));
+  // No session: the prompt of the selected scope is the one shown.
+  assert.deepEqual(sessionTabPresentation(kept, snapshot, "p", null).scope, scopeP);
+  assert.deepEqual(sessionTabPresentation(kept, snapshot, null, null).scope, chats);
+  assert.equal(sessionTabPresentation(kept, snapshot, "missing", null).scope, null);
+});
+
+test("what becomes the transient tab takes the place of the one that leaves; a kept tab stays where it is", () => {
+  const model = createSessionTabModel();
+  // A kept session, then one that is looked at, then another kept one after it.
+  let state = openSessionTab(openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"), "preview"), tab("three"));
+  const three = { ...snapshot, sessions: [...snapshot.sessions, ...["three", "four"].map(id => ({ ...snapshot.sessions[0], id, title: id, fullTitle: id }))] };
+  reconcileSessionTabModel(model, { ...state, active: tab("two") }, label);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), sessionNodeId(tab("two")), sessionNodeId(tab("three"))]);
+  assert.deepEqual(transient(model), [sessionNodeId(tab("two"))]);
+
+  // Another session is looked at: it is where the transient tab was, between the two kept ones.
+  state = openSessionTab({ ...state, active: tab("two") }, tab("four"), "preview");
+  reconcileSessionTabModel(model, state, label);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), sessionNodeId(tab("four")), sessionNodeId(tab("three"))]);
+  assert.deepEqual(transient(model), [sessionNodeId(tab("four"))]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionNodeId(tab("four")));
+  assert.ok(sessionTabAction(Actions.selectTab(sessionNodeId(tab("four"))), state, three, () => true));
+
+  // Kept: the same node, in the same place, no longer transient.
+  const node = model.getNodeById(sessionNodeId(tab("four")));
+  state = pinSessionTab(state, tab("four"));
+  reconcileSessionTabModel(model, state, label);
+  assert.equal(model.getNodeById(sessionNodeId(tab("four"))), node);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), sessionNodeId(tab("four")), sessionNodeId(tab("three"))]);
+  assert.deepEqual(transient(model), []);
+
+  // The next session looked at has no transient tab to take: it is added after the others.
+  state = openSessionTab(state, tab("two"), "preview");
+  reconcileSessionTabModel(model, state, label);
+  assert.deepEqual(strip(model).at(-1), sessionNodeId(tab("two")));
+  assert.deepEqual(transient(model), [sessionNodeId(tab("two"))]);
+});
+
+test("the prompt of a new session takes the transient tab from the session looked at, and gives it back", () => {
+  const model = createSessionTabModel();
+  let state = openSessionTab(openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"), "preview"), tab("three"));
+  state = { ...state, active: tab("two") };
+  reconcileSessionTabModel(model, { ...state, scope: scopeP }, label);
+  // The row of the project: the session that was looked at leaves, and the prompt is where it was.
+  state = closePreviewTab(state);
+  reconcileSessionTabModel(model, { ...state, scope: scopeP }, label);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), sessionDraftNodeId, sessionNodeId(tab("three"))]);
+  assert.deepEqual(transient(model), [sessionDraftNodeId]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionDraftNodeId);
+  assert.equal(shownDraftNodeId({ ...state, scope: scopeP }), sessionDraftNodeId);
+  // A session is looked at again: it takes the place of the prompt.
+  state = openSessionTab(state, tab("two"), "preview");
+  reconcileSessionTabModel(model, { ...state, scope: scopeP }, label);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), sessionNodeId(tab("two")), sessionNodeId(tab("three"))]);
+  assert.equal(model.getNodeById(sessionDraftNodeId), undefined);
+});
+
+test("a prompt that is kept has a tab of its own, where the transient one was, beside the prompts of other scopes", () => {
+  const model = createSessionTabModel();
+  const names = (draft: DraftTab) => draft.projectId === null ? "New chat" : "New session - Project";
+  let state: SessionTabs = { ...openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two")), active: null };
+  reconcileSessionTabModel(model, { ...state, scope: scopeP }, label, undefined, undefined, names);
+  model.doAction(Actions.moveNode(sessionDraftNodeId, pane(model).getId(), DockLocation.CENTER, 1, true));
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), sessionDraftNodeId, sessionNodeId(tab("two"))]);
+
+  // Kept: the transient prompt is gone, and the tab of the scope is in its place, shown.
+  state = openDraftTab(state, scopeP);
+  reconcileSessionTabModel(model, { ...state, scope: scopeP }, label, undefined, undefined, names);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("one")), draftNodeId(scopeP), sessionNodeId(tab("two"))]);
+  assert.deepEqual(transient(model), []);
+  const own = model.getNodeById(draftNodeId(scopeP)) as TabNode;
+  assert.deepEqual([own.getName(), own.isEnableClose(), own.isSelected()], ["New session - Project", true, true]);
+  assert.equal(shownDraftNodeId({ ...state, scope: scopeP }), draftNodeId(scopeP));
+
+  // The chats are selected: their prompt is the transient one, and the tab of the project stays.
+  reconcileSessionTabModel(model, { ...state, scope: chats }, label, undefined, undefined, names);
+  assert.ok(model.getNodeById(draftNodeId(scopeP)) && model.getNodeById(sessionDraftNodeId));
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionDraftNodeId);
+  // Kept as well: two prompts have their own tab. A session shown leaves both.
+  state = openDraftTab(state, chats);
+  reconcileSessionTabModel(model, { ...state, scope: chats }, label, undefined, undefined, names);
+  assert.equal((model.getNodeById(draftNodeId(chats)) as TabNode).getName(), "New chat");
+  reconcileSessionTabModel(model, { ...state, active: tab("one"), scope: scopeP }, label, undefined, undefined, names);
+  assert.ok(model.getNodeById(draftNodeId(scopeP)) && model.getNodeById(draftNodeId(chats)));
+  assert.equal(model.getNodeById(sessionDraftNodeId), undefined);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionNodeId(tab("one")));
+
+  // The dock selects, moves and closes the tab of a prompt as it does a session; an unknown one is refused.
+  const current = () => true;
+  assert.deepEqual(draftTabAction(Actions.selectTab(draftNodeId(scopeP)), state, snapshot, current), { kind: "select", draft: scopeP });
+  assert.deepEqual(draftTabAction(Actions.deleteTab(draftNodeId(chats)), state, snapshot, current), { kind: "close", draft: chats });
+  assert.equal(draftTabAction(Actions.selectTab(draftNodeId({ projectId: "other", path: "/o" })), state, snapshot, current), null);
+  assert.equal(draftTabAction(Actions.selectTab(draftNodeId(scopeP)), state, { ...snapshot, projects: [] }, current), null, "a prompt whose project is gone");
+  assert.equal(draftTabAction(Actions.selectTab(draftNodeId(scopeP)), state, snapshot, () => false), null);
+  assert.ok(sessionLayoutActionAllowed(model, Actions.selectTab(draftNodeId(scopeP)), state, snapshot, current));
+  assert.ok(sessionLayoutActionAllowed(model, Actions.moveNode(draftNodeId(scopeP), pane(model).getId(), DockLocation.RIGHT, -1, true), state, snapshot, current));
+  assert.equal(sessionLayoutActionAllowed(model, Actions.deleteTab(draftNodeId(scopeP)), state, snapshot, current), false, "closing is asked of the window");
+
+  // Closed: its tab goes, and the other prompt keeps its own.
+  state = closeDraftTab(state, scopeP);
+  reconcileSessionTabModel(model, { ...state, active: tab("one"), scope: scopeP }, label, undefined, undefined, names);
+  assert.equal(model.getNodeById(draftNodeId(scopeP)), undefined);
+  assert.ok(model.getNodeById(draftNodeId(chats)));
 });

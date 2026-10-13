@@ -35,11 +35,11 @@ cd ../../../site
 lunet build
 ```
 
-All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
+All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge (found on Windows, macOS and Linux; `CODEALTA_TEST_BROWSER` names another Chromium) and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
 
 Frontend test output is failure-focused, with totals and emitted diagnostics retained; use `npm run test:verbose` for every test name. Vite builds print warnings and errors, not the successful asset listing. The separate GitHub .NET summary is configured in `src/dotnet-releaser.toml` to omit passed/skipped details, not failures or totals; see `doc/development-guide.md`.
 
-Both frontend test scripts run at most two test files concurrently to bound headless Edge startup load. Browser fixtures use `browserTarget.ts` for guest-mode flags and `waitForBrowserPort`: a five-second wall-clock deadline that tolerates missing/partial port files and reports child exit, spawn errors and bounded stderr. Keep stderr piped, preserve owned-browser cleanup, and do not replace startup failures with blind retries or skips.
+Both frontend test scripts run at most two test files concurrently to bound headless Edge startup load. Browser fixtures use `browserTarget.ts` for guest-mode flags and `waitForBrowserPort`: a five-second wall-clock deadline that tolerates missing/partial port files and reports child exit, spawn errors and bounded stderr. Keep stderr piped, preserve owned-browser cleanup (`endBrowser`, not a command of one system such as `taskkill`), and do not replace startup failures with blind retries or skips.
 
 ### Debug or Release
 

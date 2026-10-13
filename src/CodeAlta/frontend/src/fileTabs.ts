@@ -7,7 +7,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * The tab of a terminal names the terminal; its project is empty for a terminal of no project, and its path
  * is the folder the terminal started in. The automations of the application have one tab, of no project
  * (`view: "automations"`), and so have the work items, the tasks and the plans of every project
- * (`view: "workItems"`), the issues and pull requests (`view: "issues"`), the canvases that plugins declare (`view: "canvases"`), and the user guide that ships with the application (`view: "documentation"`). The code editor also opens on the folder of a source plugin or of a skill, and on the folder of a
+ * (`view: "workItems"`), the issues and pull requests (`view: "issues"`), the canvases that plugins declare (`view: "canvases"`), the user guide that ships with the application (`view: "documentation"`), and the bookmarks of every project (`view: "bookmarks"`). The code editor also opens on the folder of a source plugin or of a skill, and on the folder of a
  * file that a link named and no project has: its tab names that folder where a tab names a project, and carries the name of the plugin, of the skill or of the folder.
  *
  * A canvas is a tab that a plugin provides (`view: "canvas"`). Its identity is the plugin, the canvas, the project or the
@@ -15,7 +15,7 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * shows before the plugin has started: the title (`name`) and the `icon`, kept up to date by the plugin, and `plugin`, the id
  * of the folder of the plugin package, which says where to rebuild it and open its source when it is not running.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues" | "canvases" | "canvas" | "documentation";
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues" | "canvases" | "canvas" | "documentation" | "bookmarks";
   terminalId?: string; name?: string; pluginKey?: string; canvasId?: string; sessionId?: string; key?: string; icon?: string; plugin?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
@@ -41,6 +41,9 @@ export const canvasesTab: FileTab = Object.freeze({ projectId: "", projectPath: 
 /** The tab of the user guide that ships with the application: there is one, whatever the project. */
 export const isDocumentationTab = (tab: FileTab) => tab.view === "documentation";
 export const documentationTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "documentation" });
+/** The tab of the bookmarks of every project, where they are found and managed: there is one, whatever the project. */
+export const isBookmarksTab = (tab: FileTab) => tab.view === "bookmarks";
+export const bookmarksTab: FileTab = Object.freeze({ projectId: "", projectPath: "", view: "bookmarks" });
 export const isCanvasTab = (tab: FileTab) => tab.view === "canvas";
 /** Which canvas a tab shows, and about what: the plugin and the canvas it declares, the project and the session when it has them, and its key. */
 export type CanvasTabIdentity = Readonly<{ pluginKey: string; canvasId: string; project?: Readonly<{ id: string; path: string }> | null; sessionId?: string | null; key?: string | null }>;
@@ -162,7 +165,7 @@ export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot):
   // The folder of a plugin or of a skill is not a project of the workspace: its editor says so itself when the folder is gone.
   // A canvas of the application lasts; one of a project or of a session lasts as long as they are in the space.
   const canvas = (tab: FileTab) => (tab.projectId === "" || resolveFileTab(snapshot, tab)) && (tab.sessionId === undefined || snapshot.sessions.some(session => session.id === tab.sessionId));
-  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
+  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isBookmarksTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
   const open = state.open.filter(lasting);
   const closed = state.closed.filter(lasting);
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
@@ -185,13 +188,21 @@ export function reopenTabKind(order: readonly TabKind[], sessionsClosed: number,
   return available("file") ? "file" : available("session") ? "session" : null;
 }
 
-export type TabPosition = Readonly<{ kind: "draft" } | { kind: TabKind; index: number }>;
-/** Next/previous tab over one ring: the new-session tab, the session tabs, then the tabs of projects. */
-export function cycleTab(sessions: number, files: number, current: TabPosition, delta: 1 | -1): TabPosition {
-  const count = 1 + sessions + files;
-  const at = current.kind === "draft" ? 0 : current.kind === "session" ? 1 + current.index : 1 + sessions + current.index;
-  const next = (at + delta + count) % count;
-  return next === 0 ? { kind: "draft" } : next <= sessions ? { kind: "session", index: next - 1 } : { kind: "file", index: next - 1 - sessions };
+export type TabPosition = Readonly<{ kind: "draft" } | { kind: TabKind | "prompt"; index: number }>;
+/**
+ * Next/previous tab over one ring: the new-session tab, the session tabs, the new-session prompts that have a tab of
+ * their own (`prompts`), then the tabs of projects. Without `transient` the ring has no new-session tab: the prompt of
+ * the selected scope is one of those that have their own.
+ */
+export function cycleTab(sessions: number, files: number, current: TabPosition, delta: 1 | -1, prompts = 0, transient = true): TabPosition {
+  const first = transient ? 1 : 0;
+  const count = first + sessions + prompts + files;
+  if (count === 0) return current;
+  const at = current.kind === "draft" ? 0 : current.kind === "session" ? first + current.index
+    : current.kind === "prompt" ? first + sessions + current.index : first + sessions + prompts + current.index;
+  const next = (at + delta + count) % count - first;
+  return next < 0 ? { kind: "draft" } : next < sessions ? { kind: "session", index: next }
+    : next < sessions + prompts ? { kind: "prompt", index: next - sessions } : { kind: "file", index: next - sessions - prompts };
 }
 
 type StoredTab = { projectId?: unknown; projectPath?: unknown; path?: unknown; view?: unknown; name?: unknown; pluginKey?: unknown; canvasId?: unknown; sessionId?: unknown; key?: unknown; icon?: unknown; plugin?: unknown };
@@ -216,6 +227,7 @@ function storedTab(value: unknown): { tab: FileTab; file: string | null } | null
   if (stored.view === "issues") return stored.projectId === "" && stored.projectPath === "" ? { tab: issuesTab, file: null } : null;
   if (stored.view === "canvases") return stored.projectId === "" && stored.projectPath === "" ? { tab: canvasesTab, file: null } : null;
   if (stored.view === "documentation") return stored.projectId === "" && stored.projectPath === "" ? { tab: documentationTab, file: null } : null;
+  if (stored.view === "bookmarks") return stored.projectId === "" && stored.projectPath === "" ? { tab: bookmarksTab, file: null } : null;
   if (stored.view === "canvas") { const tab = storedCanvasTab(stored); return tab ? { tab, file: null } : null; }
   if (!text(stored.projectId, 256) || !text(stored.projectPath, 4096)) return null;
   const project = { id: stored.projectId, path: stored.projectPath };

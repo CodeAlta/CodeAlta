@@ -32,10 +32,13 @@ See [Getting Started](https://codealta.github.io/docs/getting-started/) for requ
 
 CodeAlta Desktop brings together:
 
-- **Sessions & delegation**: create sessions from a project's **+**, choosing the agent, model and working folder; run agents in split panes, resume, queue, steer and delegate work.
+- **Sessions & delegation**: run agents in split panes; resume, queue, steer and delegate work.
+  In Desktop, `Enter` sends when idle and enqueues while busy; `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now (steers a busy turn).
+- **Fork & rewind**: branch a session from any turn and keep the original, or roll it back to an earlier prompt.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
 - **Work items**: review agent-proposed tasks and plans; start, defer or dismiss them.
+- **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues; start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.
 - **Canvases**: use interactive boards, checklists and custom tools beside your conversations.

@@ -73,6 +73,13 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     public double AddCost(string conversationId, double cost)
         => _totalCosts.AddOrUpdate(conversationId, cost, (_, total) => total + cost);
 
+    /// <summary>
+    /// Starts the cost of a forked conversation from what its source cost in all: the CLI goes on from the total of the
+    /// transcript it copies, also when it resumes it at an earlier entry (Claude Code 2.1.292).
+    /// </summary>
+    public void CopyCost(string sourceConversationId, string conversationId)
+        => _totalCosts[conversationId] = _totalCosts.GetValueOrDefault(sourceConversationId);
+
     /// <summary>Gets the processes that were started, in order.</summary>
     public IReadOnlyList<ClaudeCodeFakeProcess> Processes => [.. _processes];
 
@@ -116,7 +123,15 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     {
         _cli = cli;
         Launch = launch;
-        SessionId = FindOption("--session-id=") ?? FindOption("--resume=") ?? "fake-session";
+        // A fork is another conversation, which the CLI names itself.
+        ForksSession = launch.Arguments.Contains("--fork-session") && FindOption("--resume=") is not null;
+        ResumedAt = launch.Arguments.SkipWhile(static argument => argument != "--resume-session-at").Skip(1).FirstOrDefault();
+        SessionId = ForksSession ? Guid.NewGuid().ToString() : FindOption("--session-id=") ?? FindOption("--resume=") ?? "fake-session";
+        if (ForksSession)
+        {
+            cli.CopyCost(FindOption("--resume=")!, SessionId);
+        }
+
         LaunchPermissionMode = launch.Arguments.SkipWhile(static argument => argument != "--permission-mode").Skip(1).FirstOrDefault();
         PermissionMode = LaunchPermissionMode ?? cli.SettingsPermissionMode;
         if (cli.RefuseReasoningDisplay && launch.Arguments.Contains("--thinking-display"))
@@ -138,6 +153,24 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     public string SessionId { get; }
 
     public string? ResumedSessionId => FindOption("--resume=");
+
+    /// <summary>Gets a value indicating whether the process continues the resumed conversation as another one.</summary>
+    public bool ForksSession { get; }
+
+    /// <summary>Gets the entry of the transcript the resumed conversation is cut after, when one was given.</summary>
+    public string? ResumedAt { get; }
+
+    /// <summary>Gets the entries of the transcript this process wrote, in order: assistant messages and results of tools.</summary>
+    public IReadOnlyList<string> Entries => [.. _entries];
+
+    private readonly ConcurrentQueue<string> _entries = new();
+
+    private string NextEntry()
+    {
+        var uuid = Guid.NewGuid().ToString();
+        _entries.Enqueue(uuid);
+        return uuid;
+    }
 
     /// <summary>Gets the permission mode the process was started in, if any.</summary>
     public string? LaunchPermissionMode { get; }
@@ -390,6 +423,8 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         {
             ["type"] = "assistant",
             ["session_id"] = SessionId,
+            // Every entry of the transcript has an identifier; those of a subagent are not on the conversation.
+            ["uuid"] = parentToolUseId is null ? NextEntry() : Guid.NewGuid().ToString(),
             ["parent_tool_use_id"] = parentToolUseId,
             ["message"] = new JsonObject
             {
@@ -425,6 +460,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         {
             ["type"] = "user",
             ["session_id"] = SessionId,
+            ["uuid"] = parentToolUseId is null ? NextEntry() : Guid.NewGuid().ToString(),
             ["parent_tool_use_id"] = parentToolUseId,
             ["message"] = new JsonObject
             {
@@ -450,7 +486,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
             ["result"] = text,
             ["session_id"] = SessionId,
             // The cost is the one of the conversation so far, also in a process that resumed it.
-            ["total_cost_usd"] = _cli.AddCost(ResumedSessionId ?? SessionId, 0.01),
+            ["total_cost_usd"] = _cli.AddCost(ForksSession ? SessionId : ResumedSessionId ?? SessionId, 0.01),
             ["duration_ms"] = 42,
             ["modelUsage"] = _cli.ModelUsage?.Invoke() ?? new JsonObject { ["claude-test-1"] = new JsonObject { ["contextWindow"] = 200000 } },
         };

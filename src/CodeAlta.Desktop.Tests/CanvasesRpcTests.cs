@@ -224,8 +224,11 @@ public sealed class CanvasesRpcTests
         Assert.AreEqual("ok", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, before.Connection, [Invoke("r1", "where")])).Status);
         await page.NextAsync("rpc");
 
-        // A page that reloads watches again: the connection of the one before cannot be answered any more.
+        // A page that reloads watches again: the connection of the one before cannot be answered any more. The watch
+        // that replaces a page drops its connections once it has begun, and the new page is told of each one.
         var next = fixture.Watch();
+        var dropped = await next.NextAsync("rpcClosed");
+        Assert.AreEqual((opened.InstanceId, before.Connection, "page_gone"), (dropped.InstanceId, dropped.Connection, dropped.Reason));
         Assert.AreEqual("closed", fixture.Service.RpcSend(new(Epoch, opened.InstanceId, before.Connection, [Invoke("r2", "where")])).Status);
         await page.EndedAsync();
         var after = fixture.Service.RpcOpen(new(Epoch, opened.InstanceId));

@@ -1296,6 +1296,7 @@ public sealed class CopilotDirectProviderTests
             Assert.AreEqual("session-test", requestBody.GetProperty("prompt_cache_key").GetString());
             Assert.IsFalse(requestBody.GetProperty("store").GetBoolean());
             Assert.AreEqual("session-test", interactionId);
+            var sent = requestBody;
 
             var operation = response.Usage!.LastOperation!;
             Assert.AreEqual(12_057L, operation.InputTokens);
@@ -1303,6 +1304,43 @@ public sealed class CopilotDirectProviderTests
             Assert.AreEqual(2_392L, operation.CacheWriteTokens);
             Assert.AreEqual(0.04049, operation.Cost!.Value, 1e-9);
             Assert.AreEqual("AI credits", operation.CostUnit);
+
+            // A session that was forked gives the key of the session it comes from, and stays itself as an interaction.
+            _ = await executor.ExecuteTurnAsync(
+                new AgentTurnRequest
+                {
+                    Provider = provider,
+                    ProviderId = new ModelProviderId(provider.ProviderKey),
+                    SessionId = "session-fork",
+                    RunId = new AgentRunId("run-fork"),
+                    PromptCacheKey = "session-test",
+                    ModelId = "gpt-test",
+                    ModelInfo = new AgentModelInfo(
+                        "gpt-test",
+                        Provider: "github-copilot",
+                        Capabilities: new Dictionary<string, object?>
+                        {
+                            ["copilotEndpointKind"] = "Responses",
+                        }),
+                    Conversation =
+                    [
+                        new AgentConversationMessage(
+                            AgentConversationRole.User,
+                            [new AgentMessagePart.Text("test")]),
+                    ],
+                    Tools = [],
+                    State = new AgentSessionState
+                    {
+                        SessionId = "session-fork",
+                        ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+                        ProviderKey = "github-copilot",
+                        UpdatedAt = DateTimeOffset.UtcNow,
+                    },
+                },
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            Assert.AreEqual("session-test", requestBody.GetProperty("prompt_cache_key").GetString());
+            Assert.AreEqual("session-fork", interactionId);
+            Assert.AreEqual(sent.GetProperty("input").GetRawText(), requestBody.GetProperty("input").GetRawText());
         }
         finally
         {

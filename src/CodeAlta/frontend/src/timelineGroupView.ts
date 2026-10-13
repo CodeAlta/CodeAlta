@@ -4,6 +4,7 @@ import type { ReconciledRow } from "./reconcileTimeline";
 import type { TimelineImageReader, TimelineImageSource } from "./timelineImages";
 import type { TimelineGroup } from "./toolGroups";
 import type { ToolOutputs } from "./toolOutput";
+import type { BranchMode } from "./sessionBranch/branchPoints";
 
 export type HistorySources = ReadonlyMap<string, NonNullable<HistoryTimeline["sources"]>[number]>;
 
@@ -15,6 +16,8 @@ export type TimelineGroupProps = {
   echoImages: ReadonlyMap<string, TimelineImageSource>;
   readImages?: TimelineImageReader; toolOutputs?: ToolOutputs; canInspect: () => boolean;
   onOpenSource: (target: HistorySourceTarget) => void; onOpenTool: (key: string, origin: HTMLButtonElement) => void;
+  /** The records that are the prompt of a turn, by journal offset, and what opens the window of a fork or a rewind on one of them. */
+  promptKeys?: ReadonlySet<string>; onBranch?: (promptOffset: string, mode: BranchMode) => void;
 };
 
 const subject = (row: ReconciledRow) => row.source === "history" ? row.item : row.row;
@@ -41,13 +44,16 @@ export function sameTimelineGroup(previous: TimelineGroupProps, next: TimelineGr
   const before = previous.group, after = next.group;
   if (previous.sessionId !== next.sessionId || before.key !== after.key || before.tools !== after.tools || before.rows.length !== after.rows.length
     || previous.readImages !== next.readImages || previous.toolOutputs !== next.toolOutputs || previous.canInspect !== next.canInspect
-    || previous.onOpenSource !== next.onOpenSource || previous.onOpenTool !== next.onOpenTool) return false;
+    || previous.onOpenSource !== next.onOpenSource || previous.onOpenTool !== next.onOpenTool || previous.onBranch !== next.onBranch) return false;
+  // A window that grew has another set of prompts: a row is the same while it is still, or still not, one of them.
+  const promptsChanged = previous.promptKeys !== next.promptKeys;
   const sourcesChanged = previous.sources !== next.sources || previous.revision !== next.revision;
   const echoes = previous.echoImages.size > 0 || next.echoImages.size > 0;
   for (let index = 0; index < after.rows.length; index++) {
     const was = before.rows[index], now = after.rows[index];
     if (was.source !== now.source || was.key !== now.key || subject(was) !== subject(now)) return false;
     if (echoes && previous.echoImages.get(now.key)?.key !== next.echoImages.get(now.key)?.key) return false;
+    if (promptsChanged && now.source === "history" && previous.promptKeys?.has(now.item.key) !== next.promptKeys?.has(now.item.key)) return false;
     // A refresh of the history gives a new revision and new ranges: the row is the same while its own did not move.
     if (sourcesChanged && now.source === "history" && !sameSource(groupHistorySource(previous, now.item.key), groupHistorySource(next, now.item.key))) return false;
   }

@@ -73,11 +73,13 @@ The history and the flow do the same thing to a session (`SessionCatchUp`, `doc/
 | Case | What happens |
 | --- | --- |
 | A journal read in several chunks (64 MiB each) | One transaction per chunk: the writes stay short, whatever the size of the file. The largest journal of the author's profile is 1.5 GB |
-| The file is not the one the cursor belongs to (a header prepended, a file replaced, a shorter file, a state of another version of the facts) | `CatchUpResult.Restarted`: the session is read again from the start, the chunks are kept in memory (facts are small), and **one** transaction replaces the rows of the session, so the old numbers stay until the new ones are complete |
+| The file is not the one the cursor belongs to (a header prepended, a file replaced, a session rewound, a shorter file, a state of another version of the facts) | `CatchUpResult.Restarted`: the session is read again from the start, the chunks are kept in memory (facts are small), and **one** transaction replaces the rows of the session, so the old numbers stay until the new ones are complete |
 | The read is canceled (pause, stop, application closing) | It stops at a line end; what was read is saved with its cursor. The `journal` row then holds a length and a stamp of zero, so that it is never taken for a complete reading. A session that is read **again from its start** (the row above) saves nothing when it is canceled before its end: a part of the session does not take the place of all of it, the old numbers stay, and the next reading starts from the start again |
 | A session that has been quiet for an hour (`DeadAfter`) with a run that has no end | `InterruptOpenRuns` closes the run as interrupted, once: a session that is not running writes nothing more. The engine cannot tell a dead session from a run that waits for the user, so a later record of that run opens it again and takes the interruption back (`doc/statistics-facts.md`, "Interrupted") |
 | A session whose journal is not readable | It is skipped and counted (`StatisticsStatus.SkippedCount` and the first fifty with their reason); the job goes on. It is tried again when the journal changes, not at every look, and it stays counted at the following looks. `ResumeAsync` on a history that is done or stopped with skipped sessions ("Try again") tries them again as they are |
 | The file is replaced between two chunks of a session that is read again | The facts kept of the first file are dropped: the batch of a restarted reading holds the session from its start |
+| The session is a fork, or keeps what a rewind removed (its header has `forked_from.counted_from`) | The records it starts with are a copy of those of its source, where they are counted: they add nothing here. Only the records from `counted_from` on are facts of the session (`doc/statistics-facts.md`, "Forked and rewound sessions") |
+| The session was rewound | Its journal is replaced by a shorter one whose first line differs (`rewind_count`), also when it grows past the saved offset afterwards: it is the first row of this table again, and the facts of the removed turns leave the session. A signal of the session or the next look at the journals finds it |
 
 ## The history job
 
@@ -357,6 +359,7 @@ A cold disk was not measured. `dotnet test src -c Release --filter RealProfileHi
 ## Limits
 
 - The facts count what is in the journals (`doc/statistics-facts.md`, "Limits"). A session that was deleted before it was read cannot be counted.
+- A turn is counted in the session it was made in. A fork counts the turns made after it was created; the turns a rewind removes are counted in the session that keeps them, and nowhere once a rewind discarded them, though their provider was paid.
 - The spaces of a project are the ones it has today. A space has the chats too (a chat belongs to no project, and the Explorer shows it in every space); a project filter leaves them out.
 - The origin of a prompt filters prompts and runs; time and tokens of a quarter hour have no sender, and a result says so in `query.ignoredFilters`.
 - The sub-agents of a session are the sessions whose records name it as their parent. A session the statistics have not read yet (a history that starts later, a session created a second ago) is not in the tree until it is read.

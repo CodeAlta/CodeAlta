@@ -385,7 +385,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     instructionBundle.InstructionHash,
                     linkedCts.Token)
                 .ConfigureAwait(false);
-            await AppendUserMessageAsync(options.Input, runId, options.AskId, linkedCts.Token, options.SourceSessionId).ConfigureAwait(false);
+            await AppendUserMessageAsync(options.Input, runId, options.AskId, linkedCts.Token, options.SourceSessionId, options.IsProviderInitiated).ConfigureAwait(false);
 
             _state = _state with
             {
@@ -1451,6 +1451,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ProviderId = ProviderId,
             SessionId = SessionId,
             RunId = runId,
+            PromptCacheKey = _summary.ForkedFrom?.RootSessionId,
             ModelId = _summary.ModelId ?? _options.Model,
             ModelInfo = modelInfo,
             WorkingDirectory = _summary.ExecutionDirectory,
@@ -1543,7 +1544,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         };
     }
 
-    private async Task AppendUserMessageAsync(AgentInput input, AgentRunId runId, string? askId, CancellationToken cancellationToken, string? sourceSessionId = null)
+    private async Task AppendUserMessageAsync(AgentInput input, AgentRunId runId, string? askId, CancellationToken cancellationToken, string? sourceSessionId = null,
+        bool providerInitiated = false)
     {
         var message = new AgentConversationMessage(
             AgentConversationRole.User,
@@ -1563,7 +1565,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DateTimeOffset.UtcNow,
             runId,
             AgentContentKind.User,
-            $"user:{Guid.CreateVersion7()}",
+            // The message of a turn the provider started by itself is not one anyone wrote: its identifier says so, for
+            // what lists the prompts of a session as points to continue from.
+            $"{(providerInitiated ? AgentSessionTurn.ProviderPromptPrefix : "user:")}{Guid.CreateVersion7()}",
             null,
             RenderUserInput(input.Items),
             SerializeAgentInput(input),
@@ -1763,6 +1767,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             ProviderSessionId = response.ProviderSessionId ?? _state.ProviderSessionId,
             ProviderState = response.ProviderState ?? _state.ProviderState,
+            // The provider answered from the point the session was forked at or rewound to: it has taken it up.
+            ProviderBranch = null,
             Usage = effectiveUsage ?? _state.Usage,
             UpdatedAt = DateTimeOffset.UtcNow,
         };

@@ -55,6 +55,8 @@ export type TimelineItem = Readonly<{
   sourceSessionId?: string;
   /** The recorded result of a background job, shown as a compact card with its facts and output in a window. */
   jobResult?: JobResult;
+  /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
+  providerPrompt?: boolean;
 }>;
 
 /**
@@ -327,6 +329,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolExitCode: entry.tool?.exitCode,
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,
+    providerPrompt: category === "user" && entry.contentId?.startsWith("provider:") ? true : undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
   };
 }

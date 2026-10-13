@@ -12,6 +12,9 @@ namespace CodeAlta.Plugin.Statistics.Facts;
 /// <para>The definitions are those of the statistics proposal: a run goes from the first record that carries it to its
 /// <c>Idle</c> or <c>error</c>; requests and tokens come from the <c>UsageUpdated</c> records only; a tool call is counted
 /// when it starts and measured when it ends; a prompt belongs to the sender its provenance names.</para>
+/// <para>A session that starts with the turns of another one (a fork, or the session that keeps what a rewind removed) holds a
+/// copy of their records. Its header says from when its records are its own (<c>forked_from.counted_from</c>): the older ones
+/// were counted in the source session and add no fact here; only the choices in force are followed through them.</para>
 /// <para>Not thread-safe.</para>
 /// </remarks>
 internal sealed class SessionFactsReducer : IJournalRecordSink
@@ -114,6 +117,18 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             return;
         }
 
+        if (record is HeaderRecord { CountedFrom: { } countedFrom })
+        {
+            // The header is the first line of a journal: it is read before the records it tells apart.
+            (_state.Inherited ??= new InheritedRecordsState()).CountedFrom = countedFrom;
+        }
+
+        if (_state.Inherited is { } inherited && IsInherited(inherited, record, timestamp))
+        {
+            OnInheritedRecord(record);
+            return;
+        }
+
         _recordsInBatch = true;
         if (_state.FirstRecord is not { } first || timestamp < first)
         {
@@ -162,6 +177,75 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
                 break;
             case RunEndRecord end:
                 OnRunEnd(end, timestamp, run);
+                break;
+        }
+
+        if (!string.IsNullOrEmpty(record.Provider))
+        {
+            _state.Provider = StatisticsProviders.Fold(record.Provider);
+        }
+    }
+
+    // ----- the records of the session a fork was made from -----
+
+    // Tells whether a record is one the session inherited from its source: it is older than the time the header gives. A run is not
+    // cut in two by that time: it belongs whole to the session its first record belongs to, because the time of a record may be
+    // earlier than the one of the record before it.
+    private bool IsInherited(InheritedRecordsState inherited, JournalRecord record, DateTimeOffset timestamp)
+    {
+        if (record is HeaderRecord)
+        {
+            // The header of the source is never copied: the one a journal has is the one of its session.
+            return false;
+        }
+
+        var runId = record.RunId;
+        if (string.IsNullOrEmpty(runId))
+        {
+            return timestamp < inherited.CountedFrom;
+        }
+
+        // The run that is going first, then the last run of the source: the two cases of nearly every record.
+        if (FindOpenRun(runId) is not null)
+        {
+            return false;
+        }
+
+        if (inherited.Runs.LastIndexOf(runId) >= 0)
+        {
+            return true;
+        }
+
+        if (timestamp >= inherited.CountedFrom || IsClosed(runId))
+        {
+            return false;
+        }
+
+        inherited.Runs.Add(runId);
+        if (inherited.Runs.Count > SessionFactsState.MaxInheritedRuns)
+        {
+            inherited.Runs.RemoveAt(0);
+        }
+
+        return true;
+    }
+
+    // An inherited record adds no fact, opens no run and is not a record of the session. It is only followed for what the records
+    // that come after it are counted under: the provider, the model (and the name its provider reports for it), the effort and
+    // the agent prompt in force.
+    private void OnInheritedRecord(JournalRecord record)
+    {
+        switch (record)
+        {
+            case ModelChangedRecord changed:
+                OnModelChanged(changed);
+                break;
+            case UsageRecord { Operation: { } op } when !string.IsNullOrWhiteSpace(op.Model) && (HasTokens(op) || HasCost(op) || op.DurationMs is not null):
+                // The same requests that name the model in a session of its own.
+                ApplyReportedModel(op.Model);
+                break;
+            case SystemPromptRecord { AgentPromptId: { Length: > 0 } agentPrompt }:
+                _state.AgentPrompt = agentPrompt;
                 break;
         }
 
@@ -845,9 +929,8 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             return;
         }
 
-        var hasTokens = op.InputTokens is not null || op.OutputTokens is not null || op.CachedInputTokens is not null
-            || op.CacheReadTokens is not null || op.CacheWriteTokens is not null || op.ReasoningTokens is not null;
-        var hasCost = op.Cost is { } cost && double.IsFinite(cost) && cost >= 0;
+        var hasTokens = HasTokens(op);
+        var hasCost = HasCost(op);
         if (!hasTokens && !hasCost && op.DurationMs is null)
         {
             return;
@@ -863,17 +946,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         _lastOperation = op;
         if (!string.IsNullOrWhiteSpace(op.Model))
         {
-            if (_state.Model.Length > 0 && !string.Equals(_state.Model, op.Model, StringComparison.Ordinal))
-            {
-                Diagnostics.ModelRenamedByUsage++;
-                if (_state.ModelAliases.Count < 64)
-                {
-                    _state.ModelAliases[_state.Model] = op.Model;
-                }
-            }
-
-            // The model the provider says it used, not the alias that was chosen.
-            _state.Model = op.Model;
+            ApplyReportedModel(op.Model);
         }
 
         var model = CurrentModel();
@@ -946,6 +1019,27 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             run.LastCost = op.Cost;
             run.LastCostDuration = op.DurationMs;
         }
+    }
+
+    private static bool HasTokens(AgentOperationUsageSnapshot op)
+        => op.InputTokens is not null || op.OutputTokens is not null || op.CachedInputTokens is not null
+            || op.CacheReadTokens is not null || op.CacheWriteTokens is not null || op.ReasoningTokens is not null;
+
+    private static bool HasCost(AgentOperationUsageSnapshot op) => op.Cost is { } cost && double.IsFinite(cost) && cost >= 0;
+
+    // The model the provider says it used, not the alias that was chosen: the alias counts under that name from then on.
+    private void ApplyReportedModel(string model)
+    {
+        if (_state.Model.Length > 0 && !string.Equals(_state.Model, model, StringComparison.Ordinal))
+        {
+            Diagnostics.ModelRenamedByUsage++;
+            if (_state.ModelAliases.Count < 64)
+            {
+                _state.ModelAliases[_state.Model] = model;
+            }
+        }
+
+        _state.Model = model;
     }
 
     // ----- tool calls -----

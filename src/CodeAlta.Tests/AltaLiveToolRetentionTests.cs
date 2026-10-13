@@ -19,6 +19,8 @@ public sealed partial class AltaLiveToolTests
     [DataRow("request")]
     [DataRow("steer")]
     [DataRow("compact")]
+    [DataRow("fork")]
+    [DataRow("rewind")]
     [DataRow("set_agent")]
     [DataRow("abort")]
     [DataRow("reminder")]
@@ -408,7 +410,8 @@ public sealed partial class AltaLiveToolTests
         "skill" => ["skill", "activate", "synthetic", "--session", " target "],
         "notes-set" => ["notes", "set", "--stdin"],
         "notes-clear" => ["notes", "clear"],
-        "compact" or "abort" => ["session", route, " target "],
+        "compact" or "abort" or "fork" => ["session", route, " target "],
+        "rewind" => ["session", route, " target ", "--before", "1"],
         "set_agent" => ["session", route, " target ", "--prompt-id", "default"],
         _ => ["session", route, " target ", "--message", "synthetic"],
     };

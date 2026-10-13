@@ -20,12 +20,14 @@ internal sealed partial class WorkspaceService
     private readonly Func<OwnedProjectReferenceScope?, CancellationToken, Task<IReadOnlyList<OwnedPromptChoice>?>>? _draftPrompts;
     private readonly Func<string, string?, string, string, Task<bool>>? _renameSession;
     private readonly Func<string, string?, string, string, Task<string>>? _deleteSession;
+    private readonly Func<string, string, string, string, string, Task<OwnedSessionMoveResult>>? _moveSession;
     // One instance monitor makes catalog-affecting admission atomic. Workers keep
     // their own original tasks; no monitor is held over awaited work.
     private object _sessionGate => _importGate;
     private Task<WorkspaceCreateSessionResponse>? _sessionWork;
     private Task<WorkspaceRenameSessionResponse>? _renameWork;
     private Task<WorkspaceDeleteSessionResponse>? _deleteWork;
+    private Task<WorkspaceMoveSessionResponse>? _moveWork;
     private bool _sessionsClosed;
 
     internal WorkspaceService(CodeAltaHost host, string epoch, GitWorktreeService? worktrees = null) : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
@@ -38,6 +40,11 @@ internal sealed partial class WorkspaceService
         _draftPrompts = host.Commands.GetDraftPromptChoicesAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
+        _readTurns = host.Commands.ReadSessionTurnsAsync;
+        _readRecord = host.WorkspaceReads.ReadHistoryRecordAsync;
+        _forkSession = host.Commands.ForkSessionAsync;
+        _rewindSession = host.Commands.RewindSessionAsync;
+        _moveSession = host.Commands.MoveSessionAsync;
     }
 
     // Only catalogs: this read does not initialize a provider, create a session or confer send authority.
@@ -130,10 +137,14 @@ internal sealed partial class WorkspaceService
         Task? create;
         Task? rename;
         Task? delete;
-        lock (_sessionGate) { _sessionsClosed = true; create = _sessionWork; rename = _renameWork; delete = _deleteWork; }
+        Task? branch;
+        Task? move;
+        lock (_sessionGate) { _sessionsClosed = true; create = _sessionWork; rename = _renameWork; delete = _deleteWork; branch = _branchWork; move = _moveWork; }
         if (create is not null) await create.ConfigureAwait(false);
         if (rename is not null) await rename.ConfigureAwait(false);
         if (delete is not null) await delete.ConfigureAwait(false);
+        if (branch is not null) await branch.ConfigureAwait(false);
+        if (move is not null) await move.ConfigureAwait(false);
     }
 
     private async Task CreateSessionOwnedAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor provider,

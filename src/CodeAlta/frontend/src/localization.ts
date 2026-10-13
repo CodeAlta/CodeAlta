@@ -2,7 +2,9 @@ import { landingMessages } from "./landing/messages";
 import { statisticsMessages } from "./statistics/messages";
 import { worktreeMessages } from "./worktrees/messages";
 import { documentationMessages } from "./documentation/messages";
+import { bookmarkMessages } from "./bookmarks/messages";
 import { storageMessages } from "./storage/messages";
+import { sessionBranchMessages } from "./sessionBranch/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -63,7 +65,7 @@ export const messages = dictionary({
   "Times this prompt is sent": ["Veces que se envía este prompt", "Nombre d’envois de ce prompt", "So oft wird dieser Prompt gesendet", "このプロンプトを送信する回数", "此提示词的发送次数"],
   "Steer the running turn": ["Orientar el turno en curso", "Orienter le tour en cours", "Laufenden Durchgang steuern", "実行中のターンを誘導", "引导正在运行的回合"],
   "Enqueue for the next turn": ["Encolar para el siguiente turno", "Mettre en file pour le prochain tour", "Für den nächsten Durchgang einreihen", "次のターン用にキューへ追加", "排队到下一回合"],
-  "Enqueue this prompt for the next turn (Enter)": ["Encolar este prompt para el siguiente turno (Intro)", "Mettre ce prompt en file pour le prochain tour (Entrée)", "Diesen Prompt für den nächsten Durchgang einreihen (Eingabe)", "このプロンプトを次のターン用にキューへ追加 (Enter)", "将此提示词排队到下一回合 (Enter)"],
+  "Enqueue this prompt for the next turn ({shortcut})": ["Encolar este prompt para el siguiente turno ({shortcut})", "Mettre ce prompt en file pour le prochain tour ({shortcut})", "Diesen Prompt für den nächsten Durchgang einreihen ({shortcut})", "このプロンプトを次のターン用にキューへ追加 ({shortcut})", "将此提示词排队到下一回合 ({shortcut})"],
   "Enqueue": ["Encolar", "Mettre en file", "Einreihen", "キューに追加", "排队"],
   "Browse agent prompts": ["Explorar instrucciones del agente", "Parcourir les instructions de l’agent", "Agenten-Prompts durchsuchen", "エージェントプロンプトを参照", "浏览智能体提示词"],
   "Agent, model and reasoning for the next Send": ["Agente, modelo y razonamiento para el próximo envío", "Agent, modèle et raisonnement pour le prochain envoi", "Agent, Modell und Denkaufwand für das nächste Senden", "次の送信のエージェント、モデル、推論", "下次发送的智能体、模型和推理"],
@@ -357,7 +359,7 @@ export const messages = dictionary({
   "Development build": ["Compilación de desarrollo", "Build de développement", "Entwicklungs-Build", "開発ビルド", "开发版本"],
   "Mode": ["Modo", "Mode", "Modus", "モード", "模式"],
   "Reminders: {count} active": ["Recordatorios: {count} activos", "Rappels : {count} actifs", "Erinnerungen: {count} aktiv", "リマインダー: 有効 {count} 件", "提醒：{count} 个活动"],
-  "Steer the running turn with this prompt (Ctrl+Enter)": ["Dirigir el turno en curso con este prompt (Ctrl+Intro)", "Orienter le tour en cours avec ce prompt (Ctrl+Entrée)", "Laufenden Durchgang mit diesem Prompt steuern (Strg+Eingabe)", "このプロンプトで実行中のターンを誘導 (Ctrl+Enter)", "用此提示引导正在运行的轮次 (Ctrl+Enter)"],
+  "Steer the running turn with this prompt": ["Dirigir el turno en curso con este prompt", "Orienter le tour en cours avec ce prompt", "Laufenden Durchgang mit diesem Prompt steuern", "このプロンプトで実行中のターンを誘導", "用此提示引导正在运行的轮次"],
   "Compact the conversation (Ctrl+F11)": ["Compactar la conversación (Ctrl+F11)", "Compacter la conversation (Ctrl+F11)", "Unterhaltung komprimieren (Strg+F11)", "会話をコンパクト化 (Ctrl+F11)", "压缩对话 (Ctrl+F11)"],
   "Stop the running turn": ["Detener el turno en curso", "Arrêter le tour en cours", "Laufenden Durchgang stoppen", "実行中のターンを停止", "停止正在运行的轮次"],
   "CodeAlta restarted. Reload the window to continue.": ["CodeAlta se reinició. Recarga la ventana para continuar.", "CodeAlta a redémarré. Rechargez la fenêtre pour continuer.", "CodeAlta wurde neu gestartet. Fenster neu laden, um fortzufahren.", "CodeAlta が再起動しました。続行するにはウィンドウを再読み込みしてください。", "CodeAlta 已重新启动。请重新加载窗口以继续。"],
@@ -496,6 +498,7 @@ export const messages = dictionary({
   "Start the session and send (Enter)": ["Iniciar la sesión y enviar (Enter)", "Démarrer la session et envoyer (Entrée)", "Sitzung starten und senden (Enter)", "セッションを開始して送信 (Enter)", "开始会话并发送 (Enter)"],
   "Send options": ["Opciones de envío", "Options d’envoi", "Sendeoptionen", "送信オプション", "发送选项"],
   "Send now": ["Enviar ahora", "Envoyer maintenant", "Jetzt senden", "今すぐ送信", "立即发送"],
+  "Send now (steer)": ["Enviar ahora (dirigir)", "Envoyer maintenant (orienter)", "Jetzt senden (steuern)", "今すぐ送信 (誘導)", "立即发送 (引导)"],
   "Enqueue until idle": ["Encolar hasta que esté inactiva", "Mettre en file jusqu’à l’inactivité", "Einreihen bis zum Leerlauf", "アイドルになるまでキューに追加", "排队直到空闲"],
   "Sent as soon as the session is idle.": ["Se envía en cuanto la sesión queda inactiva.", "Envoyé dès que la session est inactive.", "Wird gesendet, sobald die Sitzung im Leerlauf ist.", "セッションがアイドルになり次第送信します。", "会话空闲后立即发送。"],
   "Sent immediately.": ["Se envía de inmediato.", "Envoyé immédiatement.", "Wird sofort gesendet.", "すぐに送信します。", "立即发送。"],
@@ -863,6 +866,30 @@ export const messages = dictionary({
   "Session actions for {title}": ["Acciones de sesión para {title}", "Actions de session pour {title}", "Sitzungsaktionen für {title}", "{title} のセッション操作", "{title} 的会话操作"],
   "Open session": ["Abrir sesión", "Ouvrir la session", "Sitzung öffnen", "セッションを開く", "打开会话"],
   "Rename…": ["Renombrar…", "Renommer…", "Umbenennen…", "名前を変更…", "重命名…"],
+  "Move to Project": ["Mover al proyecto", "Déplacer vers le projet", "In Projekt verschieben", "プロジェクトへ移動", "移动到项目"],
+  "Move the selected session to another project.": ["Mueve la sesión seleccionada a otro proyecto.", "Déplace la session sélectionnée vers un autre projet.", "Verschiebt die ausgewählte Sitzung in ein anderes Projekt.", "選択したセッションを別のプロジェクトへ移動します。", "将所选会话移动到其他项目。"],
+  "Move to project…": ["Mover al proyecto…", "Déplacer vers le projet…", "In Projekt verschieben…", "プロジェクトへ移動…", "移动到项目…"],
+  "Move {title} to another project": ["Mover {title} a otro proyecto", "Déplacer {title} vers un autre projet", "{title} in ein anderes Projekt verschieben", "{title} を別のプロジェクトへ移動", "将 {title} 移动到其他项目"],
+  "The sessions it started in this project move with it. Each keeps working in its git worktree when the other project is a checkout of the same repository.": ["Las sesiones que inició en este proyecto se mueven con ella. Cada una sigue trabajando en su worktree de git cuando el otro proyecto es un checkout del mismo repositorio.", "Les sessions qu’elle a lancées dans ce projet sont déplacées avec elle. Chacune continue de travailler dans son worktree git quand l’autre projet est un checkout du même dépôt.", "Die Sitzungen, die sie in diesem Projekt gestartet hat, werden mitverschoben. Jede arbeitet weiter in ihrem Git-Worktree, wenn das andere Projekt ein Checkout desselben Repositorys ist.", "このプロジェクトで開始したセッションも一緒に移動します。移動先が同じリポジトリのチェックアウトであれば、各セッションは引き続き自身の git worktree で作業します。", "它在此项目中启动的会话会随之移动。当另一个项目是同一仓库的检出时，每个会话继续在其 git worktree 中工作。"],
+  "Projects to move the session to": ["Proyectos a los que mover la sesión", "Projets vers lesquels déplacer la session", "Projekte, in die die Sitzung verschoben werden kann", "セッションの移動先プロジェクト", "可将会话移动到的项目"],
+  "No other project matches this name or path.": ["Ningún otro proyecto coincide con este nombre o ruta.", "Aucun autre projet ne correspond à ce nom ou chemin.", "Kein anderes Projekt entspricht diesem Namen oder Pfad.", "この名前またはパスに一致する他のプロジェクトはありません。", "没有其他项目匹配此名称或路径。"],
+  "No other project in this space.": ["No hay otro proyecto en este espacio.", "Aucun autre projet dans cet espace.", "Kein anderes Projekt in diesem Bereich.", "このスペースに他のプロジェクトはありません。", "此空间中没有其他项目。"],
+  "Move here": ["Mover aquí", "Déplacer ici", "Hierher verschieben", "ここへ移動", "移动到此处"],
+  "Moved to {project}.": ["Movida a {project}.", "Déplacée vers {project}.", "Nach {project} verschoben.", "{project} へ移動しました。", "已移动到 {project}。"],
+  "The session moved, but:": ["La sesión se movió, pero:", "La session a été déplacée, mais :", "Die Sitzung wurde verschoben, aber:", "セッションは移動しましたが、次の問題があります:", "会话已移动，但是："],
+  "The session moved, but the refreshed list does not show it in {project} yet. Refresh to check.": ["La sesión se movió, pero la lista actualizada aún no la muestra en {project}. Actualiza para comprobarlo.", "La session a été déplacée, mais la liste actualisée ne l’affiche pas encore dans {project}. Actualisez pour vérifier.", "Die Sitzung wurde verschoben, aber die aktualisierte Liste zeigt sie noch nicht in {project}. Aktualisieren Sie zur Prüfung.", "セッションは移動しましたが、更新した一覧にはまだ {project} に表示されていません。更新して確認してください。", "会话已移动，但刷新后的列表尚未在 {project} 中显示它。请刷新以检查。"],
+  "Moving a session requires an owned host.": ["Mover una sesión requiere un host propio.", "Déplacer une session nécessite un hôte propre.", "Das Verschieben einer Sitzung erfordert einen eigenen Host.", "セッションの移動には所有ホストが必要です。", "移动会话需要自有主机。"],
+  "The session or its project changed. Refresh before moving it.": ["La sesión o su proyecto cambió. Actualiza antes de moverla.", "La session ou son projet a changé. Actualisez avant de la déplacer.", "Die Sitzung oder ihr Projekt hat sich geändert. Aktualisieren Sie vor dem Verschieben.", "セッションまたはそのプロジェクトが変更されました。移動する前に更新してください。", "会话或其项目已更改。请先刷新再移动。"],
+  "The project to move the session to is gone or archived. Refresh and choose another one.": ["El proyecto de destino ya no existe o está archivado. Actualiza y elige otro.", "Le projet de destination n’existe plus ou est archivé. Actualisez et choisissez-en un autre.", "Das Zielprojekt existiert nicht mehr oder ist archiviert. Aktualisieren Sie und wählen Sie ein anderes.", "移動先のプロジェクトは存在しないか、アーカイブされています。更新して別のプロジェクトを選んでください。", "目标项目已不存在或已归档。请刷新并选择其他项目。"],
+  "The session already belongs to this project.": ["La sesión ya pertenece a este proyecto.", "La session appartient déjà à ce projet.", "Die Sitzung gehört bereits zu diesem Projekt.", "セッションはすでにこのプロジェクトに属しています。", "会话已属于此项目。"],
+  "The host changed. Reload before moving the session.": ["El host cambió. Recarga antes de mover la sesión.", "L’hôte a changé. Rechargez avant de déplacer la session.", "Der Host hat sich geändert. Laden Sie neu, bevor Sie die Sitzung verschieben.", "ホストが変更されました。セッションを移動する前に再読み込みしてください。", "主机已更改。移动会话前请重新加载。"],
+  "The host is closing; the session was not moved.": ["El host se está cerrando; la sesión no se movió.", "L’hôte se ferme ; la session n’a pas été déplacée.", "Der Host wird geschlossen; die Sitzung wurde nicht verschoben.", "ホストを終了中のため、セッションは移動されませんでした。", "主机正在关闭；会话未移动。"],
+  "Another change of sessions is in progress. Try again when it ends.": ["Hay otro cambio de sesiones en curso. Vuelve a intentarlo cuando termine.", "Une autre modification de sessions est en cours. Réessayez quand elle sera terminée.", "Eine andere Änderung von Sitzungen läuft. Versuchen Sie es erneut, wenn sie beendet ist.", "別のセッション変更が進行中です。終了してから再度お試しください。", "另一项会话更改正在进行。请在其结束后重试。"],
+  "The session, or a session it started, is running or has background tasks. Move it once it is idle.": ["La sesión, o una sesión que inició, se está ejecutando o tiene tareas en segundo plano. Muévela cuando esté inactiva.", "La session, ou une session qu’elle a lancée, est en cours ou a des tâches en arrière-plan. Déplacez-la une fois inactive.", "Die Sitzung oder eine von ihr gestartete Sitzung läuft oder hat Hintergrundaufgaben. Verschieben Sie sie, sobald sie untätig ist.", "セッション、またはそれが開始したセッションが実行中か、バックグラウンドタスクを持っています。アイドルになってから移動してください。", "该会话或其启动的会话正在运行或有后台任务。请在其空闲后再移动。"],
+  "The session, or a session it started, waits for an answer. Answer it before moving the session.": ["La sesión, o una sesión que inició, espera una respuesta. Respóndela antes de mover la sesión.", "La session, ou une session qu’elle a lancée, attend une réponse. Répondez avant de déplacer la session.", "Die Sitzung oder eine von ihr gestartete Sitzung wartet auf eine Antwort. Antworten Sie, bevor Sie die Sitzung verschieben.", "セッション、またはそれが開始したセッションが回答を待っています。セッションを移動する前に回答してください。", "该会话或其启动的会话正在等待回答。移动会话前请先回答。"],
+  "The session has unfinished or queued work. Let it finish before moving the session.": ["La sesión tiene trabajo sin terminar o en cola. Deja que termine antes de mover la sesión.", "La session a du travail inachevé ou en file d’attente. Laissez-le se terminer avant de déplacer la session.", "Die Sitzung hat unerledigte oder eingereihte Arbeit. Lassen Sie sie abschließen, bevor Sie die Sitzung verschieben.", "セッションに未完了またはキュー内の作業があります。完了してからセッションを移動してください。", "该会话有未完成或排队中的工作。请等其完成后再移动会话。"],
+  "Some sessions it started moved, but not the session itself. Check both projects before trying again.": ["Algunas sesiones que inició se movieron, pero no la sesión en sí. Revisa ambos proyectos antes de volver a intentarlo.", "Certaines sessions qu’elle a lancées ont été déplacées, mais pas la session elle-même. Vérifiez les deux projets avant de réessayer.", "Einige von ihr gestartete Sitzungen wurden verschoben, die Sitzung selbst nicht. Prüfen Sie beide Projekte, bevor Sie es erneut versuchen.", "開始したセッションの一部は移動しましたが、セッション自体は移動していません。再試行する前に両方のプロジェクトを確認してください。", "它启动的部分会话已移动，但会话本身未移动。重试前请检查两个项目。"],
+  "The move may have completed. Refresh and inspect the session; no retry will be sent.": ["Es posible que el movimiento se haya completado. Actualiza e inspecciona la sesión; no se enviará ningún reintento.", "Le déplacement a peut-être abouti. Actualisez et vérifiez la session ; aucune nouvelle tentative ne sera envoyée.", "Das Verschieben wurde möglicherweise abgeschlossen. Aktualisieren und prüfen Sie die Sitzung; es wird kein erneuter Versuch gesendet.", "移動は完了している可能性があります。更新してセッションを確認してください。再試行は送信されません。", "移动可能已完成。请刷新并检查会话；不会发送重试。"],
   "Do not ask again": ["No volver a preguntar", "Ne plus demander", "Nicht mehr fragen", "今後は確認しない", "不再询问"],
   "Delete this session?": ["¿Eliminar esta sesión?", "Supprimer cette session ?", "Diese Sitzung löschen?", "このセッションを削除しますか？", "删除此会话？"],
   "Its history is deleted and cannot be restored. The files of the project are kept.": ["Su historial se elimina y no se puede restaurar. Los archivos del proyecto se conservan.", "Son historique est supprimé et ne peut pas être restauré. Les fichiers du projet sont conservés.", "Ihr Verlauf wird gelöscht und kann nicht wiederhergestellt werden. Die Dateien des Projekts bleiben erhalten.", "履歴は削除され、復元できません。プロジェクトのファイルは残ります。", "其历史记录将被删除且无法恢复。项目文件会保留。"],
@@ -1152,6 +1179,7 @@ export const messages = dictionary({
   "Loading providers…": ["Cargando proveedores…", "Chargement des fournisseurs…", "Anbieter werden geladen…", "プロバイダーを読み込み中…", "正在加载提供商…"],
   "Provider models": ["Modelos del proveedor", "Modèles du fournisseur", "Anbietermodelle", "プロバイダーのモデル", "提供商模型"],
   "Search models": ["Buscar modelos", "Rechercher des modèles", "Modelle suchen", "モデルを検索", "搜索模型"],
+  "Models shown in the model list of the prompt": ["Modelos visibles en la lista de modelos del prompt", "Modèles affichés dans la liste des modèles du prompt", "Angezeigte Modelle in der Modellliste des Prompts", "プロンプトのモデル一覧に表示するモデル数", "提示词模型列表中显示的模型数"],
   "Choose a model": ["Elegir un modelo", "Choisir un modèle", "Modell auswählen", "モデルを選択", "选择模型"],
   "Save provider connection changes before listing models.": ["Guarda los cambios de conexión del proveedor antes de listar modelos.", "Enregistrez les changements de connexion du fournisseur avant de lister les modèles.", "Speichern Sie die Verbindungsänderungen des Anbieters, bevor Sie Modelle auflisten.", "モデルを一覧表示する前にプロバイダーの接続設定の変更を保存してください。", "列出模型前请保存提供程序连接设置的更改。"],
   "Name, ID or description": ["Nombre, ID o descripción", "Nom, ID ou description", "Name, ID oder Beschreibung", "名前、ID、説明", "名称、ID 或描述"],
@@ -1447,7 +1475,7 @@ export const messages = dictionary({
   "{count} canceled": ["{count} canceladas", "{count} annulé(s)", "{count} abgebrochen", "{count} キャンセル", "{count} 已取消"],
   "Modified files": ["Archivos modificados", "Fichiers modifiés", "Geänderte Dateien", "変更されたファイル", "已修改文件"],
   "Image read": ["Imagen leída", "Image lue", "Bild gelesen", "読み取った画像", "已读取的图像"],
-  "Enter to send · Shift+Enter for a new line · Ctrl+Enter to steer": ["Enter para enviar · Shift+Enter nueva línea · Ctrl+Enter para dirigir", "Enter pour envoyer · Shift+Enter nouvelle ligne · Ctrl+Enter pour orienter", "Enter zum Senden · Shift+Enter für neue Zeile · Ctrl+Enter zum Steuern", "Enter で送信 · Shift+Enter で改行 · Ctrl+Enter で実行を誘導", "Enter 发送 · Shift+Enter 换行 · Ctrl+Enter 引导运行"],
+  "Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)": ["Enter para enviar o encolar si está ocupado · Shift+Enter nueva línea · {shortcut} para enviar ahora (dirigir)", "Enter pour envoyer ou mettre en file si occupé · Shift+Enter nouvelle ligne · {shortcut} pour envoyer maintenant (orienter)", "Enter zum Senden oder Einreihen bei laufendem Durchgang · Shift+Enter für neue Zeile · {shortcut} zum sofortigen Senden (steuern)", "Enter で送信、実行中はキューに追加 · Shift+Enter で改行 · {shortcut} で今すぐ送信 (誘導)", "Enter 发送，忙碌时加入队列 · Shift+Enter 换行 · {shortcut} 立即发送 (引导)"],
   "Cancel transfer": ["Cancelar transferencia", "Annuler le transfert", "Übertragung abbrechen", "転送をキャンセル", "取消转移"],
   "Session configuration": ["Configuración de la sesión", "Configuration de la session", "Sitzungskonfiguration", "セッション設定", "会话配置"],
   "Agent prompt": ["Instrucciones del agente", "Instructions de l’agent", "Agenten-Prompt", "エージェントプロンプト", "智能体提示词"],
@@ -1878,6 +1906,7 @@ export const messages = dictionary({
   "Find in folder": ["Buscar en la carpeta", "Rechercher dans le dossier", "Im Ordner suchen", "フォルダー内を検索", "在文件夹中查找"],
   "Files": ["Archivos", "Fichiers", "Dateien", "ファイル", "文件"],
   "Close others": ["Cerrar los demás", "Fermer les autres", "Andere schließen", "他を閉じる", "关闭其他"],
+  "Close to the right": ["Cerrar a la derecha", "Fermer à droite", "Rechts schließen", "右側を閉じる", "关闭右侧"],
   "Close saved": ["Cerrar los guardados", "Fermer les fichiers enregistrés", "Gespeicherte schließen", "保存済みを閉じる", "关闭已保存"],
   "Close all": ["Cerrar todo", "Tout fermer", "Alle schließen", "すべて閉じる", "全部关闭"],
   "Keep open": ["Mantener abierto", "Garder ouvert", "Geöffnet lassen", "開いたままにする", "保持打开"],
@@ -2342,6 +2371,8 @@ export const messages = dictionary({
   ...worktreeMessages,
   ...documentationMessages,
   ...storageMessages,
+  ...sessionBranchMessages,
+  ...bookmarkMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

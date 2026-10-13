@@ -43,6 +43,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     public string DatabasePath => _database.DatabasePath;
 
+    public ApplicationDatabase Database => _database;
+
     public async IAsyncEnumerable<AgentSessionCacheProjection> ListSessionsAsync(
         AgentSessionCacheProjectionContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)

@@ -18,6 +18,7 @@ const live = (text: string): SessionDisplayView => ({ sessionId: "session", revi
   transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0" });
 
 const stable = { sessionId: "session", canInspect: () => true, onOpenSource: () => {}, onOpenTool: () => {} };
+const stableBranch = () => {};
 const revision = { sessionId: "session", length: "100", lastWriteUtcTicks: "5" } as NonNullable<TimelineGroupProps["revision"]>;
 function groups(entries: Entry[], view: SessionDisplayView | null, extra: Partial<TimelineGroupProps> = {}): TimelineGroupProps[] {
   return groupTimelineTools(reconcileTimeline(entries, view), entries)
@@ -54,6 +55,16 @@ test("a group is rendered again when a row, its place in the journal or its imag
   assert.equal(sameTimelineGroup(placed, { ...prompt, revision, sources: sources("1", "12") }), false);
   assert.equal(sameTimelineGroup(placed, { ...prompt, revision: { ...revision, length: "200" }, sources: sources("1", "9") }), false);
   assert.equal(sameTimelineGroup(placed, prompt), false);
+  // The prompts a session can be forked from are worked out again for each window: a row is the same while it is still, or still not, one of them.
+  // They are named by their journal offset: the key of a row changes when the live view shows the same text.
+  const key = "1";
+  assert.notEqual(prompt.group.rows[0].key, key);
+  const offered = { ...prompt, promptKeys: new Set([key]), onBranch: stableBranch };
+  assert.equal(sameTimelineGroup(offered, { ...offered, promptKeys: new Set([key, "99"]) }), true);
+  assert.equal(sameTimelineGroup(offered, { ...offered, promptKeys: new Set(["99"]) }), false);
+  assert.equal(sameTimelineGroup(offered, { ...offered, promptKeys: undefined }), false);
+  assert.equal(sameTimelineGroup(offered, { ...offered, onBranch: () => {} }), false);
+  assert.equal(sameTimelineGroup({ ...tools, promptKeys: new Set([key]) }, { ...tools, promptKeys: new Set(["99"]) }), true);
   // The images of a prompt being sent are compared by what they are, not by the map that holds them.
   const images = (key: string) => new Map([[prompt.group.rows[0].key, { key }]]) as unknown as TimelineGroupProps["echoImages"];
   assert.equal(sameTimelineGroup({ ...prompt, echoImages: images("one") }, { ...prompt, echoImages: images("one") }), true);

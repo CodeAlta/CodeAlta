@@ -1164,14 +1164,96 @@ The summarizer is an ordinary provider turn executed through the same turn execu
 
 A summary request is an operation of the session, and the provider bills it. `AgentCompactionSummarizer` tells the session what each request used as soon as it answers (a compaction can make several: chunks, a shrink pass, the reduction of an oversized anchor, and it can fail after some of them). The session records it as a `UsageUpdated` update whose last operation has the initiator `compaction` and whose window stays the one of the conversation, so that the turn statistics, `alta session metrics` and the usage window count the request once and the context meter does not move. The completion update repeats that operation, and its details carry the totals of the summary requests (`summaryInputTokens`, `summaryCachedInputTokens`, `summaryCacheWriteTokens`, `summaryOutputTokens`, `summaryCost`, `summaryCostUnit`) beside `summaryPromptInputTokens`, which is the estimate made before the requests. A compaction that is planned again asks for a summary again: `summaryCallCount` and `summaryPromptInputTokens` add up the requests of every planning attempt, those that reduce an oversized anchor included, so that they describe the requests whose usage was recorded. `AgentTokenEstimator` never takes an operation of initiator `compaction` for the size of the prompt. Activated CodeAlta-managed skills can be rehydrated into composed instructions after compaction so skill guidance survives without duplicating current context.
 
+## Fork and rewind
+
+A session can be continued from an earlier point in two ways. A **fork** is a new session that starts with the turns of
+another one up to a point; that one goes on as it was. A **rewind** removes from a session the turn of a point and every
+turn after it. Both are operations on journals: no provider is called, and nothing in the working folder is touched (the
+files that removed turns changed are not restored; the journal holds bounded diffs, not what could restore them).
+
+**Points.** A turn is the records of one run, from the first record that carries its run id (the model-selection and
+system-prompt records of a run precede its prompt). A point is the start of a turn, or the end of the last complete
+record, and it is named by the **run id** of the turn it precedes, never by a count or a position. `AgentJournalTurnReader`
+reads the turns of a journal (`FileSystemAgentSessionStore.ReadTurnsAsync`, `SessionRuntimeService.ReadSessionTurnsAsync`):
+it reads a record by its two ends only (`AgentJournalRecordText`: the discriminators in the first 160 bytes, the shared
+fields in the last 512), so a scan costs the reading of the file whatever the size of a record, holds one read buffer, and
+does not hold the journal gate while it reads. Nothing of it is cached: on a journal of 233 MiB with 400 turns, one
+record of 24 MiB among them, the turns are read in about 30 ms, and the whole session is forked in about 100 ms (an SSD,
+October 2026). A turn that runs is never part of a fork and cannot be removed: the point after the last turn of a
+session that runs is the start of the turn in progress. A turn says who started it: the session of an agent
+(`SourceSessionId`), the answer to a question (`AskId`), or the provider by itself (`StartedByProvider`: the content
+identifier of such a prompt starts with `provider:` instead of `user:`); a frontend offers the prompts a person wrote
+as points to continue from, and hands only those back to its composer.
+
+**Fork** (`SessionRuntimeService.ForkSessionAsync`, `SessionViewJournalStore.ForkAsync`,
+`FileSystemAgentSessionStore.CommitForkAsync`). The journal of the new session is written beside its final place and
+renamed, which is the commit point:
+
+- a header line of its own, then the records of the source before the point, copied by `AgentJournalBranchWriter` as
+  bytes with two changes: the session id among the fields a record ends with, and the paths of the attachments of the
+  source, which name the attachment folder of the fork (the files those records name are copied, as clones where the
+  filesystem has them). What a record says is not read or rewritten, so what the model is sent again from the fork is
+  what it was sent from the source. A record larger than 16 MiB is passed through and keeps its attachment paths;
+- the four metadata snapshots of the source (header, view state, summary, state) are left out: a summary inherits its
+  lineage from the ones before it, so those of another session must not precede the ones of the fork;
+- then a summary, a state and a local state for the fork. The state is **the last one written before the point**, so
+  that compaction, loaded skills and usage are those of that moment by construction. The local state carries the choices
+  of the source (provider, model, effort, agent prompt, permission mode) and none of its queued prompts.
+
+The source is not written and may run. The fork is a stored session: no provider is started, and it is attached when it
+is first used. Without a title it is named after its source, "<title> (fork)", then "(fork 2)" for the next fork of
+that session or for a fork of the fork, so that the forks of one session are told apart in a list. It is not a child of its source: `ParentSessionId` stays what the caller gives (none by default), and where
+it comes from is recorded apart, in `AgentSessionSummary.ForkedFrom` (`AgentSessionForkOrigin`: the source, the session at
+the start of the chain of forks, the title of the source, the number of turns kept, the run of the point, the time) and
+as `forked_from` in the header.
+
+**The first request of a fork reads what its source cached.** Three things make it so, and
+`SessionForkRewindTests.Fork_ContinuesFromThePoint_WithTheRequestOfItsSource` pins them:
+
+- the conversation it sends starts with the same messages, which the byte copy guarantees;
+- its instructions are the same text: the only part of the composed instructions that depends on the session, the name of
+  its scratchpad file, is taken from the session at the start of the chain of forks (`ForkedFrom.RootSessionId`). A fork
+  that is given a parent or another folder has other instructions, and its first request is not read from the cache;
+- `AgentTurnRequest.PromptCacheKey` is the id of that same session, which the providers that route by a key send in the
+  place of the session id (see [providers](providers.md)).
+
+**Rewind** (`SessionRuntimeService.RewindSessionAsync`, `SessionViewJournalStore.RewindAsync`,
+`FileSystemAgentSessionStore.CommitRewindAsync`). The session must be idle: no run, no queue drain, no queued prompt, no
+permission or question waiting, no background command or task. Its attachment is retired first, as for a deletion, so
+that nothing of the conversation held in memory is written afterwards and the next prompt replays the journal. The
+journal is replaced by one rename: the records before the point, then a summary, a state (the last one written before the
+point) and the local state. The session keeps its id, its title and its local choices. The header is written again with
+`rewind_count`, and `AgentSessionSummary.RewindCount` counts the rewinds: a reader that follows a journal from an offset
+it remembers (the statistics) recognizes a journal by its first line and starts again, and a view that holds what it read
+of the conversation (a pane of the desktop application) reads it again when the count changes.
+
+By default the session as it was before the rewind is **kept as a session of its own**, titled "<title> (before
+rewind)", created as a fork of kind `Rewind` that holds every turn: nothing is lost, and the removed turns stay counted
+in the statistics. Its `ForkedFrom.CountedFrom` is the start of the first removed turn: its records older than that are
+those of the rewound session, which are counted there. Without it (`KeepRemovedTurns = false`) what is removed is gone.
+
+**Providers that keep the conversation.** The state a fork or a rewound session starts with keeps the provider state of
+the point and carries `AgentSessionState.ProviderBranch` (`Fork` or `Rewind`, whether the point is the end of the
+conversation, and the provider state at the end of the source). A provider that is sent the whole conversation with each
+request needs nothing of it. One that keeps the conversation on its side takes it up from the point at its next start
+(see "Fork and rewind" of the Claude Code provider). `AgentSession` removes the marker with the first answer. A state
+written for another provider, before the session changed provider, is not handed over: the session starts that provider
+anew, from the conversation of CodeAlta.
+
+Outcomes are statuses, not exceptions (`SessionBranchOutcome.Status`): `ok`, `session_missing`, `session_archived`,
+`turn_not_found`, `turn_running`, `session_in_use`, `interaction_pending`, `queue_pending`, `background_work`,
+`session_changed` (the journal changed between the read of its turns and the commit), `unsupported_format`, `io_failed`.
+
 ## Persistence model
 
 Agent-runtime session journals contain replayable normalized history plus raw state records:
 
-- `local.sessionSummary` for session summary metadata;
+- `local.sessionSummary` for session summary metadata, with the lineage of a fork (`forkedFrom`) and the count of the
+  rewinds (`rewindCount`);
 - `local.sessionState` for agent runtime replay state;
 - `local.compactionCheckpoint` for compaction outcomes;
-- `codealta.sessionHeader` and `codealta.sessionState` for legacy session-view/session-view metadata.
+- `codealta.sessionHeader` and `codealta.sessionState` for legacy session-view/session-view metadata; the header of a
+  fork has `forked_from`, and the header of a session that was rewound has `rewind_count`.
 
 The runtime reads journals to restore recoverable sessions, session history, usage, modified-file summaries, activated-skill state, parent/sub-session lineage, provider/model/reasoning selections, and the selected agent prompt id. Metadata-only recovery paths use the SQLite projection cache when healthy, but history/resume reads continue to replay JSONL. Unknown recovered agent prompt ids fall back to the default agent prompt. The frontend stores only view/prompt state outside the journal.
 

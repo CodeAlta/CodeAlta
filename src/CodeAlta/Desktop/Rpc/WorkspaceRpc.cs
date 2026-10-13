@@ -206,15 +206,27 @@ internal sealed partial class WorkspaceService
                 projectId is null ? null : projects.FirstOrDefault(project => project.Id == projectId));
             var title = DisplayText(sourceTitle, ref shortened);
             var fullTitle = DisplayTextBounded(sourceTitle, 4096, ref shortened);
+            string? forkedFrom = null, forkedTitle = null, forkKind = null;
+            var forkTurns = 0;
+            if (session.ForkedFrom is { } origin && ValidLineageId(origin.SessionId))
+            {
+                forkedFrom = origin.SessionId;
+                forkedTitle = string.IsNullOrWhiteSpace(origin.Title) ? null : DisplayText(origin.Title, ref shortened);
+                forkKind = origin.Kind == CodeAlta.Agent.Runtime.AgentSessionForkKind.Rewind ? "rewind" : "fork";
+                forkTurns = Math.Max(0, origin.TurnCount);
+            }
+
             var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
                 + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0)
-                + (worktreePath?.Length ?? 0) + (worktreeRoot?.Length ?? 0) + (worktreeName?.Length ?? 0));
+                + (worktreePath?.Length ?? 0) + (worktreeRoot?.Length ?? 0) + (worktreeName?.Length ?? 0)
+                + (forkedFrom?.Length ?? 0) + (forkedTitle?.Length ?? 0) + 24);
             if (cost > remaining) break;
             remaining -= cost;
             displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
                 session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
-                automationId, worktreePath, worktreeRoot, worktreeName, worktreeMissing));
+                automationId, worktreePath, worktreeRoot, worktreeName, worktreeMissing,
+                forkedFrom, forkedTitle, forkKind, forkTurns, Math.Max(0, session.RewindCount)));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -270,4 +282,9 @@ internal sealed record WorkspaceProject(string Id, string Name, string Path, boo
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
     DateTimeOffset? CreatedAt, int? MessageCount = null, string? AutomationId = null,
-    string? WorktreePath = null, string? WorktreeRoot = null, string? WorktreeName = null, bool WorktreeMissing = false);
+    string? WorktreePath = null, string? WorktreeRoot = null, string? WorktreeName = null, bool WorktreeMissing = false,
+    // Where a session that starts with the turns of another one comes from: "fork", or "rewind" for the session that
+    // keeps what a rewind removed. Lineage only: the session is not a child of that one.
+    string? ForkedFromSessionId = null, string? ForkedFromTitle = null, string? ForkKind = null, int ForkTurnCount = 0,
+    // The number of times the session was rewound: a pane that shows it reads its conversation again when it changes.
+    int RewindCount = 0);

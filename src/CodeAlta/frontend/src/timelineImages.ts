@@ -107,8 +107,9 @@ export function createTimelineImageCache(invoke: Invoke, limits: { maximumEntrie
       return failed;
     }
   }
-  function load(request: ImageRequest): Promise<TimelineImageState> {
-    const key = JSON.stringify([request.expectedEpoch, request.sessionId, request.offset, request.index]);
+  const cacheKey = (request: ImageRequest, rewinds: number) => JSON.stringify([request.expectedEpoch, request.sessionId, rewinds, request.offset, request.index]);
+  function load(request: ImageRequest, rewinds: number): Promise<TimelineImageState> {
+    const key = cacheKey(request, rewinds);
     const known = peek(key);
     if (known) return Promise.resolve(known);
     let pending = loading.get(key);
@@ -119,11 +120,14 @@ export function createTimelineImageCache(invoke: Invoke, limits: { maximumEntrie
     return pending;
   }
   return {
-    /** The reader of one session's images under one host epoch. */
-    reader(expectedEpoch: string, sessionId: string): TimelineImageReader {
-      return offset => ({ key: JSON.stringify([expectedEpoch, sessionId, offset]),
-        peek: index => peek(JSON.stringify([expectedEpoch, sessionId, offset, index])),
-        load: index => load({ expectedEpoch, sessionId, offset, index }) });
+    /**
+     * The reader of one session's images under one host epoch. `rewinds` is the number of times the session was
+     * rewound: a rewind writes its journal again, and an offset then names another record than the one kept here.
+     */
+    reader(expectedEpoch: string, sessionId: string, rewinds = 0): TimelineImageReader {
+      return offset => ({ key: JSON.stringify([expectedEpoch, sessionId, rewinds, offset]),
+        peek: index => peek(cacheKey({ expectedEpoch, sessionId, offset, index }, rewinds)),
+        load: index => load({ expectedEpoch, sessionId, offset, index }, rewinds) });
     },
     /** Entries and URL characters currently kept. */
     usage: () => ({ entries: entries.size, characters }),

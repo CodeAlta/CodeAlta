@@ -2,7 +2,7 @@ import type { WorkspaceProject } from "#neoastra";
 import { Fragment, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
-import { ProjectRowActions, type ProjectRowAuthority } from "./ProjectRowActions";
+import { ProjectRowActions, type ProjectRowAuthority, type ProjectRowDrop } from "./ProjectRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
 
 /** What the Explorer remembers and shows of its scopes: which are open, which projects are favorites. */
@@ -47,14 +47,17 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, actions, children, activity, renaming, asking, editor, changes, terminals, tree, head }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, editor, changes, terminals, tree, head, drop }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
   /** How many of the projects, from the first, are favorites: they are listed under a title of their own. */
   favorites?: number;
   selectedId: string | null;
+  /** A row was pressed: its scope is selected, and the prompt of a new session of it is shown. The row is not opened or closed: its chevron does that. */
   onSelect: (id: string | null) => void;
+  /** A row was double-clicked: the prompt of a new session of its scope is given a tab of its own. */
+  onKeep?: (id: string | null) => void;
   canRename: boolean;
   renameBusy: boolean;
   onRename: () => void;
@@ -75,6 +78,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   children?: ReactNode;
   /** What stands between the chats and the projects: the title of the projects and their filter. */
   head?: ReactNode;
+  /** What makes the row of a project a place a dragged session is dropped on. */
+  drop?: (project: WorkspaceProject) => ProjectRowDrop | undefined;
 }) {
   const { t } = useShellLanguage();
   const [folded, setFolded] = useState<{ id: string | null } | null>(null);
@@ -86,12 +91,13 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     if (tree) tree.toggle(id);
     else if (id === selectedId) setFolded(open(id) ? { id } : null);
   }
-  // The row of the selected scope also opens and closes it; the owner opens a scope that becomes the selected one.
+  // A row selects its scope, as the row of a session with sub-agents selects the session: only the chevron and the
+  // arrow keys open and close it. Without a tree the selected scope is the one open, so another one starts open.
   function select(id: string | null) {
-    if (id === selectedId) toggle(id); else setFolded(null);
+    if (id !== selectedId) setFolded(null);
     onSelect(id);
   }
-  const twist = (id: string | null) => <span className="tree-twist" onClick={event => { event.stopPropagation(); toggle(id); }}>
+  const twist = (id: string | null) => <span className="tree-twist" onClick={event => { event.stopPropagation(); toggle(id); }} onDoubleClick={event => event.stopPropagation()}>
     <AppIcon name="chevronDown" size={12} className={open(id) ? "tree-chevron expanded" : "tree-chevron"} /></span>;
   // The sessions of the selected scope stay in the page while it is closed: what is being typed there is kept.
   const branch = (id: string | null) => id === selectedId ? <li className="project-session-branch" hidden={!open(id)}>{children}{tree?.after?.(id)}</li>
@@ -101,10 +107,10 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     const editing = !!editor?.open(project.id);
     const changing = !!changes?.open(project.id);
     const running = terminals?.count(project.id) ?? 0;
-    return <Fragment key={project.id}><ProjectRowActions project={project} authority={actions}
+    return <Fragment key={project.id}><ProjectRowActions project={project} authority={actions} drop={drop?.(project)}
       favorite={tree ? { value: favorite, set: value => tree.setFavorite(project, value) } : undefined}>
       <button type="button" title={`${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
-        data-scope={project.id} onClick={() => select(project.id)}>
+        data-scope={project.id} onClick={() => select(project.id)} onDoubleClick={() => onKeep?.(project.id)}>
         {twist(project.id)}
         <span className="project-icon" data-file-tone={project.archived ? "muted" : "gold"}><AppIcon name={project.archived ? "archive" : open(project.id) ? "open" : "folder"} size={15} /></span>
         <strong>{project.name}</strong>{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
@@ -139,7 +145,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   return <>
     <ul className="nav-list project-root-list" aria-label={t("Chats")} onKeyDown={event => rowKey(event, toggle)}>
       <li className="project-action-row" onContextMenu={event => { if (sessions) { event.preventDefault(); setOtherMenu(true); } }}>
-        <button type="button" aria-pressed={selectedId === null} aria-expanded={open(null)} data-scope="" onClick={() => select(null)}>
+        <button type="button" aria-pressed={selectedId === null} aria-expanded={open(null)} data-scope="" onClick={() => select(null)} onDoubleClick={() => onKeep?.(null)}>
           {twist(null)}<span className="project-icon" data-file-tone="teal"><AppIcon name="chat" size={15} /></span><strong>{t("Chats")}</strong>{activity?.(null)}
         </button>
         {sessions && <button ref={otherTrigger} type="button" className="icon-button project-actions-trigger" aria-label={t("Actions for {title}", { title: t("Chats") })}

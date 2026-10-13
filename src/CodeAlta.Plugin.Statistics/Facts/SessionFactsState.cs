@@ -39,6 +39,9 @@ internal sealed class SessionFactsState
     /// <summary>The number of runs closed for a session that went quiet that are remembered, so that a run that goes on is opened again.</summary>
     public const int MaxSettledRuns = 4;
 
+    /// <summary>The number of runs of the source of a fork that are remembered, so that a late record of one is not taken for a run of the fork.</summary>
+    public const int MaxInheritedRuns = 32;
+
     /// <summary>Gets or sets the version of the facts this state belongs to.</summary>
     public int Version { get; set; } = CurrentVersion;
 
@@ -123,6 +126,12 @@ internal sealed class SessionFactsState
     /// <summary>Gets or sets the hashes of the prompt identifiers already taken from the state records, oldest first.</summary>
     public List<ulong> SeenPrompts { get; set; } = [];
 
+    /// <summary>
+    /// Gets or sets what tells the records a session that starts with the turns of another one (a fork, or the session that keeps
+    /// what a rewind removed) inherited from the records that are its own. Null for a session that is not one: every record is its own.
+    /// </summary>
+    public InheritedRecordsState? Inherited { get; set; }
+
     /// <summary>Makes an independent copy of the state, so that a catch-up that is not saved leaves the saved one as it was.</summary>
     /// <returns>The copy.</returns>
     public SessionFactsState Clone() => FromUtf8Json(ToUtf8Json());
@@ -165,6 +174,24 @@ internal sealed class SessionFactsState
             return new SessionFactsState { Version = 0 };
         }
     }
+}
+
+/// <summary>
+/// The records a session holds of the session it was forked from. They are counted in that session, not in this one.
+/// </summary>
+internal sealed class InheritedRecordsState
+{
+    /// <summary>
+    /// Gets or sets the time the records of the session are its own from (<c>forked_from.counted_from</c> of its header): a record
+    /// that is older is one of the source session.
+    /// </summary>
+    public DateTimeOffset CountedFrom { get; set; }
+
+    /// <summary>
+    /// Gets or sets the identifiers of the last runs of the source session, oldest first: a run is counted whole in the session its
+    /// first record belongs to, so a record of one of these runs is inherited whatever its time.
+    /// </summary>
+    public List<string> Runs { get; set; } = [];
 }
 
 /// <summary>A run that has not ended.</summary>

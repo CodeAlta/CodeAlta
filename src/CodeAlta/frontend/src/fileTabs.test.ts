@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, bookmarksTab, isBookmarksTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
   skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
@@ -257,6 +257,19 @@ test("next and previous tab walk one ring: the new-session tab, the sessions, th
   assert.deepEqual(cycleTab(1, 0, { kind: "session", index: 0 }, 1), { kind: "draft" });
 });
 
+test("the prompts that have a tab of their own are in the ring, after the sessions; the prompt of the selected scope is there once", () => {
+  // The transient prompt, a session, two prompts with their own tab, a file.
+  assert.deepEqual(cycleTab(1, 1, { kind: "session", index: 0 }, 1, 2), { kind: "prompt", index: 0 });
+  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 0 }, 1, 2), { kind: "prompt", index: 1 });
+  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 1 }, 1, 2), { kind: "file", index: 0 });
+  assert.deepEqual(cycleTab(1, 1, { kind: "file", index: 0 }, 1, 2), { kind: "draft" });
+  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 0 }, -1, 2), { kind: "session", index: 0 });
+  // The selected scope has its own tab: there is no transient prompt to stop at.
+  assert.deepEqual(cycleTab(1, 1, { kind: "file", index: 0 }, 1, 2, false), { kind: "session", index: 0 });
+  assert.deepEqual(cycleTab(1, 0, { kind: "session", index: 0 }, -1, 1, false), { kind: "prompt", index: 0 });
+  assert.deepEqual(cycleTab(0, 0, { kind: "prompt", index: 0 }, 1, 1, false), { kind: "prompt", index: 0 });
+});
+
 test("an editor tab is labeled with its project and marks unsaved edits in every language; a changes tab holds none", () => {
   for (const locale of locales) {
     const render = (tab: FileTab, dirty: boolean) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
@@ -287,6 +300,24 @@ test("the work items have one tab, of no project, that outlives the projects and
     const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
       createElement(FileTabLabel, { tab: workItemsTab, project: "", dirty: false })));
     assert.ok(html.includes(translate(locale, "Work items")), html);
+  }
+});
+
+test("the bookmarks have one tab, of no project, that outlives the projects and is kept for the next start", () => {
+  assert.deepEqual(bookmarksTab, { projectId: "", projectPath: "", view: "bookmarks" });
+  assert.ok(isBookmarksTab(bookmarksTab) && !isBookmarksTab(workItemsTab) && !isWorkItemsTab(bookmarksTab) && !isEditorTab(bookmarksTab));
+  const state = openFileTab(openFileTab(emptyFileTabs(), editor()), bookmarksTab);
+  assert.equal(state.active, bookmarksTab);
+  assert.equal(openFileTab(state, { ...bookmarksTab }).open.length, 2, "Asked again, the one that is open is shown.");
+  assert.deepEqual(reconcileFileTabs(state, { ...catalog, projects: [] }), { open: [bookmarksTab], active: bookmarksTab, closed: [] });
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(restoreFileTabs(() => stored), { ...state, closed: [] });
+  assert.deepEqual(restoreFileTabs(() => JSON.stringify({ version: 1, open: [{ projectId: "p", projectPath: "/p", view: "bookmarks" }], active: null })), emptyFileTabs());
+  for (const locale of locales) {
+    const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: () => assert.fail("rendering must not dispatch") } },
+      createElement(FileTabLabel, { tab: bookmarksTab, project: "", dirty: false })));
+    assert.ok(html.includes(translate(locale, "Bookmarks")), html);
   }
 });
 
