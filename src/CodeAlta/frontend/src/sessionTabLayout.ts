@@ -1,6 +1,6 @@
 import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action, type Node as LayoutNode } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { draftKey, draftTabLimit, draftTabOf, hasDraftTab, isPreviewTab, openSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, selectedTab, sessionTabLimit, tabKey,
+import { draftKey, draftTabLimit, draftTabOf, hasDraftTab, isPreviewTab, openSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, selectedTab, sessionTabLimit, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs } from "./sessionTabs";
 import { emptyFileTabs, fileNodeId, fileTabLimit, isChangesTab, isTerminalTab, type FileTab, type FileTabs } from "./fileTabs";
 
@@ -14,22 +14,27 @@ export const draftNodeId = (draft: DraftTab) => `draft:${draftKey(draft)}`;
 /**
  * The tabs as the dock shows them: the tabs of the window, and `scope`, the scope whose new-session prompt is the one
  * shown when no session is. That prompt is in the tab of its own when its scope has one, in the transient one otherwise.
+ * With `single` the sessions share one tab: the session shown or that prompt, and nothing in it is transient.
  */
-export type SessionTabView = SessionTabs & Readonly<{ scope?: DraftTab | null }>;
+export type SessionTabView = SessionTabs & Readonly<{ scope?: DraftTab | null; single?: boolean }>;
 /** The node that shows the new-session prompt when no session is shown: the tab of the scope, or the transient one. */
 export const shownDraftNodeId = (state: SessionTabView) => state.scope && hasDraftTab(state, state.scope) ? draftNodeId(state.scope) : sessionDraftNodeId;
 
 // Project App's selection synchronously: its persistence effect can lag a render.
 // Never rebind an invalid formerly active identity to a reused session ID.
 // A selected session that has no tab yet is looked at: it takes the transient tab, unless it is opened to be kept.
+// With a single tab (`single`) the selected session is the only one open, and the prompt shown without one leaves none.
 export function sessionTabPresentation(state: SessionTabs, snapshot: WorkspaceSnapshot | undefined,
   projectId: string | null, sessionId: string | null, mode: SessionTabMode = "preview"): SessionTabView {
-  if (!snapshot) return { ...state, active: null };
+  const single = mode === "single";
+  // While the catalog is not read the tabs stay what they are: nothing says yet which session is shown.
+  if (!snapshot) return single ? { ...state, active: null, single } : { ...state, active: null };
+  const shape = (view: SessionTabView): SessionTabView => single ? { ...singleSessionTab(view), single } : view;
   const valid = reconcileSessionTabs(state, snapshot);
   const scope = draftTabOf(snapshot, projectId);
-  if (state.active?.sessionId === sessionId && !resolveSessionTab(snapshot, state.active)) return { ...valid, active: null, scope };
+  if (state.active?.sessionId === sessionId && !resolveSessionTab(snapshot, state.active)) return shape({ ...valid, active: null, scope });
   const selected = selectedTab(snapshot, projectId, sessionId);
-  return { ...(selected ? openSessionTab(valid, selected, mode) : { ...valid, active: null }), scope };
+  return shape({ ...(selected ? openSessionTab(valid, selected, mode) : { ...valid, active: null }), scope });
 }
 
 export function createSessionTabModel() {
@@ -61,7 +66,8 @@ const noFiles = emptyFileTabs();
 // One tab is transient: the session that is looked at, or the new-session prompt of the selected scope. What becomes
 // the transient tab takes the place of the one that leaves, in its pane and at its position, as the preview tab of a
 // code editor does; so does the prompt that is given a tab of its own. Nodes say whether they are transient in their
-// `config`, which is how the one that leaves is found.
+// `config`, which is how the one that leaves is found. The single tab of the sessions is replaced the same way: the
+// session or the prompt that takes it is where the one that leaves was.
 export function reconcileSessionTabModel(model: Model, state: SessionTabView, label: (tab: SessionTab | null) => string, files: FileTabs = noFiles,
   fileLabel: (file: FileTab) => string = file => file.view, draftLabel: (draft: DraftTab) => string = () => label(null)) {
   const open = state.open.slice(0, sessionTabLimit);
@@ -96,7 +102,7 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
   for (const tab of open) {
     const id = sessionNodeId(tab);
     const name = label(tab);
-    const preview = isPreviewTab(state, tab);
+    const preview = !!state.single || isPreviewTab(state, tab);
     const node = model.getNodeById(id);
     if (!node) {
       const at = preview ? place() : { pane: home(), index: -1 };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { closeDraftTab, closePreviewTab, closeSessionTab, draftTabLimit, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit } from "./sessionTabs";
+import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftTabLimit, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit, singleSessionTab } from "./sessionTabs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionTabLabel } from "./SessionTabStrip";
@@ -196,4 +196,60 @@ test("the transient tab and the tabs of prompts follow the catalog, and are kept
   const odd = JSON.stringify({ version: 1, open: [tab("one")], active: tab("one"), preview: tab("two"),
     drafts: [{ projectId: "p", path: "/p" }, { projectId: 7, path: "/x" }, "text", { projectId: "p", path: "/p" }] });
   assert.deepEqual(restoreSessionTabs(() => odd), { open: [tab("one")], active: tab("one"), closed: [], drafts: [{ projectId: "p", path: "/p" }] });
+});
+
+test("with a single tab the session that is opened takes the place of the one that was there", () => {
+  const first = openSessionTab(emptySessionTabs(), tab("one"), "single");
+  assert.deepEqual(first, { open: [tab("one")], active: tab("one"), closed: [] });
+  assert.equal(openSessionTab(first, tab("one"), "single"), first, "the session that is shown, opened again, changes nothing");
+  // The session that leaves is not a closed tab: it was replaced, as the one of a transient tab is.
+  const second = openSessionTab(first, tab("two"), "single");
+  assert.deepEqual(second, { open: [tab("two")], active: tab("two"), closed: [] });
+  assert.equal(isPreviewTab(second, tab("two")), false, "nothing is transient");
+  // Closed, it leaves no tab, and is the tab that can be opened again.
+  const closed = closeSessionTab(second, tab("two"));
+  assert.deepEqual(closed, { open: [], active: null, closed: [tab("two")] });
+  assert.deepEqual(openSessionTab(closed, closed.closed.at(-1)!, "single"), second);
+  // What is kept for the next start is what a window with one kept tab keeps.
+  let stored = "";
+  assert.ok(persistSessionTabs(value => { stored = value; }, second));
+  assert.deepEqual(JSON.parse(stored), { version: 1, open: [tab("two")], active: tab("two") });
+});
+
+test("a single tab keeps the session shown of the tabs that were open, and neither a transient tab nor the tab of a prompt", () => {
+  const project = { projectId: "p", path: "/p" };
+  // A kept session, a kept chat that is the one shown, a session that is looked at, and the prompt of the project.
+  const several = { ...openDraftTab(openSessionTab(openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("global", null)), tab("two"), "preview"), project),
+    active: tab("global", null) };
+  const single = singleSessionTab(several);
+  assert.deepEqual(single, { open: [tab("global", null)], active: tab("global", null), closed: [], preview: null, drafts: [] });
+  assert.equal(singleSessionTab(single), single, "the same state once it has a single tab");
+  assert.equal(openSessionTab(single, tab("global", null), "single"), single);
+  // Opening a session among several tabs leaves that one.
+  assert.deepEqual(openSessionTab(several, tab("one"), "single"), { ...single, open: [tab("one")], active: tab("one") });
+  // The prompt of a new session is the one shown: no session has a tab.
+  assert.deepEqual(singleSessionTab({ ...several, active: null }), { ...single, open: [], active: null });
+  // A state that had neither a transient tab nor a prompt keeps its shape, and so does what is stored of it.
+  const plain = openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"));
+  assert.deepEqual(singleSessionTab(plain), { open: [tab("two")], active: tab("two"), closed: [] });
+  const one = openSessionTab(emptySessionTabs(), tab("one"));
+  assert.equal(singleSessionTab(one), one);
+  assert.equal(singleSessionTab(closeSessionTab(one, tab("one"))).open.length, 0);
+  let stored = "";
+  assert.ok(persistSessionTabs(value => { stored = value; }, single));
+  assert.deepEqual(JSON.parse(stored), { version: 1, open: [tab("global", null)], active: tab("global", null) });
+
+  // Several tabs again: the tab that was the single one is a kept tab, and the next session looked at is beside it.
+  const again = openSessionTab(single, tab("two"), "preview");
+  assert.deepEqual(again.open, [tab("global", null), tab("two")]);
+  assert.ok(isPreviewTab(again, tab("two")) && !isPreviewTab(again, tab("global", null)));
+});
+
+test("the sessions that keep a pane without a tab are the named ones the catalog lists, but the one shown", () => {
+  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "global", "one", "missing"], "two"), [tab("one"), tab("global", null)]);
+  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "two"], "one"), [tab("two")]);
+  assert.deepEqual(backgroundSessionTabs(catalog, [], null), []);
+  // A session listed twice, or under a project the catalog does not have, is not one the window can show.
+  assert.deepEqual(backgroundSessionTabs({ ...catalog, sessions: [...catalog.sessions, catalog.sessions[0]] }, ["one", "two"], null), [tab("two")]);
+  assert.deepEqual(backgroundSessionTabs({ ...catalog, projects: [] }, ["one", "global"], null), [tab("global", null)]);
 });

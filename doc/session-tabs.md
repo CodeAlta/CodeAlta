@@ -171,6 +171,56 @@ only when a session of it is shown, so that the session is in view.
 - The tab keys go through these tabs too, after the sessions (`cycleTab`); the
   prompt of the selected scope is in the ring once.
 
+### A single tab for the sessions
+
+**Settings > Sessions > Single tab for sessions** (off unless the user turned it
+on) gives the sessions one tab. It is a preference of the window
+(`singleSessionTab` of `useWindowPreferences`, local storage key
+`codealta.desktop.single-session-tab.v1`, `on` or `off`, written only when the
+user chooses), like the tabs themselves: the host does not know it. With the
+setting off nothing of what follows applies, and the tabs are stored as before.
+
+- `App` opens every session with the mode `single` (`tabMode`), whatever the
+  caller asked: `openSessionTab(state, tab, "single")` leaves that session alone
+  in `open`. The session that leaves is not listed among the closed tabs, as the
+  one of a transient tab is not. What is stored is `{ version, open, active }`
+  with one tab: the shape a window with one kept tab stores.
+- `singleSessionTab(state)` is the shape of the tabs with the setting on: the
+  active session alone, or no session while the prompt of a new session is
+  shown, no transient tab and no prompt with a tab of its own. `App` applies it
+  (`shapeTabs`) to what it restores at the start, to the tabs of a space it
+  enters, and in the selection effect, which is where turning the setting on
+  closes the other tabs. The tabs that leave are not closed tabs. Turned off,
+  the state has one kept tab and the usual rules apply from there.
+- `sessionTabPresentation(…, "single")` applies the same shape in the render,
+  before the effect, and says so with `single` on the view. `SessionTabStrip`
+  then shows no title in italics, keeps nothing on a double click, has no
+  **Keep open**, and opens no menu for a tab that has no entry to offer (the
+  prompt of a new session alone in its pane).
+- The prompt of a new session takes the tab: with no session selected `open` is
+  empty and the dock shows the `session-draft` node, which does not close. The
+  `leftPrompt` effect gives no tab to a prompt that is left with a text: the
+  text stays with its scope (`localDrafts`, `codealta.desktop.localPrompt.*`)
+  and is shown when the prompt of that scope is shown again.
+- The tab is replaced where it is. `reconcileSessionTabModel` marks the node of
+  the single tab `config: { preview: true }`, which is how the node that leaves
+  gives its pane and its position to the one that comes, among the tabs of
+  projects.
+- The tab keys do not go from the session to the prompt of a new session: the
+  prompt is in the ring only while it is the one shown (`cycleTab` without its
+  transient entry).
+- A session is not its tab: its run, its requests and its drafts are the
+  host's or `App`'s, and stay when its pane leaves. The prompts that wait above
+  a composer (`queue.composer`) are the exception, since the pane of their
+  session is what sends them when it is idle. `App` follows that queue with the
+  setting on, and `backgroundSessionTabs` names the sessions that have rows and
+  are not the one shown: `SessionTabStrip` renders their pane in
+  `.session-background-panes`, hidden, as the pane of a tab that is not in
+  front. The pane leaves with the last row. A prompt a plugin queued
+  (`submitPlugin`) is tied to the pane that admitted it: while it still waits it
+  is taken off the queue and refused to the plugin when that pane leaves, as
+  when its tab is closed.
+
 ### The menu of a tab
 
 The other button of the pointer on a tab, or the menu key or Shift+F10 on the tab
@@ -202,7 +252,8 @@ lost the keyboard to the prompt. The menu does not show the tab it is asked from
   button does; the tab in front is then left as it is.
 - Each closed tab can be reopened, the last one first.
 - **Keep open** is in the menu of the transient tab: the session looked at, or the
-  prompt of a new session. **Split right** and **Split below** move the tab to a
+  prompt of a new session; not with a single tab for the sessions, where nothing
+  is transient. **Split right** and **Split below** move the tab to a
   pane of its own, when its pane has another tab.
 - A press on a tab is captured by the dock, so an open menu sees no mouse press to
   close on: the strip closes it on any press outside it.

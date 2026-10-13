@@ -10,8 +10,11 @@ export type DraftTab = Readonly<{ projectId: string | null; path: string | null 
  */
 export type SessionTabs = Readonly<{ open: readonly SessionTab[]; active: SessionTab | null; closed: readonly SessionTab[];
   preview?: SessionTab | null; drafts?: readonly DraftTab[] }>;
-/** How a session is opened: to look at it, in the transient tab, or to keep it, in a tab of its own. */
-export type SessionTabMode = "preview" | "permanent";
+/**
+ * How a session is opened: to look at it, in the transient tab, or to keep it, in a tab of its own. With a single tab
+ * for the sessions (`single`) it takes that tab, in the place of the session that was there.
+ */
+export type SessionTabMode = "preview" | "permanent" | "single";
 export const sessionTabsKey = "codealta.desktop.sessionTabs.v1";
 export const sessionTabLimit = 32;
 export const draftTabLimit = 16;
@@ -74,9 +77,15 @@ export function selectedTab(snapshot: WorkspaceSnapshot, projectId: string | nul
  * Opens the tab of a session and shows it. A session that has a tab keeps it, and keeps what it is: looking at a
  * session that was kept does not make its tab transient again, and keeping (`permanent`) the one of the transient tab
  * makes that tab its own. A session that has none takes the transient tab when it is looked at (`preview`), in the
- * place of the session that was there, which is not listed among the closed tabs: it was never kept.
+ * place of the session that was there, which is not listed among the closed tabs: it was never kept. With a single
+ * tab (`single`) the session is the only one open, whatever was: the others leave as the one of a transient tab does.
  */
 export function openSessionTab(state: SessionTabs, tab: SessionTab, mode: SessionTabMode = "permanent"): SessionTabs {
+  if (mode === "single") {
+    const closed = state.closed.filter(value => !same(value, tab));
+    const only = state.open.length === 1 && same(state.open[0], tab) && same(state.active, tab) && closed.length === state.closed.length;
+    return singleSessionTab(only ? state : { ...state, open: [tab], active: tab, closed });
+  }
   if (state.open.some(value => same(value, tab))) {
     const kept = mode === "permanent" && isPreviewTab(state, tab);
     return same(state.active, tab) && !kept ? state : { ...state, active: tab, ...(kept ? { preview: null } : {}) };
@@ -94,6 +103,34 @@ export function openSessionTab(state: SessionTabs, tab: SessionTab, mode: Sessio
     if (same(evicted, preview)) preview = null;
   }
   return { ...state, open, active: tab, closed, ...previewOf(state, preview) };
+}
+
+/**
+ * The tabs of a window whose sessions share a single tab: the session that is shown, alone, or none while the prompt
+ * of a new session is shown in its place. No tab is transient and no prompt has a tab of its own. The same state when
+ * it is that already; the tabs that leave are not listed among the closed ones.
+ */
+export function singleSessionTab<T extends SessionTabs>(state: T): T {
+  const shown = state.active ? state.open.find(value => same(value, state.active)) ?? null : null;
+  if (state.open.length === (shown ? 1 : 0) && same(state.active, shown) && !state.preview && !state.drafts?.length) return state;
+  return { ...state, open: shown ? [shown] : [], active: shown, ...(state.preview === undefined ? {} : { preview: null }),
+    ...(state.drafts === undefined ? {} : { drafts: noDrafts }) };
+}
+
+/**
+ * The sessions whose pane is kept without a tab, out of sight: those named, as the catalog lists them, but the one
+ * that is shown. With a single tab they are the sessions that left it while prompts wait above their composer, which
+ * is what sends them. A session the catalog does not list once, or lists under another scope, has no pane.
+ */
+export function backgroundSessionTabs(snapshot: WorkspaceSnapshot, sessionIds: readonly string[], shownId: string | null): SessionTab[] {
+  const tabs: SessionTab[] = [];
+  for (const id of new Set(sessionIds)) {
+    if (id === shownId || tabs.length >= sessionTabLimit) continue;
+    const row = snapshot.sessions.find(value => value.id === id);
+    const tab = row ? selectedTab(snapshot, row.scopeKind === "project" ? row.projectId : null, id) : null;
+    if (tab) tabs.push(tab);
+  }
+  return tabs;
 }
 
 /** Keeps the session of the transient tab: its tab is its own from now on. The same state when the tab is not the transient one. */

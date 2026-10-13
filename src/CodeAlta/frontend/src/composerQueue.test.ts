@@ -198,6 +198,23 @@ test("an image prompt is queued with its images", () => {
   assert.equal(owner.add("Steer", "epoch", "session", "text", image)?.images, null);
 });
 
+test("the sessions that have rows are named once, until their last row leaves", () => {
+  const owner = createComposerQueue();
+  assert.deepEqual(owner.sessions("epoch"), []);
+  const first = owner.add("Queue", "epoch", "one", "first")!;
+  owner.add("Steer", "epoch", "one", "steer");
+  const other = owner.add("Queue", "epoch", "two", "other")!;
+  owner.add("Queue", "older", "three", "of another host");
+  assert.deepEqual(owner.sessions("epoch"), ["one", "two"]);
+  assert.deepEqual(owner.sessions("older"), ["three"]);
+  // A row that is being sent still needs its session; a session with no row left is not named.
+  owner.claim(other, send("key"));
+  assert.deepEqual(owner.sessions("epoch"), ["one", "two"]);
+  owner.sent(other.id);
+  owner.remove(first);
+  assert.deepEqual(owner.sessions("epoch"), ["one"]);
+});
+
 test("the row shows one line, and the repeat count stays a whole number of at least one", () => {
   assert.equal(queuePreview("  first line\n\n  second\tline  "), "first line second line");
   assert.deepEqual([clampQueueCount(0), clampQueueCount(2.9), clampQueueCount(Number.NaN), clampQueueCount(100000)], [1, 2, 1, 999]);

@@ -50,7 +50,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
 import { browserActivation } from "./sessionBrowser";
-import { closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, tabKey,
+import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
@@ -299,6 +299,7 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const noSubscription = () => () => { };
+const noRevision = () => 0;
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
 type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage";
 type SettingsSection = Exclude<View, "workspace">;
@@ -546,7 +547,12 @@ function App() {
   const openSettingsPage = useRef<(page: string) => void>(() => {});
   openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces") navigate(page); };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
-  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm } = useWindowPreferences();
+  const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm,
+    singleSessionTab: singleTab, setSingleSessionTab: setSingleTab } = useWindowPreferences();
+  // With a single tab for the sessions, whatever opens a session shows it in that tab, in the place of the one that
+  // was there, and the tabs the window keeps are the one of the session shown.
+  const tabMode = (mode: SessionTabMode): SessionTabMode => singleTab ? "single" : mode;
+  const shapeTabs = (state: SessionTabsState) => singleTab ? singleSessionTab(state) : state;
   // The user's own color schemes, and what the editor of one shows while it edits.
   const schemeLibrary = useColorSchemeLibrary(setCustomSchemes);
   const [appearancePreview] = useState(createAppearancePreview);
@@ -647,6 +653,10 @@ function App() {
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
   const [abortRuns] = useState(() => createAbortRunSubmissions(sessionOperations.abortRun));
   const [queue] = useState(() => createQueueSubmissions(sessionOperations.queue, sessionOperations.cancelQueue));
+  // With a single tab, a session that leaves it while prompts wait above its composer keeps its pane, out of sight:
+  // the pane is what sends them once the session is idle, as the pane of a tab that is not in front does. The window
+  // follows the waiting prompts for that only.
+  useSyncExternalStore(singleTab ? queue.composer.subscribe : noSubscription, singleTab ? queue.composer.getSnapshot : noRevision);
   const [askActions] = useState(() => createAskActions(
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
@@ -922,10 +932,10 @@ function App() {
     // answer. A row/space selection made even before this effect first runs must win over saved state.
     const navigation = initial ? 0 : retentionNavigation.current, revision = browserRevision.current;
     const first = snapshot.sessions[0];
-    const next = initial ? restoredTabs ? reconcileSessionTabs(restoredTabs, snapshot)
+    const next = shapeTabs(initial ? restoredTabs ? reconcileSessionTabs(restoredTabs, snapshot)
       : first ? openSessionTab(emptySessionTabs(), { sessionId: first.id,
         projectId: snapshot.projects.find(project => project.path === first.workspacePath)?.id ?? null, path: first.workspacePath })
-        : emptySessionTabs() : tabs;
+        : emptySessionTabs() : tabs);
     const expose = () => {
       if (!initial) return;
       initialSelectionMade.current = true;
@@ -944,7 +954,8 @@ function App() {
 
   useEffect(() => {
     if (!snapshot || !tabsReady) return;
-    const valid = reconcileSessionTabs(tabs, snapshot);
+    // With a single tab, the tabs that were open when the setting was turned on leave here, but the one of the session shown.
+    const valid = shapeTabs(reconcileSessionTabs(tabs, snapshot));
     // A previously verified active identity disappearing must not silently bind
     // the same ID to a different project/path or a duplicate catalog row.
     if (tabs.active && !resolveSessionTab(snapshot, tabs.active) && tabs.active.sessionId === sessionId) {
@@ -954,10 +965,11 @@ function App() {
       return;
     }
     const selection = selectedTab(snapshot, projectId, sessionId);
-    const next = selection ? openSessionTab(valid, selection, openingMode(selection.sessionId)) : valid.active ? { ...valid, active: null } : valid;
+    // The prompt of a new session that is shown takes the single tab: the session that was in it leaves.
+    const next = selection ? openSessionTab(valid, selection, tabMode(openingMode(selection.sessionId))) : valid.active ? shapeTabs({ ...valid, active: null }) : valid;
     if (next !== tabs) setTabs(next);
     else if (selection && keptSession.current === selection.sessionId) keptSession.current = null;
-  }, [snapshot, projectId, sessionId, tabsReady, tabs]);
+  }, [snapshot, projectId, sessionId, tabsReady, tabs, singleTab]);
   // What is typed in the prompt of the session that is looked at keeps its tab, as an edit keeps the preview tab of
   // a code editor. The window does not follow the prompts: it is told of an edit, and only this one changes it.
   const keepEdited = useRef(() => { });
@@ -999,7 +1011,7 @@ function App() {
   // that is shown again stays what it is.
   function selectSessionTab(tab: SessionTab, mode: SessionTabMode = "permanent") {
     if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
-    applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab, mode));
+    applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab, tabMode(mode)));
   }
   // A double click on the row of a session: its tab is its own, and stays when another session is looked at.
   function keepSession(scope: string | null, session: WorkspaceSession) {
@@ -1008,9 +1020,10 @@ function App() {
   }
   // The row of a scope in the Explorer shows the prompt of a new session of it. The prompt takes the transient tab:
   // a session that was only looked at leaves it. Kept (a double click), it has a tab of its own, as many scopes can.
+  // With a single tab the prompt takes that tab once its scope is selected, and no prompt has a tab of its own.
   function showScopeDraft(id: string | null, keep = false) {
     const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, id) : null;
-    if (draft) {
+    if (draft && !singleTab) {
       const valid = reconcileSessionTabs(tabs, snapshot!);
       const next = keep ? openDraftTab(valid, draft) : hasDraftTab(valid, draft) ? valid : closePreviewTab(valid);
       if (next !== tabs) setTabs(next);
@@ -1112,7 +1125,7 @@ function App() {
     const scoped = scopeSnapshot(full, members);
     publishWorkspaceState({ kind: "ready", snapshot: scoped });
     const kept = spaceTabs.current.get(next);
-    const entering = reconcileSessionTabs(kept?.tabs ?? restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, next))) ?? emptySessionTabs(), scoped);
+    const entering = shapeTabs(reconcileSessionTabs(kept?.tabs ?? restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, next))) ?? emptySessionTabs(), scoped));
     const files = reconcileTerminalTabs(reconcileFileTabs(kept?.files ?? restoreFileTabs(() => localStorage.getItem(spaceStorageKey(fileTabsKey, next))) ?? emptyFileTabs(), scoped),
       new Set(terminalList.map(terminal => terminal.id)));
     closedTabKinds.current = [];
@@ -1764,7 +1777,9 @@ function App() {
       const session = valid.open.findIndex(tab => valid.active && tabKey(tab) === tabKey(valid.active));
       const current: TabPosition = file >= 0 ? { kind: "file", index: file } : session >= 0 ? { kind: "session", index: session }
         : own >= 0 ? { kind: "prompt", index: own } : { kind: "draft" };
-      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1, prompts.length, own < 0);
+      // With a single tab the prompt of a new session is in the ring only while it is the one shown: going through
+      // the tabs does not take the session out of its tab.
+      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1, prompts.length, own < 0 && !(singleTab && valid.open.length > 0));
       if (next.kind === "file") activateFile(fileTabs.open[next.index]);
       // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
       else if (next.kind === "session") selectSessionTab(valid.open[next.index], "preview");
@@ -2161,13 +2176,15 @@ function App() {
   // prompt of another scope, or a session, takes the place of a prompt that has a text or pictures, that prompt gets
   // a tab of its own, as a double click gives it. An empty prompt leaves its place, and so does the one a session
   // was just started from. This runs after the effect that opens the tab of the selected session, and adds to it.
+  // With a single tab the prompt that is left gets no tab: what was typed stays with its scope, and is there when the
+  // prompt of that scope is shown again.
   const promptTyped = !!(localDrafts.peek(draftScope)?.text ?? "").trim() || localImages.images.length > 0;
   const leftPrompt = useRef<{ projectId: string | null; sessionId: string | null; typed: boolean } | null>(null);
   useEffect(() => {
     const before = leftPrompt.current;
     leftPrompt.current = { projectId, sessionId, typed: promptTyped };
     if (!before?.typed || before.sessionId !== null || before.projectId === projectId && sessionId === null) return;
-    if (!tabsReady || !snapshot || snapshot !== currentSnapshot.current) return;
+    if (singleTab || !tabsReady || !snapshot || snapshot !== currentSnapshot.current) return;
     const left = draftTabOf(snapshot, before.projectId);
     if (left) writeTabs(current => openDraftTab(current, left));
   });
@@ -3740,12 +3757,13 @@ function App() {
           </div>
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
-          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId, openingMode(sessionId))} snapshot={snapshot}
+          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)))} snapshot={snapshot}
+            background={singleTab && snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.composer.sessions(status.hostEpoch), sessionId) : undefined}
             draftLabel={draft => { const project = draft.projectId === null ? null : snapshot?.projects.find(value => value.id === draft.projectId);
               return project ? t("New session — {project}", { project: project.name }) : t("New chat"); }}
             keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}
             keepDraft={() => { const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, projectId) : null;
-              if (draft) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
+              if (draft && !singleTab) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
             selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft} closePrompt={() => { leftPrompt.current = null; }} closeTabs={closeTabs}
             newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
@@ -3916,7 +3934,8 @@ function App() {
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
-      : settingsSection === "sessions" ? <SessionSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "sessions" ? <SessionSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
+        tabs={{ single: singleTab, setSingle: setSingleTab }} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined}
         onOpenFile={owned ? closeSettings : undefined} />

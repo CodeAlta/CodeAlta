@@ -644,3 +644,76 @@ test("a prompt that is kept has a tab of its own, where the transient one was, b
   assert.equal(model.getNodeById(draftNodeId(scopeP)), undefined);
   assert.ok(model.getNodeById(draftNodeId(chats)));
 });
+
+// The tabs as a window with a single tab for its sessions shows them.
+const single = (state: SessionTabs, sessionId: string | null, catalog = snapshot) => sessionTabPresentation(state, catalog, "p", sessionId, "single");
+
+test("with a single tab the selected session is the only tab, and the prompt of a new session takes its place", () => {
+  const several = openDraftTab(openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"), "preview"), scopeP);
+  const shown = single(several, "one");
+  assert.deepEqual([shown.open, shown.active, shown.preview, shown.drafts, shown.single, shown.scope], [[tab("one")], tab("one"), null, [], true, scopeP]);
+  // The window has not kept the selection yet: the session that is selected is the one shown all the same.
+  assert.deepEqual(single(openSessionTab(emptySessionTabs(), tab("one"), "single"), "two").open, [tab("two")]);
+  // No session is selected: none has a tab, and the prompt of the scope is in the tab, not in one of its own.
+  const prompt = single(several, null);
+  assert.deepEqual([prompt.open, prompt.active, prompt.single], [[], null, true]);
+  assert.equal(shownDraftNodeId(prompt), sessionDraftNodeId);
+  // While the catalog is not read the tabs stay what they are.
+  assert.deepEqual(sessionTabPresentation(several, undefined, "p", "one", "single").open, several.open);
+  // Without the setting nothing says so, and the tabs are the ones that are open.
+  const usual = sessionTabPresentation(several, snapshot, "p", "one");
+  assert.deepEqual([usual.open.length, usual.single, usual.drafts], [2, undefined, [scopeP]]);
+});
+
+test("the single tab of the sessions is replaced where it is, among the tabs of projects", () => {
+  const model = createSessionTabModel();
+  const a = fileNodeId(file("a")), b = fileNodeId(file("b"));
+  let state = emptySessionTabs();
+  let files = openFileTab(emptyFileTabs(), file("a"));
+  reconcileSessionTabModel(model, single(state, null), label, files);
+  files = openFileTab(files, file("b"));
+  reconcileSessionTabModel(model, single(state, null), label, files);
+  assert.deepEqual(strip(model), [a, sessionDraftNodeId, b]);
+  // A session is opened: it is where the prompt of a new session was, between the tabs of the two projects.
+  files = activateFileTab(files, null);
+  state = openSessionTab(state, tab("one"), "single");
+  reconcileSessionTabModel(model, single(state, "one"), label, files);
+  assert.deepEqual(strip(model), [a, sessionNodeId(tab("one")), b]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionNodeId(tab("one")));
+  // Another one takes its place there, and the tab of the first is gone.
+  state = openSessionTab(state, tab("two"), "single");
+  reconcileSessionTabModel(model, single(state, "two"), label, files);
+  assert.deepEqual(strip(model), [a, sessionNodeId(tab("two")), b]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionNodeId(tab("two")));
+  // The same tabs again change nothing of the dock.
+  const node = model.getNodeById(sessionNodeId(tab("two")));
+  reconcileSessionTabModel(model, single(state, "two"), label, files);
+  assert.equal(model.getNodeById(sessionNodeId(tab("two"))), node);
+  // The prompt of a new session takes the tab from the session; it is the tab of the sessions, and does not close.
+  reconcileSessionTabModel(model, single(state, null), label, files);
+  assert.deepEqual(strip(model), [a, sessionDraftNodeId, b]);
+  assert.equal((model.getNodeById(sessionDraftNodeId) as TabNode).isEnableClose(), false);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionDraftNodeId);
+});
+
+test("a single tab closes the other tabs of sessions and of prompts, and leaves a kept tab when there are several again", () => {
+  const model = createSessionTabModel();
+  const wide = { ...snapshot, sessions: [...snapshot.sessions, { ...snapshot.sessions[0], id: "three", title: "three", fullTitle: "three" }] };
+  // A kept session, one that is looked at and is shown, another kept one, and the prompt of the chats in a tab of its own.
+  const state: SessionTabs = { ...openDraftTab(openSessionTab(openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"), "preview"), tab("three")), chats), active: tab("two") };
+  reconcileSessionTabModel(model, { ...state, scope: scopeP }, label);
+  assert.equal(strip(model).length, 4);
+  const node = model.getNodeById(sessionNodeId(tab("two")));
+
+  const on = single(state, "two", wide);
+  reconcileSessionTabModel(model, on, label);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("two"))]);
+  assert.equal(model.getNodeById(sessionNodeId(tab("two"))), node, "the pane of the session shown is the one it had");
+
+  // Several tabs again: the tab is a kept one, and a session that is looked at gets the transient tab beside it.
+  const off = sessionTabPresentation({ open: on.open, active: on.active, closed: on.closed, preview: on.preview, drafts: on.drafts }, wide, "p", "one");
+  reconcileSessionTabModel(model, off, label);
+  assert.deepEqual(strip(model), [sessionNodeId(tab("two")), sessionNodeId(tab("one"))]);
+  assert.equal(model.getNodeById(sessionNodeId(tab("two"))), node);
+  assert.deepEqual(transient(model), [sessionNodeId(tab("one"))]);
+});

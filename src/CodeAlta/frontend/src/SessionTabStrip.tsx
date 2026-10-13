@@ -94,8 +94,13 @@ const noFiles = emptyFileTabs();
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
-  keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs }: {
+  keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs, background }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
+  /**
+   * Sessions that have no tab and keep their pane all the same, out of sight: with a single tab, those that left it
+   * while prompts wait above their composer. Their pane is rendered as the one of a tab that is not in front.
+   */
+  background?: readonly SessionTab[];
   /**
    * The model of the dock, when its owner keeps one: a dock that is taken away and shown again (the tabs of a
    * space) then has its panes where they were. Without it the dock has a model of its own.
@@ -240,10 +245,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   const drag = useSessionTabDrag(root, model, guard,
     (action, current) => sessionLayoutActionAllowed(model, action, state, snapshot, current, files), apply);
   // A double click on the title of the transient tab keeps what it shows, as in a code editor: the session that was
-  // looked at, or the prompt of a new session.
+  // looked at, or the prompt of a new session. The single tab of the sessions has nothing to keep.
   const lastClick = useRef<{ id: string; at: number } | null>(null);
   function keepNode(id: string) {
-    if (!guard()()) return;
+    if (state.single || !guard()()) return;
     if (id === sessionDraftNodeId) { if (!state.active) keepDraft?.(); return; }
     const tab = state.open.find(value => sessionNodeId(value) === id);
     if (tab && isPreviewTab(state, tab)) keep?.(tab);
@@ -305,18 +310,21 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     if (!current() || !(pane instanceof TabSetNode)) return;
     const id = node.getId();
     const shown = dockTab(id, state, files);
-    const transient = id === sessionDraftNodeId ? !state.active : !!shown && "session" in shown && isPreviewTab(state, shown.session);
+    const transient = !state.single && (id === sessionDraftNodeId ? !state.active : !!shown && "session" in shown && isPreviewTab(state, shown.session));
     // The menu key asks at the tab itself: it has no place of the pointer.
     const box = anchor.getBoundingClientRect();
     const at = pointer && (pointer.x || pointer.y) ? pointer : { x: box.left, y: box.bottom };
-    setMenu({ anchor, at, title: node.getName(), current, items: [
+    const items: SessionMenuEntry[] = [
       { key: "close", label: t("Close"), icon: "close", disabled: !node.isEnableClose(), onSelect: () => apply(Actions.deleteTab(id), current) },
       closeEntry(pane, node, "others", t("Close others"), current),
       closeEntry(pane, node, "right", t("Close to the right"), current),
       closeEntry(pane, node, "all", t("Close all"), current),
       ...(transient ? [{ key: "d-keep", divider: true as const }, { key: "keep", label: t("Keep open"), onSelect: () => keepNode(id) }] : []),
       ...(node.isEnableDrag() ? [{ key: "d-split", divider: true as const }, ...splitEntries(pane, node, current)] : []),
-    ] });
+    ];
+    // The single tab of the sessions, alone in its pane with the prompt of a new session, has nothing to offer.
+    if (state.single && items.every(item => "divider" in item || item.disabled)) return;
+    setMenu({ anchor, at, title: node.getName(), current, items });
   }
   return <div className="session-tabs workspace-layout" ref={root} data-dragging={!!drag.preview}
     onPointerDownCapture={event => {
@@ -386,7 +394,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       }}
       onRenderTab={(node, values) => {
         // The transient tab says so with its title in italics: the prompt of the selected scope, or the session looked at.
-        if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()} data-transient="true">{label(null)}</span>; return; }
+        // The single tab of the sessions is not one: what it shows stays until something else is opened.
+        if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()} data-transient={state.single ? undefined : "true"}>{label(null)}</span>; return; }
         const prompt = state.drafts?.find(value => draftNodeId(value) === node.getId());
         if (prompt) {
           values.leading = <span className="file-tab-icon" data-file-tone="teal"><AppIcon name="newSession" size={14} /></span>;
@@ -448,6 +457,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());
         return tab && renderSession ? <SessionTabContent node={node} retained={!state.active || sessionNodeId(state.active) !== node.getId()}>{visible => renderSession(tab, visible)}</SessionTabContent> : null;
       }} /></div>
+    {renderSession && !!background?.length && <div className="session-background-panes" hidden>
+      {background.map(tab => <div key={sessionNodeId(tab)} className="session-tab-content">{renderSession(tab, false)}</div>)}</div>}
     {drag.preview && <div className="session-drop-preview" aria-hidden="true" style={{ left: drag.preview.rect.x, top: drag.preview.rect.y,
       width: drag.preview.rect.width, height: drag.preview.rect.height }} />}
     {menu && root.current && <SessionTabMenu anchor={menu.anchor} at={menu.at} items={menu.items} title={menu.title ?? t("Open sessions")}

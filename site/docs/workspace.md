@@ -86,6 +86,21 @@ In the desktop app, going through your sessions does not open a tab for each of 
 
 A session you create is kept from the start. Closing a tab never deletes a session.
 
+### A single tab for sessions
+
+If you prefer one tab for all your sessions, turn on **Single tab for sessions** in **Settings > Sessions**. It is off by default.
+
+{.table}
+| With a single tab | What happens |
+|---|---|
+| You open a session | It takes the place of the session shown, however you open it: a click or a double-click in the sidebar, the search, a bookmark, a link to another session, a new session, a fork. |
+| You click a project | Its new-session prompt takes the tab. What you typed in that prompt stays with the project, and is there when you click the project again. |
+| You close the tab | The prompt of a new session is shown. **Reopen closed tab** brings the session back. |
+
+No title is in italics, and there is nothing to keep open. The other tabs, such as **Bookmarks**, **Issues**, the code editors and the terminals, are not concerned. A session that leaves the tab keeps working, and the prompts you queued for it are still sent.
+
+Turning the setting on leaves the session shown and closes the other session tabs. Turning it off gives you several tabs again.
+
 ### Close several tabs at once
 
 Right-click a tab to open its menu. From the keyboard, press `Shift+F10` (or the menu key) on the tab that has the keyboard:

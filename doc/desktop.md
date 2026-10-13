@@ -540,6 +540,9 @@ or by its model. The session that runs writes that title, and every list shows t
 (`SessionRuntimeService.ListedTitle`); see [session titles](new-session-provider.md#session-titles).
 The page reads `globalConfig.sessionTitles` and saves a choice at once with
 `globalConfig.saveSessionTitles`; a session takes it with its next prompt.
+The same page has **Single tab for sessions**, off by default: a preference of the window, kept in this
+WebView's local storage, which is set also where the configuration file cannot be read. See "A single tab
+for the sessions" in [session tabs](session-tabs.md).
 
 **Delete…** of a session, **Archive project…** and **Unarchive project…** ask in the same kind of
 popover beside the row (`ConfirmPopover.tsx`): the question, the name it is about, what it does, and
@@ -579,7 +582,8 @@ before creation. Selecting an existing session tab or sidebar session removes it
 tab of the dock, which a session that is only looked at takes as well: one tab, with its title in
 italics, for what the Explorer shows on a click, and a double click to keep it (a session, or the
 prompt of a project, of which several can then be open). See "The transient tab" in
-`doc/session-tabs.md`. Real session
+`doc/session-tabs.md`. With **Single tab for sessions** the sessions and that prompt share one tab, and
+nothing in it is transient. Real session
 panes, drafts and split geometry are retained, rather than replaced with a project placeholder.
 The welcome view renders the same 3-D FIGlet/ASCII logo asset as the TUI, with the project name,
 folder and launch guidance below it. Its composer uses the same surface, status line, editor,

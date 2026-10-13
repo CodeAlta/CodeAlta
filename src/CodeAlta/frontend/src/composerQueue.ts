@@ -99,6 +99,10 @@ export function createComposerQueue() {
       const own = items.filter(item => item.epoch === epoch && item.sessionId === sessionId);
       return [...own.filter(item => item.kind === "Steer"), ...own.filter(item => item.kind === "Queue")];
     },
+    /** The sessions that have rows: a row leaves through the composer of its session, which is kept for it. */
+    sessions(epoch: string): readonly string[] {
+      return [...new Set(items.filter(item => item.epoch === epoch).map(item => item.sessionId))];
+    },
     add: (kind: ComposerQueueItem["kind"], epoch: string, sessionId: string, text: string, images: QueueImages | null = null) => add(kind, epoch, sessionId, text, images),
     /** A local insertion is not acceptance: resolve only at a receipt or conclusive no-late-work cancellation. */
     admit(epoch: string, sessionId: string, text: string, signal: AbortSignal, selection?: SessionSendRequest["selection"]): Promise<boolean> {

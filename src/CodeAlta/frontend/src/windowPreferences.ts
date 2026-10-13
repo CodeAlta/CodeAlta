@@ -69,6 +69,8 @@ export const darkerStorageKey = "codealta.desktop.darker.v1";
 export const confirmations = ["sessionDelete", "projectArchive"] as const;
 export type Confirmation = typeof confirmations[number];
 export const confirmationStorageKey = (confirmation: Confirmation) => `codealta.desktop.confirm.${confirmation}.v1`;
+/** Whether the sessions of the window share a single tab; nothing is kept until the user chooses. */
+export const singleSessionTabStorageKey = "codealta.desktop.single-session-tab.v1";
 type Preference = "theme" | "scheme" | "sort" | "rail" | "recent" | "subAgents";
 export type PreferenceNotices = Partial<Record<Preference, PreferenceIssue>>;
 
@@ -109,6 +111,7 @@ export function useWindowPreferences() {
     sort: readPreference(projectSortStorageKey, ["name", "recent"], "name"),
     rail: readPreference(projectRailVisibilityKey, ["expanded", "collapsed"], "expanded"),
     confirm: Object.fromEntries(confirmations.map(value => [value, readPreference(confirmationStorageKey(value), ["ask", "skip"], "ask").value === "ask"])) as Record<Confirmation, boolean>,
+    singleTab: readPreference(singleSessionTabStorageKey, ["on", "off"], "off").value === "on",
   }));
   const [theme, updateTheme] = useState<Theme>(initial.theme.value);
   const [darker, updateDarker] = useState(initial.darker.value === "on");
@@ -188,6 +191,12 @@ export function useWindowPreferences() {
     updateConfirms(current => ({ ...current, [confirmation]: ask }));
     try { localStorage.setItem(confirmationStorageKey(confirmation), ask ? "ask" : "skip"); } catch { /* Asked again at the next start. */ }
   }
+  // Whether the sessions share a single tab. A choice that could not be kept still stands until the window is closed.
+  const [singleSessionTab, updateSingleSessionTab] = useState(initial.singleTab);
+  function setSingleSessionTab(value: boolean) {
+    updateSingleSessionTab(value);
+    try { localStorage.setItem(singleSessionTabStorageKey, value ? "on" : "off"); } catch { /* Several tabs again at the next start. */ }
+  }
   function setProjectSort(value: ProjectSort) {
     updateSort(value);
     save("sort", () => persistProjectSort(value => localStorage.setItem(projectSortStorageKey, value), value));
@@ -206,5 +215,6 @@ export function useWindowPreferences() {
   const shownScheme = selectedScheme(colorScheme, customSchemes, keptScheme);
   const appearance: ShownAppearance = useMemo(() => ({ theme: shownTheme, scheme: colorScheme, palette: schemePalette(shownScheme, variant) }), [shownTheme, colorScheme, shownScheme, variant]);
   return { theme, shownTheme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes,
-    projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm };
+    projectSort, setProjectSort, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm,
+    singleSessionTab, setSingleSessionTab };
 }
