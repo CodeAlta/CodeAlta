@@ -194,7 +194,9 @@ exit/signal and last file probe. A successful launcher exit may precede readines
 spawn error fails the test. Keep fixture-owned process/profile cleanup; never hide failures with
 automatic relaunches or skips. A test that has to know its browser is gone before it removes the profile
 ends it with `endBrowser`, never with a command of one system (`taskkill` ends the whole tree on Windows,
-the process is killed elsewhere).
+the process is killed elsewhere). After readiness `waitForBrowserPort` keeps the stderr pipe drained but no
+longer lets it hold the test process: on macOS Edge's crash handler outlives the browser for minutes with the
+other end of that pipe, and a test file that had passed went on running until it was gone.
 
 The browser tests run on three systems with three fonts and their own gestures. Assert what the product
 promises (an order, "no overlap", "shorter than"), not a margin that one font gives, and name the system

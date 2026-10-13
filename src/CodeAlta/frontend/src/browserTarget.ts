@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 
 /** The variable that names the browser to drive, in the place of the Edge the system has. */
 export const browserVariable = "CODEALTA_TEST_BROWSER";
@@ -103,5 +104,8 @@ export async function waitForBrowserPort(profile: string, browser: ChildProcess,
     browser.off("exit", exited);
     browser.stderr?.off("data", capture);
     browser.stderr?.resume(); // Keep the pipe drained after readiness without retaining its contents.
+    // What the browser leaves behind holds the other end of the pipe (Edge's crash handler, on macOS for minutes
+    // after the browser is gone): the pipe alone does not keep the process of the test alive.
+    (browser.stderr as (Readable & { unref?: () => void }) | null)?.unref?.();
   }
 }
