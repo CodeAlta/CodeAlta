@@ -35,7 +35,7 @@ With no projects, the tab shows **No projects in this snapshot.** Open a project
 - Type words or a number to filter the list.
 - Select an item to read its description and its comments. Double-click it, or use the expand button, to read it in a larger window.
 
-A project that keeps its code on one service and its issues in Jira shows both: choose the tracker beside the project.
+A project that keeps its code on one service and its issues in Jira shows both: choose the tracker beside the project. A project can name [several Jira projects](plugins/jira.md#several-jira-projects): their issues are listed together.
 
 ## Work on an item
 

@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using CodeAlta.Plugin.Jira;
 using CodeAlta.Plugins.Abstractions;
+using XenoAtom.CommandLine;
 
 namespace CodeAlta.Tests;
 
@@ -45,6 +47,34 @@ public sealed class JiraPluginTests
     }
 
     [TestMethod]
+    public void AProject_CanNameSeveralJiraProjects_AndTheFirstIsWhereNewIssuesGo()
+    {
+        var one = JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"")!;
+        CollectionAssert.AreEqual(new[] { "ALTA" }, one.Projects.ToArray());
+        Assert.IsFalse(one.HasSeveralProjects);
+        Assert.AreEqual("https://example.atlassian.net/browse/ALTA", one.IssuesUrl());
+
+        // `project` comes first, whatever the list says; a key is listed once, and what is not a key is left out.
+        var several = JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"alta\"\nprojects = [\"plat\", \"ALTA\", \"TE AM\", 7, \"Team\", \"PLAT\"]")!;
+        Assert.AreEqual("ALTA", several.Project);
+        CollectionAssert.AreEqual(new[] { "ALTA", "PLAT", "TEAM" }, several.Projects.ToArray());
+        Assert.IsTrue(several.HasSeveralProjects && several.Has("PLAT") && !several.Has("OTHER"));
+        Assert.AreEqual("https://example.atlassian.net/issues/?jql=project%20in%20%28ALTA%2C%20PLAT%2C%20TEAM%29%20ORDER%20BY%20updated%20DESC", several.IssuesUrl());
+        Assert.AreNotEqual(one, several);
+        Assert.AreEqual(several, several with { });
+
+        // Without `project`, the first key of the list is the one new issues go to.
+        var listed = JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nprojects = [\"PLAT\", \"TEAM\"]")!;
+        Assert.AreEqual("PLAT", listed.Project);
+        CollectionAssert.AreEqual(new[] { "PLAT", "TEAM" }, listed.Projects.ToArray());
+
+        Assert.IsNull(JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nprojects = []"), "No Jira project is named.");
+        Assert.IsNull(JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"AL TA\"\nprojects = [\"PLAT\"]"), "A project that is written wrong is not replaced by another.");
+        var many = JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nprojects = [" + string.Join(", ", Enumerable.Range(0, 40).Select(static index => $"\"P{index}\"")) + "]")!;
+        Assert.AreEqual(JiraSettings.MaximumProjects, many.Projects.Count);
+    }
+
+    [TestMethod]
     public void ADocumentOfJira_BecomesMarkdown()
     {
         using var document = JsonDocument.Parse("""
@@ -80,10 +110,17 @@ public sealed class JiraPluginTests
     [TestMethod]
     public void AListing_IsAQueryOfTheProject_ByStateAndByWhatIsTyped()
     {
-        Assert.AreEqual("project = \"ALTA\" AND statusCategory != Done ORDER BY updated DESC", JiraTracker.Query("ALTA", TrackedItemFilter.Open, null));
-        Assert.AreEqual("project = \"ALTA\" AND statusCategory = Done AND text ~ \"scroll \\\"position\\\"\" ORDER BY updated DESC", JiraTracker.Query("ALTA", TrackedItemFilter.Closed, " scroll \"position\" "));
-        Assert.AreEqual("project = \"ALTA\" AND key = \"ALTA-12\" ORDER BY updated DESC", JiraTracker.Query("ALTA", TrackedItemFilter.All, "12"));
-        Assert.AreEqual("project = \"ALTA\" AND key = \"OTHER-7\" ORDER BY updated DESC", JiraTracker.Query("ALTA", TrackedItemFilter.All, "other-7"));
+        Assert.AreEqual("project = \"ALTA\" AND statusCategory != Done ORDER BY updated DESC", JiraTracker.Query(["ALTA"], TrackedItemFilter.Open, null));
+        Assert.AreEqual("project = \"ALTA\" AND statusCategory = Done AND text ~ \"scroll \\\"position\\\"\" ORDER BY updated DESC", JiraTracker.Query(["ALTA"], TrackedItemFilter.Closed, " scroll \"position\" "));
+        Assert.AreEqual("project = \"ALTA\" AND key = \"ALTA-12\" ORDER BY updated DESC", JiraTracker.Query(["ALTA"], TrackedItemFilter.All, "12"));
+        Assert.AreEqual("project = \"ALTA\" AND key = \"OTHER-7\" ORDER BY updated DESC", JiraTracker.Query(["ALTA"], TrackedItemFilter.All, "other-7"));
+
+        // Several projects are asked together; a number is the one of an issue of any of them.
+        string[] projects = ["ALTA", "PLAT"];
+        Assert.AreEqual("project in (\"ALTA\", \"PLAT\") AND statusCategory != Done ORDER BY updated DESC", JiraTracker.Query(projects, TrackedItemFilter.Open, null));
+        Assert.AreEqual("project in (\"ALTA\", \"PLAT\") AND text ~ \"scroll\" ORDER BY updated DESC", JiraTracker.Query(projects, TrackedItemFilter.All, "scroll"));
+        Assert.AreEqual("project in (\"ALTA\", \"PLAT\") AND key in (\"ALTA-12\", \"PLAT-12\") ORDER BY updated DESC", JiraTracker.Query(projects, TrackedItemFilter.All, "12"));
+        Assert.AreEqual("project in (\"ALTA\", \"PLAT\") AND key = \"PLAT-7\" ORDER BY updated DESC", JiraTracker.Query(projects, TrackedItemFilter.All, "plat-7"));
         Assert.IsTrue(JiraClient.IsKey("ALTA-12") && !JiraClient.IsKey("ALTA-") && !JiraClient.IsKey("12") && !JiraClient.IsKey("ALTA-12; DROP"));
         Assert.AreEqual(new DateTimeOffset(2026, 10, 7, 23, 17, 18, 501, TimeSpan.FromHours(2)), JiraClient.Date("2026-10-07T23:17:18.501+0200"));
     }
@@ -119,6 +156,109 @@ public sealed class JiraPluginTests
         // A project that does not name its Jira has no tracker, and nothing is run for it.
         using var plain = new TempProject("[plugins.mcp]\nenabled = true\n");
         Assert.IsEmpty(await plugin.GetTrackersAsync(plain.Path, default));
+    }
+
+    [TestMethod]
+    public async Task TheTracker_ListsTheIssuesOfSeveralProjectsTogether_AndLeavesOutAProjectTheAccountDoesNotSee()
+    {
+        using var root = new TempProject("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\nprojects = [\"PLAT\", \"GONE\", \"TEAM\"]\n");
+        var cli = new FakeCli { Account = "example.atlassian.net" };
+        // Jira refuses the whole query for one project it does not show, and names it in lower case.
+        cli.Answers["workitem search"] = arguments => arguments[4].Contains("\"GONE\"", StringComparison.Ordinal)
+            ? new(1, string.Empty, "✗ Error: failed to parse JQL query: the value 'gone' does not exist for the field 'project'.")
+            : new(0, "[" + Issue + ",{\"key\":\"PLAT-4\",\"fields\":{\"summary\":\"Of the platform\"}}]", string.Empty);
+        var plugin = await CreateAsync(cli, root.Path);
+
+        var tracker = (await plugin.GetTrackersAsync(root.Path, default)).Single();
+        Assert.AreEqual(("jira", "ALTA, PLAT, GONE, TEAM"), (tracker.Service, tracker.Location));
+        StringAssert.StartsWith(tracker.WebUrl, "https://example.atlassian.net/issues/?jql=project%20in%20");
+
+        var page = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
+        CollectionAssert.AreEqual(new[] { "ALTA-5", "PLAT-4" }, page.Items.Select(static item => item.Id).ToArray());
+        Assert.AreEqual("https://example.atlassian.net/browse/PLAT-4", page.Items[1].Url);
+        Assert.AreEqual("Jira does not show the project GONE to this account: its issues are not listed. Check `projects` in .alta/config.toml.", page.Problem);
+        Assert.IsFalse(page.NeedsSignIn);
+        var searches = cli.Runs.Where(static run => run.StartsWith("jira workitem search", StringComparison.Ordinal)).ToArray();
+        Assert.AreEqual(2, searches.Length);
+        StringAssert.Contains(searches[0], "--jql project in (\"ALTA\", \"PLAT\", \"GONE\", \"TEAM\") AND statusCategory != Done ORDER BY updated DESC");
+        StringAssert.Contains(searches[1], "--jql project in (\"ALTA\", \"PLAT\", \"TEAM\") AND statusCategory != Done ORDER BY updated DESC");
+
+        // An issue of any project of the site is read by its key.
+        cli.Answers["workitem view"] = _ => new(0, Issue, string.Empty);
+        Assert.IsNotNull(await tracker.ReadAsync(TrackedItemKind.Issue, "PLAT-4", default));
+
+        // What happened lately is asked of all of them at once, and a project that is not shown stops nothing.
+        cli.Runs.Clear();
+        var created = await plugin.ReadEventsAsync(root.Path, "jira", TrackedEventKind.Created, TimeSpan.FromMinutes(5), default);
+        Assert.AreEqual(("ALTA, PLAT, GONE, TEAM", (string?)null, 2), (created!.Location, created.Problem, created.Events.Count));
+        Assert.IsTrue(cli.Runs.Any(static run => run.Contains("--jql project in (\"ALTA\", \"PLAT\", \"TEAM\") AND created >= -6m ORDER BY created ASC", StringComparison.Ordinal)));
+
+        // Another failure is said as it is, and so is the one of a project that is alone.
+        cli.Answers["workitem search"] = _ => new(1, string.Empty, "✗ Error: the service is down");
+        var failed = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
+        Assert.AreEqual((0, "Jira: the service is down"), (failed.Items.Count, failed.Problem));
+        using var alone = new TempProject("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"GONE\"\n");
+        cli.Answers["workitem search"] = _ => new(1, string.Empty, "✗ Error: failed to parse JQL query: the value 'gone' does not exist for the field 'project'.");
+        var single = await (await plugin.GetTrackersAsync(alone.Path, default)).Single().ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
+        StringAssert.Contains(single.Problem, "the value 'gone' does not exist");
+    }
+
+    [TestMethod]
+    public async Task AnIssueIsCreated_InTheProjectOfTheSettings_OrInAnotherOneTheProjectNames()
+    {
+        using var root = new TempProject("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\nprojects = [\"PLAT\"]\n");
+        var cli = new FakeCli { Account = "example.atlassian.net" };
+        cli.Answers["workitem create"] = arguments => new(0, "{\"key\":\"" + arguments[4] + "-31\"}", string.Empty);
+        cli.Answers["workitem comment"] = _ => new(0, string.Empty, string.Empty);
+        var plugin = await CreateAsync(cli, root.Path);
+
+        var (code, output, _) = await RunAsync(plugin, root.Path, "jira", "create", "--summary", "The list loses its place", "--type", "Bug");
+        Assert.AreEqual(0, code);
+        using (var created = JsonDocument.Parse(output))
+        {
+            Assert.AreEqual(("alta.jira.created", "ALTA-31", "ALTA", "https://example.atlassian.net/browse/ALTA-31"),
+                (created.RootElement.GetProperty("type").GetString(), created.RootElement.GetProperty("key").GetString(), created.RootElement.GetProperty("project").GetString(), created.RootElement.GetProperty("url").GetString()));
+        }
+
+        CollectionAssert.Contains(cli.Runs, "jira workitem create --project ALTA --type Bug --summary The list loses its place --json");
+
+        (code, output, _) = await RunAsync(plugin, root.Path, "jira", "create", "--jira-project", "plat", "--summary", "For the platform");
+        Assert.AreEqual(0, code);
+        StringAssert.Contains(output, "\"key\":\"PLAT-31\"");
+        CollectionAssert.Contains(cli.Runs, "jira workitem create --project PLAT --type Task --summary For the platform --json");
+
+        // Never in a project the settings do not name.
+        var runs = cli.Runs.Count;
+        (code, _, var error) = await RunAsync(plugin, root.Path, "jira", "create", "--jira-project", "OTHER", "--summary", "Elsewhere");
+        Assert.AreEqual(2, code);
+        StringAssert.Contains(error, "usage.unknownProject");
+        StringAssert.Contains(error, "Its Jira projects are ALTA, PLAT.");
+        Assert.IsFalse(cli.Runs.Skip(runs).Any(static run => run.Contains("workitem create", StringComparison.Ordinal)));
+
+        // A number alone is an issue of the project new issues go to.
+        (code, output, _) = await RunAsync(plugin, root.Path, "jira", "comment", "12", "--body", "Seen.");
+        Assert.AreEqual(0, code);
+        StringAssert.Contains(output, "\"key\":\"ALTA-12\"");
+        CollectionAssert.Contains(cli.Runs, "jira workitem comment create --key ALTA-12 --body Seen.");
+
+        (code, output, _) = await RunAsync(plugin, root.Path, "jira", "status");
+        Assert.AreEqual(0, code);
+        using var status = JsonDocument.Parse(output);
+        Assert.AreEqual("ALTA", status.RootElement.GetProperty("project").GetString());
+        CollectionAssert.AreEqual(new[] { "ALTA", "PLAT" }, status.RootElement.GetProperty("projects").EnumerateArray().Select(static project => project.GetString()).ToArray());
+    }
+
+    [TestMethod]
+    public void AnAgent_IsToldTheProjectsOfJira_AndWhereANewIssueGoes()
+    {
+        var one = JiraPlugin.Guidance(new JiraSettings("example.atlassian.net", "ALTA"));
+        StringAssert.Contains(one, "project `ALTA` on `example.atlassian.net`");
+        Assert.IsFalse(one.Contains("--jira-project", StringComparison.Ordinal));
+
+        var several = JiraPlugin.Guidance(new JiraSettings("example.atlassian.net", "ALTA") { Projects = ["ALTA", "PLAT", "TEAM"] });
+        StringAssert.Contains(several, "in several projects: `ALTA`, `PLAT`, `TEAM`.");
+        StringAssert.Contains(several, "A new issue goes to `ALTA`; it goes to another of these projects only when the user names that project: `alta jira create --jira-project PLAT`.");
+        StringAssert.Contains(several, "A number alone names an issue of `ALTA`.");
     }
 
     [TestMethod]
@@ -257,6 +397,26 @@ public sealed class JiraPluginTests
         });
         await plugin.InitializeAsync(CancellationToken.None);
         return plugin;
+    }
+
+    // Runs an `alta` command of the plugin for the project in a folder.
+    private static async Task<(int Code, string Output, string Error)> RunAsync(JiraPlugin plugin, string projectPath, params string[] arguments)
+    {
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        var app = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(new PluginAltaCommandContext
+        {
+            Plugin = PluginDescriptorFactory.FromType(typeof(JiraPlugin)),
+            Services = NoopPluginServices.Create(),
+            Scope = PluginScope.Project,
+            ScopeProjectPath = projectPath,
+            CorrelationId = "corr-1",
+            Stdin = TextReader.Null,
+            Stdout = stdout,
+            Stderr = stderr,
+        }) };
+        var code = await app.RunAsync(arguments, new CommandRunConfig { Out = TextWriter.Null, Error = stderr });
+        return (code, stdout.ToString(), stderr.ToString());
     }
 
     // A CLI that answers what a test says, and records what it was asked.

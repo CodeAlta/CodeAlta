@@ -1022,7 +1022,7 @@ alta issue show <id> [--project <project>] [--tracker <service>] [--kind issue|p
 ```text
 alta jira status
 alta jira login
-alta jira create --summary <text> [--type Task|Bug|Story|...] [--description <text> | --stdin] [--label <label>]...
+alta jira create --summary <text> [--jira-project <key>] [--type Task|Bug|Story|...] [--description <text> | --stdin] [--label <label>]...
 alta jira comment <key> (--body <text> | --stdin)
 alta jira transition <key> <status>
 alta jira assign <key> <email|@me>
@@ -1031,6 +1031,12 @@ alta jira assign <key> <email|@me>
 `status` makes Jira ready (the CLI, the account) and says what is missing; `login` runs the browser sign-in of the
 CLI and waits five minutes at most. The others change an issue and answer its key and address. A project that
 does not name its Jira answers `jira.notConfigured`.
+
+A project can name several Jira projects (`project` and `projects` of `[plugins.jira]`). `alta issue list` then
+lists their issues together, and `alta jira status` answers them in `projects`, with `project` the one a new issue
+goes to. `create` writes there unless `--jira-project` names another project of the list; a key that is not in the
+list is refused (`usage.unknownProject`, exit code 2) before Jira is asked, and `alta.jira.created` says the
+`project` that was used. A number in place of a key (`alta jira comment 12`) names an issue of `project`.
 
 ## Skill commands
 

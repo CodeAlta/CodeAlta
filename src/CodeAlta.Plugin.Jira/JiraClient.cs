@@ -83,6 +83,34 @@ internal sealed partial class JiraClient
         }
     }
 
+    /// <summary>
+    /// Lists the issues a query finds in several projects. Jira refuses a whole query for one project it does not
+    /// show to the account: such a project is left out, and the others are asked again.
+    /// </summary>
+    /// <param name="settings">The site.</param>
+    /// <param name="projects">The keys of the projects to look in.</param>
+    /// <param name="jql">Writes the query for the projects that are left.</param>
+    /// <param name="limit">The most issues to return.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>What was found, and the projects that were left out.</returns>
+    public async Task<(JiraResult<IReadOnlyList<TrackedItem>> Found, IReadOnlyList<string> Hidden)> SearchAsync(JiraSettings settings, IReadOnlyList<string> projects,
+        Func<IReadOnlyList<string>, string> jql, int limit, CancellationToken cancellationToken)
+    {
+        List<string>? hidden = null;
+        while (true)
+        {
+            var found = await SearchAsync(settings, jql(projects), limit, cancellationToken).ConfigureAwait(false);
+            if (found.Value is not null || projects.Count < 2 || found.Problem is not { } problem || HiddenProjectPattern().Match(problem) is not { Success: true } match
+                || projects.FirstOrDefault(project => string.Equals(project, match.Groups[1].Value, StringComparison.OrdinalIgnoreCase)) is not { } named) return (found, hidden ?? []);
+            (hidden ??= []).Add(named);
+            projects = [.. projects.Where(project => project != named)];
+        }
+    }
+
+    /// <summary>Writes the part of a query that names the projects to look in.</summary>
+    internal static string Projects(IReadOnlyList<string> projects)
+        => projects.Count == 1 ? "project = " + Quote(projects[0]) : "project in (" + string.Join(", ", projects.Select(Quote)) + ")";
+
     /// <summary>Reads one issue with its description and its comments.</summary>
     public async Task<JiraResult<TrackedItemDetail>> ViewAsync(JiraSettings settings, string key, CancellationToken cancellationToken)
     {
@@ -214,9 +242,13 @@ internal sealed partial class JiraClient
 
     [GeneratedRegex(@"^[A-Za-z][A-Za-z0-9_]*-\d+$")]
     private static partial Regex KeyPattern();
+
+    // What Jira answers for a project that does not exist, or that the account does not see.
+    [GeneratedRegex(@"the value '([^']+)' does not exist for the field 'project'", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex HiddenProjectPattern();
 }
 
-/// <summary>The issues of the Jira project of a CodeAlta project.</summary>
+/// <summary>The issues of the Jira projects of a CodeAlta project.</summary>
 internal sealed class JiraTracker : IIssueTracker
 {
     private static readonly TrackedItemKind[] Issues = [TrackedItemKind.Issue];
@@ -225,7 +257,7 @@ internal sealed class JiraTracker : IIssueTracker
     private readonly Func<CancellationToken, ValueTask<(string? Problem, bool NeedsSignIn)>> _ready;
 
     /// <summary>Creates the tracker.</summary>
-    /// <param name="settings">The site and the project.</param>
+    /// <param name="settings">The site and its projects.</param>
     /// <param name="client">The Jira of the CLI.</param>
     /// <param name="ready">Makes the CLI ready and signed in for the site, or says why it is not.</param>
     internal JiraTracker(JiraSettings settings, JiraClient client, Func<CancellationToken, ValueTask<(string? Problem, bool NeedsSignIn)>> ready)
@@ -238,30 +270,37 @@ internal sealed class JiraTracker : IIssueTracker
     public string DisplayName => "Jira";
 
     /// <inheritdoc />
-    public string Location => _settings.Project;
+    public string Location => string.Join(", ", _settings.Projects);
 
     /// <inheritdoc />
-    public string? WebUrl => _settings.BrowseUrl(_settings.Project);
+    public string? WebUrl => _settings.IssuesUrl();
 
     /// <inheritdoc />
     public IReadOnlyList<TrackedItemKind> Kinds => Issues;
 
-    /// <summary>Writes the query of a listing.</summary>
-    internal static string Query(string project, TrackedItemFilter filter, string? text)
+    /// <summary>Writes the query of a listing of the issues of some projects.</summary>
+    internal static string Query(IReadOnlyList<string> projects, TrackedItemFilter filter, string? text)
     {
-        var jql = "project = " + JiraClient.Quote(project);
+        var jql = JiraClient.Projects(projects);
         jql += filter switch { TrackedItemFilter.Open => " AND statusCategory != Done", TrackedItemFilter.Closed => " AND statusCategory = Done", _ => string.Empty };
         var words = text?.Trim();
         if (!string.IsNullOrEmpty(words))
         {
-            // A key, or the number of one, names an issue; anything else is looked for in the texts.
+            // A key, or the number of one, names an issue; anything else is looked for in the texts. A number is the
+            // one of an issue of any of the projects: Jira answers those that exist.
             jql += JiraClient.IsKey(words) ? " AND key = " + JiraClient.Quote(words.ToUpperInvariant())
-                : words.All(char.IsAsciiDigit) ? " AND key = " + JiraClient.Quote(project + "-" + words)
-                : " AND text ~ " + JiraClient.Quote(words);
+                : !words.All(char.IsAsciiDigit) ? " AND text ~ " + JiraClient.Quote(words)
+                : projects.Count == 1 ? " AND key = " + JiraClient.Quote(projects[0] + "-" + words)
+                : " AND key in (" + string.Join(", ", projects.Select(project => JiraClient.Quote(project + "-" + words))) + ")";
         }
 
         return jql + " ORDER BY updated DESC";
     }
+
+    /// <summary>Says which projects a listing could not read, in words for the user.</summary>
+    internal static string? Hidden(IReadOnlyList<string> projects)
+        => projects.Count == 0 ? null
+            : $"Jira does not show the project{(projects.Count == 1 ? string.Empty : "s")} {string.Join(", ", projects)} to this account: {(projects.Count == 1 ? "its" : "their")} issues are not listed. Check `projects` in .alta/config.toml.";
 
     /// <inheritdoc />
     public async ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
@@ -271,9 +310,9 @@ internal sealed class JiraTracker : IIssueTracker
         var (problem, needsSignIn) = await _ready(cancellationToken).ConfigureAwait(false);
         if (problem is not null) return new([]) { Problem = problem, NeedsSignIn = needsSignIn };
         var limit = Math.Clamp(query.Limit, 1, 100);
-        var found = await _client.SearchAsync(_settings, Query(_settings.Project, query.Filter, query.Text), limit + 1, cancellationToken).ConfigureAwait(false);
+        var (found, hidden) = await _client.SearchAsync(_settings, _settings.Projects, projects => Query(projects, query.Filter, query.Text), limit + 1, cancellationToken).ConfigureAwait(false);
         if (found.Value is not { } items) return new([]) { Problem = found.Problem, NeedsSignIn = found.NeedsSignIn };
-        return new(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit };
+        return new(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit, Problem = Hidden(hidden) };
     }
 
     /// <inheritdoc />

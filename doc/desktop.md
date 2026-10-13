@@ -3437,7 +3437,8 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   issues, or the 100 pull requests that changed last: the commits of a pull request are noticed from
   the second time it is listed.
 - **Events of Jira.** `jira` (`created`, or `updated`) watches the Jira project of the project of the
-  automation, through the plugin that knows it (`IIssueEventSource`, the Jira plugin). The trigger starts from
+  automation, or all of them when it names several, through the plugin that knows it (`IIssueEventSource`, the
+  Jira plugin). The trigger starts from
   the moment it is first looked at; each later look asks what was created, or updated, since the last one, a
   day back at most, and starts the automation once for each issue created and once for each change of an
   issue. Its authors are the people of the Jira project, so every event starts it. The prompt is followed by
@@ -3699,13 +3700,15 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
 - **Jira** is a tracker of the projects that name one (`[plugins.jira]`, see `doc/plugins.md`): its issues have keys
   (`ALTA-12`), a type, a priority and the status of their workflow, shown beside the state. Its rows have no date,
   which the search of the Atlassian CLI does not give. When the CLI is being downloaded or nobody is signed in, the
-  list says so in place of the items.
+  list says so in place of the items. A project that names several Jira projects (`projects`) has one Jira
+  tracker: their issues are listed together, the keys say which project each is in, and a project the account
+  does not see is named above the issues of the others.
 - **Trackers.** A tracker is an `IIssueTracker`: a service name (`github`, `gitlab`, `azure_devops`, `bitbucket`,
-  `jira`), what it is of (`owner/repository`, or the key of a project), the kinds of items it has, a listing and
+  `jira`), what it is of (`owner/repository`, or the keys of the Jira projects), the kinds of items it has, a listing and
   the reading of one item. A plugin that knows trackers implements `IIssueTrackerSource`
   (`GetTrackersAsync(projectPath)`); the host asks every active plugin that implements it, and a plugin that
   fails hides no other. The Git plugin gives the tracker of the hosted repository of the folder; the Jira plugin
-  gives the Jira project a project names in its configuration. With several trackers the tab shows a choice
+  gives the Jira projects a project names in its configuration, as one tracker. With several trackers the tab shows a choice
   beside the project; one service appears once.
 - **The hosting services** are read through their REST APIs with the credentials of the user (see
   `doc/plugins.md`). GitHub: the issues and pulls listings, and the search for words and for merged or unmerged

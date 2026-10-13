@@ -5,9 +5,9 @@ namespace CodeAlta.Plugin.Jira;
 
 /// <summary>
 /// Built-in plugin for projects whose issues are in Jira. A project names its Atlassian site and its Jira
-/// project in <c>[plugins.jira]</c> of its <c>.alta/config.toml</c>; the plugin then lists and reads its issues
-/// for the Issues tab, and gives agents the <c>alta jira</c> commands. Jira is reached through the Atlassian
-/// CLI (<c>acli</c>), which the plugin downloads the first time a project needs it.
+/// project, or several of them, in <c>[plugins.jira]</c> of its <c>.alta/config.toml</c>; the plugin then lists
+/// and reads their issues for the Issues tab, and gives agents the <c>alta jira</c> commands. Jira is reached
+/// through the Atlassian CLI (<c>acli</c>), which the plugin downloads the first time a project needs it.
 /// </summary>
 [Plugin("jira", DisplayName = "Jira", Description = "The issues of a Jira project, for projects that say so in their configuration.")]
 public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSource
@@ -71,13 +71,15 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     public async ValueTask<TrackedEventPage?> ReadEventsAsync(string projectPath, string service, TrackedEventKind kind, TimeSpan window, CancellationToken cancellationToken)
     {
         if (service != "jira" || _client is not { } client || JiraSettings.Read(projectPath) is not { } settings) return null;
-        var page = new TrackedEventPage("Jira", settings.Project, []);
+        var page = new TrackedEventPage("Jira", string.Join(", ", settings.Projects), []);
         if ((await EnsureReadyAsync(settings, cancellationToken).ConfigureAwait(false)).Problem is { } problem) return page with { Problem = problem };
         // Jira reads a date as the account's own time: a number of minutes means the same everywhere.
         var minutes = Math.Clamp((int)Math.Ceiling(window.TotalMinutes) + 1, 2, 7 * 24 * 60);
         var field = kind == TrackedEventKind.Created ? "created" : "updated";
-        var jql = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"project = {JiraClient.Quote(settings.Project)} AND {field} >= -{minutes}m ORDER BY {field} ASC");
-        var found = await client.SearchAsync(settings, jql, MaximumEvents, cancellationToken).ConfigureAwait(false);
+        // A project the account does not see is left out: what happens in the others still starts the automation.
+        var (found, _) = await client.SearchAsync(settings, settings.Projects,
+            projects => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{JiraClient.Projects(projects)} AND {field} >= -{minutes}m ORDER BY {field} ASC"),
+            MaximumEvents, cancellationToken).ConfigureAwait(false);
         if (found.Value is not { } items) return page with { Problem = found.Problem ?? "Jira did not answer." };
         if (kind == TrackedEventKind.Created) return page with { Events = [.. items.Select(static item => new TrackedEvent(item, item.Id))] };
 
@@ -120,11 +122,29 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
         yield return Prompt.Dynamic(PluginPromptChannel.Developer, (context, _) =>
         {
             var settings = JiraSettings.Read(context.ProjectPath ?? context.Services.Workspace.SelectedProjectPath);
-            return ValueTask.FromResult(settings is null ? null
-                : $"This project keeps its issues in Jira: project `{settings.Project}` on `{settings.Site}`. Read them with `alta issue list --tracker jira` and "
-                  + $"`alta issue show {settings.Project}-<n>`. Change them with `alta jira` (`create`, `comment`, `transition`, `assign`), only when the user asks for it. "
-                  + $"An issue key such as `{settings.Project}-12` names an issue of that project.");
+            return ValueTask.FromResult(settings is null ? null : Guidance(settings));
         }, title: "Jira", kind: PluginPromptPartKind.ToolGuidance, order: 60);
+    }
+
+    /// <summary>
+    /// What an agent is told of the Jira of its project: where the issues are, how to read and change them, and,
+    /// with several Jira projects, which one a new issue goes to.
+    /// </summary>
+    internal static string Guidance(JiraSettings settings)
+    {
+        if (!settings.HasSeveralProjects)
+        {
+            return $"This project keeps its issues in Jira: project `{settings.Project}` on `{settings.Site}`. Read them with `alta issue list --tracker jira` and "
+                   + $"`alta issue show {settings.Project}-<n>`. Change them with `alta jira` (`create`, `comment`, `transition`, `assign`), only when the user asks for it. "
+                   + $"An issue key such as `{settings.Project}-12` names an issue of that project.";
+        }
+
+        var other = settings.Projects[1];
+        return $"This project keeps its issues in Jira on `{settings.Site}`, in several projects: {string.Join(", ", settings.Projects.Select(static project => $"`{project}`"))}. "
+               + "Read them with `alta issue list --tracker jira`, which lists the issues of all these projects together, and `alta issue show <KEY>-<n>`. "
+               + "Change them with `alta jira` (`create`, `comment`, `transition`, `assign`), only when the user asks for it. "
+               + $"A new issue goes to `{settings.Project}`; it goes to another of these projects only when the user names that project: `alta jira create --jira-project {other}`. "
+               + $"The key of an issue starts with the key of its project: `{other}-12` is an issue of `{other}`. A number alone names an issue of `{settings.Project}`.";
     }
 
     /// <summary>
@@ -295,6 +315,8 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
         lock (_announced) _announced.Clear();
         Invalidate();
         var (problem, _) = await EnsureReadyAsync(settings, cancellationToken).ConfigureAwait(false);
-        return PluginCommandResult.Message(problem ?? $"Jira is ready: project {settings.Project} on {settings.Site}.");
+        return PluginCommandResult.Message(problem ?? (settings.HasSeveralProjects
+            ? $"Jira is ready: projects {string.Join(", ", settings.Projects)} on {settings.Site}. New issues go to {settings.Project}."
+            : $"Jira is ready: project {settings.Project} on {settings.Site}."));
     }
 }

@@ -30,6 +30,24 @@ project = "ALTA"
 
 That is all. The first time the project needs Jira, CodeAlta downloads the Atlassian CLI (`acli`) into `~/.alta/cache/jira` and tells you so in a notice. Nothing is downloaded for a project that does not turn Jira on.
 
+### Several Jira projects
+
+A repository can hold the work of several teams or products, each with its own Jira project. Name the others in `projects`:
+
+```toml
+[plugins.jira]
+site = "example.atlassian.net"
+project = "ALTA"
+projects = ["PLAT", "TEAM"]
+```
+
+- The issues of all these projects are listed together, the most recently updated first. The key of an issue says which project it is in: `PLAT-7`.
+- A new issue goes to the project of `project`, here `ALTA`. An agent creates an issue in another one only when you name it, and never in a project that is not in the list.
+- Without `project`, the first key of `projects` is the one new issues go to.
+- All the projects are on the same site, and 20 at most are read.
+
+When your account does not see one of the projects, the Issues tab lists the others and says which one is missing.
+
 ## Sign in
 
 CodeAlta uses the sign-in of the Atlassian CLI. There are two ways.
@@ -67,7 +85,11 @@ List the open issues of this project and tell me which ones are about the Explor
 Create a Jira bug for the crash we just found, then move ALTA-12 to In Progress.
 ```
 
-- **Automations** can start when an issue of the project is created or updated: choose the **Jira issue** trigger. CodeAlta looks at Jira every five minutes.
+```text
+Create a Jira story in PLAT for the new build cache.
+```
+
+- **Automations** can start when an issue of the project is created or updated, in any of its Jira projects: choose the **Jira issue** trigger. CodeAlta looks at Jira every five minutes.
 
 ## Turn it off
 

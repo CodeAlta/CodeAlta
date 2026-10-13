@@ -73,7 +73,7 @@ Project-local CodeAlta state lives under `<project>/.alta/`:
 
 | Path | Purpose |
 | --- | --- |
-| `<project>/.alta/config.toml` | Project-local config overrides, the automations of CodeAlta Desktop that are kept with the project, and `[plugins.jira]` (`site`, `project`, optionally `email` and `token_env`), which turns the Jira plugin on for the project. |
+| `<project>/.alta/config.toml` | Project-local config overrides, the automations of CodeAlta Desktop that are kept with the project, and `[plugins.jira]` (`site`, `project`, optionally `projects` for other Jira projects of the site, `email` and `token_env`), which turns the Jira plugin on for the project. |
 | `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
 | `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. The generated `.gitignore` of the folder keeps the generated build files out of the repository. |
 | `<project>/.alta/plugin-data/<plugin key>/` | What a plugin stores for the project with `Services.State`. |

@@ -8,20 +8,28 @@ namespace CodeAlta.Plugin.Jira;
 /// What a project says of its Jira: the <c>[plugins.jira]</c> table of its <c>.alta/config.toml</c>.
 /// </summary>
 /// <param name="Site">The Atlassian site of the project, as a host name: <c>example.atlassian.net</c>.</param>
-/// <param name="Project">The key of the Jira project its issues are in: <c>ALTA</c>.</param>
+/// <param name="Project">
+/// The key of the Jira project its issues are in: <c>ALTA</c>. With several Jira projects, the one new issues go to
+/// and the one a number alone names.
+/// </param>
 /// <remarks>
 /// <code>
 /// [plugins.jira]
 /// enabled = true
 /// site = "example.atlassian.net"
 /// project = "ALTA"
+/// projects = ["PLAT", "TEAM"]    # other Jira projects whose issues are listed with those of `project`
 /// email = "me@example.com"       # only to sign in with an API token
 /// token_env = "JIRA_API_TOKEN"   # the environment variable that holds the token
 /// </code>
+/// Without <c>project</c>, the first key of <c>projects</c> is the one new issues go to.
 /// Jira is used by a project only: the table of the configuration of the user is not read.
 /// </remarks>
 public sealed record JiraSettings(string Site, string Project)
 {
+    /// <summary>The most Jira projects one project lists; the keys after that are not read.</summary>
+    public const int MaximumProjects = 20;
+
     /// <summary>The environment variables an API token is looked for in, when the project names none.</summary>
     public static readonly IReadOnlyList<string> TokenVariables = ["JIRA_API_TOKEN", "ATLASSIAN_API_TOKEN"];
 
@@ -33,6 +41,34 @@ public sealed record JiraSettings(string Site, string Project)
 
     /// <summary>Gets the name of the environment variable that holds an API token; null for the usual ones.</summary>
     public string? TokenVariable { get; init; }
+
+    /// <summary>
+    /// Gets the keys of the Jira projects whose issues are listed: <see cref="Project"/> first, then the others in
+    /// the order the project wrote them, each once.
+    /// </summary>
+    public IReadOnlyList<string> Projects { get; init; } = [Project];
+
+    /// <summary>Gets whether the project names several Jira projects.</summary>
+    public bool HasSeveralProjects => Projects.Count > 1;
+
+    /// <summary>Gets whether a key is the one of a Jira project the project names.</summary>
+    /// <param name="project">The key, in upper case.</param>
+    /// <returns>True when it is one of <see cref="Projects"/>.</returns>
+    public bool Has(string project) => Projects.Contains(project, StringComparer.Ordinal);
+
+    /// <summary>Gets the address of the issues of the project on the web: its Jira project, or a search of its Jira projects.</summary>
+    /// <returns>The address.</returns>
+    public string IssuesUrl()
+        => HasSeveralProjects
+            ? $"https://{Site}/issues/?jql={Uri.EscapeDataString("project in (" + string.Join(", ", Projects) + ") ORDER BY updated DESC")}"
+            : BrowseUrl(Project);
+
+    /// <inheritdoc />
+    public bool Equals(JiraSettings? other)
+        => other is not null && Site == other.Site && Project == other.Project && Email == other.Email && TokenVariable == other.TokenVariable && Projects.SequenceEqual(other.Projects, StringComparer.Ordinal);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(Site, Project, Email, TokenVariable, Projects.Count);
 
     /// <summary>Gets the address of an issue on the web.</summary>
     /// <param name="key">The key of the issue.</param>
@@ -63,7 +99,10 @@ public sealed record JiraSettings(string Site, string Project)
 
     /// <summary>Reads the settings from the text of a configuration file.</summary>
     /// <param name="toml">The text of the file.</param>
-    /// <returns>The settings; null when Jira is not enabled there, or the site or the project is missing or malformed.</returns>
+    /// <returns>
+    /// The settings; null when Jira is not enabled there, the site is missing or malformed, <c>project</c> is malformed,
+    /// or no Jira project is named. A malformed key of <c>projects</c> is left out.
+    /// </returns>
     public static JiraSettings? Parse(string toml)
     {
         ArgumentNullException.ThrowIfNull(toml);
@@ -73,8 +112,23 @@ public sealed record JiraSettings(string Site, string Project)
         if (!root.TryGetValue("plugins", out var plugins) || plugins is not TomlTable pluginTable
             || !pluginTable.TryGetValue("jira", out var jira) || jira is not TomlTable table) return null;
         if (table.TryGetValue("enabled", out var enabled) && enabled is false) return null;
-        if (NormalizeSite(Text(table, "site") ?? Text(table, "url")) is not { } site || NormalizeProject(Text(table, "project")) is not { } project) return null;
-        return new(site, project) { Email = Text(table, "email"), TokenVariable = Text(table, "token_env") };
+        if (NormalizeSite(Text(table, "site") ?? Text(table, "url")) is not { } site) return null;
+        var projects = new List<string>();
+        if (Text(table, "project") is { } written)
+        {
+            if (NormalizeProject(written) is not { } project) return null;
+            projects.Add(project);
+        }
+
+        if (table.TryGetValue("projects", out var list) && list is TomlArray keys)
+        {
+            foreach (var key in keys)
+            {
+                if (projects.Count < MaximumProjects && NormalizeProject(key as string) is { } project && !projects.Contains(project, StringComparer.Ordinal)) projects.Add(project);
+            }
+        }
+
+        return projects.Count == 0 ? null : new(site, projects[0]) { Projects = projects, Email = Text(table, "email"), TokenVariable = Text(table, "token_env") };
     }
 
     /// <summary>Reduces what a user writes for a site (an address, a host) to its host name.</summary>

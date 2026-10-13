@@ -30,9 +30,10 @@ internal static class JiraCommands
         command.Add(Assign(plugin, context));
         Help(command,
             "The project names its Jira in `.alta/config.toml`: `[plugins.jira]` with `site` (example.atlassian.net) and `project` (the key, such as ALTA).",
+            "A project whose issues are in several Jira projects adds `projects` (other keys): their issues are listed together, and `project` is where a new issue goes.",
             "Jira is reached through the Atlassian CLI, which CodeAlta downloads and signs in when it is first needed.",
             "To list and read the issues, use `alta issue list` and `alta issue show`: they answer for Jira as for every other tracker.",
-            "An issue is named by its key: `ALTA-12`. The number alone names an issue of the project.",
+            "An issue is named by its key: `ALTA-12`. The number alone names an issue of the project (of `project`, when there are several).",
             "Examples: `alta jira status`; `alta jira create --type Bug --summary \"The list loses its place\" --stdin`; `alta jira comment ALTA-12 --stdin`; "
             + "`alta jira transition ALTA-12 \"In Progress\"`; `alta jira assign ALTA-12 @me`.");
         return command;
@@ -48,7 +49,7 @@ internal static class JiraCommands
             var (problem, needsSignIn) = await plugin.EnsureReadyAsync(settings, context.CancellationToken).ConfigureAwait(false);
             var account = problem is null ? await plugin.Client.GetAccountAsync(context.CancellationToken).ConfigureAwait(false) : null;
             Write(context, new { type = "alta.jira.status", version = 1, correlationId = context.CorrelationId, ready = problem is null, site = settings.Site, project = settings.Project,
-                account = account?.Email, signIn = account?.Kind, problem, needsSignIn = needsSignIn ? true : (bool?)null });
+                projects = settings.Projects, account = account?.Email, signIn = account?.Kind, problem, needsSignIn = needsSignIn ? true : (bool?)null });
             return 0;
         });
         return command;
@@ -70,10 +71,11 @@ internal static class JiraCommands
 
     private static Command CreateIssue(JiraPlugin plugin, PluginAltaCommandContext context)
     {
-        string? summary = null, type = null, description = null;
+        string? summary = null, type = null, description = null, target = null;
         var labels = new List<string>();
         var stdin = false;
         var command = Leaf("create", "Create an issue in the Jira project. Only when the user asks for it.");
+        command.Add("jira-project=", "The key of the Jira project the issue goes to, when the project names several: one of them. Defaults to the one of `project`.", value => target = value);
         command.Add("summary=", "The title of the issue, in one line. Required.", value => summary = value);
         command.Add("type=", "The type of the issue: Task (default), Bug, Story, Epic, or another type of the project.", value => type = value);
         command.Add("description=", "The description, as plain text. Prefer --stdin for several lines.", value => description = value);
@@ -85,10 +87,14 @@ internal static class JiraCommands
             if (string.IsNullOrWhiteSpace(summary) || summary.Length > 255 || summary.Contains('\n', StringComparison.Ordinal)) return Fail(context, "usage.invalidSummary", "--summary is required: one line of at most 255 characters.", Usage);
             var body = stdin ? await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false) : description;
             if (body is { Length: > MaximumBody }) return Fail(context, "usage.descriptionTooLong", "The description is too long.", Usage);
+            // An issue is created only where the project says its issues are: never in another project of the site.
+            var project = string.IsNullOrWhiteSpace(target) ? settings.Project : JiraSettings.NormalizeProject(target);
+            if (project is null || !settings.Has(project))
+                return Fail(context, "usage.unknownProject", $"--jira-project names no Jira project of this project. {(settings.HasSeveralProjects ? "Its Jira projects are" : "Its Jira project is")} {string.Join(", ", settings.Projects)}.", Usage);
             if (await Ready(plugin, context, settings).ConfigureAwait(false) is { } refused) return refused;
-            var created = await plugin.Client.CreateAsync(settings.Project, string.IsNullOrWhiteSpace(type) ? "Task" : type.Trim(), summary.Trim(), body?.Trim(), labels, context.CancellationToken).ConfigureAwait(false);
+            var created = await plugin.Client.CreateAsync(project, string.IsNullOrWhiteSpace(type) ? "Task" : type.Trim(), summary.Trim(), body?.Trim(), labels, context.CancellationToken).ConfigureAwait(false);
             if (created.Value is not { } key) return Fail(context, "jira.failed", created.Problem ?? "Jira did not create the issue.");
-            Write(context, new { type = "alta.jira.created", version = 1, correlationId = context.CorrelationId, key, url = settings.BrowseUrl(key), project = settings.Project });
+            Write(context, new { type = "alta.jira.created", version = 1, correlationId = context.CorrelationId, key, url = settings.BrowseUrl(key), project });
             return 0;
         });
         return command;
@@ -159,7 +165,7 @@ internal static class JiraCommands
     }
 
     private static int NotConfigured(PluginAltaCommandContext context)
-        => Fail(context, "jira.notConfigured", "This project does not use Jira. Its .alta/config.toml needs [plugins.jira] with `site` (example.atlassian.net) and `project` (the key of the Jira project).");
+        => Fail(context, "jira.notConfigured", "This project does not use Jira. Its .alta/config.toml needs [plugins.jira] with `site` (example.atlassian.net) and `project` (the key of the Jira project), or `projects` (several keys).");
 
     private static int Fail(PluginAltaCommandContext context, string code, string message, int exitCode = Failure)
     {

@@ -40,7 +40,7 @@ The session starts with nothing but your prompt: say what to look at and what to
 | Cron | When a cron expression matches, for example `0 9 * * 1-5`. |
 | Issue | When an issue is opened in the repository of the project. |
 | Pull request | When a pull request is opened, or when it receives commits. |
-| Jira issue | When an issue of the Jira project is created, or when it is updated. |
+| Jira issue | When an issue of the Jira project is created, or when it is updated. A project with [several Jira projects](plugins/jira.md#several-jira-projects) watches all of them. |
 | Command | When a command that CodeAlta keeps running ends with success. |
 
 An automation can have several triggers. Times are read on the clock of your computer.
