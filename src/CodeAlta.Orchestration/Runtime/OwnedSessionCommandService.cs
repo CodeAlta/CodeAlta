@@ -332,14 +332,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(workspacePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
-        if (title.Length > 256 || title != title.Trim() || title.Any(char.IsControl))
-            throw new ArgumentException("A title must be unpadded, free of control characters, and at most 256 characters.", nameof(title));
-        for (var index = 0; index < title.Length; index++)
-        {
-            if (!char.IsSurrogate(title[index])) continue;
-            if (!char.IsHighSurrogate(title[index]) || ++index == title.Length || !char.IsLowSurrogate(title[index]))
-                throw new ArgumentException("A title must contain only valid Unicode scalars.", nameof(title));
-        }
+        if (SessionRuntimeService.SessionTitleError(title) is { } error) throw new ArgumentException(error, nameof(title));
         lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
         return _runtime.RenameOwnedSessionAsync(sessionId, projectId, workspacePath, title);
     }

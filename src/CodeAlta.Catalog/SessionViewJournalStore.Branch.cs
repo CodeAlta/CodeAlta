@@ -153,6 +153,8 @@ public sealed partial class SessionViewJournalStore
         {
             SessionId = target.SessionId,
             Title = string.IsNullOrWhiteSpace(target.Title) ? null : target.Title,
+            // A title given to the new session was chosen; without one it is titled as its source is.
+            TitleSource = target.TitleSource ?? point.Summary.TitleSource,
             WorkingDirectory = target.WorkingDirectory,
             WorktreeDirectory = string.IsNullOrWhiteSpace(target.WorktreeDirectory) ? null : target.WorktreeDirectory,
             ParentSessionId = string.IsNullOrWhiteSpace(target.ParentSessionId) ? null : target.ParentSessionId,
@@ -174,6 +176,7 @@ public sealed partial class SessionViewJournalStore
             ModelId = sourceLocal?.ModelId,
             ReasoningEffort = sourceLocal?.ReasoningEffort,
             PermissionMode = sourceLocal?.PermissionMode,
+            TitleMode = sourceLocal?.TitleMode,
             AgentPromptId = sourceLocal?.AgentPromptId,
             Archived = target.Status == SessionViewStatus.Archived,
             ParentSessionId = target.ParentSessionId,

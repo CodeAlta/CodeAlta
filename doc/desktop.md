@@ -461,7 +461,8 @@ the click that ends a drag is swallowed, and Escape or leaving the window cancel
 - A session that works in a git worktree keeps it when the target project is another checkout of the same
   repository (and not the checkout of that worktree itself); otherwise it leaves it. A worktree folder is never
   deleted.
-- A session that was never named takes the name and the default summary of its new project.
+- A session that still has the title it was created with, the name of its project, takes the name and
+  the default summary of its new project. A title somebody gave, and one CodeAlta derived, stay.
 - The attachment of the session is retired: the next send starts it in its new folder, and its first
   attachment tells the agent in its developer instructions that it was moved, from which folder to which.
   That notice is kept in memory only: after a restart the agent learns its folder from its instructions alone.
@@ -511,11 +512,12 @@ automation a bolt, and the chats two speech bubbles.
 name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsewhere leaves the name
 as it is. A rename that is refused says why under the field. A session keeps the name it was created
 or renamed with, also when a later Send attaches it again (another model, a restart) and when it is
-continued from the terminal UI, which lists a session by the first line of its summary; a session that
-was never named shows the first line of its summary, 80 characters at most
-(`SessionRuntimeService.ListedTitle`). That line follows
-what the session says, also after a restart or another model: a Send that attaches a session again
-leaves its saved title as it is, so the line never becomes the name of the session.
+continued from the terminal UI. A session nobody named is titled by CodeAlta, as **Settings >
+Sessions** says (`[sessions] title`): from its first prompt, from the first line of its last message,
+or by its model. The session that runs writes that title, and every list shows the saved one
+(`SessionRuntimeService.ListedTitle`); see [session titles](new-session-provider.md#session-titles).
+The page reads `globalConfig.sessionTitles` and saves a choice at once with
+`globalConfig.saveSessionTitles`; a session takes it with its next prompt.
 
 **Delete…** of a session, **Archive project…** and **Unarchive project…** ask in the same kind of
 popover beside the row (`ConfirmPopover.tsx`): the question, the name it is about, what it does, and

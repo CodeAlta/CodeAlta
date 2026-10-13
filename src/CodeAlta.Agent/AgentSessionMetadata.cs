@@ -71,6 +71,9 @@ public sealed record AgentSessionViewStateMetadata(
 {
     /// <summary>Gets the permission mode chosen for the session, or <see langword="null"/> for the one of its provider.</summary>
     public string? PermissionMode { get; init; }
+
+    /// <summary>Gets how the session titles itself, or <see langword="null"/> when it follows the setting.</summary>
+    public AgentSessionTitleMode? TitleMode { get; init; }
 }
 
 /// <summary>
@@ -118,5 +121,11 @@ public sealed record RawApiSessionMetadataDetails(
     string? ProviderBaseUri = null,
     string? ProviderSessionId = null,
     string? Title = null)
-    : AgentSessionMetadataDetails;
+    : AgentSessionMetadataDetails
+{
+    /// <summary>
+    /// Gets who chose <see cref="Title"/>; <see langword="null"/> for a session written before sources were recorded.
+    /// </summary>
+    public AgentSessionTitleSource? TitleSource { get; init; }
+}
 

@@ -217,7 +217,7 @@ public sealed class SessionJournalSqliteCacheTests
         {
             await connection.OpenAsync().ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE app_meta SET version = 2 WHERE owner = 'session_cache';";
+            command.CommandText = "UPDATE app_meta SET version = 3 WHERE owner = 'session_cache';";
             Assert.AreEqual(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
             command.CommandText = "ALTER TABLE session_projection_cache RENAME COLUMN title TO title_of_the_newer_build;";
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -229,7 +229,7 @@ public sealed class SessionJournalSqliteCacheTests
 
         Assert.AreEqual(1, sessions.Length);
         Assert.AreEqual("session-downgrade", sessions[0].SessionId);
-        Assert.AreEqual(1, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
+        Assert.AreEqual(2, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
         await downgraded.UpsertSessionAsync(CreateSummary("session-after-the-downgrade", updatedAt: "2026-06-18T13:05:00+00:00")).ConfigureAwait(false);
         Assert.AreEqual(2, (await downgraded.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
         Assert.AreEqual(5L, await database.ReadAsync("plugin:test", async (connection, token) =>
@@ -797,6 +797,43 @@ public sealed class SessionJournalSqliteCacheTests
 
         Assert.AreEqual(0, sessions.Length);
         Assert.IsTrue(File.Exists(options.ApplicationDatabasePath));
+    }
+
+    [TestMethod]
+    public async Task TitleModeAndTitleSource_AreKeptByTheJournalAndTheCache_AndAnOlderCacheIsGivenTheColumn()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var session = CreateSummary("session-title-mode", updatedAt: "2026-06-18T17:00:00+00:00") with { TitleSource = AgentSessionTitleSource.User };
+        await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(session).ConfigureAwait(false);
+        await catalog.JournalStore.AppendStateAsync(CreateDescriptor(session), new SessionViewLocalState { ProviderKey = "openai", TitleMode = "last_message" })
+            .ConfigureAwait(false);
+
+        var listed = await ListSingleAsync().ConfigureAwait(false);
+        Assert.AreEqual(AgentSessionTitleMode.LastMessage, listed.ViewState!.TitleMode);
+        Assert.AreEqual(AgentSessionTitleSource.User, ((RawApiSessionMetadataDetails)listed.Details!).TitleSource);
+        Assert.AreEqual("last_message", (await new SessionViewCatalog(options).JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false))!.TitleMode);
+
+        // The cache of a version that knew no such choice: no column, and the version that build recorded.
+        await using (var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE session_projection_cache DROP COLUMN local_title_mode; UPDATE app_meta SET version = 1 WHERE owner = 'session_cache';";
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        // Its rows stay, and say the mode of a session once its journal is read again.
+        Assert.AreEqual(AgentSessionTitleSource.User, ((RawApiSessionMetadataDetails)(await ListSingleAsync().ConfigureAwait(false)).Details!).TitleSource);
+        await new SessionViewCatalog(options).JournalStore.AppendStateAsync(CreateDescriptor(session), new SessionViewLocalState { ProviderKey = "openai", TitleMode = "first_prompt" })
+            .ConfigureAwait(false);
+        Assert.AreEqual(AgentSessionTitleMode.FirstPrompt, (await ListSingleAsync().ConfigureAwait(false)).ViewState!.TitleMode);
+        await using var database = ApplicationDatabase.Create(options);
+        Assert.AreEqual(2, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+
+        async Task<AgentSessionMetadata> ListSingleAsync()
+            => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
     }
 
     private static CatalogOptions CreateOptions(string globalRoot)

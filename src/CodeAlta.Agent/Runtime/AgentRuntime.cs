@@ -189,6 +189,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             WorkingDirectory = options.WorkingDirectory,
             WorktreeDirectory = options.LeaveWorktree ? null : NormalizeOptionalText(options.WorktreeDirectory),
             Title = NormalizeOptionalText(options.Title),
+            TitleSource = options.TitleSource,
             Summary = null,
             ParentSessionId = NormalizeOptionalText(options.ParentSessionId),
             CreatedBySessionId = NormalizeOptionalText(options.CreatedBySessionId ?? options.ParentSessionId),
@@ -365,6 +366,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory) ? summary.WorkingDirectory : options.WorkingDirectory,
             WorktreeDirectory = ResumedWorktree(summary, options),
             Title = string.IsNullOrWhiteSpace(options.Title) ? summary.Title : options.Title.Trim(),
+            TitleSource = summary.TitleSource ?? options.TitleSource,
             UpdatedAt = updatedAt,
         };
 
@@ -393,6 +395,8 @@ public sealed class AgentRuntime : IAsyncDisposable
             WorkingDirectory = string.IsNullOrWhiteSpace(options.WorkingDirectory) ? summary.WorkingDirectory : options.WorkingDirectory,
             WorktreeDirectory = ResumedWorktree(summary, options),
             Title = string.IsNullOrWhiteSpace(options.Title) ? summary.Title : options.Title.Trim(),
+            // A session written before sources were recorded is given the one its host decided on; any other keeps its own.
+            TitleSource = summary.TitleSource ?? options.TitleSource,
         };
     }
 

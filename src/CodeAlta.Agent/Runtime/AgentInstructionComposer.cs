@@ -10,13 +10,15 @@ internal static class AgentInstructionComposer
 {
     public static AgentInstructionBundle Compose(
         AgentSessionCreateOptions options,
-        IReadOnlyList<AgentLoadedSkillState>? loadedSkills = null)
-        => Compose(options, loadedSkills, new AgentInstructionFileReader());
+        IReadOnlyList<AgentLoadedSkillState>? loadedSkills = null,
+        string? sessionInstructions = null)
+        => Compose(options, loadedSkills, new AgentInstructionFileReader(), sessionInstructions);
 
     internal static AgentInstructionBundle Compose(
         AgentSessionCreateOptions options,
         IReadOnlyList<AgentLoadedSkillState>? loadedSkills,
-        AgentInstructionFileReader instructionFiles)
+        AgentInstructionFileReader instructionFiles,
+        string? sessionInstructions = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(instructionFiles);
@@ -60,6 +62,13 @@ internal static class AgentInstructionComposer
             {
                 developerSections.Add(activeSkillsSection);
             }
+        }
+
+        // What the session adds for the state it is in now (how it is titled): the last section, so that a change
+        // of that state changes one paragraph of the instructions and nothing else.
+        if (Normalize(sessionInstructions) is { } sessionSection)
+        {
+            developerSections.Add(sessionSection);
         }
 
         var developerInstructions = developerSections.Count == 0

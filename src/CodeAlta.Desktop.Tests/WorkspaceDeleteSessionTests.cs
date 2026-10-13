@@ -123,7 +123,7 @@ public sealed class WorkspaceDeleteSessionTests
     }
 
     [TestMethod]
-    public async Task NeverNamedSession_IsDeletedWithTheTitleTheListShows()
+    public async Task SessionTitledByItsLastMessage_IsDeletedWithTheTitleTheListShows()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-delete-" + Guid.NewGuid().ToString("N"));
         var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
@@ -138,12 +138,13 @@ public sealed class WorkspaceDeleteSessionTests
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
             });
             var project = host.CurrentProject;
+            host.RuntimeService.SaveSessionTitleMode(AgentSessionTitleMode.LastMessage);
             var sessionId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, null)).SessionId;
             var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
             Assert.IsNotNull(receipt);
             Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
 
-            // The session was never named: the list shows the first line of what it last said, 80 characters at most.
+            // Nobody named the session: its title is the first line of what it last said, 80 characters at most.
             var rpc = new WorkspaceService(host, Epoch);
             var listed = (await rpc.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(session => session.Id == sessionId);
             Assert.AreEqual(AnsweringProvider.FirstLine[..79], listed.Title);

@@ -130,6 +130,32 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SessionTitles_AreReadFromAndSavedToTheConfigurationFile()
+    {
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
+        Assert.AreEqual(new GlobalConfigSessionTitlesResponse("ok", "model"), fixture.Service.SessionTitles(new(Epoch)));
+
+        Assert.AreEqual(new GlobalConfigSessionTitlesResponse("ok", "last_message"), fixture.Service.SaveSessionTitles(new(Epoch, "last_message")));
+        Assert.AreEqual(new GlobalConfigSessionTitlesResponse("ok", "last_message"), fixture.Service.SessionTitles(new(Epoch)));
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "[sessions]");
+        StringAssert.Contains(text, "title = \"last_message\"");
+        StringAssert.Contains(text, "sk-kept", "The other settings stay.");
+
+        // The default is the absence of the setting.
+        Assert.AreEqual("ok", fixture.Service.SaveSessionTitles(new(Epoch, "model")).Status);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("[sessions]", StringComparison.Ordinal));
+
+        foreach (var mode in new[] { "summary", "", null })
+            Assert.AreEqual(new GlobalConfigSessionTitlesResponse("invalid", null), fixture.Service.SaveSessionTitles(new(Epoch, mode)));
+        Assert.AreEqual("stale_epoch", fixture.Service.SessionTitles(new("another")).Status);
+        Assert.AreEqual("stale_epoch", fixture.Service.SaveSessionTitles(new("another", "first_prompt")).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().SessionTitles(new(Epoch)).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().SaveSessionTitles(new(Epoch, "first_prompt")).Status);
+        Assert.AreEqual("model", fixture.Service.SessionTitles(new(Epoch)).Mode, "A refused save changes nothing.");
+    }
+
+    [TestMethod]
     public async Task Providers_ReportWhatBlankFieldsFallBackTo()
     {
         await using var fixture = new Fixture("""

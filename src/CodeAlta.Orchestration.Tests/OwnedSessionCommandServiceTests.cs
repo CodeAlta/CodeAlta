@@ -1955,6 +1955,7 @@ public sealed class OwnedSessionCommandServiceTests
             await header.ConfigureAwait(false);
             // Header/state cache writes only update rows; a genuine summary creates the row.
             var store = journal.CreateSessionStore();
+            Provider.JournalStore = store;
             var summary = Track(store.UpsertSessionAsync(new AgentSessionSummary
             {
                 SessionId = session.SessionId,
@@ -2229,6 +2230,7 @@ public sealed class OwnedSessionCommandServiceTests
 
     private sealed class ControlledProvider
     {
+        public IAgentSessionJournalStore? JournalStore { get; set; }
         private int _runtimeStarts, _resumes, _creates, _sends, _aborts, _runtimeDisposals, _earlyDisposals, _active;
         private int _runtimeStops, _sessionDisposals;
         internal ControlledProvider(string providerId = "owned-fixture")
@@ -2412,8 +2414,21 @@ public sealed class OwnedSessionCommandServiceTests
             public ValueTask DisposeAsync() => owner.DisposeAsync();
         }
 
-        private class Session(ControlledProvider owner, string sessionId) : IAgentSession, IAgentPermissionModeProvider
+        private class Session(ControlledProvider owner, string sessionId) : IAgentSession, IAgentPermissionModeProvider, IAgentSessionTitleProvider
         {
+            public async Task RenameAsync(string title, CancellationToken cancellationToken = default)
+            {
+                var store = owner.JournalStore;
+                Assert.IsNotNull(store);
+                var summary = await store.GetSessionSummaryAsync(sessionId, cancellationToken);
+                Assert.IsNotNull(summary);
+                await store.UpsertSessionAsync(summary with { Title = title, TitleSource = AgentSessionTitleSource.User }, cancellationToken);
+            }
+
+            public AgentSessionTitleMode TitleMode { get; private set; } = AgentSessionTitles.DefaultMode;
+            public void SetTitleMode(AgentSessionTitleMode mode) => TitleMode = mode;
+            public Task ReleaseTitleAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
             public ModelProviderId ProviderId => owner.Descriptor.ProviderId;
             public string? PermissionMode => owner.SessionPermissionMode;
             public void SetPermissionMode(string? permissionMode) => owner.SessionPermissionMode = permissionMode;

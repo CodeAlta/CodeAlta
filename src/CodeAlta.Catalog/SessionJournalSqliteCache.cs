@@ -11,7 +11,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
     private const string Owner = "session_cache";
     private const string TablePrefix = "session_projection_cache";
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private const int ProjectionVersion = 1;
     private const string CacheCompleteMetadataKey = "session_projection_cache_complete";
     private const string CacheCompleteValue = "1";
@@ -282,6 +282,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                             local_reasoning_effort = $local_reasoning_effort,
                             local_agent_prompt_id = $local_agent_prompt_id,
                             local_permission_mode = $local_permission_mode,
+                            local_title_mode = $local_title_mode,
                             archived = $archived,
                             message_count = $message_count,
                             local_parent_session_id = $local_parent_session_id,
@@ -299,6 +300,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(state.ReasoningEffort));
                     AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(state.AgentPromptId));
                     AddParameter(command, "$local_permission_mode", NormalizeOptionalText(state.PermissionMode));
+                    AddParameter(command, "$local_title_mode", FormatTitleMode(state.TitleMode));
                     AddParameter(command, "$archived", state.Archived ? 1 : 0);
                     AddParameter(command, "$message_count", state.MessageCount);
                     AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
@@ -793,6 +795,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     local_reasoning_effort TEXT,
                     local_agent_prompt_id TEXT,
                     local_permission_mode TEXT,
+                    local_title_mode TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
                     message_count INTEGER,
                     local_parent_session_id TEXT,
@@ -815,6 +818,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         await AddPermissionModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddTitleModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_updated ON session_projection_cache(updated_at_utc_ticks DESC);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
@@ -846,6 +850,25 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
     }
+
+    // A cache written before a session could choose how it is titled has no column for it. Its rows stay, without
+    // a choice: the sessions of such a build made none, and a row is read again when its journal changes.
+    private static async Task AddTitleModeColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_title_mode';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_title_mode TEXT;", cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string? FormatTitleMode(string? name)
+        => AgentSessionTitles.ParseMode(name) is { } mode ? AgentSessionTitles.NameOf(mode) : null;
 
     private static async Task ExecuteSchemaCommandAsync(
         SqliteConnection connection,
@@ -962,6 +985,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_reasoning_effort,
                 local_agent_prompt_id,
                 local_permission_mode,
+                local_title_mode,
                 archived,
                 message_count,
                 local_parent_session_id,
@@ -998,6 +1022,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_reasoning_effort,
                 $local_agent_prompt_id,
                 $local_permission_mode,
+                $local_title_mode,
                 $archived,
                 $message_count,
                 $local_parent_session_id,
@@ -1033,6 +1058,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_reasoning_effort = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_reasoning_effort ELSE session_projection_cache.local_reasoning_effort END,
                 local_agent_prompt_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_agent_prompt_id ELSE session_projection_cache.local_agent_prompt_id END,
                 local_permission_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_permission_mode ELSE session_projection_cache.local_permission_mode END,
+                local_title_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_title_mode ELSE session_projection_cache.local_title_mode END,
                 archived = CASE WHEN excluded.local_state_cached = 1 THEN excluded.archived ELSE session_projection_cache.archived END,
                 message_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.message_count ELSE session_projection_cache.message_count END,
                 local_parent_session_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_parent_session_id ELSE session_projection_cache.local_parent_session_id END,
@@ -1073,6 +1099,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(localState?.ReasoningEffort));
         AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(localState?.AgentPromptId));
         AddParameter(command, "$local_permission_mode", NormalizeOptionalText(localState?.PermissionMode));
+        AddParameter(command, "$local_title_mode", localState?.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null);
         AddParameter(command, "$archived", localState?.Archived == true ? 1 : 0);
         AddParameter(command, "$message_count", localState?.MessageCount);
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(localState?.ParentSessionId));
@@ -1161,6 +1188,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 CreatedByJson: GetString(reader, "created_by_json"))
             {
                 PermissionMode = GetString(reader, "local_permission_mode"),
+                TitleMode = AgentSessionTitles.ParseMode(GetString(reader, "local_title_mode")),
             };
         }
 
@@ -1200,6 +1228,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             CreatedByJson: SerializeCreatedBy(state.CreatedBy))
         {
             PermissionMode = NormalizeOptionalText(state.PermissionMode),
+            TitleMode = AgentSessionTitles.ParseMode(state.TitleMode),
         };
     }
 

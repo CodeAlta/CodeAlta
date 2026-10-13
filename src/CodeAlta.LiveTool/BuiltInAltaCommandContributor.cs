@@ -74,6 +74,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("session steer"),
         Mutating("session queue"),
         Mutating("session set_agent"),
+        Mutating("session title"),
         Disruptive("session abort"),
         Mutating("session compact"),
         Mutating("session fork"),
@@ -703,6 +704,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionSteerCommand(context));
         group.Add(CreateSessionQueueCommand(context));
         group.Add(CreateSessionSetAgentCommand(context));
+        group.Add(CreateSessionTitleCommand(context));
         group.Add(CreateSessionAbortCommand(context));
         group.Add(CreateSessionCompactCommand(context));
         group.Add(CreateSessionForkCommand(context));
@@ -972,6 +974,29 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("prompt-id=", "Agent prompt id from `alta prompt list`. Use `default` to restore the default agent prompt.", value => promptId = value);
         command.Add(async (_, _) => await HandleSessionSetAgentAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), promptId).ConfigureAwait(false));
         AddHelpText(command, "Examples: `alta session set_agent --prompt-id reviewer`; `alta session set_agent <session-id> --prompt-id default`.");
+        return command;
+    }
+
+    private static Command CreateSessionTitleCommand(AltaCommandContext context)
+    {
+        string? sessionId = null;
+        string? title = null;
+        string? mode = null;
+        var command = Leaf("title", "Show the title of a session, name the session, or choose how CodeAlta titles it.");
+        command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => sessionId = value);
+        command.Add("set=", "Name the session. A title that is given stays until somebody changes it.", value => title = value);
+        command.Add("mode=", "How CodeAlta titles the session: `first_prompt`, `last_message`, `model`, or `default` to follow the setting. The title then follows the mode, unless `--set` names the session in the same call.", value => mode = value);
+        command.Add(async (_, _) => await HandleSessionTitleAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), title, mode).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "Without an option, prints the title, who chose it (`user` or `auto`) and how the session is titled.",
+            "It changes that session only, never the setting. Modes: `first_prompt` keeps the title of the first prompt,",
+            "`last_message` follows the first line of the last answer, `model` asks the model for a title.",
+            "Examples:",
+            "  `alta session title`",
+            "  `alta session title --set \"Parser rewrite\"`",
+            "  `alta session title <session-id> --mode last_message`",
+            "  `alta session title --mode default`");
         return command;
     }
 
@@ -3341,6 +3366,71 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.Success;
     }
 
+    private static async ValueTask<int> HandleSessionTitleAsync(AltaCommandContext context, string? sessionId, string? title, string? mode)
+    {
+        context.ClaimSessionWork(sessionId);
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return UsageError(context, "usage.missingSession", "Session id is required outside a session caller.", "alta session title");
+        }
+
+        // `default` is no mode of its own: the session follows the setting again.
+        AgentSessionTitleMode? ownMode = null;
+        var changeMode = mode is not null;
+        if (changeMode && !string.Equals(mode!.Trim(), "default", StringComparison.OrdinalIgnoreCase))
+        {
+            ownMode = AgentSessionTitles.ParseMode(mode);
+            if (ownMode is null)
+            {
+                return UsageError(context, "usage.invalidTitleMode", "--mode must be first_prompt, last_message, model or default.", "alta session title");
+            }
+        }
+
+        if (title is not null)
+        {
+            title = title.Trim();
+            if (SessionRuntimeService.SessionTitleError(title) is { } error)
+            {
+                return UsageError(context, "usage.invalidTitle", error, "alta session title");
+            }
+        }
+
+        if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var infoResult = await ResolveSessionInfoAsync(context, sessionId).ConfigureAwait(false);
+        if (infoResult.ExitCode != AltaExitCodes.Success)
+        {
+            return infoResult.ExitCode;
+        }
+
+        var resolvedSessionId = infoResult.Info!.Session.SessionId;
+        var changed = title is not null || changeMode;
+        var state = changed
+            ? await runtime.SetSessionTitleAsync(resolvedSessionId, title, changeMode, ownMode, context.CancellationToken).ConfigureAwait(false)
+            : await runtime.GetSessionTitleAsync(resolvedSessionId, context.CancellationToken).ConfigureAwait(false);
+        if (state is null)
+        {
+            return NotFound(context, "session.notFound", $"Session '{sessionId}' was not found.");
+        }
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.session.title",
+            version = 1,
+            correlationId = context.CorrelationId,
+            sessionId = state.SessionId,
+            title = state.Title,
+            titleSource = AgentSessionTitles.NameOf(state.Source),
+            titleMode = AgentSessionTitles.NameOf(state.Mode),
+            titleModeFrom = state.OwnMode ? "session" : "setting",
+            changed,
+        });
+        return AltaExitCodes.Success;
+    }
+
     private static async ValueTask<int> HandleSessionAbortAsync(AltaCommandContext context, string? sessionId, string? reason)
     {
         context.ClaimSessionWork(sessionId);
@@ -5524,6 +5614,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             parentSessionId = info.Session.ParentSessionId,
             createdBy = info.Session.CreatedBy,
             title = info.Session.Title,
+            // Who chose the title, and the mode of the session when it has one of its own (see `session title`).
+            titleSource = AgentSessionTitles.NameOf(info.Session.TitleSource),
+            titleMode = info.Session.TitleMode,
             state = info.State,
             status = SessionStatusWire(info.Session.Status),
             workingDirectory = info.Session.WorkingDirectory,

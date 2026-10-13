@@ -25,6 +25,66 @@ Enabled does not mean ready, capable, authenticated or successfully created.
 
 ## Admission and confirmation
 
+### Session titles
+
+A title is saved in the summary of the session with who chose it (`AgentSessionSummary.Title`
+and `TitleSource`):
+
+- `user`: a title given at creation (`workspace.createSession` with a title, `alta session create
+  --title`, `alta session fork --title`), a Rename, `alta session title --set`. Nothing replaces it
+  automatically.
+- `auto`: the title a session is created with when none is given (the name of its project, or
+  `Global Session`), and every title CodeAlta derives.
+- no source: a journal written before sources were recorded. It is listed as it always was (its
+  saved title, or the first line of its summary when that title is one a session is created with),
+  and decided once when the session is next attached or renamed: a title that is one a session is
+  created with becomes `auto`, with the title the session was listed under; any other becomes `user`.
+
+A fork, a rewind and a move keep the source of the title unless they are given a title.
+
+How an `auto` title changes is the title mode: the `[sessions] title` setting, or the session's
+own `title_mode` in its local state (`alta session title --mode`), which a fork keeps.
+
+| Mode | The title |
+| --- | --- |
+| `first_prompt` | The title derived from the first prompt, then nothing else. |
+| `last_message` | After each assistant message with text, its first line (80 characters at most). |
+| `model` (default, `AgentSessionTitles.DefaultMode`) | The content of the last `<session_title>` tag of an assistant message. |
+
+In every mode the first prompt with text names the session (`AgentSessionTitles.FromPrompt`: the
+first paragraph without a heading or list marker, cut at the end of its first sentence, on one
+line, 80 UTF-16 units at most without splitting a surrogate pair, cut at a word with an ellipsis).
+A prompt nobody wrote does not: a turn the provider started by itself, and a message of CodeAlta,
+which starts with a `[CodeAlta ...]` line (a delegated-agent message, an update of a child session,
+the result of a background job). The host derives the title, so it is the same for a prompt of
+CodeAlta Desktop, of `alta session send`, of an automation and of a reminder. The TUI is the
+exception: it creates a session that starts from a prompt with a title it derives itself
+(`SessionPromptText.CreateInitialSessionTitle`), which is a title that was given (`user`) and so
+stays, as it always did there.
+
+The live `AgentSession` is the only writer of an `auto` title. It learns its mode when it is
+created or resumed (`AgentSessionCreateOptions.TitleMode`) and while it is attached
+(`IAgentSessionTitleProvider.SetTitleMode`, through `AgentHub.SetTitleModeAsync`): at once for
+`alta session title --mode`, and with the next prompt of the session when the setting changed.
+Every summary write goes through `UpdateSummaryAsync`, which reads the source under the summary
+gate, so a Rename during a run wins. Rename updates an attached session through
+`IAgentSessionTitleProvider.RenameAsync`; an unattached session is renamed directly in the journal,
+and an attached runtime without this capability refuses Rename.
+
+In mode `model`, and while nobody named the session, the session adds one paragraph to the
+developer instructions of each run (`SessionRuntimeService.SessionTitleGuidance`): it asks the
+model to start its answer with a `<session_title>` line when it answers the first prompt, and
+later only when the subject changed. The paragraph is composed per run, so a change of mode needs
+no new attachment; Claude Code is told of it by its `<codealta_instructions_update>` note.
+
+The tag is removed where assistant text leaves the session, whatever the mode
+(`AgentSessionTitleTag`): from the completed content events (the timeline, the journal, parent
+notifications, `alta session result`, the plugins), from the streamed deltas, where a stateful
+filter per content holds back what could be the start of a tag, and from the summary. The raw
+assistant message, in the conversation and in `local.assistantMessage`, keeps what the model
+wrote. A tag in a fenced code block, or right after a backtick, is quoted text and stays, as does
+one that spans lines or holds more than 200 characters.
+
 Create remains effectful. `WorkspaceCreateSessionRpc` validates the bounded optional
 provider ID and exact epoch/scope, then resolves exactly one currently enabled
 descriptor under the existing shared catalog admission gate. Explicit selection

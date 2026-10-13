@@ -377,6 +377,29 @@ public sealed class DesktopWorkspaceTests
     }
 
     [TestMethod]
+    public void Projection_SessionWithATitleSourceIsListedByItsSavedTitle()
+    {
+        // The session itself writes the title CodeAlta chose, and a Rename the one somebody chose: a list shows what
+        // is saved, also the title the session was created with, and never the first line of the summary.
+        var project = Project("p");
+        foreach (var (source, title) in new[]
+                 {
+                     (AgentSessionTitleSource.Auto, project.DisplayName),
+                     (AgentSessionTitleSource.Auto, "Fix the login error"),
+                     (AgentSessionTitleSource.User, project.DisplayName),
+                 })
+        {
+            var session = Session("titled") with
+            {
+                Summary = "Latest answer of the assistant",
+                Details = new RawApiSessionMetadataDetails(Title: title) { TitleSource = source },
+            };
+            var snapshot = WorkspaceService.ProjectSnapshot([project], [session], ProjectHeader(session));
+            Assert.AreEqual(title, snapshot.Sessions[0].Title, source.ToString());
+        }
+    }
+
+    [TestMethod]
     public void Projection_NeverNamedGlobalSessionShowsFirstLineOfSummary()
     {
         var session = Session("global") with

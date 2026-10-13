@@ -75,6 +75,7 @@ import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type Act
 import { ReminderBadge } from "./ReminderBadge";
 import { SessionWaitingBadge, WaitingBadge } from "./WaitingBadge";
 import { PermissionSettings } from "./PermissionSettings";
+import { SessionSettings } from "./SessionSettings";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions, noOutgoing } from "./sessionOperations";
@@ -292,7 +293,7 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "storage";
+type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App() {
@@ -394,9 +395,22 @@ function App() {
     const was = liveRuns.current.has(id);
     if (running) liveRuns.current.add(id); else liveRuns.current.delete(id);
     if (was && !running) { readSessionList.current(); refreshWorkItems.current(); }
+    // The first prompt of a session titles it when its run starts: the list is read once that is written.
+    if (!was && running) setTimeout(() => readSessionList.current(), 1_500);
   };
+  // A session also runs with no tab on it (a sub-agent, a prompt sent by the alta tool): the activity of the host
+  // says when one starts and when it ends, and its title is read then as the one of a session of a tab is.
+  const hostRuns = useMemo(() => spacesState.sessions.filter(session => session.running).map(session => session.sessionId).sort().join("\n"), [spacesState.sessions]);
+  const hostRunsNow = useRef(hostRuns);
   useEffect(() => {
-    const timer = setInterval(() => { if (liveRuns.current.size > 0) readSessionList.current(); }, 10_000);
+    if (hostRunsNow.current === hostRuns) return;
+    hostRunsNow.current = hostRuns;
+    readSessionList.current();
+    const timer = setTimeout(() => readSessionList.current(), 1_500);
+    return () => clearTimeout(timer);
+  }, [hostRuns]);
+  useEffect(() => {
+    const timer = setInterval(() => { if (liveRuns.current.size > 0 || hostRunsNow.current) readSessionList.current(); }, 10_000);
     return () => clearInterval(timer);
   }, []);
   const [projectId, writeProjectId] = useState<string | null>(null);
@@ -3855,6 +3869,7 @@ function App() {
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "sessions" ? <SessionSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
@@ -4005,7 +4020,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["spaces", "Spaces", "space"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
-      ["permissions", "Permissions", "shield"],
+      ["permissions", "Permissions", "shield"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
     ["Advanced", [["config", "Configuration file", "config"], ["storage", "Storage", "database"], ["mcpHost", "CodeAlta MCP", "remote"]]],

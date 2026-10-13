@@ -17,7 +17,7 @@ namespace CodeAlta.Agent.Runtime;
 /// Shared session implementation for provider-backed local raw-API agents.
 /// </summary>
 public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns,
-    IAgentBackgroundTaskProvider, IAgentPermissionModeProvider, IAgentRemoteControlProvider
+    IAgentBackgroundTaskProvider, IAgentPermissionModeProvider, IAgentRemoteControlProvider, IAgentSessionTitleProvider
 {
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
@@ -55,6 +55,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly IDisposable? _backgroundTasksRegistration;
     private readonly IDisposable? _remoteControlRegistration;
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
+    // Turns release the state gate while they run. Serialize their summary snapshots with live Rename separately.
+    private readonly SemaphoreSlim _summaryGate = new(initialCount: 1, maxCount: 1);
+    // How the session titles itself: read by the runs, set from any thread.
+    private int _titleMode;
+    // The title the first prompt of the session gives it; null until a prompt a person or an agent wrote had text.
+    private string? _firstPromptTitle;
+    // The assistant texts that stream now, by content: a title tag is never shown, not even in part.
+    private readonly Dictionary<(string? Attempt, string Content), AgentSessionTitleTag.Filter> _titleFilters = [];
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
     private readonly Queue<AgentInput> _pendingSteerInputs = new();
@@ -124,6 +132,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             RecordCompactionSummaryUsageAsync);
         _options = options;
         _permissionMode = NormalizeOptionalText(options.PermissionMode);
+        _titleMode = (int)(options.TitleMode ?? AgentSessionTitles.DefaultMode);
+        _firstPromptTitle = FirstPromptTitle(history);
         _allowProviderContinuation = allowProviderContinuation;
         _summary = summary;
         _state = RebuildLoadedSkillsState(state, history);
@@ -206,6 +216,144 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         Volatile.Write(ref _permissionMode, NormalizeOptionalText(permissionMode));
     }
 
+    /// <inheritdoc />
+    public async Task RenameAsync(string title, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        using var operation = EnterOperation();
+        await _summaryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            // A journal append can succeed before cache refresh fails. Keep the chosen title in memory too,
+            // so a later snapshot cannot undo a partially persisted Rename.
+            // The title is now one somebody chose: no turn replaces it, whatever the mode of the session.
+            _summary = _summary with { Title = title.Trim(), TitleSource = AgentSessionTitleSource.User };
+            await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _summaryGate.Release(); }
+    }
+
+    /// <inheritdoc />
+    public AgentSessionTitleMode TitleMode => (AgentSessionTitleMode)Volatile.Read(ref _titleMode);
+
+    /// <inheritdoc />
+    public void SetTitleMode(AgentSessionTitleMode mode)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Volatile.Write(ref _titleMode, (int)mode);
+    }
+
+    /// <inheritdoc />
+    public async Task ReleaseTitleAsync(CancellationToken cancellationToken = default)
+    {
+        using var operation = EnterOperation();
+        await _summaryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            // What the mode would have made of the session so far. A model gives its title with its next answer.
+            var title = TitleMode switch
+            {
+                AgentSessionTitleMode.FirstPrompt => Volatile.Read(ref _firstPromptTitle),
+                AgentSessionTitleMode.LastMessage => AgentSessionTitles.FromMessage(_summary.Summary),
+                _ => null,
+            };
+            _summary = _summary with { Title = title ?? _summary.Title, TitleSource = AgentSessionTitleSource.Auto };
+            await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _summaryGate.Release(); }
+    }
+
+    // The one place a summary is changed, and so the one place an automatic title is written: the update reads the
+    // source of the title under the gate a Rename takes, so a title somebody chose is never replaced.
+    private async Task UpdateSummaryAsync(Func<AgentSessionSummary, AgentSessionSummary> update, CancellationToken cancellationToken, bool persist = true)
+    {
+        await _summaryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var updated = update(_summary);
+            if (ReferenceEquals(updated, _summary)) return;
+            _summary = updated;
+            if (persist) await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _summaryGate.Release(); }
+    }
+
+    // The instructions that ask the model for a title tag, while the session is titled that way: a session
+    // somebody named is not asked for a title that would not be used.
+    private string? TitleInstructions()
+        => TitleMode is AgentSessionTitleMode.Model && _summary.TitleSource is AgentSessionTitleSource.Auto ? _options.TitleInstructions : null;
+
+    private static string? FirstPromptTitle(IReadOnlyList<AgentEvent> history)
+    {
+        foreach (var @event in history)
+        {
+            if (@event is not AgentContentCompletedEvent { Kind: AgentContentKind.User } prompt) continue;
+            var text = prompt.Content;
+            // The prompt as it was sent names its attachments apart from its text.
+            if (prompt.Details is { ValueKind: JsonValueKind.Object } details)
+            {
+                try
+                {
+                    if (details.Deserialize(AgentJsonSerializerContext.Default.AgentInput) is { } input) text = PromptText(input);
+                }
+                catch (Exception exception) when (exception is JsonException or NotSupportedException)
+                {
+                }
+            }
+
+            var providerInitiated = prompt.ContentId.StartsWith(AgentSessionTurn.ProviderPromptPrefix, StringComparison.Ordinal);
+            if (AgentSessionTitles.PromptNames(text, providerInitiated) && AgentSessionTitles.FromPrompt(text) is { } title) return title;
+        }
+
+        return null;
+    }
+
+    private static string PromptText(AgentInput input)
+        => string.Join('\n', input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
+
+    // The first prompt a person or an agent wrote names a session nobody named, in every mode.
+    private async Task TitleFromPromptAsync(AgentInput input, bool providerInitiated, CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _firstPromptTitle) is not null) return;
+        var text = PromptText(input);
+        if (!AgentSessionTitles.PromptNames(text, providerInitiated) || AgentSessionTitles.FromPrompt(text) is not { } title) return;
+        Volatile.Write(ref _firstPromptTitle, title);
+        await UpdateSummaryAsync(
+                summary => summary.TitleSource is AgentSessionTitleSource.Auto ? summary with { Title = title, UpdatedAt = DateTimeOffset.UtcNow } : summary,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private AgentSessionTitleTag.Filter TitleFilter(AgentTurnDelta delta)
+    {
+        var key = (NormalizeOptionalText(delta.AttemptId), delta.ContentId);
+        lock (_titleFilters)
+        {
+            if (!_titleFilters.TryGetValue(key, out var filter)) _titleFilters[key] = filter = new AgentSessionTitleTag.Filter();
+            return filter;
+        }
+    }
+
+    // attemptId: the attempt whose draft is discarded; null for every text, once its message is complete.
+    private void ForgetTitleFilters(string? attemptId = null)
+    {
+        lock (_titleFilters)
+        {
+            if (attemptId is null)
+            {
+                _titleFilters.Clear();
+                return;
+            }
+
+            foreach (var key in _titleFilters.Keys.Where(key => string.Equals(key.Attempt, attemptId, StringComparison.Ordinal)).ToArray())
+            {
+                _titleFilters.Remove(key);
+            }
+        }
+    }
+
     // The tasks are the state of a provider that runs now: they are told to those who listen and are neither
     // kept in the history of the session nor recorded, so that a session read again later shows none. The
     // event names no run: the tasks go on outside the runs.
@@ -233,7 +381,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+            var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills, TitleInstructions());
             // Remote control may be changed during a run: like its status, warnings are live feedback,
             // not concurrent writes to the run-owned history.
             foreach (var diagnostic in instructionBundle.Diagnostics)
@@ -372,7 +520,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             if (!string.IsNullOrWhiteSpace(_summary.WorktreeDirectory) && !Directory.Exists(_summary.WorktreeDirectory))
                 throw new InvalidOperationException($"The git worktree this session works in, '{_summary.WorktreeDirectory}', no longer exists.");
             var fileChangeTracker = new AgentTurnFileChangeTracker(_summary.ExecutionDirectory);
-            var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills());
+            var instructionBundle = AgentInstructionComposer.Compose(_options, GetPromptIntegratedLoadedSkills(), TitleInstructions());
             await AppendInstructionWarningsAsync(instructionBundle, runId, linkedCts.Token).ConfigureAwait(false);
             var requestDeveloperInstructions = CombineDeveloperInstructions(
                 instructionBundle.DeveloperInstructions,
@@ -921,7 +1069,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private async Task<AgentCompactionOutcome> CompactGateHeldAsync(CancellationToken cancellationToken)
     {
-        var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills);
+        var instructionBundle = AgentInstructionComposer.Compose(_options, _state.LoadedSkills, TitleInstructions());
         await AppendInstructionWarningsAsync(instructionBundle, null, cancellationToken).ConfigureAwait(false);
         var modelInfo = await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false);
         if (_turnExecutor is IAgentProviderCompaction providerCompaction)
@@ -1000,9 +1148,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 DateTimeOffset.UtcNow,
                 "Active context window");
             _state = _state with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow };
-            _summary = _summary with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow };
             await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-            await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+            await UpdateSummaryAsync(summary => summary with { Usage = usage, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
         }
 
         var completed = new AgentSessionUpdateEvent(
@@ -1083,6 +1230,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
         _pendingSteerInputs.Clear();
         _stateGate.Dispose();
+        _summaryGate.Dispose();
         _eventChannel.Writer.TryComplete();
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Count > 1) throw new AggregateException(failures);
@@ -1608,6 +1756,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
         }
+
+        await TitleFromPromptAsync(input, providerInitiated, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<bool> AppendPendingSteerInputsAsync(AgentRunId runId, CancellationToken cancellationToken)
@@ -1695,12 +1845,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = refreshedUsage,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
-        _summary = _summary with
-        {
-            Usage = refreshedUsage,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-
         if (shouldEmitPredictiveUpdate)
         {
             var usageEvent = new AgentSessionUpdateEvent(
@@ -1715,7 +1859,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
 
         await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-        await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        await UpdateSummaryAsync(summary => summary with { Usage = refreshedUsage, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task AppendTurnDiffUpdatedAsync(
@@ -1753,6 +1897,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             _conversation.Add(response.AssistantMessage);
         }
+        // The message is complete: what its streamed texts still held back is in the texts that follow.
+        ForgetTitleFilters();
+        // The conversation and the raw message keep what the model wrote, which it is sent again. Everything that is
+        // shown (the content events, the preview) is without its title tags, whatever the mode of the session.
+        string? modelTitle = null;
         var providerConversation = CreateProviderConversation();
         var effectiveUsage = CreateConversationUsageSnapshot(
             systemMessage,
@@ -1772,17 +1921,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = effectiveUsage ?? _state.Usage,
             UpdatedAt = DateTimeOffset.UtcNow,
         };
-        _summary = _summary with
-        {
-            ModelId = _summary.ModelId ?? _options.Model,
-            ReasoningEffort = _options.ReasoningEffort ?? _summary.ReasoningEffort,
-            AgentPromptId = NormalizeOptionalText(_options.AgentPromptId) ?? _summary.AgentPromptId,
-            Title = response.Title ?? _summary.Title,
-            Summary = response.Summary ?? ExtractAssistantSummary(response.AssistantMessage) ?? _summary.Summary,
-            Usage = effectiveUsage ?? _summary.Usage,
-            UpdatedAt = DateTimeOffset.UtcNow,
-        };
-
         var events = new List<AgentEvent>();
         if (hasDurableAssistantOutput)
         {
@@ -1807,6 +1945,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             switch (part)
             {
                 case AgentMessagePart.Text text:
+                    var shown = AgentSessionTitleTag.Strip(text.Value, out var tagged) ?? string.Empty;
+                    modelTitle = tagged ?? modelTitle;
+                    // A text that was only its title tag shows nothing.
+                    if (!ReferenceEquals(shown, text.Value) && string.IsNullOrWhiteSpace(shown)) break;
                     events.Add(new AgentContentCompletedEvent(
                         ProviderId,
                         SessionId,
@@ -1815,7 +1957,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         AgentContentKind.Assistant,
                         partContentId ?? $"assistant:{Guid.CreateVersion7()}",
                         null,
-                        text.Value));
+                        shown));
                     break;
                 case AgentMessagePart.Reasoning reasoning:
                     events.Add(new AgentContentCompletedEvent(
@@ -1865,7 +2007,25 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
         await AppendEventsAsync(events, cancellationToken).ConfigureAwait(false);
         await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-        await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        var preview = NormalizeOptionalText(AgentSessionTitleTag.Strip(response.Summary)) ?? ExtractAssistantSummary(response.AssistantMessage);
+        await UpdateSummaryAsync(summary => summary with
+        {
+            ModelId = summary.ModelId ?? _options.Model,
+            ReasoningEffort = _options.ReasoningEffort ?? summary.ReasoningEffort,
+            AgentPromptId = NormalizeOptionalText(_options.AgentPromptId) ?? summary.AgentPromptId,
+            // Only a title CodeAlta chose follows the conversation, and only as the mode of the session says.
+            Title = (summary.TitleSource is AgentSessionTitleSource.Auto
+                ? TitleMode switch
+                {
+                    AgentSessionTitleMode.Model => AgentSessionTitles.FromMessage(modelTitle),
+                    AgentSessionTitleMode.LastMessage => AgentSessionTitles.FromMessage(preview),
+                    _ => null,
+                }
+                : null) ?? summary.Title,
+            Summary = preview ?? summary.Summary,
+            Usage = effectiveUsage ?? summary.Usage,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask OnStreamingDeltaAsync(
@@ -1873,6 +2033,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentTurnDelta delta,
         CancellationToken cancellationToken)
     {
+        var text = delta.Text;
+        if (delta.Kind is AgentContentKind.Assistant && text.Length > 0)
+        {
+            // A title tag is never shown, not even in part: what could be one is held back until it is known.
+            text = TitleFilter(delta).Append(text);
+            if (text.Length == 0) return;
+        }
+
         var details = CreateStreamingDeltaDetails(delta);
         var @event = new AgentContentDeltaEvent(
             ProviderId,
@@ -1882,7 +2050,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             delta.Kind,
             delta.ContentId,
             null,
-            delta.Text,
+            text,
             details);
         await AppendEventsAsync([@event], AgentEventPersistenceMode.TransientOnly, cancellationToken).ConfigureAwait(false);
     }
@@ -1953,6 +2121,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private void RemoveTransientDraftDeltas(string attemptId)
     {
+        ForgetTitleFilters(attemptId);
         for (var index = _history.Count - 1; index >= 0; index--)
         {
             if (_history[index] is AgentContentDeltaEvent delta &&
@@ -2739,12 +2908,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = usage,
             UpdatedAt = completedAt,
         };
-        _summary = _summary with
-        {
-            Usage = usage,
-            UpdatedAt = completedAt,
-        };
-
         var rawCheckpoint = new AgentRawEvent(
             ProviderId,
             SessionId,
@@ -2766,7 +2929,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage: usage);
         await AppendEventsAsync([rawCheckpoint, completed], cancellationToken).ConfigureAwait(false);
         await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
-        await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
+        await UpdateSummaryAsync(summary => summary with { Usage = usage, UpdatedAt = completedAt }, cancellationToken).ConfigureAwait(false);
 
         long? tokensRemoved = result.TokensAfter is null ? null : Math.Max(0, result.TokensBefore - result.TokensAfter.Value);
         return new AgentCompactionOutcome(
@@ -2791,7 +2954,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             UpdatedAt = now,
         };
         _state = _state with { Usage = usage, UpdatedAt = now };
-        _summary = _summary with { Usage = usage, UpdatedAt = now };
+        await UpdateSummaryAsync(summary => summary with { Usage = usage, UpdatedAt = now }, cancellationToken, persist: false).ConfigureAwait(false);
         var recorded = new AgentSessionUpdateEvent(
             ProviderId,
             SessionId,
@@ -3497,7 +3660,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     private static string? ExtractAssistantSummary(AgentConversationMessage message)
-        => message.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value).FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+        => message.Parts.OfType<AgentMessagePart.Text>().Select(static part => AgentSessionTitleTag.Strip(part.Value)).FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
 
     private static string? GuessMediaType(string pathOrUri)
         => Path.GetExtension(pathOrUri).ToLowerInvariant() switch

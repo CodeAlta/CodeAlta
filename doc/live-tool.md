@@ -270,6 +270,8 @@ Useful control commands:
 alta session create --project <project> --title "Investigate parser"
 alta session create --project <project> --same-model-as <session-id>
 alta session set_agent <session-id> --prompt-id <prompt-id>
+alta session title <session-id> --set "Parser rewrite"
+alta session title <session-id> --mode last_message
 alta session send <session-id> --message "Summarize the latest failure."
 alta session send <session-id> --stdin --queue-if-busy
 alta session queue <session-id> --message "Run this after the current turn."
@@ -279,6 +281,21 @@ alta session compact <session-id>
 alta session fork <session-id> --before <turn>
 alta session rewind <session-id> --before <turn>
 ```
+
+`alta session title [<session-id>]` is about the title of a session, the calling one by default.
+Without an option it only reads: its record (`alta.session.title`) has `title`, `titleSource`
+(`user` for a title somebody chose, `auto` for one CodeAlta chose, `unset` for a session written
+before that was recorded), `titleMode` (`first_prompt`, `last_message` or `model`) and
+`titleModeFrom` (`session` for a mode of its own, `setting` otherwise). `--set "<title>"` names the
+session, by the same path as Rename in the desktop: the title is the one somebody chose, also on a
+session that runs, and it has the same limits (256 characters at most, no control characters;
+`usage.invalidTitle`). `--mode first_prompt|last_message|model` gives the session a mode of its own
+and `--mode default` makes it follow the setting again; both hand the title back to CodeAlta
+(`titleSource` becomes `auto`), which applies the mode at once to an attached session (the title of
+its first prompt, or the first line of its last message). With `--set` in the same call the title
+is the given one and only the mode is recorded. The command changes that session only, never the
+`[sessions] title` setting. `alta session info` and `alta session list` print `titleSource`, and
+`titleMode` for a session that has a mode of its own.
 
 `alta session create --project <project> --worktree` creates the session in a new git worktree: a
 checkout of its own, in the folder the user chose for worktrees, on a new branch `alta/<name>`. It starts

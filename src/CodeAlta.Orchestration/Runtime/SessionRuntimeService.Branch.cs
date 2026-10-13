@@ -299,9 +299,12 @@ public sealed partial class SessionRuntimeService
         target.MessageCount = null;
         target.ForkedFrom = null;
         target.RewindCount = 0;
+        // Without a title the new session is titled as its source is: by whoever chose that title.
+        target.TitleSource = null;
         if (NormalizeOptionalText(title) is { } given)
         {
             target.Title = given;
+            target.TitleSource = AgentSessionTitleSource.User;
             return target;
         }
 

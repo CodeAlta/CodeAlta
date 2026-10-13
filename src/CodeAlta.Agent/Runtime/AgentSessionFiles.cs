@@ -68,6 +68,13 @@ public sealed record AgentSessionSummary
     public string? Title { get; init; }
 
     /// <summary>
+    /// Gets or initializes who chose <see cref="Title"/>: CodeAlta, which may replace it, or a person or an agent,
+    /// whose title is never replaced automatically. Null for a session written before sources were recorded: it is
+    /// decided when the session is next attached or renamed.
+    /// </summary>
+    public AgentSessionTitleSource? TitleSource { get; init; }
+
+    /// <summary>
     /// Gets or initializes the latest preview text.
     /// </summary>
     public string? Summary { get; init; }
