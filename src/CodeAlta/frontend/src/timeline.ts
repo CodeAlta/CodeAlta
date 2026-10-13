@@ -3,7 +3,7 @@ import { parseDelegatedMessage } from "./delegatedMessage";
 import { parseJobResult, type JobResult } from "./jobResult";
 import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
-import { projectFileChanges, type FileChanges } from "./fileChanges";
+import { fileChangesMarkdown, projectFileChanges, type FileChanges } from "./fileChanges";
 import { projectTimelineImages, type TimelineImage } from "./timelineImages";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
@@ -294,7 +294,9 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     entry.interactionId ? `Interaction: ${entry.interactionId}` : null,
     `Event: ${entry.eventType} · byte ${entry.offset}`,
   ].filter((value): value is string => value !== null);
-  const copyMarkdown = [summaryIsCode && summary ? `\`\`\`\n${summary}\n\`\`\`` : summary, markdown, detailMarkdown, details]
+  const fileChanges = projectFileChanges(entry);
+  // What the card says, as Markdown. The record of the event (JSON) stays in its details: it is never copied.
+  const copyMarkdown = [summaryIsCode && summary ? `\`\`\`\n${summary}\n\`\`\`` : summary, markdown, detailMarkdown, fileChangesMarkdown(fileChanges)]
     .filter((value): value is string => !!value).join("\n\n") || null;
 
   return {
@@ -315,7 +317,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     truncated: entry.textTruncated || entry.detailsTruncated,
     bodyOmitted: entry.bodyOmitted,
     copyMarkdown: job ? [job.title, job.result, job.body].filter(Boolean).join("\n\n") : copyMarkdown,
-    fileChanges: projectFileChanges(entry),
+    fileChanges,
     images: category === "user" ? projectTimelineImages(entry.images) : category === "image" ? toolImages : undefined,
     toolCall: entry.eventType === "activity" && entry.activityId && category === "tool" ? { providerId: entry.providerId, runId: entry.runId,
       activityId: entry.activityId, kind, name: entry.name, offset: /^\d+$/.test(entry.offset) ? entry.offset : null, outputOffset: null,

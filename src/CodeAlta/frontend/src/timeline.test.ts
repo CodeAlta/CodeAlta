@@ -99,7 +99,21 @@ test("the records of a tool call make one row, with what its details and its liv
   assert.equal(buildTimelineItems([entry({ ...base, offset: JSON.stringify(["provider", "run", "call"]), phase: "Started" })])[0].toolCall!.offset, null);
 });
 
-test("file changes inspect supplied paths and count only validated per-file hunks without changing raw Copy", () => {
+test("the copy of a card is its Markdown, without the JSON record of the event", () => {
+  const details = JSON.stringify({ prompt_sender: "user", attachments: [{ name: "notes.txt" }] });
+  // A message of the user, of the assistant, an error: what was written, and nothing of the record.
+  for (const kind of ["User", "Assistant"]) {
+    const [item] = buildTimelineItems([entry({ eventType: "contentCompleted", kind, contentId: `c-${kind}`, text: "Fix the **parser**.", details })]);
+    assert.equal(item.copyMarkdown, "Fix the **parser**.");
+    assert.equal(item.details, formatDetails(details), "the record is still in the details of the card");
+  }
+  assert.equal(buildTimelineItems([entry({ eventType: "error", kind: null, text: "The provider refused the request.", details })])[0].copyMarkdown,
+    "The provider refused the request.");
+  // A card that says nothing but its record has nothing to copy.
+  assert.equal(buildTimelineItems([entry({ eventType: "interaction", kind: "Answered", text: null, details })])[0].copyMarkdown, null);
+});
+
+test("file changes inspect supplied paths, count only validated per-file hunks, and are copied as Markdown", () => {
   const details = JSON.stringify({ changes: [
     { path: "<script>literal</script>.ts", kind: { type: "update" }, diff: "@@ -1 +1,2 @@\n-old\n+new\n+line\n" },
     { path: "other.ts", kind: { type: "unknown-provider-kind" } },
@@ -108,7 +122,11 @@ test("file changes inspect supplied paths and count only validated per-file hunk
   assert.equal(item.fileChanges?.rows.length, 2);
   assert.deepEqual(item.fileChanges?.rows[0], { index: 0, path: "<script>literal</script>.ts", kind: "update", diff: "@@ -1 +1,2 @@\n-old\n+new\n+line\n", counts: { added: 2, removed: 1 } });
   assert.equal(item.fileChanges?.rows[1]?.counts, null);
-  assert.equal(item.copyMarkdown, formatDetails(details));
+  assert.equal(item.copyMarkdown, "- `<script>literal</script>.ts` (update)\n\n```diff\n@@ -1 +1,2 @@\n-old\n+new\n+line\n```\n\n- `other.ts` (unknown-provider-kind)");
+  // A diff that holds a fence of its own is fenced with a longer one.
+  const fenced = buildTimelineItems([entry({ eventType: "activity", kind: "FileChange", phase: "Completed", text: null,
+    details: JSON.stringify({ changes: [{ path: "readme.md", kind: { type: "update" }, diff: "@@ -1 +1 @@\n-```\n+````\n" }] }) })])[0]!;
+  assert.equal(fenced.copyMarkdown, "- `readme.md` (update)\n\n`````diff\n@@ -1 +1 @@\n-```\n+````\n`````");
 });
 
 test("a user message lists its images and no other record does", () => {
@@ -303,7 +321,7 @@ test("tool activities expose the tool and first command while folding duplicate 
   assert.match(items[0].details!, /"command": "dotnet test/);
 });
 
-test("persisted ToolCall retains the exact otherwise-hidden Canceled message in details and Copy", () => {
+test("persisted ToolCall retains the exact otherwise-hidden Canceled message in details and Copy, without its record", () => {
   const text = "  Supplied cancellation message\r\nnot an inferred outcome  ";
   const details = JSON.stringify({ command: "echo fixture", result: { success: true } });
   const [item] = buildTimelineItems([entry({ eventType: "activity", kind: "ToolCall", phase: "Canceled",
@@ -313,8 +331,9 @@ test("persisted ToolCall retains the exact otherwise-hidden Canceled message in 
   assert.equal(item.summary, "echo fixture");
   assert.equal(item.markdown, null);
   assert.deepEqual({ detail: item.detailMarkdown, copy: item.copyMarkdown }, {
-    detail: text, copy: `\`\`\`\necho fixture\n\`\`\`\n\n${text}\n\n${formatDetails(details)}`,
+    detail: text, copy: `\`\`\`\necho fixture\n\`\`\`\n\n${text}`,
   });
+  assert.equal(item.details, formatDetails(details));
 });
 
 test("supplied tool messages preserve phase, bounds, branches and provider/run separation", () => {

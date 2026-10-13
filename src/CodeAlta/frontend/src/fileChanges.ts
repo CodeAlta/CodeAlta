@@ -40,6 +40,21 @@ export function projectFileChanges(entry: HistoryEntry): FileChanges | undefined
   return { source: rows.length ? JSON.stringify(entry) : "", rows, partial };
 }
 
+/**
+ * The files of a card as Markdown, for its copy: each path with what was done to it, and its diff when the record
+ * has one. Null when the record names no file.
+ */
+export function fileChangesMarkdown(changes: FileChanges | undefined): string | null {
+  if (!changes?.rows.length) return null;
+  return changes.rows.map(row => {
+    const head = `- \`${row.path}\`${row.kind ? ` (${row.kind})` : ""}`;
+    if (!row.diff) return head;
+    // A fence longer than any run of backticks of the diff, so that the diff cannot end it.
+    const fence = "`".repeat(Math.max(3, ...Array.from(row.diff.matchAll(/`+/g), match => match[0].length + 1)));
+    return `${head}\n\n${fence}diff\n${row.diff.replace(/\n$/, "")}\n${fence}`;
+  }).join("\n\n");
+}
+
 // Only complete, bounded unified file sections are projected. Paths remain display data;
 // quoted/ambiguous headers and malformed hunks never become guessed file counts.
 function splitSuppliedDiff(diff: string): Record<string, unknown>[] | null {

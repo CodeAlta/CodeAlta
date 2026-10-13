@@ -1439,7 +1439,10 @@ Persisted user and assistant message bodies longer than 1,200 UTF-16 units initi
 inert excerpt of at most 240 units (not sliced/rendered Markdown). **Show full message** renders the entire
 already retained body through the normal sanitized Markdown renderer; **Collapse message** restores the excerpt.
 Both controls work with keyboard or pointer. Copy Markdown still copies all retained text while collapsed;
-shortening/omission notices stay outside the disclosure. Copy success/failure feedback belongs only to the
+shortening/omission notices stay outside the disclosure. What is copied is what the card says, as Markdown
+(`copyMarkdown` in `timeline.ts`): its command or summary, its text, and for a card of file changes the
+paths with their diffs. The JSON record of the event is shown in the details of the card and is never
+part of the copy; a card that has nothing but its record has no Copy button. Copy success/failure feedback belongs only to the
 current retained record and latest click; changing source or leaving the row clears it. An already dispatched
 clipboard write cannot be undone. This is window-local per-record presentation state,
 not a read for omitted text, a stored preference or a reconstruction of live output.
