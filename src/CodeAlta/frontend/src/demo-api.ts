@@ -141,6 +141,16 @@ export const storage = Object.freeze({
   watchMaintenance: unavailable,
   watchRetention: unavailable,
 });
+// A browser preview has no microphone permission, no model and no worker: speech to prompt does not exist there.
+const noSpeech = async () => ({ status: "unavailable", supported: false, enabled: false, model: "", modelId: null, models: [], rootPath: null, error: null });
+export const speech = Object.freeze({
+  read: noSpeech, saveSettings: noSpeech, delete: noSpeech,
+  install: async () => ({ status: "unavailable" }), cancelInstall: async () => ({ status: "unavailable" }),
+  watch: async () => (async function* (): AsyncGenerator<{ state: string; modelId: string | null; modelName: string | null; receivedBytes: string; totalBytes: string; error: string | null }> { })(),
+  start: async () => ({ status: "unavailable", id: null }), append: async () => ({ status: "unavailable" }),
+  listen: async () => (async function* (): AsyncGenerator<{ state: string; finalText: string; partialText: string; error: string | null }> { })(),
+  stop: async () => ({ status: "unavailable", text: "", error: null }),
+});
 export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
   open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });
 // The demo starts no session by itself: its automations tab says so.

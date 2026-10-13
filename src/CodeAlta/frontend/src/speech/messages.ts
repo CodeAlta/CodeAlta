@@ -1,0 +1,60 @@
+// English source keys; translations in es, fr, de, ja, zh-CN order.
+export const speechMessages = {
+  // The button of the composer and its question.
+  "Dictate the prompt (F9)": ["Dictar el prompt (F9)", "Dicter le prompt (F9)", "Prompt diktieren (F9)", "プロンプトを音声入力 (F9)", "语音输入提示词 (F9)"],
+  "Stop dictation (F9)": ["Detener el dictado (F9)", "Arrêter la dictée (F9)", "Diktat beenden (F9)", "音声入力を停止 (F9)", "停止语音输入 (F9)"],
+  "Starting the dictation…": ["Iniciando el dictado…", "Démarrage de la dictée…", "Diktat wird gestartet…", "音声入力を開始中…", "正在开始语音输入…"],
+  "Finishing the dictation…": ["Terminando el dictado…", "Fin de la dictée…", "Diktat wird beendet…", "音声入力を終了中…", "正在结束语音输入…"],
+  "The speech model is being downloaded…": ["Se está descargando el modelo de voz…", "Le modèle vocal est en cours de téléchargement…", "Das Sprachmodell wird heruntergeladen…", "音声モデルをダウンロード中…", "正在下载语音模型…"],
+  "Download the speech model?": ["¿Descargar el modelo de voz?", "Télécharger le modèle vocal ?", "Sprachmodell herunterladen?", "音声モデルをダウンロードしますか？", "下载语音模型？"],
+  "Download": ["Descargar", "Télécharger", "Herunterladen", "ダウンロード", "下载"],
+  "Choose another model": ["Elegir otro modelo", "Choisir un autre modèle", "Anderes Modell wählen", "別のモデルを選ぶ", "选择其他模型"],
+  "English": ["Inglés", "Anglais", "Englisch", "英語", "英语"],
+  "25 languages": ["25 idiomas", "25 langues", "25 Sprachen", "25 言語", "25 种语言"],
+  "Multilingual": ["Multilingüe", "Multilingue", "Mehrsprachig", "多言語", "多语言"],
+
+  // The notice of the download.
+  "Downloading {model} — {received} of {total}": ["Descargando {model} — {received} de {total}", "Téléchargement de {model} — {received} sur {total}", "{model} wird heruntergeladen — {received} von {total}", "{model} をダウンロード中 — {received} / {total}", "正在下载 {model} — {received} / {total}"],
+  "Downloading {model}…": ["Descargando {model}…", "Téléchargement de {model}…", "{model} wird heruntergeladen…", "{model} をダウンロード中…", "正在下载 {model}…"],
+  "Installing {model}…": ["Instalando {model}…", "Installation de {model}…", "{model} wird installiert…", "{model} をインストール中…", "正在安装 {model}…"],
+  "Speech to prompt is ready": ["La voz a prompt está lista", "La dictée de prompt est prête", "Sprache zu Prompt ist bereit", "音声入力の準備ができました", "语音输入已就绪"],
+  "The speech model could not be downloaded: check the network connection.": ["No se pudo descargar el modelo de voz: comprueba la conexión de red.", "Le modèle vocal n’a pas pu être téléchargé : vérifiez la connexion réseau.", "Das Sprachmodell konnte nicht heruntergeladen werden: Netzwerkverbindung prüfen.", "音声モデルをダウンロードできませんでした。ネットワーク接続を確認してください。", "无法下载语音模型：请检查网络连接。"],
+  "The speech model was not found at its address.": ["No se encontró el modelo de voz en su dirección.", "Le modèle vocal est introuvable à son adresse.", "Das Sprachmodell wurde unter seiner Adresse nicht gefunden.", "指定のアドレスに音声モデルが見つかりませんでした。", "在其地址处未找到语音模型。"],
+  "The downloaded speech model is damaged: download it again.": ["El modelo de voz descargado está dañado: descárgalo de nuevo.", "Le modèle vocal téléchargé est endommagé : téléchargez-le de nouveau.", "Das heruntergeladene Sprachmodell ist beschädigt: erneut herunterladen.", "ダウンロードした音声モデルが破損しています。もう一度ダウンロードしてください。", "下载的语音模型已损坏：请重新下载。"],
+  "This speech model is not supported.": ["Este modelo de voz no es compatible.", "Ce modèle vocal n’est pas pris en charge.", "Dieses Sprachmodell wird nicht unterstützt.", "この音声モデルには対応していません。", "不支持此语音模型。"],
+  "Another CodeAlta is downloading this speech model.": ["Otro CodeAlta está descargando este modelo de voz.", "Un autre CodeAlta télécharge ce modèle vocal.", "Ein anderes CodeAlta lädt dieses Sprachmodell herunter.", "別の CodeAlta がこの音声モデルをダウンロードしています。", "另一个 CodeAlta 正在下载此语音模型。"],
+  "The speech model could not be written to the disk.": ["No se pudo escribir el modelo de voz en el disco.", "Le modèle vocal n’a pas pu être écrit sur le disque.", "Das Sprachmodell konnte nicht auf den Datenträger geschrieben werden.", "音声モデルをディスクに書き込めませんでした。", "无法将语音模型写入磁盘。"],
+  "Speech to prompt is not available on this system.": ["La voz a prompt no está disponible en este sistema.", "La dictée de prompt n’est pas disponible sur ce système.", "Sprache zu Prompt ist auf diesem System nicht verfügbar.", "このシステムでは音声入力を利用できません。", "此系统不支持语音输入。"],
+  "The speech model could not be loaded.": ["No se pudo cargar el modelo de voz.", "Le modèle vocal n’a pas pu être chargé.", "Das Sprachmodell konnte nicht geladen werden.", "音声モデルを読み込めませんでした。", "无法加载语音模型。"],
+  "The speech model could not be installed.": ["No se pudo instalar el modelo de voz.", "Le modèle vocal n’a pas pu être installé.", "Das Sprachmodell konnte nicht installiert werden.", "音声モデルをインストールできませんでした。", "无法安装语音模型。"],
+
+  // What ends a dictation by itself.
+  "The microphone is not available. Check the privacy settings of the system.": ["El micrófono no está disponible. Revisa los ajustes de privacidad del sistema.", "Le microphone n’est pas disponible. Vérifiez les réglages de confidentialité du système.", "Das Mikrofon ist nicht verfügbar. Datenschutzeinstellungen des Systems prüfen.", "マイクを利用できません。システムのプライバシー設定を確認してください。", "麦克风不可用。请检查系统的隐私设置。"],
+  "The dictation could not start.": ["No se pudo iniciar el dictado.", "La dictée n’a pas pu démarrer.", "Das Diktat konnte nicht gestartet werden.", "音声入力を開始できませんでした。", "无法开始语音输入。"],
+  "The dictation stopped: the speech engine failed.": ["El dictado se detuvo: falló el motor de voz.", "La dictée s’est arrêtée : le moteur vocal a échoué.", "Das Diktat wurde beendet: Die Sprach-Engine ist fehlgeschlagen.", "音声入力が停止しました。音声エンジンでエラーが発生しました。", "语音输入已停止：语音引擎出错。"],
+
+  // The settings page.
+  "Speech": ["Voz", "Voix", "Sprache", "音声", "语音"],
+  "Dictate a prompt with a speech model that runs on this computer.": ["Dicta un prompt con un modelo de voz que se ejecuta en este equipo.", "Dictez un prompt avec un modèle vocal qui s’exécute sur cet ordinateur.", "Einen Prompt mit einem Sprachmodell diktieren, das auf diesem Computer läuft.", "このコンピューターで動作する音声モデルでプロンプトを音声入力します。", "使用在此计算机上运行的语音模型口述提示词。"],
+  "Speech to prompt": ["Voz a prompt", "Dictée de prompt", "Sprache zu Prompt", "音声入力", "语音输入"],
+  "Custom…": ["Personalizado…", "Personnalisé…", "Benutzerdefiniert…", "カスタム…", "自定义…"],
+  "Hugging Face repository address": ["Dirección del repositorio de Hugging Face", "Adresse du dépôt Hugging Face", "Adresse des Hugging-Face-Repositorys", "Hugging Face リポジトリのアドレス", "Hugging Face 仓库地址"],
+  "Enter the address of a Hugging Face repository, such as https://huggingface.co/owner/model.": ["Introduce la dirección de un repositorio de Hugging Face, como https://huggingface.co/owner/model.", "Saisissez l’adresse d’un dépôt Hugging Face, par exemple https://huggingface.co/owner/model.", "Adresse eines Hugging-Face-Repositorys eingeben, z. B. https://huggingface.co/owner/model.", "Hugging Face リポジトリのアドレスを入力してください (例: https://huggingface.co/owner/model)。", "请输入 Hugging Face 仓库的地址，例如 https://huggingface.co/owner/model。"],
+  "Not downloaded": ["No descargado", "Non téléchargé", "Nicht heruntergeladen", "未ダウンロード", "未下载"],
+  "Not downloaded · {size}": ["No descargado · {size}", "Non téléchargé · {size}", "Nicht heruntergeladen · {size}", "未ダウンロード · {size}", "未下载 · {size}"],
+  "Downloading…": ["Descargando…", "Téléchargement…", "Wird heruntergeladen…", "ダウンロード中…", "正在下载…"],
+  "Downloading… {percent}": ["Descargando… {percent}", "Téléchargement… {percent}", "Wird heruntergeladen… {percent}", "ダウンロード中… {percent}", "正在下载… {percent}"],
+  "Installing…": ["Instalando…", "Installation…", "Wird installiert…", "インストール中…", "正在安装…"],
+  "Downloaded · {size}": ["Descargado · {size}", "Téléchargé · {size}", "Heruntergeladen · {size}", "ダウンロード済み · {size}", "已下载 · {size}"],
+  "Shortcut": ["Atajo", "Raccourci", "Tastenkürzel", "ショートカット", "快捷键"],
+  "Downloaded models": ["Modelos descargados", "Modèles téléchargés", "Heruntergeladene Modelle", "ダウンロード済みのモデル", "已下载的模型"],
+  "No model is downloaded.": ["No hay ningún modelo descargado.", "Aucun modèle n’est téléchargé.", "Kein Modell heruntergeladen.", "ダウンロード済みのモデルはありません。", "尚未下载任何模型。"],
+  "Author and license": ["Autor y licencia", "Auteur et licence", "Autor und Lizenz", "作成者とライセンス", "作者和许可证"],
+  "Delete {name}?": ["¿Eliminar {name}?", "Supprimer {name} ?", "{name} löschen?", "{name} を削除しますか？", "删除 {name}？"],
+  "Delete {name}": ["Eliminar {name}", "Supprimer {name}", "{name} löschen", "{name} を削除", "删除 {name}"],
+  "Speech settings unavailable": ["Ajustes de voz no disponibles", "Réglages de la voix indisponibles", "Spracheinstellungen nicht verfügbar", "音声設定を利用できません", "语音设置不可用"],
+
+  // The command.
+  "Dictate": ["Dictar", "Dicter", "Diktieren", "音声入力", "语音输入"],
+  "Dictate the prompt with the microphone, or stop the dictation.": ["Dicta el prompt con el micrófono o detiene el dictado.", "Dicte le prompt au microphone, ou arrête la dictée.", "Den Prompt mit dem Mikrofon diktieren oder das Diktat beenden.", "マイクでプロンプトを音声入力するか、音声入力を停止します。", "用麦克风口述提示词，或停止语音输入。"],
+} as const;
