@@ -22,6 +22,11 @@ Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and
 
 In CodeAlta Desktop, the **+** on the row of a project, or **New session…** in its **…** menu, creates a session without sending a prompt. A small form opens beside the row: give the session a title if you want one, choose the agent, the model and the reasoning, and whether it works in the project folder or in a new [worktree](worktrees.md), then click **Create**. **Chats** has the same button for a new chat. What you choose is remembered for the next session of that project.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-new-session-popover.webp" alt="The form that opens beside a project row of CodeAlta Desktop to create a session: a title, the agent, the model, the reasoning and the folder" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The form of a new session opens beside the row of its project.</figcaption>
+</figure>
+
 When reopening an existing session, CodeAlta restores local history before provider initialization has to finish. A ready compatible provider can resume or switch a CodeAlta-owned local session while it is idle; provider-native continuation state is reused only when it is safe.
 
 In CodeAlta Desktop, the links of a message work, yours and the agent's:
@@ -46,6 +51,11 @@ CodeAlta titles a session you did not name. The session first takes a short titl
 
 In CodeAlta Desktop, choose it in **Settings > Sessions**. The choice is saved in `~/.alta/config.toml`:
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-session-settings.webp" alt="The Sessions page of the Settings of CodeAlta Desktop with the choice of how a session you did not name is titled" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Sessions page of the Settings chooses how a session you did not name is titled.</figcaption>
+</figure>
+
 ```toml
 [sessions]
 title = "first_prompt" # or "last_message", or "model"
@@ -65,6 +75,11 @@ alta session title --mode default           # this session follows your choice i
 ## Move a session to another project
 
 In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.
+
+<figure class="alta-figure my-4" style="max-width: 18rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a session in the Explorer of CodeAlta Desktop, with Fork, bookmark, Move to project, Delete and Statistics of this session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The menu of a session: Fork, the bookmark, Move to project and the rest.</figcaption>
+</figure>
 
 - Choose **Move to project…** in the menu of the session (or `/move_to_project` in the search), then the project. Or drag the row of the session onto the row of the project in the sidebar.
 - The sessions it started in its project, its [sub-agents](#sub-agents), move with it.
@@ -132,6 +147,11 @@ Three ways lead to the same window:
 - **Fork…** in the **Actions** menu of a session in the Explorer.
 
 None of them acts at once. The window lists the points of the session, the newest first: **End of the session**, then one row per turn with its number, its prompt, when it started and what it did. Select a point and the window shows its prompt and says in plain words what the action does there, for example "Turns 4 to 9 (6 turns) are removed from this session". The conversation behind the window scrolls to that prompt when it is loaded.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-fork-rewind.webp" alt="The Fork or rewind window of CodeAlta Desktop with the turns of a session, one of them selected, and what a fork at that point does" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Choose a point of the session: the window says what a fork or a rewind does there.</figcaption>
+</figure>
 
 | Key | Action |
 | --- | --- |

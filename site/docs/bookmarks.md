@@ -26,9 +26,19 @@ A session with bookmarked messages has a short rail at the right edge of its tim
 
 With the keyboard, `Shift+F3` goes to the previous bookmark and `Shift+F4` to the next one.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-bookmark-rail.webp" alt="A session of CodeAlta Desktop with a filled bookmark on a message and the rail of marks at the right edge of its timeline" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A bookmarked message keeps a filled bookmark. The rail at the right edge has one mark for each bookmark of the session.</figcaption>
+</figure>
+
 ## The Bookmarks tab
 
 Open it with the bookmark icon of the activity bar, with `Ctrl+G Ctrl+F`, or with `/bookmarks`. It is a tab like the others, restored with your tabs.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-bookmarks.webp" alt="The Bookmarks tab of CodeAlta Desktop: the bookmarks of three projects, with the messages and the session that were marked" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Bookmarks tab lists the messages and the sessions you marked, project by project.</figcaption>
+</figure>
 
 The tab lists every bookmark, of every project:
 

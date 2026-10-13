@@ -79,6 +79,11 @@ In the desktop app, going through your sessions does not open a tab for each of 
 | Start a new session in a project | Click the project: its new-session prompt takes the tab with the italic title. |
 | Keep the prompt of a new session open | Double-click the project, or the title of that tab. Several projects can each keep theirs. A prompt you have typed in is kept too: when you click another project or a session, it stays in a tab named after its project. |
 
+<figure class="alta-figure my-4" style="max-width: 52rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-tabs.webp" alt="The tab strip of CodeAlta Desktop: a kept session, the Bookmarks and Issues tabs, and a tab with an italic title" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Kept tabs, and the tab with the italic title that the next session or project you click takes over.</figcaption>
+</figure>
+
 A session you create is kept from the start. Closing a tab never deletes a session.
 
 ### Close several tabs at once
@@ -168,6 +173,11 @@ In CodeAlta Desktop, turn on **Settings > Appearance > Entry appearance** to cus
 
 In **Customize**, select an entry type and adjust its **Normal** and **Hover / keyboard focus** appearance: content opacity, background tint, outer border and a subtle shadow. Existing colors follow your color scheme. Left accents can stay undimmed, and hover or focus cannot lower content opacity. The previews show both states using example entries.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-entry-appearance.webp" alt="The Entry appearance window of CodeAlta Desktop: the settings of the intermediate answers and a preview of their two states" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Each type of entry has its own opacity, tint, border and shadow, with a preview of both states.</figcaption>
+</figure>
+
 Highlighting also works without dimming: leave content opacity at 100% and adjust the background, border or shadow. Changes apply immediately. **Reset type** restores the initial preset for the selected type; **Reset all** restores it for every type. Switching the feature off and on keeps your customizations. If a change cannot be saved, a notice explains that it still applies in this window.
 
 Use `F3` / `F4` to jump between previous and next user or assistant messages. Use `Ctrl+F3` to jump to the first message and `Ctrl+F4` to return to the bottom.
@@ -196,6 +206,11 @@ In the TUI, a tile opens a dialog with the details of the call and its output.
 The timeline has one line for the system prompt of a session, and another each time it changes. The line names the agent prompt, the size of the prompt in tokens and, for a change, the lines added and removed.
 
 In CodeAlta Desktop, click the line to open the prompt. **Changes** compares it with the prompt before, side by side or in one column, and **Prompt** shows the system message and the developer instructions as they were sent, with a button to copy them as Markdown.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-system-prompt.webp" alt="The System prompt window of CodeAlta Desktop comparing the Plan prompt of a session with the Default prompt it replaced" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A system prompt that changed, compared with the one before.</figcaption>
+</figure>
 
 ## Prompt editor and prompt queue
 
@@ -228,6 +243,11 @@ In the desktop app, the agent prompt, provider, model and reasoning effort are i
 <figure class="alta-figure my-4" style="max-width: 38rem;">
   <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
   <figcaption class="small text-secondary mt-2">Agent prompt, provider, model and reasoning effort for the next send.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4" style="max-width: 24rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop filtered by a search box" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Type in the search box of the model list to find a model.</figcaption>
 </figure>
 
 Beside that picker, a small button names the permission mode of the session and opens the list of modes:
