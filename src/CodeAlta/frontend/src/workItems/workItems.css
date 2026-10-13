@@ -118,7 +118,10 @@
 .work-detail-spacer { flex: 1; }
 .work-detail-text { min-height: 0; overflow-y: auto; padding: 16px 12px 28px 20px; }
 @container (max-width: 860px) {
-  .work-body { grid-template-columns: minmax(0, 1fr); grid-auto-rows: minmax(0, auto); overflow-y: auto; }
+  /* One column: the list, then what is read, each as tall as its content, and the body scrolls them together.
+     A row that could shrink would share the height of the tab, and the rows of the list would be drawn under
+     the item that is read. */
+  .work-body { grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; overflow-y: auto; }
   .work-list { overflow: visible; padding-right: 0; }
   .work-detail { border-left: 0; border-top: 1px solid var(--line); }
   .work-detail-card > header, .work-detail-actions, .work-detail-text { padding-left: 0; }

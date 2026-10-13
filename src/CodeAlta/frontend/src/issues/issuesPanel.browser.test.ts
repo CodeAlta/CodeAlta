@@ -78,5 +78,17 @@ test("the choice of a Jira project is drawn in both themes and fits a narrow tab
     await page.shot("issues-jira-projects-narrow");
     assert.equal(await page.evaluate(overflow), false, "nothing is wider than a narrow tab");
     assert.ok(await page.evaluate(`(() => { const box = ${part}.getBoundingClientRect(); return box.width > 0 && box.right <= innerWidth; })()`));
+    // In one column the list is as tall as its rows and the item that is read comes after it: the tab scrolls
+    // them together, and nothing of the item is drawn over a row.
+    const stacked = await page.evaluate<{ rows: number; lastRow: number; list: number; detail: number; scrolls: boolean }>(`(() => {
+      const body = document.querySelector('.work-body'), all = [...document.querySelectorAll('.issue-row-item')];
+      return { rows: all.length, lastRow: all.at(-1).getBoundingClientRect().bottom, list: document.querySelector('.work-list').getBoundingClientRect().bottom,
+        detail: document.querySelector('.work-detail').getBoundingClientRect().top, scrolls: body.scrollHeight > body.clientHeight }; })()`);
+    assert.equal(stacked.rows, 5);
+    assert.ok(stacked.lastRow <= stacked.list + 1 && stacked.list <= stacked.detail + 1, `the item is read under the list, not over it: ${JSON.stringify(stacked)}`);
+    assert.equal(stacked.scrolls, true, "what does not fit is reached by scrolling the tab");
+    await page.evaluate(`document.querySelector('.work-body').scrollTo(0, 1e6)`);
+    assert.ok(await page.evaluate(`(() => { const body = document.querySelector('.work-body').getBoundingClientRect(), text = document.querySelector('.work-detail-text').getBoundingClientRect(); return text.bottom <= body.bottom + 1; })()`),
+      "the end of the description is reached");
   }, options);
 });
