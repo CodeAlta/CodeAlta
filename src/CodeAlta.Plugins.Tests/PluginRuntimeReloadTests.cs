@@ -298,6 +298,50 @@ public sealed class PluginRuntimeReloadTests
     }
 
     [TestMethod]
+    public void BuildOutput_NamesAFileOfAPackageReachedThroughALink_ByItsPathInThePackage()
+    {
+        using var temp = new TestTempDirectory();
+        // The build runs in the folder of the package and names its files by the path the system gives for that
+        // folder, every link of it followed: the temporary folder of macOS is itself below one.
+        var home = WithoutLinks(temp.Path);
+        var real = Directory.CreateDirectory(Path.Combine(home, "real", "plugins", "notes")).FullName;
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(home, "link"), "real"); // relative, as /var is to private/var
+            Directory.CreateSymbolicLink(Path.Combine(home, "outer"), Path.Combine(home, "link"));
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522)) // ERROR_PRIVILEGE_NOT_HELD: Windows without Developer Mode or elevation cannot create
+        {
+            Assert.Inconclusive("Disposable symlink creation requires platform permission.");
+        }
+
+        var output = string.Join('\n',
+            $"{Path.Combine(real, "plugin.cs")}(11,42): error CS0103: The name 'missing' does not exist in the current context [{Path.Combine(real, "plugin.cs.csproj")}]",
+            $"{Path.Combine(real, "parts", "more.cs")}(3,1): warning CS0168: The variable 'unused' is declared but never used",
+            $"{Path.Combine(home, "real", "plugins", "other", "plugin.cs")}(1,1): error CS0103: The name 'elsewhere' does not exist in the current context");
+
+        foreach (var directory in new[] { Path.Combine(home, "link", "plugins", "notes"), Path.Combine(home, "outer", "plugins", "notes"), Path.Combine(temp.Path, "outer", "plugins", "notes"), real })
+        {
+            var diagnostics = PluginBuildService.ParseDiagnostics(output, directory);
+
+            CollectionAssert.AreEqual(new[] { "plugin.cs", "parts/more.cs", Path.Combine(home, "real", "plugins", "other", "plugin.cs") },
+                diagnostics.Select(static diagnostic => diagnostic.File).ToArray(), directory);
+        }
+
+        static string WithoutLinks(string path)
+        {
+            var resolved = Path.GetPathRoot(path)!;
+            foreach (var name in path[resolved.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+            {
+                resolved = Path.Combine(resolved, name);
+                if (new DirectoryInfo(resolved).ResolveLinkTarget(returnFinalTarget: true) is { } target) resolved = target.FullName;
+            }
+
+            return resolved;
+        }
+    }
+
+    [TestMethod]
     public void ANewPackage_HasAPluginNamedAfterItsId()
     {
         using var temp = new TestTempDirectory();

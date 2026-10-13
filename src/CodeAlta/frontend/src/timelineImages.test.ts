@@ -72,7 +72,15 @@ test("an image is read once and then answered from the cache", async () => {
   await cache.reader("epoch", "other")("120").load(0);
   await cache.reader("later", "session")("120").load(0);
   assert.equal(requests.length, 5);
-  assert.equal(source.key, JSON.stringify(["epoch", "session", "120"]));
+  assert.equal(source.key, JSON.stringify(["epoch", "session", 0, "120"]));
+  // A rewind writes the journal again: the same offset names another message, whose image is read anew.
+  const rewound = cache.reader("epoch", "session", 1)("120");
+  assert.equal(rewound.peek(0), undefined);
+  assert.notEqual(rewound.key, source.key);
+  await rewound.load(0);
+  assert.equal(requests.length, 6);
+  assert.deepEqual(requests[5], requests[0]);
+  assert.deepEqual(source.peek(0), first);
 });
 
 test("the cache keeps the newest images within its entry and size limits", async () => {

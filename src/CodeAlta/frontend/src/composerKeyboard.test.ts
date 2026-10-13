@@ -2,24 +2,34 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { dispatchComposerKey, dispatchExpandedComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 
-test("regular Enter sends; Ctrl+Enter steers without sending", () => {
+test("regular Enter uses idle-send/busy-enqueue; platform-modified Enter sends now", () => {
   const actions: string[] = [];
   const send = () => actions.push("send");
-  const steer = () => actions.push("steer");
-  assert.equal(dispatchComposerKey({ key: "Enter" }, send, steer), true);
-  assert.equal(dispatchComposerKey({ key: "Enter", ctrlKey: true }, send, steer), true);
-  assert.deepEqual(actions, ["send", "steer"]);
+  const enqueue = () => actions.push("idle-send/busy-enqueue");
+  for (const mac of [false, true]) {
+    assert.equal(dispatchComposerKey({ key: "Enter" }, enqueue, send, mac), true);
+    assert.equal(dispatchComposerKey({ key: "Enter", ctrlKey: !mac, metaKey: mac }, enqueue, send, mac), true);
+    assert.equal(dispatchComposerKey({ key: "Enter", ctrlKey: mac, metaKey: !mac }, enqueue, send, mac), false);
+  }
+  assert.deepEqual(actions, ["idle-send/busy-enqueue", "send", "idle-send/busy-enqueue", "send"]);
 });
 
 test("IME confirmation, modified newlines, held keys and handled input never dispatch", () => {
-  const unexpected = () => assert.fail("Input must not submit or steer");
+  const unexpected = () => assert.fail("Input must not submit or enqueue");
   for (const event of [
     { key: "Enter", isComposing: true }, { key: "Enter", keyCode: 229 },
     { key: "Enter", ctrlKey: true, isComposing: true }, { key: "Enter", shiftKey: true },
     { key: "Enter", shiftKey: true, ctrlKey: true }, { key: "Enter", altKey: true },
     { key: "Enter", metaKey: true }, { key: "Enter", repeat: true },
+    { key: "Enter", ctrlKey: true, metaKey: true },
     { key: "Enter", defaultPrevented: true }, { key: "a" },
   ]) assert.equal(dispatchComposerKey(event, unexpected, unexpected), false);
+  for (const event of [
+    { key: "Enter", metaKey: true, isComposing: true }, { key: "Enter", metaKey: true, keyCode: 229 },
+    { key: "Enter", metaKey: true, shiftKey: true }, { key: "Enter", metaKey: true, altKey: true },
+    { key: "Enter", metaKey: true, repeat: true }, { key: "Enter", metaKey: true, defaultPrevented: true },
+    { key: "Enter", metaKey: true, ctrlKey: true },
+  ]) assert.equal(dispatchComposerKey(event, unexpected, unexpected, true), false);
 });
 
 test("expanded editor Escape and Ctrl+Enter only close; Enter and editing gestures remain input", () => {

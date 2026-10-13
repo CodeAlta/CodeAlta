@@ -5,6 +5,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.LiveTool;
+using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Mcp;
@@ -3628,6 +3629,690 @@ public sealed partial class AltaLiveToolTests
         var provenance = state.PromptProvenance;
         CollectionAssert.AreEqual(new[] { "send", "steer", "message", "request" }, provenance.Select(static item => item.Kind).ToArray());
         Assert.IsTrue(provenance.All(static item => item.SubmittedBy?.Kind == "agent"));
+    }
+
+    [TestMethod]
+    public async Task SessionTurns_ListsTheTurnsOfASession_ByNumberRunAndStatus()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var session = await fixture.CreateSessionAsync("Review").ConfigureAwait(false);
+        var longPrompt = new string('p', 250);
+        foreach (var prompt in new[] { "one", "two", longPrompt })
+        {
+            await fixture.SendAsync(session.SessionId, prompt).ConfigureAwait(false);
+        }
+
+        var all = await fixture.Dispatcher.InvokeAsync(["session", "turns", session.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, all.ExitCode, all.Transcript);
+        var turns = BranchRecords(all, "alta.session.turn");
+        CollectionAssert.AreEqual(new[] { 1, 2, 3 }, turns.Select(static turn => turn.GetProperty("turn").GetInt32()).ToArray());
+        Assert.AreEqual(3, turns.Select(static turn => turn.GetProperty("runId").GetString()).Distinct().Count());
+        Assert.IsTrue(turns.All(turn => turn.GetProperty("sessionId").GetString() == session.SessionId && turn.GetProperty("version").GetInt32() == 1));
+        Assert.IsTrue(turns.All(static turn => turn.GetProperty("status").GetString() == "completed"));
+        Assert.IsTrue(turns.All(static turn => turn.GetProperty("endedAt").GetDateTimeOffset() >= turn.GetProperty("startedAt").GetDateTimeOffset()));
+        Assert.IsTrue(turns.All(static turn => turn.GetProperty("assistantMessages").GetInt32() == 1 && turn.GetProperty("toolCalls").GetInt32() == 0
+            && turn.GetProperty("steers").GetInt32() == 0 && turn.GetProperty("compactions").GetInt32() == 0));
+        Assert.AreEqual("one", turns[0].GetProperty("prompt").GetString());
+        Assert.IsFalse(turns[0].GetProperty("promptTruncated").GetBoolean());
+        // The record shows the start of a long prompt, and says that it is not all of it.
+        Assert.AreEqual(longPrompt[..200], turns[2].GetProperty("prompt").GetString());
+        Assert.IsTrue(turns[2].GetProperty("promptTruncated").GetBoolean());
+        var summary = BranchRecords(all, "alta.session.turns.summary").Single();
+        Assert.AreEqual(3, summary.GetProperty("count").GetInt32());
+        Assert.IsFalse(summary.GetProperty("truncated").GetBoolean());
+
+        // The last turns only; the numbers stay those of the session.
+        var last = await fixture.Dispatcher.InvokeAsync(["session", "turns", session.SessionId, "--last", "2"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { 2, 3 }, BranchRecords(last, "alta.session.turn").Select(static turn => turn.GetProperty("turn").GetInt32()).ToArray());
+        Assert.AreEqual(2, BranchRecords(last, "alta.session.turns.summary").Single().GetProperty("count").GetInt32());
+        Assert.IsTrue(BranchRecords(last, "alta.session.turns.summary").Single().GetProperty("truncated").GetBoolean());
+        var more = await fixture.Dispatcher.InvokeAsync(["session", "turns", session.SessionId, "--last", "9"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(3, BranchRecords(more, "alta.session.turn").Count);
+
+        // A session lists its own turns without naming itself.
+        var own = await fixture.Dispatcher.InvokeAsync(["session", "turns"], caller: fixture.Agent(session.SessionId)).ConfigureAwait(false);
+        CollectionAssert.AreEqual(
+            turns.Select(static turn => turn.GetProperty("runId").GetString()).ToArray(),
+            BranchRecords(own, "alta.session.turn").Select(static turn => turn.GetProperty("runId").GetString()).ToArray());
+
+        // A session that was never sent a prompt has no turn.
+        var empty = await fixture.CreateSessionAsync("Empty").ConfigureAwait(false);
+        var none = await fixture.Dispatcher.InvokeAsync(["session", "turns", empty.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, none.ExitCode, none.Transcript);
+        Assert.AreEqual(0, BranchRecords(none, "alta.session.turns.summary").Single().GetProperty("count").GetInt32());
+
+        (string[] Args, int ExitCode, string Code)[] refused =
+        [
+            (["session", "turns"], AltaExitCodes.Usage, "usage.missingSession"),
+            (["session", "turns", session.SessionId, "--last", "0"], AltaExitCodes.Usage, "usage.invalidLast"),
+            (["session", "turns", "no-such-session"], AltaExitCodes.NotFound, "session.notFound"),
+        ];
+        foreach (var (args, exitCode, code) in refused)
+        {
+            await fixture.AssertRefusedAsync(args, AltaCallerIdentity.Cli, exitCode, code).ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
+    public async Task SessionFork_StartsANewSessionFromATurn_AndLeavesItsSourceAsItIs()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var session = await fixture.CreateSessionAsync("Review").ConfigureAwait(false);
+        foreach (var prompt in new[] { "one", "two", "three" })
+        {
+            await fixture.SendAsync(session.SessionId, prompt).ConfigureAwait(false);
+        }
+
+        var runs = (await fixture.Host.RuntimeService.ReadSessionTurnsAsync(session.SessionId).ConfigureAwait(false))!.Turns.Turns.Select(static turn => turn.RunId).ToArray();
+        async Task<JsonElement> ForkAsync(params string[] arguments)
+        {
+            var result = await fixture.Dispatcher.InvokeAsync(["session", "fork", session.SessionId, .. arguments], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Transcript);
+            return BranchRecords(result, "alta.session.forked").Single();
+        }
+
+        // Without a point the fork has every turn, and is a session of its own beside its source: not a sub-agent of it.
+        var whole = await ForkAsync().ConfigureAwait(false);
+        var wholeId = whole.GetProperty("sessionId").GetString()!;
+        Assert.AreNotEqual(session.SessionId, wholeId);
+        Assert.AreEqual("Review (fork)", whole.GetProperty("title").GetString());
+        Assert.AreEqual(session.SessionId, whole.GetProperty("forkedFromSessionId").GetString());
+        Assert.AreEqual(session.SessionId, whole.GetProperty("forkRootSessionId").GetString());
+        Assert.AreEqual(3, whole.GetProperty("turns").GetInt32());
+        Assert.AreEqual(3, whole.GetProperty("sourceTurns").GetInt32());
+        Assert.IsFalse(whole.TryGetProperty("beforeRunId", out JsonElement _));
+        Assert.IsFalse(whole.GetProperty("excludedRunningTurn").GetBoolean());
+        Assert.IsFalse(whole.TryGetProperty("parentSessionId", out JsonElement _));
+        Assert.AreEqual(session.ProjectRef, whole.GetProperty("projectId").GetString());
+        Assert.AreEqual(fixture.Provider.Descriptor.ProviderId.Value, whole.GetProperty("providerKey").GetString());
+        Assert.AreEqual(session.WorkingDirectory, whole.GetProperty("workingDirectory").GetString());
+        Assert.IsFalse(whole.TryGetProperty("worktreeDirectory", out JsonElement _));
+        Assert.AreEqual(AltaCallerIdentity.Cli.Kind, whole.GetProperty("forkedBy").GetProperty("kind").GetString());
+        var listed = await fixture.ListedAsync(wholeId).ConfigureAwait(false);
+        Assert.IsNull(listed.ParentSessionId);
+        Assert.AreEqual(session.SessionId, listed.ForkedFrom!.SessionId);
+
+        // A turn is named by its number or by its run; `--after N` is `--before N+1`.
+        var beforeThree = await ForkAsync("--before", "3", "--title", "Other approach").ConfigureAwait(false);
+        Assert.AreEqual("Other approach", beforeThree.GetProperty("title").GetString());
+        Assert.AreEqual(2, beforeThree.GetProperty("turns").GetInt32());
+        Assert.AreEqual(3, beforeThree.GetProperty("sourceTurns").GetInt32());
+        Assert.AreEqual(runs[2], beforeThree.GetProperty("beforeRunId").GetString());
+        Assert.IsFalse(beforeThree.GetProperty("excludedRunningTurn").GetBoolean());
+        var afterOne = await ForkAsync("--after", "1").ConfigureAwait(false);
+        Assert.AreEqual(1, afterOne.GetProperty("turns").GetInt32());
+        Assert.AreEqual(runs[1], afterOne.GetProperty("beforeRunId").GetString());
+        var beforeRun = await ForkAsync("--before", runs[1]).ConfigureAwait(false);
+        Assert.AreEqual(1, beforeRun.GetProperty("turns").GetInt32());
+        Assert.AreEqual(runs[1], beforeRun.GetProperty("beforeRunId").GetString());
+        var afterRun = await ForkAsync("--after", runs[1]).ConfigureAwait(false);
+        Assert.AreEqual(2, afterRun.GetProperty("turns").GetInt32());
+        Assert.AreEqual(runs[2], afterRun.GetProperty("beforeRunId").GetString());
+        var beforeFirst = await ForkAsync("--before", "1").ConfigureAwait(false);
+        Assert.AreEqual(0, beforeFirst.GetProperty("turns").GetInt32());
+        // After the last turn is the whole session, by either option.
+        foreach (var arguments in new[] { new[] { "--after", "3" }, ["--after", runs[2]], ["--before", "4"] })
+        {
+            var end = await ForkAsync(arguments).ConfigureAwait(false);
+            Assert.AreEqual(3, end.GetProperty("turns").GetInt32(), string.Join(' ', arguments));
+            Assert.IsFalse(end.TryGetProperty("beforeRunId", out JsonElement _), string.Join(' ', arguments));
+        }
+
+        // The fork is a stored session: the prompt it is sent first continues from the point, and the source goes on as it was.
+        var sent = await fixture.Dispatcher.InvokeAsync(["session", "send", beforeThree.GetProperty("sessionId").GetString()!, "--message", "four"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Transcript);
+        await fixture.WaitIdleAsync(beforeThree.GetProperty("sessionId").GetString()!).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "one", "two", "four" }, fixture.LastUserTexts(beforeThree.GetProperty("sessionId").GetString()!));
+        await fixture.SendAsync(session.SessionId, "five").ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "one", "two", "three", "five" }, fixture.LastUserTexts(session.SessionId));
+
+        // A parent is given, never assumed: an agent that forks another session is not made the parent of the fork.
+        var coordinator = await fixture.CreateSessionAsync("Coordinator").ConfigureAwait(false);
+        var byAgent = await fixture.Dispatcher.InvokeAsync(["session", "fork", session.SessionId, "--before", "2"], caller: fixture.Agent(coordinator.SessionId)).ConfigureAwait(false);
+        var byAgentRecord = BranchRecords(byAgent, "alta.session.forked").Single();
+        Assert.IsFalse(byAgentRecord.TryGetProperty("parentSessionId", out JsonElement _));
+        Assert.AreEqual("agent", byAgentRecord.GetProperty("forkedBy").GetProperty("kind").GetString());
+        Assert.AreEqual(coordinator.SessionId, byAgentRecord.GetProperty("forkedBy").GetProperty("sourceSessionId").GetString());
+        var byAgentListed = await fixture.ListedAsync(byAgentRecord.GetProperty("sessionId").GetString()!).ConfigureAwait(false);
+        Assert.IsNull(byAgentListed.ParentSessionId, "A fork is not listed as a sub-agent of the session that asked for it.");
+        Assert.AreEqual("agent", byAgentListed.CreatedBy?.Kind);
+        var child = await fixture.Dispatcher.InvokeAsync(["session", "fork", session.SessionId, "--before", "2", "--parent", coordinator.SessionId], caller: fixture.Agent(coordinator.SessionId)).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, child.ExitCode, child.Transcript);
+        var childRecord = BranchRecords(child, "alta.session.forked").Single();
+        Assert.AreEqual(coordinator.SessionId, childRecord.GetProperty("parentSessionId").GetString());
+        Assert.AreEqual(coordinator.SessionId, (await fixture.ListedAsync(childRecord.GetProperty("sessionId").GetString()!).ConfigureAwait(false)).ParentSessionId);
+        // A stored session is a parent as well as an attached one.
+        var storedParent = await ForkAsync("--before", "2", "--parent", wholeId).ConfigureAwait(false);
+        Assert.AreEqual(wholeId, storedParent.GetProperty("parentSessionId").GetString());
+
+        var forks = await fixture.CountSessionsAsync().ConfigureAwait(false);
+        (string[] Args, int ExitCode, string Code)[] refused =
+        [
+            (["session", "fork"], AltaExitCodes.Usage, "usage.missingSession"),
+            (["session", "fork", session.SessionId, "--before", "2", "--after", "1"], AltaExitCodes.Usage, "usage.turnConflict"),
+            (["session", "fork", session.SessionId, "--worktree", "--no-worktree"], AltaExitCodes.Usage, "usage.worktreeConflict"),
+            (["session", "fork", session.SessionId, "--base", "main"], AltaExitCodes.Usage, "usage.invalidBase"),
+            (["session", "fork", session.SessionId, "--worktree", "--base=--force"], AltaExitCodes.Usage, "usage.invalidBase"),
+            (["session", "fork", "no-such-session"], AltaExitCodes.NotFound, "session.notFound"),
+            (["session", "fork", session.SessionId, "--before", "9"], AltaExitCodes.NotFound, "session.turnNotFound"),
+            (["session", "fork", session.SessionId, "--before", "0"], AltaExitCodes.NotFound, "session.turnNotFound"),
+            (["session", "fork", session.SessionId, "--after", "5"], AltaExitCodes.NotFound, "session.turnNotFound"),
+            (["session", "fork", session.SessionId, "--after", "no-such-run"], AltaExitCodes.NotFound, "session.turnNotFound"),
+            (["session", "fork", session.SessionId, "--parent", "no-such-parent"], AltaExitCodes.NotFound, "session.parentNotFound"),
+            // The folder of the project is no git repository here.
+            (["session", "fork", session.SessionId, "--worktree"], AltaExitCodes.Failure, "worktree.not_repository"),
+        ];
+        foreach (var (args, exitCode, code) in refused)
+        {
+            await fixture.AssertRefusedAsync(args, AltaCallerIdentity.Cli, exitCode, code).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(forks, await fixture.CountSessionsAsync().ConfigureAwait(false), "A refused fork creates no session.");
+    }
+
+    [TestMethod]
+    public async Task SessionFork_WorksWhereItsSourceWorks_OrInAWorktreeOfItsOwn()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        if (!TryCreateRepository(projectPath))
+        {
+            Assert.Inconclusive("git is not installed.");
+        }
+
+        var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        try
+        {
+            var session = await fixture.CreateSessionAsync("Review").ConfigureAwait(false);
+            await fixture.SendAsync(session.SessionId, "one").ConfigureAwait(false);
+            async Task<JsonElement> ForkAsync(string sessionId, params string[] arguments)
+            {
+                var result = await fixture.Dispatcher.InvokeAsync(["session", "fork", sessionId, .. arguments], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+                Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Transcript);
+                return BranchRecords(result, "alta.session.forked").Single();
+            }
+
+            // A worktree of its own is a new checkout on a new branch; the fork stays a session of the project.
+            var own = await ForkAsync(session.SessionId, "--worktree", "--base", "main").ConfigureAwait(false);
+            var worktree = own.GetProperty("worktreeDirectory").GetString()!;
+            Assert.IsTrue(Directory.Exists(worktree));
+            Assert.AreEqual(Path.Combine(fixture.Host.CatalogOptions.WorktreesRoot, fixture.Host.CurrentProject.Slug), Path.GetDirectoryName(worktree));
+            Assert.AreEqual("alta/" + Path.GetFileName(worktree), own.GetProperty("worktreeBranch").GetString());
+            Assert.AreEqual(session.WorkingDirectory, own.GetProperty("workingDirectory").GetString());
+            Assert.AreEqual(worktree, (await fixture.ListedAsync(own.GetProperty("sessionId").GetString()!).ConfigureAwait(false)).WorktreeDirectory);
+
+            // A fork of a session that works in a worktree works there too: no other one is made.
+            var same = await ForkAsync(own.GetProperty("sessionId").GetString()!).ConfigureAwait(false);
+            Assert.AreEqual(worktree, same.GetProperty("worktreeDirectory").GetString());
+            Assert.IsFalse(same.TryGetProperty("worktreeBranch", out JsonElement _));
+            Assert.AreEqual(session.SessionId, same.GetProperty("forkRootSessionId").GetString());
+            Assert.AreEqual(own.GetProperty("sessionId").GetString(), same.GetProperty("forkedFromSessionId").GetString());
+            // Unless it is sent to the folder of the project.
+            var apart = await ForkAsync(own.GetProperty("sessionId").GetString()!, "--no-worktree").ConfigureAwait(false);
+            Assert.IsFalse(apart.TryGetProperty("worktreeDirectory", out JsonElement _));
+
+            // A fork that is refused leaves no checkout behind: the turn is looked up before git is asked anything.
+            var before = Directory.GetDirectories(Path.GetDirectoryName(worktree)!).Length;
+            await fixture.AssertRefusedAsync(["session", "fork", session.SessionId, "--worktree", "--before", "7"], AltaCallerIdentity.Cli, AltaExitCodes.NotFound, "session.turnNotFound").ConfigureAwait(false);
+            Assert.AreEqual(before, Directory.GetDirectories(Path.GetDirectoryName(worktree)!).Length);
+        }
+        finally
+        {
+            await fixture.DisposeAsync().ConfigureAwait(false);
+            MakeWritable(root.Path);
+        }
+    }
+
+    [TestMethod]
+    public async Task SessionForkAndRewind_OfASessionThatRuns_LeaveOutOrRefuseTheTurnInProgress()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var session = await fixture.CreateSessionAsync("Long work").ConfigureAwait(false);
+        await fixture.SendAsync(session.SessionId, "one").ConfigureAwait(false);
+        fixture.Provider.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = fixture.Host.RuntimeService.SendAsync(session, fixture.Options, new AgentSendOptions { Input = AgentInput.Text("two") }, CancellationToken.None);
+        try
+        {
+            await fixture.Provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            var self = fixture.Agent(session.SessionId);
+
+            var listed = await fixture.Dispatcher.InvokeAsync(["session", "turns"], caller: self).ConfigureAwait(false);
+            var turns = BranchRecords(listed, "alta.session.turn");
+            CollectionAssert.AreEqual(new[] { "completed", "running" }, turns.Select(static turn => turn.GetProperty("status").GetString()).ToArray());
+            var runningRunId = turns[1].GetProperty("runId").GetString()!;
+
+            // A session forks itself while it runs: the fork has what is complete, and says that it left the turn out.
+            var own = await fixture.Dispatcher.InvokeAsync(["session", "fork"], caller: self).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, own.ExitCode, own.Transcript);
+            var ownRecord = BranchRecords(own, "alta.session.forked").Single();
+            Assert.AreEqual(session.SessionId, ownRecord.GetProperty("forkedFromSessionId").GetString());
+            Assert.AreEqual(1, ownRecord.GetProperty("turns").GetInt32());
+            Assert.AreEqual(2, ownRecord.GetProperty("sourceTurns").GetInt32());
+            Assert.AreEqual(runningRunId, ownRecord.GetProperty("beforeRunId").GetString());
+            Assert.IsTrue(ownRecord.GetProperty("excludedRunningTurn").GetBoolean());
+            Assert.IsFalse(ownRecord.TryGetProperty("parentSessionId", out JsonElement _));
+            Assert.AreEqual(session.SessionId, ownRecord.GetProperty("forkedBy").GetProperty("sourceSessionId").GetString());
+            Assert.IsNull((await fixture.ListedAsync(ownRecord.GetProperty("sessionId").GetString()!).ConfigureAwait(false)).ParentSessionId, "A fork of oneself is not one's sub-agent.");
+            // The same fork, asked by its point.
+            foreach (var arguments in new[] { new[] { "--before", "2" }, ["--after", "1"], ["--before", runningRunId] })
+            {
+                var point = await fixture.Dispatcher.InvokeAsync(["session", "fork", session.SessionId, .. arguments], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+                Assert.AreEqual(AltaExitCodes.Success, point.ExitCode, point.Transcript);
+                Assert.AreEqual(1, BranchRecords(point, "alta.session.forked").Single().GetProperty("turns").GetInt32(), string.Join(' ', arguments));
+                Assert.IsTrue(BranchRecords(point, "alta.session.forked").Single().GetProperty("excludedRunningTurn").GetBoolean(), string.Join(' ', arguments));
+            }
+
+            var before = await fixture.Dispatcher.InvokeAsync(["session", "fork", session.SessionId, "--before", "1"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.IsFalse(BranchRecords(before, "alta.session.forked").Single().GetProperty("excludedRunningTurn").GetBoolean());
+            // A turn that is asked for and runs is refused, not left out in silence.
+            var sessions = await fixture.CountSessionsAsync().ConfigureAwait(false);
+            await fixture.AssertRefusedAsync(["session", "fork", session.SessionId, "--after", "2"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.turnRunning").ConfigureAwait(false);
+            await fixture.AssertRefusedAsync(["session", "fork", session.SessionId, "--after", runningRunId], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.turnRunning").ConfigureAwait(false);
+            await fixture.AssertRefusedAsync(["session", "fork", session.SessionId, "--before", "3"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.turnRunning").ConfigureAwait(false);
+
+            // A session that runs is not rewound: by another caller, or by itself.
+            await fixture.AssertRefusedAsync(["session", "rewind", session.SessionId, "--before", "2"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.running").ConfigureAwait(false);
+            await fixture.AssertRefusedAsync(["session", "rewind", session.SessionId, "--before", "1"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.running").ConfigureAwait(false);
+            await fixture.AssertRefusedAsync(["session", "rewind", session.SessionId, "--before", "1"], self, AltaExitCodes.Unsupported, "session.running").ConfigureAwait(false);
+            // Nor one that has a prompt waiting.
+            var queued = await fixture.Dispatcher.InvokeAsync(["session", "queue", session.SessionId, "--message", "later"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode, queued.Transcript);
+            await fixture.AssertRefusedAsync(["session", "rewind", session.SessionId, "--before", "1"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.queuePending").ConfigureAwait(false);
+            Assert.AreEqual(sessions, await fixture.CountSessionsAsync().ConfigureAwait(false), "A refusal creates no session.");
+            Assert.AreEqual(2, (await fixture.Host.RuntimeService.ReadSessionTurnsAsync(session.SessionId).ConfigureAwait(false))!.Turns.Turns.Count);
+        }
+        finally
+        {
+            fixture.Provider.Hold.TrySetResult();
+        }
+
+        await running.ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task SessionRewind_RemovesATurnAndWhatFollows_AndKeepsOrDiscardsThem()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var session = await fixture.CreateSessionAsync("Refactoring").ConfigureAwait(false);
+        var coordinator = await fixture.CreateSessionAsync("Coordinator").ConfigureAwait(false);
+        foreach (var prompt in new[] { "one", "two", "three" })
+        {
+            await fixture.SendAsync(session.SessionId, prompt).ConfigureAwait(false);
+        }
+
+        var runs = (await fixture.Host.RuntimeService.ReadSessionTurnsAsync(session.SessionId).ConfigureAwait(false))!.Turns.Turns.Select(static turn => turn.RunId).ToArray();
+        var sessions = await fixture.CountSessionsAsync().ConfigureAwait(false);
+        (string[] Args, AltaCallerIdentity Caller, int ExitCode, string Code)[] refused =
+        [
+            (["session", "rewind", "--before", "2"], fixture.Agent(coordinator.SessionId), AltaExitCodes.Usage, "usage.invalid"),
+            (["session", "rewind", session.SessionId], AltaCallerIdentity.Cli, AltaExitCodes.Usage, "usage.missingTurn"),
+            (["session", "rewind", session.SessionId, "--discard"], AltaCallerIdentity.Cli, AltaExitCodes.Usage, "usage.missingTurn"),
+            (["session", "rewind", session.SessionId, "--before", "2", "--after", "1"], AltaCallerIdentity.Cli, AltaExitCodes.Usage, "usage.turnConflict"),
+            // Nothing follows the last turn.
+            (["session", "rewind", session.SessionId, "--after", "3"], AltaCallerIdentity.Cli, AltaExitCodes.Usage, "usage.nothingToRewind"),
+            (["session", "rewind", session.SessionId, "--after", runs[2]], AltaCallerIdentity.Cli, AltaExitCodes.Usage, "usage.nothingToRewind"),
+            (["session", "rewind", session.SessionId, "--before", "4"], AltaCallerIdentity.Cli, AltaExitCodes.Usage, "usage.nothingToRewind"),
+            (["session", "rewind", "no-such-session", "--before", "1"], AltaCallerIdentity.Cli, AltaExitCodes.NotFound, "session.notFound"),
+            (["session", "rewind", session.SessionId, "--before", "9"], AltaCallerIdentity.Cli, AltaExitCodes.NotFound, "session.turnNotFound"),
+            (["session", "rewind", session.SessionId, "--after", "no-such-run"], AltaCallerIdentity.Cli, AltaExitCodes.NotFound, "session.turnNotFound"),
+            // The session that calls runs, whatever the host knows of it.
+            (["session", "rewind", session.SessionId, "--before", "2"], fixture.Agent(session.SessionId), AltaExitCodes.Unsupported, "session.running"),
+        ];
+        foreach (var (args, caller, exitCode, code) in refused)
+        {
+            await fixture.AssertRefusedAsync(args, caller, exitCode, code).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(3, (await fixture.Host.RuntimeService.ReadSessionTurnsAsync(session.SessionId).ConfigureAwait(false))!.Turns.Turns.Count, "A refused rewind removes nothing.");
+        Assert.AreEqual(sessions, await fixture.CountSessionsAsync().ConfigureAwait(false));
+
+        // The session goes back to before its second turn; what is removed is kept as a session of its own.
+        var kept = await fixture.Dispatcher.InvokeAsync(["session", "rewind", session.SessionId, "--before", "2"], caller: fixture.Agent(coordinator.SessionId)).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, kept.ExitCode, kept.Transcript);
+        var keptRecord = BranchRecords(kept, "alta.session.rewound").Single();
+        Assert.AreEqual(session.SessionId, keptRecord.GetProperty("sessionId").GetString());
+        Assert.AreEqual(1, keptRecord.GetProperty("turns").GetInt32());
+        Assert.AreEqual(2, keptRecord.GetProperty("removedTurns").GetInt32());
+        Assert.AreEqual(runs[1], keptRecord.GetProperty("beforeRunId").GetString());
+        Assert.AreEqual("two", keptRecord.GetProperty("removedPrompt").GetString());
+        Assert.IsFalse(keptRecord.GetProperty("removedPromptTruncated").GetBoolean());
+        Assert.AreEqual(1, keptRecord.GetProperty("rewindCount").GetInt32());
+        Assert.AreEqual("agent", keptRecord.GetProperty("rewoundBy").GetProperty("kind").GetString());
+        Assert.AreEqual(coordinator.SessionId, keptRecord.GetProperty("rewoundBy").GetProperty("sourceSessionId").GetString());
+        var removedSessionId = keptRecord.GetProperty("removedTurnsSessionId").GetString()!;
+        Assert.AreEqual("Refactoring (before rewind)", (await fixture.ListedAsync(removedSessionId).ConfigureAwait(false)).Title);
+        Assert.IsNull((await fixture.ListedAsync(removedSessionId).ConfigureAwait(false)).ParentSessionId);
+
+        async Task<string?[]> PromptsAsync(string sessionId)
+        {
+            var result = await fixture.Dispatcher.InvokeAsync(["session", "turns", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Transcript);
+            return BranchRecords(result, "alta.session.turn").Select(static turn => turn.GetProperty("prompt").GetString()).ToArray();
+        }
+
+        CollectionAssert.AreEqual(new[] { "one" }, await PromptsAsync(session.SessionId).ConfigureAwait(false));
+        CollectionAssert.AreEqual(new[] { "one", "two", "three" }, await PromptsAsync(removedSessionId).ConfigureAwait(false));
+        // The next prompt starts from the point.
+        var sent = await fixture.Dispatcher.InvokeAsync(["session", "send", session.SessionId, "--message", "four"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Transcript);
+        await fixture.WaitIdleAsync(session.SessionId).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "one", "four" }, fixture.LastUserTexts(session.SessionId));
+
+        // With --discard nothing of the removed turns is kept.
+        sessions = await fixture.CountSessionsAsync().ConfigureAwait(false);
+        var discarded = await fixture.Dispatcher.InvokeAsync(["session", "rewind", session.SessionId, "--after", "1", "--discard"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, discarded.ExitCode, discarded.Transcript);
+        var discardedRecord = BranchRecords(discarded, "alta.session.rewound").Single();
+        Assert.AreEqual(1, discardedRecord.GetProperty("turns").GetInt32());
+        Assert.AreEqual(1, discardedRecord.GetProperty("removedTurns").GetInt32());
+        Assert.AreEqual("four", discardedRecord.GetProperty("removedPrompt").GetString());
+        Assert.IsFalse(discardedRecord.TryGetProperty("removedTurnsSessionId", out JsonElement _));
+        Assert.AreEqual(2, discardedRecord.GetProperty("rewindCount").GetInt32());
+        Assert.AreEqual(sessions, await fixture.CountSessionsAsync().ConfigureAwait(false));
+        await fixture.SendAsync(session.SessionId, "five").ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "one", "five" }, fixture.LastUserTexts(session.SessionId));
+        // A rewind to before the first turn empties the session.
+        var emptied = await fixture.Dispatcher.InvokeAsync(["session", "rewind", session.SessionId, "--before", "1", "--discard"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(0, BranchRecords(emptied, "alta.session.rewound").Single().GetProperty("turns").GetInt32());
+        Assert.AreEqual(2, BranchRecords(emptied, "alta.session.rewound").Single().GetProperty("removedTurns").GetInt32());
+        Assert.AreEqual(0, (await PromptsAsync(session.SessionId).ConfigureAwait(false)).Length);
+    }
+
+    [TestMethod]
+    public async Task SessionRewind_RefusesASessionWithBackgroundWorkOrThatIsArchived()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var shell = new JobShell();
+        fixture.Host.RuntimeService.Jobs.Starter = shell.Start;
+        var session = await fixture.CreateSessionAsync("Build").ConfigureAwait(false);
+        await fixture.SendAsync(session.SessionId, "one").ConfigureAwait(false);
+        await fixture.SendAsync(session.SessionId, "two").ConfigureAwait(false);
+
+        // A job of the session reports to a conversation that a rewind would remove.
+        var start = await fixture.Dispatcher.InvokeAsync(["job", "start", "--command", "npm run build", "--notify", "never", "--cwd", root.Path], caller: fixture.Agent(session.SessionId)).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, start.ExitCode, start.Transcript);
+        var message = await fixture.AssertRefusedAsync(["session", "rewind", session.SessionId, "--before", "2"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.backgroundWork").ConfigureAwait(false);
+        StringAssert.Contains(message, "alta job cancel");
+        shell.Processes.Single().Exit(0);
+        await WaitUntilAsync(() => fixture.Host.RuntimeService.Jobs.CountRunning(session.SessionId) == 0).ConfigureAwait(false);
+
+        // An archived session is left as it is.
+        var archived = await fixture.ListedAsync(session.SessionId).ConfigureAwait(false);
+        archived.Status = SessionViewStatus.Archived;
+        await fixture.Host.RuntimeService.PersistSessionLocalStateAsync(archived).ConfigureAwait(false);
+        await fixture.AssertRefusedAsync(["session", "rewind", session.SessionId, "--before", "2"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.archived").ConfigureAwait(false);
+        Assert.AreEqual(2, (await fixture.Host.RuntimeService.ReadSessionTurnsAsync(session.SessionId).ConfigureAwait(false))!.Turns.Turns.Count);
+    }
+
+    [TestMethod]
+    [DataRow("session_missing", AltaExitCodes.NotFound, "session.notFound")]
+    [DataRow("turn_not_found", AltaExitCodes.NotFound, "session.turnNotFound")]
+    [DataRow("turn_running", AltaExitCodes.Unsupported, "session.turnRunning")]
+    [DataRow("session_in_use", AltaExitCodes.Unsupported, "session.running")]
+    [DataRow("queue_pending", AltaExitCodes.Unsupported, "session.queuePending")]
+    [DataRow("interaction_pending", AltaExitCodes.Unsupported, "session.interactionPending")]
+    [DataRow("background_work", AltaExitCodes.Unsupported, "session.backgroundWork")]
+    [DataRow("session_archived", AltaExitCodes.Unsupported, "session.archived")]
+    [DataRow("session_changed", AltaExitCodes.Failure, "session.changed")]
+    [DataRow("unsupported_format", AltaExitCodes.Failure, "session.unsupportedFormat")]
+    [DataRow("io_failed", AltaExitCodes.Failure, "session.ioFailed")]
+    [DataRow("something_new", AltaExitCodes.Failure, "session.branchFailed")]
+    public void SessionBranchRefusal_HasACodeAnExitCodeAndAMessagePerStatus(string status, int exitCode, string code)
+    {
+        var refusal = BuiltInAltaCommandContributor.DescribeBranchRefusal(status, "session-7", "rewound", "4");
+
+        Assert.AreEqual((exitCode, code), (refusal.ExitCode, refusal.Code));
+        StringAssert.Contains(refusal.Message, "session-7");
+        // A refusal says what to do next; a turn that is not there or that runs is named.
+        if (exitCode == AltaExitCodes.Unsupported && status != "turn_running") StringAssert.Contains(refusal.Message, "then rewind");
+        if (status.StartsWith("turn_", StringComparison.Ordinal)) StringAssert.Contains(refusal.Message, "'4'");
+    }
+
+    [TestMethod]
+    public async Task SessionTurnsForkAndRewind_AreCommandsWithTheirPolicyAndTheirHelp()
+    {
+        var dispatcher = CreateDispatcher();
+
+        var root = await dispatcher.InvokeAsync(["--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var group = await dispatcher.InvokeAsync(["session", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var turns = await dispatcher.InvokeAsync(["session", "turns", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var fork = await dispatcher.InvokeAsync(["session", "fork", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var rewind = await dispatcher.InvokeAsync(["session", "rewind", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var tools = await dispatcher.InvokeAsync(["tool", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        StringAssert.Contains(root.Stdout, "`alta session fork <session-id> --before <turn>`; see `alta session turns`");
+        foreach (var leaf in new[] { "turns", "fork", "rewind" })
+        {
+            StringAssert.Contains(group.Stdout, leaf + "  ");
+        }
+
+        StringAssert.Contains(group.Stdout, "alta session turns <session-id> --last 5");
+        Assert.IsTrue(turns.IsHelp && fork.IsHelp && rewind.IsHelp);
+        // The description of an option is wrapped where the line ends.
+        static string Flat(string help) => string.Join(' ', help.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        StringAssert.Contains(turns.Stdout, "--last=VALUE");
+        StringAssert.Contains(Flat(turns.Stdout), "[<session-id>] CodeAlta session id. Defaults to the calling agent session when omitted.");
+        StringAssert.Contains(turns.Stdout, "`running`, `completed`, `failed` or `unfinished`");
+        foreach (var option in new[] { "--before=VALUE", "--after=VALUE", "--title=VALUE", "--parent=VALUE", "--worktree", "--base=VALUE", "--no-worktree" })
+        {
+            StringAssert.Contains(fork.Stdout, option);
+        }
+
+        AssertHelpOrder(fork.Stdout, "      --no-worktree", "Examples:");
+        StringAssert.Contains(Flat(fork.Stdout), "[<session-id>] CodeAlta session id. Defaults to the calling agent session when omitted.");
+        StringAssert.Contains(fork.Stdout, "A fork has no parent unless `--parent` names one");
+        StringAssert.Contains(fork.Stdout, "its first request then no longer reads the prompt cache of that session");
+        StringAssert.Contains(fork.Stdout, "a turn in progress is not part of the fork");
+        StringAssert.Contains(fork.Stdout, "Files are not copied or restored");
+        foreach (var option in new[] { "--before=VALUE", "--after=VALUE", "--discard" })
+        {
+            StringAssert.Contains(rewind.Stdout, option);
+        }
+
+        StringAssert.Contains(rewind.Stdout, "Files changed by the removed turns are NOT restored");
+        StringAssert.Contains(Flat(rewind.Stdout), "Do not keep the removed turns in a session of their own. This cannot be undone.");
+        StringAssert.Contains(rewind.Stdout, "Usage: alta session rewind [options] <session-id>");
+        StringAssert.Contains(rewind.Stdout, "nothing of the removed turns can be found again, and nothing can be undone");
+        StringAssert.Contains(rewind.Stdout, "A session cannot rewind itself");
+
+        // Reading the turns changes nothing, a fork adds a session, a rewind removes what a session did.
+        var paths = ReadJsonLines(tools.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.tool.paths");
+        foreach (var path in new[] { "session turns", "session fork", "session rewind" })
+        {
+            AssertJsonArrayContains(paths.GetProperty("paths"), path);
+        }
+
+        var mutating = paths.GetProperty("mutating").EnumerateArray().Select(static item => item.GetString()).ToArray();
+        var disruptive = paths.GetProperty("disruptive").EnumerateArray().Select(static item => item.GetString()).ToArray();
+        CollectionAssert.DoesNotContain(mutating, "session turns");
+        CollectionAssert.Contains(mutating, "session fork");
+        CollectionAssert.DoesNotContain(disruptive, "session fork");
+        CollectionAssert.Contains(mutating, "session rewind");
+        CollectionAssert.Contains(disruptive, "session rewind");
+    }
+
+    private static List<JsonElement> BranchRecords(AltaCommandResult result, string type)
+        => ReadJsonLines(result.Stdout).Where(line => line.GetProperty("type").GetString() == type).ToList();
+
+    /// <summary>A host whose provider answers every prompt, so that its sessions have turns in their journal, with the alta commands over it.</summary>
+    private sealed class BranchFixture(CodeAltaHost host, BranchProvider provider, AltaCommandDispatcher dispatcher, SessionExecutionOptions options) : IAsyncDisposable
+    {
+        public CodeAltaHost Host { get; } = host;
+
+        public BranchProvider Provider { get; } = provider;
+
+        public AltaCommandDispatcher Dispatcher { get; } = dispatcher;
+
+        public SessionExecutionOptions Options { get; } = options;
+
+        public static async Task<BranchFixture> CreateAsync(TempDirectory root)
+        {
+            var projectPath = Path.Combine(root.Path, "project");
+            var globalRoot = Path.Combine(root.Path, "global");
+            Directory.CreateDirectory(projectPath);
+            Directory.CreateDirectory(globalRoot);
+            var provider = new BranchProvider();
+            var host = await CodeAltaHost.CreateAsync(
+                new CodeAltaHostOptions
+                {
+                    GlobalRoot = globalRoot,
+                    CurrentProjectPath = projectPath,
+                    IsHeadless = true,
+                    HasInteractiveUi = false,
+                    StartPlugins = false,
+                    ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+                },
+                CancellationToken.None).ConfigureAwait(false);
+            var dispatcher = CreateDispatcher(new AltaServiceCollection()
+                .Add(host.CatalogOptions)
+                .Add(host.ProjectCatalog)
+                .Add(host.SessionViewCatalog)
+                .Add(host.RuntimeService));
+            return new BranchFixture(host, provider, dispatcher, new SessionExecutionOptions
+            {
+                ProviderId = provider.Descriptor.ProviderId,
+                ProviderKey = provider.Descriptor.ProviderId.Value,
+                WorkingDirectory = projectPath,
+                ProjectRoots = [projectPath],
+                Model = "fake-model",
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+            });
+        }
+
+        public AltaCallerIdentity Agent(string sessionId)
+            => new() { Kind = "agent", SourceSessionId = sessionId, SourceProjectId = Host.CurrentProject.Id, SourceAgentId = "agent-1" };
+
+        public Task<SessionViewDescriptor> CreateSessionAsync(string title)
+            => Host.RuntimeService.CreateProjectSessionAsync(Host.CurrentProject, Options, title, CancellationToken.None);
+
+        public async Task SendAsync(string sessionId, string prompt)
+        {
+            await Host.RuntimeService.SendAsync(await ListedAsync(sessionId).ConfigureAwait(false), Options, new AgentSendOptions { Input = AgentInput.Text(prompt) }, CancellationToken.None).ConfigureAwait(false);
+            await WaitIdleAsync(sessionId).ConfigureAwait(false);
+        }
+
+        public async Task WaitIdleAsync(string sessionId)
+        {
+            var session = await ListedAsync(sessionId).ConfigureAwait(false);
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (await Host.RuntimeService.HasActiveRunAsync(session, CancellationToken.None).ConfigureAwait(false))
+            {
+                Assert.IsTrue(DateTimeOffset.UtcNow < deadline, "The run did not end.");
+                await Task.Delay(10).ConfigureAwait(false);
+            }
+        }
+
+        public async Task<SessionViewDescriptor> ListedAsync(string sessionId)
+        {
+            await foreach (var session in Host.RuntimeService.ListRecoverableSessionsAsync().ConfigureAwait(false))
+            {
+                if (session.SessionId == sessionId) return session;
+            }
+
+            Assert.Fail($"Session {sessionId} is not listed.");
+            return null!;
+        }
+
+        public async Task<int> CountSessionsAsync()
+        {
+            var count = 0;
+            await foreach (var _ in Host.RuntimeService.ListRecoverableSessionsAsync().ConfigureAwait(false))
+            {
+                count++;
+            }
+
+            return count;
+        }
+
+        // The prompts of the user in the last request the provider was sent for a session.
+        public string[] LastUserTexts(string sessionId)
+            => Provider.Requests.Last(request => request.SessionId == sessionId).Conversation
+                .Where(static message => message.Role == AgentConversationRole.User)
+                .Select(static message => string.Concat(message.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value))).ToArray();
+
+        // The command does nothing and says why: the message of its error is returned.
+        public async Task<string> AssertRefusedAsync(string[] args, AltaCallerIdentity caller, int exitCode, string code)
+        {
+            var result = await Dispatcher.InvokeAsync(args, caller: caller).ConfigureAwait(false);
+            var text = string.Join(' ', args);
+            Assert.AreEqual(exitCode, result.ExitCode, text + Environment.NewLine + result.Transcript);
+            var lines = ReadJsonLines(result.Stdout);
+            Assert.IsFalse(lines.Any(static line => line.GetProperty("type").GetString() is "alta.session.forked" or "alta.session.rewound" or "alta.session.turn"), text);
+            var error = lines.Single(static line => line.GetProperty("type").GetString() == "alta.error");
+            Assert.AreEqual(code, error.GetProperty("code").GetString(), text);
+            if (exitCode == AltaExitCodes.Usage) StringAssert.Contains(error.GetProperty("usageHint").GetString(), "--help");
+            return error.GetProperty("message").GetString()!;
+        }
+
+        public ValueTask DisposeAsync() => Host.DisposeAsync();
+    }
+
+    // Answers every prompt and keeps the requests it was sent; a held one leaves its turn in progress.
+    private sealed class BranchProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<AgentTurnRequest> Requests { get; } = new();
+
+        public TaskCompletionSource? Hold { get; set; }
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("fake-branch"), "Fake Branch") { DefaultModelId = "fake-model" };
+
+        public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
+        {
+            ProtocolFamily = "test",
+            ProviderKey = "fake-branch",
+            DisplayName = "Fake Branch",
+            TransportKind = AgentTransportKind.OpenAIResponses,
+        };
+
+        public IModelProviderModelCatalog? ModelCatalog => null;
+
+        public AgentRuntimeProviderRegistration CreateProviderRegistration() => new() { Provider = RuntimeDescriptor, TurnExecutor = this };
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => this;
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult
+            {
+                ProviderId = Descriptor.ProviderId,
+                Availability = ModelProviderAvailability.Ready,
+                Models = [new AgentModelInfo("fake-model", DisplayName: "Fake Model")],
+                SelectedModelId = "fake-model",
+            });
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Enqueue(request);
+            var contentId = "content-" + Guid.NewGuid().ToString("N");
+            await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = contentId, Text = "answer" }, cancellationToken).ConfigureAwait(false);
+            if (Hold is { } hold)
+            {
+                Started.TrySetResult();
+                await hold.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            return new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("answer")]),
+                AssistantPartContentIds = [contentId],
+                ProviderSessionId = "response-" + Requests.Count,
+            };
+        }
     }
 
     [TestMethod]

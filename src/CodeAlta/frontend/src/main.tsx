@@ -23,7 +23,7 @@ import {
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
-  type ConfigurationSnapshot, type WorkspaceSession, type WorkspaceSnapshot,
+  type ConfigurationSnapshot, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
 } from "#neoastra";
 import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
@@ -45,8 +45,10 @@ import { SessionBrowser } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
-import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, canvasTab, canvasesTab, documentationTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, tabKey,
+  type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
+import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -98,6 +100,7 @@ import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { useNewSessionChoices } from "./newSessionChoices";
+import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
 import { AppIcon, type IconName } from "./AppIcon";
@@ -111,6 +114,11 @@ import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { createSessionCreation, createdSessionSelection, initialSessionTitle, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
+import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage, splitPendingTabMoves } from "./sessionMove";
+import { createCoalescedRead } from "./coalescedRead";
+import { useSessionRowDrag, type SessionDrag, type SessionRowDrag } from "./explorer/sessionDrag";
+import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
+import { MoveSessionDialog } from "./MoveSessionDialog";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
 import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
 import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
@@ -120,7 +128,7 @@ import { createProjectRename, projectNameVisible, projectRenameMessage, projectR
 import { sessionHierarchy } from "./sessionHierarchy";
 import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
-import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
@@ -223,6 +231,13 @@ import "./documentation/documentation.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
 import { createDocumentationHub } from "./documentation/documentationHub";
 import "./pluginButtons/pluginButtons.css";
+import "./sessionBranch/sessionBranch.css";
+import { SessionBranchDialog, type BranchDialogHost } from "./sessionBranch/SessionBranchDialog";
+import { SessionLineageBanner, SessionLineageMark } from "./sessionBranch/SessionLineage";
+import { composerPrompt, type BranchMode } from "./sessionBranch/branchPoints";
+import { createBranchRequests, readKeepRemovedTurns, saveKeepRemovedTurns, type BranchRequests } from "./sessionBranch/branchRequests";
+import { lineageTitle, sessionLineage } from "./sessionBranch/lineage";
+import { branchTarget, createSessionBranch, readSessionTurns, type ForkResult, type RewindResult } from "./sessionBranch/sessionBranchRpc";
 import { CanvasPanel } from "./canvases/CanvasPanel";
 import { PluginHostBridgeContext, type PluginHostBridge } from "./pluginScript/hostBridge";
 import { createCanvasHub, type CanvasClosedInstance, type CanvasOpenRequest } from "./canvases/canvasHub";
@@ -234,12 +249,47 @@ import { PluginButtons } from "./pluginButtons/PluginButtons";
 import { SessionRowMenu } from "./pluginButtons/pluginMenu";
 import { PluginButtonsActiveContext, PluginButtonsContext, createHiddenButtons, type PluginButtonContext, type PluginButtonView, type PluginButtonsHost } from "./pluginButtons/pluginButtonModel";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
+import { bookmarks as bookmarksApi } from "#neoastra";
+import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
+import { createBookmarksHub, type BookmarksHub } from "./bookmarks/bookmarksHub";
+import { createRevealRequests, type RevealOutcome, type RevealRequest, type RevealRequests } from "./bookmarks/revealRequests";
+import { createTimelineBookmarks, TimelineBookmarksContext } from "./bookmarks/timelineBookmarks";
+import { BookmarkRail } from "./bookmarks/BookmarkRail";
+import { BookmarksPanel } from "./bookmarks/BookmarksPanel";
+import { SessionBookmarkMark } from "./bookmarks/SessionBookmarkMark";
+import "./bookmarks/bookmarks.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
-  latestReady: () => boolean; latest: () => void; cancelLatest: () => void }>;
+  latestReady: () => boolean; latest: () => void; cancelLatest: () => void;
+  /** Scrolls to a user message, by the journal offset that keys its row; false when the loaded window does not hold it. */
+  showRow: (key: string) => boolean;
+  /** Goes to the bookmarked message before or after the rows in view; false when there is none that way. */
+  stepBookmark: (direction: -1 | 1) => boolean }>;
+
+/**
+ * What a pane of a session asks about bookmarks: the list the host keeps, the requests that show a message of a
+ * timeline, and the two things a pane does with a bookmark, which the window of the application carries through.
+ */
+type SessionBookmarkHost = Readonly<{ hub: BookmarksHub; reveals: RevealRequests;
+  /** Bookmarks the message of a row of a session, or removes the bookmark it has. */
+  toggleMessage: (sessionId: string, rowKey: string, bookmarkId: string | null) => void;
+  /** Goes to what a bookmark marks. */
+  go: (bookmark: Bookmark) => void;
+  /** Says that the message of a request could not be shown. */
+  unshown: (outcome: RevealOutcome) => void }>;
+
+/**
+ * What a pane of a session asks for a fork or a rewind of its session: the requests that open the window, and the
+ * two changes, which the window of the application carries through (the new session, its tab, the prompt).
+ */
+type SessionBranchHost = Readonly<{ requests: BranchRequests;
+  fork: (session: WorkspaceSession, projectId: string | null, beforeRunId: string | null) => Promise<ForkResult>;
+  rewind: (session: WorkspaceSession, projectId: string | null, beforeRunId: string, keepRemovedTurns: boolean) => Promise<RewindResult> }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
+const noSubscription = () => () => { };
+const noBookmarkProjects: readonly { id: string; name: string }[] = [];
 type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "storage";
 type SettingsSection = Exclude<View, "workspace">;
 
@@ -302,7 +352,15 @@ function App() {
     projectInspection.current = { version: projectInspection.current.version + 1, ready };
     setProjectInspectionVersion(projectInspection.current.version);
   }
+  // The moves whose tabs have not followed them yet: each is retargeted with the first list that shows it moved.
+  const pendingTabMoves = useRef<readonly WorkspaceMovedSession[]>([]);
   function publishWorkspaceState(value: WorkspaceState) {
+    if (value.kind === "ready" && pendingTabMoves.current.length > 0) {
+      const { shown, waiting } = splitPendingTabMoves(value.snapshot, pendingTabMoves.current);
+      pendingTabMoves.current = waiting;
+      // In the same update as the list: published alone, the list drops the tab of a moved session.
+      retargetMovedTabs(shown);
+    }
     advanceBrowserRevision();
     invalidateCreation();
     currentSnapshot.current = value.kind === "ready" ? value.snapshot : undefined;
@@ -312,19 +370,22 @@ function App() {
   // Sessions also appear without the window asking: an agent creates sub-sessions through the alta tool.
   // While a run is live, and when it ends, the session list is read again and shown only if it differs.
   const liveRuns = useRef(new Set<string>());
-  const sessionListRead = useRef(false);
-  const readSessionList = useRef(() => {});
-  readSessionList.current = () => {
-    if (sessionListRead.current || !currentSnapshot.current || document.visibilityState !== "visible") return;
-    sessionListRead.current = true;
+  const sessionListBody = useRef(async () => {});
+  sessionListBody.current = async () => {
+    if (!creationAlive.current || !currentSnapshot.current || document.visibilityState !== "visible") return;
     const revision = browserRevision.current;
-    void workspace.snapshot({}, { timeoutMilliseconds: 30_000 }).then(fresh => {
-      const shown = currentSnapshot.current;
-      if (!creationAlive.current || !shown || !fresh.configured || revision !== browserRevision.current
-        || sessionListSignature(shown) === sessionListSignature(fresh)) return;
-      publishWorkspaceState({ kind: "ready", snapshot: fresh });
-    }).catch(() => {}).finally(() => { sessionListRead.current = false; });
+    const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+    const shown = currentSnapshot.current;
+    if (movingPending.current) { sessionLists.defer(); return; }
+    if (!creationAlive.current || !shown || !fresh.configured || revision !== browserRevision.current
+      || sessionListSignature(shown) === sessionListSignature(fresh)) return;
+    publishWorkspaceState({ kind: "ready", snapshot: fresh });
   };
+  // A move publishes its own list, with the tabs of the moved sessions pointed at their new project: read during it,
+  // a list would drop those tabs. What is asked for then is read once the move ends.
+  const [sessionLists] = useState(() => createCoalescedRead(() => movingPending.current, () => sessionListBody.current()));
+  const readSessionList = useRef(() => {});
+  readSessionList.current = () => sessionLists.run();
   // A run that ends may have written a plan or proposed a task: the work items are read again too.
   const refreshWorkItems = useRef(() => {});
   const noteRunActivity = (id: string, running: boolean | null) => {
@@ -346,6 +407,10 @@ function App() {
   const [retentionLifetime, setRetentionLifetime] = useState<string | null>(null);
   const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, spaceId))));
   const [tabs, writeTabs] = useState(emptySessionTabs);
+  // A session that is selected without a tab is looked at: it takes the transient tab. The one named here is opened
+  // to be kept instead (a session that was just created, a fork), until its tab is there.
+  const keptSession = useRef<string | null>(null);
+  const openingMode = (id: string | null): SessionTabMode => id !== null && keptSession.current === id ? "permanent" : "preview";
   const retentionNavigation = useRef(0);
   // All shell routes, including recovery callbacks, use these admission boundaries. A newer navigation
   // invalidates an older held acknowledgement; a catalog/host/lifetime change cannot revive it either.
@@ -562,6 +627,14 @@ function App() {
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
   const [sessionPaneOwners] = useState(() => new Map<string, ReturnType<typeof createSessionPaneOwners>>());
+  // The fork and the rewind of sessions: one change at a time, and which pane shows the window that asks for it.
+  const [sessionBranch] = useState(() => createSessionBranch(workspaceApi.forkSession, workspaceApi.rewindSession));
+  const branchActions = useRef<Pick<SessionBranchHost, "fork" | "rewind">>({ fork: async () => ({ kind: "error", code: "unconfigured" }), rewind: async () => ({ kind: "error", code: "unconfigured" }) });
+  const [branchHost] = useState<SessionBranchHost>(() => ({ requests: createBranchRequests(),
+    fork: (...request) => branchActions.current.fork(...request), rewind: (...request) => branchActions.current.rewind(...request) }));
+  // The sessions rewound from this window, with the count the host answered: their pane is read again at once,
+  // before the list of sessions says the same.
+  const [rewoundHere, setRewoundHere] = useState<ReadonlyMap<string, number>>(() => new Map());
   const [scrollMemory] = useState(createTimelineScrollMemory);
   const [projectOpening] = useState(() => createProjectOpening(workspace.openProject));
   const [projectArchive] = useState(() => createProjectArchive(workspace.archiveProject));
@@ -579,6 +652,14 @@ function App() {
   const [createSession] = useState(() => createSessionCreation(workspace.createSession));
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
+  const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
+  // The session whose project is being chosen, with the project it is in when its menu was used.
+  const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
+  // The row of a session dragged onto the row of another project, and that project.
+  const rowDrag = useSessionRowDrag(id => currentSnapshot.current?.projects.find(project => project.id === id),
+    (drag, project) => { if (!movingPending.current) { setMenuTarget(null); void moveSessionTo(drag, project); } });
+  const [movingBusy, setMovingBusy] = useState(false);
+  const movingPending = useRef(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [deletingMessage, setDeletingMessage] = useState("");
@@ -847,9 +928,18 @@ function App() {
       return;
     }
     const selection = selectedTab(snapshot, projectId, sessionId);
-    const next = selection ? openSessionTab(valid, selection) : valid.active ? { ...valid, active: null } : valid;
+    const next = selection ? openSessionTab(valid, selection, openingMode(selection.sessionId)) : valid.active ? { ...valid, active: null } : valid;
     if (next !== tabs) setTabs(next);
+    else if (selection && keptSession.current === selection.sessionId) keptSession.current = null;
   }, [snapshot, projectId, sessionId, tabsReady, tabs]);
+  // What is typed in the prompt of the session that is looked at keeps its tab, as an edit keeps the preview tab of
+  // a code editor. The window does not follow the prompts: it is told of an edit, and only this one changes it.
+  const keepEdited = useRef(() => { });
+  keepEdited.current = () => {
+    const preview = tabs.preview;
+    if (preview && draftIndicators.visible(preview.sessionId, preview.sessionId)) setTabs(pinSessionTab(tabs, preview));
+  };
+  useEffect(() => draftIndicators.subscribe(() => keepEdited.current()), [draftIndicators]);
   useEffect(() => {
     if (tabsReady && snapshot) persistSessionTabs(value => localStorage.setItem(spaceStorageKey(sessionTabsKey, spaceId), value), tabs);
   }, [tabs, tabsReady, snapshot, spaceId]);
@@ -857,7 +947,7 @@ function App() {
     if (tabsReady && snapshot) persistFileTabs(value => localStorage.setItem(spaceStorageKey(fileTabsKey, spaceId), value), fileTabs);
   }, [fileTabs, tabsReady, snapshot, spaceId]);
 
-  // A scope that becomes the selected one is opened. At the start what was remembered is kept as it is; with
+  // A scope that becomes the selected one with a session is opened. At the start what was remembered is kept as it is; with
   // nothing remembered the selected scope is the one open, as it was before the Explorer remembered anything.
   const treeScope = useRef<{ id: string | null } | null>(null);
   useEffect(() => {
@@ -865,7 +955,8 @@ function App() {
     const seen = treeScope.current;
     treeScope.current = { id: projectId };
     // The chats stay closed until the user opens them: a start with nothing selected does not open them.
-    if (seen ? seen.id !== projectId : !storedProjectTree && projectId !== null) setProjectTree(current => expandScope(current, projectId));
+    // The row of a scope selects it without opening it: only a session that is shown opens the scope it is in.
+    if (seen ? seen.id !== projectId && sessionId !== null : !storedProjectTree && projectId !== null) setProjectTree(current => expandScope(current, projectId));
   }, [projectId, tabsReady]);
 
   function applyTabState(next: SessionTabsState) {
@@ -878,9 +969,69 @@ function App() {
     if (target && selectedScope.current !== target.projectId) selectProject(target.projectId, target.sessionId);
     else setSessionId(target?.sessionId ?? null);
   }
-  function selectSessionTab(tab: SessionTab) {
+  // Shows the tab of a session. One that has none is given its own, unless it is only looked at (`preview`); a tab
+  // that is shown again stays what it is.
+  function selectSessionTab(tab: SessionTab, mode: SessionTabMode = "permanent") {
     if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
-    applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab));
+    applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab, mode));
+  }
+  // A double click on the row of a session: its tab is its own, and stays when another session is looked at.
+  function keepSession(scope: string | null, session: WorkspaceSession) {
+    const tab = snapshot ? selectedTab(snapshot, scope, session.id) : null;
+    if (tab) selectSessionTab(tab);
+  }
+  // The row of a scope in the Explorer shows the prompt of a new session of it. The prompt takes the transient tab:
+  // a session that was only looked at leaves it. Kept (a double click), it has a tab of its own, as many scopes can.
+  function showScopeDraft(id: string | null, keep = false) {
+    const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, id) : null;
+    if (draft) {
+      const valid = reconcileSessionTabs(tabs, snapshot!);
+      const next = keep ? openDraftTab(valid, draft) : hasDraftTab(valid, draft) ? valid : closePreviewTab(valid);
+      if (next !== tabs) setTabs(next);
+    }
+    selectProject(id);
+  }
+  // The prompt of a new session that has a tab of its own is closed like any tab: the tab goes, what was typed stays
+  // with its scope. When it was the one shown, a session is shown in its place if one is open.
+  function closeScopeDraft(draft: DraftTab) {
+    if (!snapshot || snapshot !== currentSnapshot.current) return;
+    const valid = reconcileSessionTabs(tabs, snapshot);
+    const next = closeDraftTab(valid, draft);
+    if (next === valid) return;
+    advanceBrowserRevision();
+    tabFocusPending.current = true;
+    const shown = !valid.active && !fileTabs.active && draftKey(draft) === draftKey({ projectId, path: draft.path });
+    if (shown && next.open.length) applyTabState({ ...next, active: next.open[0] }); else setTabs(next);
+  }
+  // Several tabs closed at once, from the menu of a tab or of a pane: one change of the tabs. When what is in front
+  // closes, the tab the command was asked from comes in front. An editor with unsaved changes stays open, and the
+  // first of them asks what to do with its changes, as its close button does.
+  function closeTabs(closing: DockTabs, from: DockTab | null) {
+    if (!snapshot || snapshot !== currentSnapshot.current) return;
+    const valid = reconcileSessionTabs(tabs, snapshot);
+    const unsaved = closing.files.filter(file => fileEditors.dirty(fileTabKey(file)));
+    const closed = { ...closing, files: closing.files.filter(file => !unsaved.includes(file)) };
+    const front = fileTabs.active;
+    const show = unsaved.length ? null : shownAfterClosing(closed, { file: front, session: valid.active, scope: draftTabOf(snapshot, projectId) }, from);
+    const next = closeSessionTabs(valid, closed.sessions, closed.drafts, show && "session" in show ? show.session : null);
+    if (next === valid && !closing.files.length) return;
+    advanceBrowserRevision();
+    closedTabKinds.current = [...closedTabKinds.current, ...valid.open.filter(tab => !next.open.includes(tab)).map(() => "session" as const)].slice(-64);
+    tabFocusPending.current = true;
+    for (const file of closed.files) closeFile(file);
+    const key = (tab: SessionTab | null) => tab ? tabKey(tab) : null;
+    if (show && "draft" in show) {
+      // The prompt of a new session is shown by selecting its scope with no session.
+      applyTabState({ ...next, active: null });
+      if (show.draft.projectId !== projectId) selectProject(show.draft.projectId);
+    } else if (key(next.active) !== key(valid.active)) {
+      // Closing the session behind a tab of a project does not leave that tab.
+      const kept = front && !closed.files.some(file => sameFileTab(file, front)) ? front : null;
+      applyTabState(next);
+      if (kept) activateFile(kept);
+    } else if (next !== tabs) setTabs(next);
+    if (show && "file" in show) activateFile(show.file);
+    if (unsaved.length) closeFile(unsaved[0]);
   }
   // What each space had open when the window left it: its tabs come back with it, and the dock of each space
   // keeps where its panes were. The panes of a space that is not shown are not in the page at all.
@@ -965,6 +1116,7 @@ function App() {
     if (currentSnapshot.current?.sessions.some(candidate => candidate.id === session.id)) selectProject(target.projectId, target.sessionId);
     else showSpace(defaultSpaceId, target);
   }
+  const revealSessionLatest = useRef(revealSession); revealSessionLatest.current = revealSession;
   // Shows a space on one of its sessions: the one that waits for the user there. A session that just started is read first.
   async function openSpaceSession(id: string, target: SpaceTarget) {
     if (target.sessionId && !catalog.current?.sessions.some(session => session.id === target.sessionId)) {
@@ -1558,6 +1710,10 @@ function App() {
       else if (valid.active) {
         closedTabKinds.current = [...closedTabKinds.current, "session" as const].slice(-64);
         tabFocusPending.current = true; applyTabState(closeSessionTab(valid, valid.active));
+      } else {
+        // The prompt of a new session closes when it has a tab of its own; the transient one stays, as the last tab does.
+        const scope = draftTabOf(snapshot, projectId);
+        if (scope && hasDraftTab(valid, scope)) closeScopeDraft(scope);
       }
     } else if (action === "reopenTab") {
       const kind = reopenTabKind(closedTabKinds.current, valid.closed.length, fileTabs.closed.length);
@@ -1566,14 +1722,21 @@ function App() {
       if (at >= 0) closedTabKinds.current = closedTabKinds.current.filter((_kind, index) => index !== at);
       tabFocusPending.current = true;
       if (kind === "file") openFile(fileTabs.closed.at(-1)!); else selectSessionTab(valid.closed.at(-1)!);
-    } else if (valid.open.length + fileTabs.open.length) {
+    } else if (valid.open.length + fileTabs.open.length + (valid.drafts?.length ?? 0)) {
       tabFocusPending.current = true;
+      const prompts = valid.drafts ?? [];
+      const scope = draftTabOf(snapshot, projectId);
+      // The prompt of the selected scope is in the ring once: in its own tab when it has one, in the transient one otherwise.
+      const own = scope ? prompts.findIndex(draft => draftKey(draft) === draftKey(scope)) : -1;
       const file = fileTabs.open.findIndex(tab => sameFileTab(tab, fileTabs.active));
       const session = valid.open.findIndex(tab => valid.active && tabKey(tab) === tabKey(valid.active));
-      const current: TabPosition = file >= 0 ? { kind: "file", index: file } : session >= 0 ? { kind: "session", index: session } : { kind: "draft" };
-      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1);
+      const current: TabPosition = file >= 0 ? { kind: "file", index: file } : session >= 0 ? { kind: "session", index: session }
+        : own >= 0 ? { kind: "prompt", index: own } : { kind: "draft" };
+      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1, prompts.length, own < 0);
       if (next.kind === "file") activateFile(fileTabs.open[next.index]);
-      else if (next.kind === "session") selectSessionTab(valid.open[next.index]);
+      // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
+      else if (next.kind === "session") selectSessionTab(valid.open[next.index], "preview");
+      else if (next.kind === "prompt") selectProject(prompts[next.index].projectId);
       else applyTabState({ ...valid, active: null });
     }
   }
@@ -1762,6 +1925,46 @@ function App() {
     const session = shown.sessions.find(candidate => candidate.id === id) ?? catalog.current?.sessions.find(candidate => candidate.id === id);
     if (session) revealSession(session);
   }
+  // The bookmarks: the sessions and the messages the user marked to find them again. This window lists them and is told
+  // when they change. It does not follow them itself: the tab, the rail of a timeline and the mark of a row do.
+  const bookmarkActions = useRef<Pick<SessionBookmarkHost, "toggleMessage" | "go" | "unshown">>({ toggleMessage: () => { }, go: () => { }, unshown: () => { } });
+  const [bookmarkHost] = useState<SessionBookmarkHost>(() => ({ hub: createBookmarksHub(bookmarksApi), reveals: createRevealRequests(),
+    toggleMessage: (...request) => bookmarkActions.current.toggleMessage(...request), go: bookmark => bookmarkActions.current.go(bookmark),
+    unshown: outcome => bookmarkActions.current.unshown(outcome) }));
+  useEffect(() => terminalEpoch ? bookmarkHost.hub.connect(terminalEpoch) : undefined, [bookmarkHost, terminalEpoch]);
+  const bookmarkNotice = (message: MessageKey) => showToast({ message: t(message), intent: "warning", icon: "warning-sign", timeout: 6000 });
+  const bookmarkRefused = (status: string) => bookmarkNotice(status === "not_bookmarkable" ? "This message cannot be bookmarked."
+    : status === "limit" ? "There are too many bookmarks. Remove some first." : "The bookmark could not be added.");
+  // Goes to what a bookmark marks: its session, and for a message its place in the timeline. The host says where the
+  // message is now; the pane of the session reads its history up to it.
+  async function goToBookmark(bookmark: Bookmark) {
+    const target = await bookmarkHost.hub.resolve(bookmark.id);
+    if (!creationAlive.current) return;
+    if (target.status === "session_missing") { bookmarkNotice("The session of this bookmark no longer exists."); return; }
+    if (target.status !== "ok" && target.status !== "gone" || !target.sessionId) { bookmarkNotice("The bookmark could not be opened."); return; }
+    if (target.status === "gone") bookmarkNotice("The bookmarked message is no longer in its session.");
+    else if (target.offset) bookmarkHost.reveals.open(target.sessionId, target.offset);
+    await openAutomationSession(target.sessionId);
+  }
+  // The bookmark of the whole session: added, or removed when it has one.
+  async function toggleSessionBookmark(id: string) {
+    const held = sessionBookmarks(bookmarkHost.hub.getSnapshot().bookmarks, id).session;
+    const outcome = held ? await bookmarkHost.hub.remove(held.id) : await bookmarkHost.hub.add(id);
+    if (!outcome.ok && creationAlive.current) { if (held) bookmarkNotice("The bookmark could not be changed."); else bookmarkRefused(outcome.status); }
+  }
+  bookmarkActions.current = {
+    go: bookmark => void goToBookmark(bookmark),
+    toggleMessage: (id, rowKey, bookmarkId) => void (bookmarkId ? bookmarkHost.hub.remove(bookmarkId) : bookmarkHost.hub.add(id, rowKey)).then(outcome => {
+      if (!outcome.ok && creationAlive.current) { if (bookmarkId) bookmarkNotice("The bookmark could not be changed."); else bookmarkRefused(outcome.status); }
+    }),
+    unshown: outcome => bookmarkNotice(outcome === "missing" ? "The bookmarked message is no longer in its session." : "The history of the session could not be read up to the bookmarked message."),
+  };
+  // The line of the menu of a session row: read when the menu opens, which is when it is drawn.
+  const sessionBookmarkEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
+    if (!owned || !bookmarkHost.hub.getSnapshot().available) return [];
+    const held = sessionBookmarks(bookmarkHost.hub.getSnapshot().bookmarks, session.id).session;
+    return [{ key: "bookmark", label: t(held ? "Remove session bookmark" : "Bookmark session"), icon: held ? "bookmarkRemove" : "bookmarkAdd", onSelect: () => void toggleSessionBookmark(session.id) }];
+  };
   // The tasks agents propose and the plans of the projects: this window lists them and is told when they change.
   const [workHub] = useState(() => createWorkItemsHub(workItemsApi));
   useEffect(() => terminalEpoch ? workHub.connect(terminalEpoch) : undefined, [workHub, terminalEpoch]);
@@ -2060,20 +2263,28 @@ function App() {
     const ownedSession = session && owned;
     switch (command) {
       case "sessionInfo": case "messagePrevious": case "messageNext": case "messageFirst": case "messageLatest": case "toggleNotes": return session;
+      case "bookmarkPrevious": case "bookmarkNext": case "bookmarkSession": return ownedSession && bookmarkHost.hub.getSnapshot().available;
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
+      case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
-      case "automations": case "workItems": case "issues": case "canvases": case "documentation": return owned;
+      case "automations": case "workItems": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
+      // The session of a project, as its menu moves it, under the same locks.
+      case "moveSession": return ownedSession && !!selectedSession && sessionActionAccess(selectedSession,
+        { id: selectedSession.id, projectId, hostEpoch: status?.hostEpoch ?? null }, selectedSessionId.current, selectedScope.current, selectedProject,
+        currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
+        batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
+        renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current).move;
       default: return true;
     }
   }
@@ -2112,12 +2323,20 @@ function App() {
       case "issues": openFile(issuesTab); break;
       case "canvases": openFile(canvasesTab); break;
       case "documentation": openDocumentation(); break;
+      case "bookmarks": openFile(bookmarksTab); break;
+      case "bookmarkSession": if (selectedSession) void toggleSessionBookmark(selectedSession.id); break;
+      case "bookmarkPrevious": case "bookmarkNext": {
+        const pane = timelineCommand.current;
+        if (pane?.sessionId === selectedSession?.id && !pane?.stepBookmark(command === "bookmarkNext" ? 1 : -1)) bookmarkNotice("There is no other bookmark that way.");
+        break;
+      }
       case "newSpace": setSpaceDialog(true); break;
       case "goToSpace": setSpaceMenuRequest(value => value + 1); break;
       case "previousSpace": case "nextSpace":
         if (showSpace(neighborSpace(spacesState.spaces, spaceId, command === "nextSpace" ? 1 : -1).id)) focusPromptSoon();
         break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
+      case "moveSession": if (selectedSession) beginSessionMove(selectedSession); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
       case "toggleNavigator": toggleProjects(); break;
@@ -2127,6 +2346,7 @@ function App() {
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
       case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
       case "steer": break;
+      case "fork": case "rewind": openSessionBranch(command); break;
       // The remaining commands share their implementation with the older shortcut actions of the same name.
       default: runShortcut(command as ShortcutAction);
     }
@@ -2394,6 +2614,8 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access[pending.action]) return;
+    if (pending.action === "fork") { branchHost.requests.open(pending.sessionId, "fork"); return; }
+    if (pending.action === "move") { beginSessionMove(rows[0]); return; }
     if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
@@ -2405,7 +2627,9 @@ function App() {
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
       {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
         title={carriedBy(work, session.id).map(item => item.title).join("\n")}><AppIcon name="task" size={12} /></span>}
+      <SessionBookmarkMark hub={bookmarkHost.hub} sessionId={session.id} />
       <WorktreeBadge session={session} />
+      {session.forkedFromSessionId && <SessionLineageMark lineage={sessionLineage(session)!} />}
       <span className="session-meta"><span>{session.providerKey ?? t("No provider")}</span><SessionTime value={session.updatedAt} now={clock} /></span>
     </>;
   }
@@ -2419,7 +2643,8 @@ function App() {
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} menuEntries={session => sessionCanvasEntries(session, project)} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={sessionBookmarkEntries} deleteAsks={confirms.sessionDelete}
+      drag={session => sessionDragSource(session, scope)}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
 
@@ -2483,11 +2708,15 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access.open) return;
-    if (action === "rename" && !access.rename || action === "delete" && !access.delete) return;
+    if (action === "rename" && !access.rename || action === "delete" && !access.delete || action === "fork" && !access.fork
+      || action === "move" && !access.move) return;
     const switching = selectedSessionId.current !== row.id;
     if (switching) setSessionId(row.id);
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
     if (action === "remote-control") { dismissSessionMenu(false); if (access["remote-control"]) askRemoteControl(row.id); return; }
+    // The window of the fork is the one of the session's pane: the session is selected, and its pane shows it.
+    if (action === "fork") { dismissSessionMenu(false); branchHost.requests.open(row.id, "fork"); return; }
+    if (action === "move") { dismissSessionMenu(false); beginSessionMove(row); return; }
     dismissSessionMenu(false);
     if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
     if (action === "rename") {
@@ -2507,6 +2736,95 @@ function App() {
       publishWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
       return fresh;
     } catch { return undefined; }
+  }
+
+  // The session is the selected one, in the selected project: the window asks which project it goes to.
+  function beginSessionMove(row: WorkspaceSession) {
+    const project = selectedProject;
+    if (!project || project.archived || row.projectId !== project.id || row.workspacePath !== project.path || movingPending.current) return;
+    setRenamingId(null);
+    setDeletingId(null);
+    setMovingSession({ id: row.id, title: plainTitle(row.title), from: { projectId: project.id, projectPath: project.path } });
+  }
+
+  // The row of a session of a project can be dragged onto the row of another project: the drop moves it there.
+  function sessionDragSource(session: WorkspaceSession, scope: string | null): SessionRowDrag {
+    const project = scope === null ? undefined : snapshot?.projects.find(value => value.id === scope);
+    if (!project || !sessionMoveAccess(session, project, currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
+      batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
+      renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)) return {};
+    return rowDrag.source({ id: session.id, title: plainTitle(session.title), from: { projectId: project.id, projectPath: project.path } });
+  }
+  function projectDropTarget(project: WorkspaceProject): ProjectRowDrop | undefined {
+    return rowDrag.view?.over === project.id ? { "data-over": "true" } : undefined;
+  }
+
+  // The tabs of moved sessions follow them, in every space: the one shown, those kept in memory, and those only stored.
+  function retargetMovedTabs(moved: readonly WorkspaceMovedSession[]) {
+    if (moved.length === 0) return;
+    writeTabs(current => retargetSessionTabs(current, moved));
+    for (const [id, kept] of spaceTabs.current) spaceTabs.current.set(id, { ...kept, tabs: retargetSessionTabs(kept.tabs, moved) });
+    try {
+      for (const space of spacesHub.getSnapshot().spaces) {
+        if (space.id === shownSpace.current || spaceTabs.current.has(space.id)) continue;
+        const key = spaceStorageKey(sessionTabsKey, space.id);
+        const stored = restoreSessionTabs(() => localStorage.getItem(key));
+        if (stored) persistSessionTabs(value => localStorage.setItem(key, value), retargetSessionTabs(stored, moved));
+      }
+    } catch { /* Storage that cannot be read keeps what it has: those tabs are dropped when their space is shown. */ }
+  }
+
+  // A session chosen in its menu, or dropped on the row of a project, goes to that project.
+  async function moveSessionTo(moving: SessionDrag, target: WorkspaceProject) {
+    const capability = mutation?.capability;
+    if (movingPending.current || !owned || !capability?.canMutate() || target.archived || target.id === moving.from.projectId) return;
+    // The locks of the menu, again: a rename or a delete may have become pending or unconfirmed while the window was open.
+    if (batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current
+      || renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current) {
+      setMovingSession(null);
+      showToast({ message: t(sessionMoveMessage("busy")), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+    movingPending.current = true;
+    setMovingBusy(true);
+    // Sessions moved, but the list after the move could not be read: it is read again once the move ends.
+    let readAgain = false;
+    try {
+      const result = await moveSession(status?.hostEpoch, moving.from, { projectId: target.id, projectPath: target.path }, moving.id, capability);
+      if (!creationAlive.current) return;
+      // Their tabs follow them with the list published next, this fresh one or, if it cannot be read, a later one.
+      pendingTabMoves.current = [...pendingTabMoves.current, ...result.moved];
+      let fresh: WorkspaceSnapshot | undefined;
+      if (result.moved.length > 0 || result.kind === "error" && result.code === "move_unconfirmed") {
+        markProjectInspection(false);
+        try { fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 }); }
+        catch { fresh = undefined; }
+        if (!creationAlive.current) return;
+      }
+      readAgain = result.moved.length > 0 && !fresh?.configured;
+      if (fresh?.configured) {
+        publishWorkspaceState({ kind: "ready", snapshot: fresh });
+        const selected = selectedSessionId.current;
+        if (selected && result.moved.some(value => value.sessionId === selected)) selectProject(target.id, selected);
+      }
+      setMovingSession(null);
+      if (result.kind === "moved") {
+        if (fresh && !movedSessionsVisible(fresh, result.moved))
+          showToast({ message: t("The session moved, but the refreshed list does not show it in {project} yet. Refresh to check.", { project: target.name }),
+            intent: "warning", icon: "warning-sign", timeout: 8000 });
+        else showToast({ message: t("Moved to {project}.", { project: target.name }), intent: "success", icon: "tick", timeout: 4000 });
+        // What went wrong without stopping the move, as the host says it (the log has all of it).
+        if (result.warnings.length > 0)
+          showToast({ message: `${t("The session moved, but:")} ${result.warnings[0]}`, intent: "warning", icon: "warning-sign", timeout: 12000 });
+      } else showToast({ message: t(sessionMoveMessage(result.code)), intent: "danger", icon: "error", timeout: 8000 });
+    } finally {
+      movingPending.current = false;
+      if (creationAlive.current) {
+        setMovingBusy(false);
+        // What happened meanwhile (a run that ended, a session an agent created) is not lost with the reads skipped.
+        sessionLists.resume(readAgain);
+      }
+    }
   }
 
   async function beginProjectRename() {
@@ -2640,12 +2958,8 @@ function App() {
           {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
           {draftChoices.prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name}</option>)}
         </HTMLSelect>} provider={select}
-        model={<HTMLSelect fill id="composer-model-new" data-model-selector aria-label={t("Model")} value={value.modelId ?? ""}
-          disabled={locked || draftChoices.loadingModels} onChange={event => change("modelId", event.target.value)}>
-          {!value.modelId && <option value="">{t(draftChoices.loadingModels ? "Loading…" : "No model")}</option>}
-          {value.modelId && !draftChoices.models.some(model => model.id === value.modelId) && <option value={value.modelId}>{value.modelId} · {t("Unverified")}</option>}
-          {draftChoices.models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}
-        </HTMLSelect>}
+        model={<ComposerModelPicker id="composer-model-new" value={value.modelId || null} models={draftChoices.models} providerKey={usedProvider || null}
+          disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)} />}
         reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} disabled={locked}
           onChange={next => change("reasoningEffort", next)} />} />;
     }
@@ -2752,6 +3066,8 @@ function App() {
           setCreationLocked(false);
           selectedScope.current = selection.projectId;
           setProjectId(selection.projectId);
+          // A session that was just created is one to work in: its tab is its own.
+          keptSession.current = selection.sessionId;
           setSessionId(selection.sessionId);
           setCreatingVisible(false);
           setCreatingTitle("");
@@ -2772,6 +3088,84 @@ function App() {
         setCreatingMessage(message); recordHandoff(message + " Original draft retained; nothing sent."); }
     } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
   }
+
+  // The window of a fork or a rewind is the one of the selected session's pane: a command only asks for it.
+  function openSessionBranch(mode: BranchMode) {
+    const selection = selectedSessionInfoSelection(snapshot, selectedSession, projectId, selectedSessionId.current, selectedScope.current);
+    if (view === "workspace" && owned && currentProjectWritable() && selection) branchHost.requests.open(selection.sessionId, mode);
+  }
+  // A fork: the new session is listed, given the prompt of the turn it stops before as its draft, and opened in a tab.
+  async function forkSessionOfPane(row: WorkspaceSession, paneProjectId: string | null, beforeRunId: string | null): Promise<ForkResult> {
+    const epoch = status?.hostEpoch ?? undefined;
+    const target = branchTarget(currentSnapshot.current, row, paneProjectId);
+    if (!target) return { kind: "error", code: "scope_missing" };
+    const result = await sessionBranch.fork(epoch, target, row.id, beforeRunId, mutation?.capability);
+    if (result.kind === "forked") branchHost.requests.done(row.id);
+    if (result.kind === "forked" && creationAlive.current) void showFork(result, epoch!, row.title);
+    return result;
+  }
+  async function showFork(result: Extract<ForkResult, { kind: "forked" }>, epoch: string, sourceTitle: string) {
+    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+    // The composer of the fork does not exist yet: the prompt waits for it as its draft. A draft that is there is never replaced.
+    const prompt = composerPrompt(result.prompt);
+    if (prompt) transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), result.id, prompt);
+    let fresh: WorkspaceSnapshot | undefined;
+    try { fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 }); } catch { /* The fork exists whatever the list says. */ }
+    if (!creationAlive.current) return;
+    const title = plainTitle(result.title || sourceTitle);
+    const fork = fresh?.configured && currentHostEpoch.current === epoch ? (catalog.current ?? fresh).sessions.find(session => session.id === result.id) : undefined;
+    if (!fresh || !fork) {
+      showToast({ message: say("The fork “{title}” was created, but it could not be opened from here. Look for it in the list of sessions.", { title }), intent: "warning", icon: "warning-sign", timeout: 12_000 });
+      return;
+    }
+    publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    keptSession.current = fork.id;
+    revealSessionLatest.current(fork);
+    focusPromptSoon();
+    showToast({ intent: "success", icon: "tick", timeout: 8000, message: result.turnCount === 0 ? say("The fork “{title}” was created empty.", { title })
+      : say("The fork “{title}” was created with {turns}.", { title, turns: result.turnCount === 1 ? say("1 turn") : say("{count} turns", { count: result.turnCount }) }) });
+  }
+  // A rewind: the pane of the session is read again, its composer gets the prompt of the first removed turn, and the user is told what was removed.
+  async function rewindSessionOfPane(row: WorkspaceSession, paneProjectId: string | null, beforeRunId: string, keepRemovedTurns: boolean): Promise<RewindResult> {
+    const epoch = status?.hostEpoch ?? undefined;
+    const target = branchTarget(currentSnapshot.current, row, paneProjectId);
+    if (!target) return { kind: "error", code: "scope_missing" };
+    const result = await sessionBranch.rewind(epoch, target, row.id, beforeRunId, keepRemovedTurns, mutation?.capability);
+    if (result.kind === "rewound") branchHost.requests.done(row.id);
+    if (result.kind === "rewound" && creationAlive.current) void showRewind(result, epoch!, row);
+    return result;
+  }
+  async function showRewind(result: Extract<RewindResult, { kind: "rewound" }>, epoch: string, row: WorkspaceSession) {
+    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+    // The prompt goes back to the composer when it is empty; a draft that is there is kept, and the prompt offered beside it.
+    const prompt = composerPrompt(result.prompt);
+    let offered: string | null = null;
+    if (prompt) {
+      const composer = askPluginComposer("state", result.id).state;
+      if ((composer?.draftText ?? restoreDraft(key => localStorage.getItem(key), result.id)).trim()) offered = prompt;
+      else {
+        if (composer) askPluginComposer("draft", result.id, prompt);
+        // The pane is mounted again below: its composer starts from what is stored.
+        if (!persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), result.id, prompt)) offered = prompt;
+      }
+    }
+    setRewoundHere(current => new Map(current).set(result.id, Math.max(result.rewindCount, row.rewindCount + 1, (current.get(result.id) ?? 0) + 1)));
+    focusPromptSoon();
+    const title = plainTitle(row.title), kept = result.removedTurnsSessionId;
+    const turns = result.removedTurnCount === 1 ? say("1 turn") : say("{count} turns", { count: result.removedTurnCount });
+    showToast({ intent: "success", icon: "tick", timeout: 12_000,
+      message: kept ? say("Rewound “{title}”: {turns} removed and kept in “{kept}”. Changed files were left as they are.", { title, turns, kept: plainTitle(result.removedTurnsTitle ?? kept) })
+        : say("Rewound “{title}”: {turns} removed and deleted. Changed files were left as they are.", { title, turns }),
+      action: kept ? { text: say("Open the kept session"), onClick: () => openLinkedSession.current(kept) } : undefined });
+    if (offered) showToast({ intent: "primary", icon: "info-sign", timeout: 30_000, message: say("The composer holds a draft: the prompt of the removed turn was not put in it."),
+      action: { text: say("Copy the prompt"), onClick: () => void navigator.clipboard.writeText(offered).catch(() => { }) } });
+    let fresh: WorkspaceSnapshot | undefined;
+    try { fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 }); } catch { /* The session is rewound whatever the list says. */ }
+    if (!creationAlive.current) return;
+    if (fresh?.configured && currentHostEpoch.current === epoch) publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    else showToast({ message: say("The session was rewound, but the list of sessions could not be read. Refresh the sessions to see it as it is now."), intent: "warning", icon: "warning-sign", timeout: 12_000 });
+  }
+  branchActions.current = { fork: forkSessionOfPane, rewind: rewindSessionOfPane };
 
   async function renameSelectedSession() {
     if (batchDeletion.locked()) return;
@@ -3012,6 +3406,8 @@ function App() {
               active={!!fileTabs.active && isIssuesTab(fileTabs.active)} aria-label={t("Issues")} title={`${t("Issues")} (Ctrl+G, Ctrl+B)`} onClick={() => openFile(issuesTab)} />
             <Button variant="minimal" size="small" icon={<AppIcon name="canvases" size={16} />} className="activity-canvases" disabled={!owned}
               active={!!fileTabs.active && isCanvasesTab(fileTabs.active)} aria-label={t("Canvases")} title={t("Canvases")} onClick={() => openFile(canvasesTab)} />
+            <Button variant="minimal" size="small" icon={<AppIcon name="bookmark" size={16} />} className="activity-bookmarks" disabled={!owned}
+              active={!!fileTabs.active && isBookmarksTab(fileTabs.active)} aria-label={t("Bookmarks")} title={`${t("Bookmarks")} (Ctrl+G, Ctrl+F)`} onClick={() => openFile(bookmarksTab)} />
             <PluginButtons place="Rail" context={pluginButtonContext} />
             <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
           </nav>
@@ -3057,12 +3453,13 @@ function App() {
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p> : <div className="sidebar-empty space-empty" role="status">
             <p>{t("No project in this space yet.")}</p>
-            {owned && <Button size="small" icon={<AppIcon name="space" size={14} />} onClick={() => navigate("spaces")}>{t("Add projects")}…</Button>}
+            {owned && <Button size="small" icon={<AppIcon name="plus" size={14} />} onClick={() => void addProjectFolder()}>{t("Add projects")}…</Button>}
           </div>)}
           </>;
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           {!snapshot && railHead}
-          {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={selectProject} children={sessions}
+          {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}
+            drop={owned ? projectDropTarget : undefined}
             tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,
@@ -3146,7 +3543,7 @@ function App() {
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
                 mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
-              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id}
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} {...sessionDragSource(session, projectId)}
                 onContextMenu={event => {
                   const target = event.target as HTMLElement;
                   if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
@@ -3168,7 +3565,8 @@ function App() {
                 }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-expanded={twist && !twist.collapsed} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
-                onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}>
+                onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}
+                onDoubleClick={() => keepSession(projectId, session)}>
                 <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
@@ -3184,8 +3582,11 @@ function App() {
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
+                  { key: "fork", label: t("Fork…"), icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
+                  ...sessionBookmarkEntries(session),
+                  ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
@@ -3207,14 +3608,24 @@ function App() {
           </div>
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
-          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
+          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId, openingMode(sessionId))} snapshot={snapshot}
+            draftLabel={draft => { const project = draft.projectId === null ? null : snapshot?.projects.find(value => value.id === draft.projectId);
+              return project ? t("New session — {project}", { project: project.name }) : t("New chat"); }}
+            keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}
+            keepDraft={() => { const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, projectId) : null;
+              if (draft) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
+            selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft} closeTabs={closeTabs}
             newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
               if (!snapshot) return null;
               if (!row) return <NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")}
                 description={t("This session is no longer in the catalog. Close the tab or refresh the projects.")} />;
-              const ownerKey = JSON.stringify([status?.hostEpoch, tabKey(tab), row.createdAt]);
+              // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
+              const rewinds = Math.max(row.rewindCount, rewoundHere.get(row.id) ?? 0);
+              const ownerKey = sessionPaneKey(status?.hostEpoch, tab, row.createdAt, rewinds);
+              const lineage = sessionLineage(row);
+              const source = lineage && lineageTitle(lineage, (catalog.current ?? snapshot).sessions);
               const admitted = () => !!status && (currentHostAvailable.current
                 ? !!status.hostEpoch && currentHostEpoch.current === status.hostEpoch && retention.hasClaim(status.hostEpoch, row.id)
                 : !status.hostAvailable);
@@ -3226,7 +3637,10 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace session={row} canAdmit={admitted} remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
+              <SessionWorkspace session={row} canAdmit={admitted} rewinds={rewinds} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
+                lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
+                  onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
+                remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
                 origin={row.automationId ? (() => {
                   const origin = sessionOrigin(row.id, row.automationId, automationState.items, automationState.runs, t);
                   return <SessionOrigin name={origin.name} summary={origin.summary} onOpen={owned ? () => openAutomations(origin.id) : undefined} />;
@@ -3235,7 +3649,7 @@ function App() {
                   onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
                 onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
-                active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
+                active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab, "preview"); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
                   && admitted() && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
@@ -3252,7 +3666,7 @@ function App() {
             }}
             capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions}
             onSessionTabClick={focusPromptSoon}
-            select={selectSessionTab} close={tab => {
+            select={tab => selectSessionTab(tab, "preview")} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
               const next = closeSessionTab(tabs, tab);
               advanceBrowserRevision();
@@ -3278,6 +3692,11 @@ function App() {
               ? <DocumentationPanel key={fileTabKey(tab)} hub={documentationHub} visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)}
                 onOpenSession={id => void openAutomationSession(id)} onProviders={() => navigate("providers")}
                 onNotice={message => showToast({ message, intent: "warning", icon: "info-sign", timeout: 5000 })} />
+              : isBookmarksTab(tab)
+              // The bookmarks are the application's, whatever the space shown: each names its project among all of them.
+              ? <BookmarksPanel key={fileTabKey(tab)} hub={bookmarkHost.hub} projects={(catalog.current ?? snapshot)?.projects ?? noBookmarkProjects}
+                onActivate={() => activateFile(tab)} onGo={bookmarkHost.go} onOpenSession={id => void openAutomationSession(id)}
+                onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} />
               : isIssuesTab(tab)
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
@@ -3444,6 +3863,11 @@ function App() {
         focusPromptSoon();
         return true;
       }} onClose={() => setDialog(null)} />}
+    {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
+      style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
+    {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
+      projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
+      onClose={() => { if (!movingPending.current) setMovingSession(null); }} />}
     {spaceDialog && <SpaceDialog spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} create={spacesHub.create}
       // A space made from Settings is organized there; one made from the title bar is shown at once.
       onCreated={space => { setSpaceDialog(false); if (!settingsVisible.current) showSpace(space.id); }} onClose={() => setSpaceDialog(false)} />}
@@ -3626,8 +4050,16 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage }: {
   canAdmit: () => boolean;
+  /** The number of times the session was rewound: what was read of its journal before a rewind is not what it holds now. */
+  rewinds?: number;
+  /** The fork and the rewind of this session; null where it cannot be changed. */
+  branch?: SessionBranchHost | null;
+  /** The bookmarks of the messages of this session; null where the host keeps none. */
+  bookmarks?: SessionBookmarkHost | null;
+  /** Where the session comes from when it is a fork, shown above its timeline. */
+  lineage?: ReactNode;
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
@@ -3695,6 +4127,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   const [running, setRunning] = useState<boolean | null>(null);
   // The tool calls whose task goes on in the background, or ended there: their tiles say so.
   const [backgroundCallStates, setBackgroundCallStates] = useState<ReadonlyMap<string, BackgroundCallState>>(() => new Map());
+  // How many tasks still run in the background of the session: a rewind waits for them.
+  const [backgroundRunning, setBackgroundRunning] = useState(0);
   const [timelineNotices, setTimelineNotices] = useState<HTMLDivElement | null>(null);
   const [infoFocusRestoration] = useState(createPaletteFocusRestoration);
   useEffect(() => () => infoFocusRestoration.cancel(), [infoFocusRestoration]);
@@ -3711,7 +4145,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     infoFocusRestoration.schedule(trigger, () => !infoActive.current && infoTrigger.current === trigger && !trigger?.disabled,
       () => !!modalDialogOpen());
   }
-  const timeline = useTimelinePosition(session.id, scrollMemory);
+  const timeline = useTimelinePosition(session.id, scrollMemory, rewinds);
   const composer = useComposerLayout(preferredComposerHeight, onComposerHeight);
   const [messageNotice, setMessageNotice] = useState<TimelineNotice>(null);
   const [newerOmitted, setNewerOmitted] = useState(false);
@@ -3736,7 +4170,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             : { key: "First retained message in this window. Older journal history may be available via Load older history." }
           : { key: action === "messageFirst" ? "First retained message (not necessarily the first journal message): {label}" : "Retained message: {label}", parameters: result.label === undefined ? undefined : { label: result.label } });
       },
-      latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel };
+      latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel,
+      showRow: key => { newest.cancel(); return timeline.showRow(key); }, stepBookmark: direction => bookmarkStep.current?.(direction) ?? false };
     timelineCommand.current = command;
     return () => { if (timelineCommand.current === command) timelineCommand.current = null; };
   });
@@ -3768,10 +4203,45 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   // A command of a card of this timeline runs for this session, whatever pane has the keyboard.
   const timelinePane = useMemo(() => ({ sessionId: session.id, projectId: selectedProjectId }), [session.id, selectedProjectId]);
   // Reading is not sending: the images of an archived project's session are shown too.
-  const readImages = useMemo(() => pluginEpoch === null ? undefined : timelineImages.reader(pluginEpoch, session.id),
-    [timelineImages, pluginEpoch, session.id]);
-  const readTool = useMemo(() => pluginEpoch === null ? undefined : toolRecords.records.reader(pluginEpoch, session.id),
-    [toolRecords, pluginEpoch, session.id]);
+  const readImages = useMemo(() => pluginEpoch === null ? undefined : timelineImages.reader(pluginEpoch, session.id, rewinds),
+    [timelineImages, pluginEpoch, session.id, rewinds]);
+  const readTool = useMemo(() => pluginEpoch === null ? undefined : toolRecords.records.reader(pluginEpoch, session.id, rewinds),
+    [toolRecords, pluginEpoch, session.id, rewinds]);
+  // The window of a fork or a rewind of this session: a command, a prompt of the timeline or the menu of its row
+  // asks for it, and the pane that has the session shows it.
+  const branchRequest = useSyncExternalStore(branch ? branch.requests.subscribe : noSubscription, () => branch?.requests.forSession(session.id) ?? null);
+  const branchEpoch = branch && ownedSession && !demoMode ? status!.hostEpoch! : null;
+  const branchDialogHost = useMemo<BranchDialogHost | null>(() => branch && branchEpoch ? {
+    readTurns: (beforeTurn, signal) => readSessionTurns(workspaceApi.sessionTurns, branchEpoch, session.id, beforeTurn, signal),
+    fork: beforeRunId => branch.fork(session, selectedProjectId, beforeRunId),
+    rewind: (beforeRunId, keepRemovedTurns) => branch.rewind(session, selectedProjectId, beforeRunId, keepRemovedTurns),
+  } : null, [branch, branchEpoch, session, selectedProjectId]);
+  // A request for a session that cannot be changed here is dropped.
+  useEffect(() => { if (branchRequest && !branchDialogHost) branch?.requests.close(branchRequest); }, [branch, branchRequest, branchDialogHost]);
+  const openBranch = useCallback((key: string, mode: BranchMode) => branch?.requests.open(session.id, mode, key), [branch, session.id]);
+  // The window scrolls the conversation to the turn it has selected; closed without a change, it leaves the reader where they were.
+  const showBranchPoint = (key: string | null) => { if (key) { newest.cancel(); timeline.showRow(key); } };
+  // Whether the composer holds a draft when the window opens: a rewind keeps it, and the window says so.
+  const [branchDraft, setBranchDraft] = useState(false);
+  useLayoutEffect(() => {
+    if (!branchRequest) return;
+    setBranchDraft(!!askPluginComposer("state", session.id).state?.draftText.trim());
+    const before = timeline.position();
+    return () => timeline.restorePosition(before);
+  }, [branchRequest]);
+  // The bookmarks of the messages of this timeline: its rows follow their own mark, and its rail lists them.
+  // A host that keeps no bookmarks offers none: the rows have no button for them.
+  const bookmarksKept = useSyncExternalStore(bookmarks ? bookmarks.hub.subscribe : noSubscription, () => bookmarks?.hub.getSnapshot().available ?? false);
+  const bookmarkMarks = useMemo(() => bookmarks && bookmarksKept ? createTimelineBookmarks((rowKey, bookmarkId) => bookmarks.toggleMessage(session.id, rowKey, bookmarkId)) : null,
+    [bookmarks, bookmarksKept, session.id]);
+  const bookmarkStep = useRef<((direction: -1 | 1) => boolean) | null>(null);
+  // A message of this session to show: the history reads up to it, then the timeline goes there and points it out.
+  const revealRequest = useSyncExternalStore(bookmarks ? bookmarks.reveals.subscribe : noSubscription, () => bookmarks?.reveals.forSession(session.id) ?? null);
+  const onReveal = useCallback((request: RevealRequest, outcome: RevealOutcome) => {
+    bookmarks?.reveals.done(request);
+    if (outcome === "shown") { newest.cancel(); if (timeline.showRow(request.offset, true)) return; outcome = "missing"; }
+    bookmarks?.unshown(outcome);
+  }, [bookmarks, newest.cancel, timeline.showRow]);
   const toolOutputs = useMemo(() => pluginEpoch === null ? undefined : toolRecords.outputs.session(pluginEpoch, session.id),
     [toolRecords, pluginEpoch, session.id]);
   const ownWidth = useSessionWidthStyle(session.id);
@@ -3784,10 +4254,15 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
+    {branchRequest && branchDialogHost && <SessionBranchDialog key={`${branchRequest.mode}:${branchRequest.promptOffset ?? ""}`} title={plainTitle(session.title)} request={branchRequest} host={branchDialogHost}
+      facts={{ canMutate: !!mutation?.capability.canMutate(), running: running === true, question: askMode !== "none", background: backgroundRunning, draft: branchDraft }}
+      keepRemovedTurns={readKeepRemovedTurns(key => localStorage.getItem(key))} onKeepRemovedTurns={keep => saveKeepRemovedTurns((key, value) => localStorage.setItem(key, value), keep)}
+      onPoint={showBranchPoint} onClose={() => branch?.requests.close(branchRequest)} />}
     {demoMode
       ? <DemoConversation session={session} />
       : <>
         {origin}
+        {lineage}
         <div className="session-timeline-area" data-ask={askMode}>
         <div className="ask-file-slot" ref={setAskFileSlot} hidden={askMode !== "file"} />
         <div className="timeline-scroll" ref={timeline.elementRef}
@@ -3795,13 +4270,13 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <PluginPaneContext.Provider value={timelinePane}><History observing={observing} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
+        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
-          onAcknowledgeOutgoing={submissions.acknowledgeOutgoing}
-          live={ownedSession ? live?.snapshot?.session ?? null : null} /></PluginPaneContext.Provider>
+          onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
+          live={ownedSession ? live?.snapshot?.session ?? null : null} /></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
@@ -3816,6 +4291,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
         <SessionNotesOverlay observing={observing} sessionId={session.id} epoch={ownedSession ? status?.hostEpoch : undefined} capability={mutation?.capability}
           fallbackMarkdown={historyNotes} toggle={active ? notesToggle : undefined} reader={notesReader} />
         {workCards}
+        {bookmarks && bookmarkMarks && <BookmarkRail sessionId={session.id} hub={bookmarks.hub} marks={bookmarkMarks} scroll={timeline.elementRef} onGo={bookmarks.go} step={bookmarkStep} />}
         </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
         {/* Message navigation is announced to assistive technology only: nothing is written above the prompt. */}
@@ -3833,7 +4309,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             setRunning(value);
             const calls = backgroundCalls(background ?? []);
             setBackgroundCallStates(current => current.size === calls.size && [...calls].every(([call, state]) => current.get(call) === state) ? current : calls);
-            onRunActivity?.(value, runningBackgroundTasks(background ?? []).length);
+            const stillRunning = runningBackgroundTasks(background ?? []).length;
+            setBackgroundRunning(stillRunning);
+            onRunActivity?.(value, stillRunning);
           }} toolOutputs={toolOutputs} sessionId={session.id} remoteControlRequest={remoteControlRequest} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, scope: selectedProjectId === null ? "global" : "project",

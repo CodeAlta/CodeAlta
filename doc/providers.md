@@ -110,6 +110,12 @@ External ACP CLI adapters are no longer registered as model providers. Legacy `[
 OpenAI-compatible, Anthropic, Google, Mistral, direct HTTP, and subscription-backed providers attach to the agent session runtime. They share these properties:
 
 - sessions are CodeAlta-owned, provider-independent, and journaled under `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`;
+- a session that was forked or rewound needs nothing from them: the conversation is sent whole with each request, from a
+  journal that holds the turns of the point (see "Fork and rewind" in [runtime](runtime.md)). What a fork needs is the
+  prompt cache of its source: its requests start with the same instructions and messages, and
+  `AgentTurnRequest.PromptCacheKey` (the session at the start of its chain of forks) replaces the session id wherever a
+  provider routes its cache by a key. Providers with an implicit prefix cache or explicit breakpoints (Anthropic, generic
+  Responses and chat completions, xAI, Google, Mistral) send nothing per session and need nothing more;
 - provider/model switches are represented as events in the journal when history can be replayed safely;
 - tool declarations are generated from CodeAlta `AgentToolDefinition` values;
 - system/developer instructions and project context are composed by CodeAlta before the provider turn;
@@ -217,7 +223,7 @@ Implementation notes verified against `OpenAIResponsesTurnExecutor` and `OpenAIC
 - Ordinary `openai-responses` providers always use the HTTP/SSE SDK path. The WebSocket path is created only when `provider.CodexSubscription` is set.
 - Generic Responses providers remain on SDK-owned HTTP streaming. Codex subscription HTTP uses a narrow adapter around the configured `HttpClient`, SSE framing, and SDK event deserialization so initial response headers and Codex extensions are available before body events.
 - The WebSocket URI preserves configured query parameters, appends `/responses` when needed, and changes `http/https` to `ws/wss`. HTTP and discovery also preserve configured query parameters.
-- Turn requests consistently send `session-id`, `thread-id`, and `x-client-request-id`; the obsolete underscored `session_id` HTTP header is not sent. WebSocket handshakes additionally send `OpenAI-Beta: responses_websockets=2026-02-06`. HTTP turns send `Accept: text/event-stream`; the legacy Responses beta header is sent only when explicitly enabled.
+- Turn requests consistently send `session-id`, `thread-id`, and `x-client-request-id`; the obsolete underscored `session_id` HTTP header is not sent. The service takes the affinity of its prompt cache from `session-id`, so that header and `prompt_cache_key` carry the prompt-cache key of the session (`AgentTurnRequest.PromptCacheKey`: the session a fork comes from), over HTTP and in the WebSocket handshake; `thread-id`, `x-client-request-id` and the `client_metadata` of the turn stay the session itself, as the Codex client does for a fork that shares cache routing. WebSocket handshakes additionally send `OpenAI-Beta: responses_websockets=2026-02-06`. HTTP turns send `Accept: text/event-stream`; the legacy Responses beta header is sent only when explicitly enabled.
 - HTTP, WebSocket, and `/models` requests share the CodeAlta User-Agent shape, subscription account/FedRAMP identity, endpoint rules, and supplied HTTP transport where applicable. `/models` never receives the Responses beta header.
 - A canonical per-turn request context owns compatibility headers and internal `client_metadata`; token-sharing normalization omits `client_metadata` from the wire payload. Turn state remains turn-scoped and is never persisted.
 - Responses Lite is enabled only by trusted model metadata (currently GPT-5.6 Sol/Terra/Luna in the static catalog). Lite moves tools and nonempty instructions into leading developer input items, removes top-level tools/instructions and image detail, and uses all-turn reasoning context; ordinary Codex and generic Responses payloads retain their standard shape. When a session has no reasoning-effort override, CodeAlta sends the model's advertised default and requests `summary: auto`, allowing the service to select its most detailed supported summarizer; explicit `None` remains an opt-out from summary delivery. Visible timeline reasoning comes from provider summary events/final summary parts, and terminal raw-reasoning extension data is not promoted into a summary.
@@ -268,8 +274,8 @@ Model discovery uses the provider `/models` endpoint with a static fallback acco
 Copilot bills tokens (AI credits), and cached input at a fraction of the input price (a tenth for most models), so every route has to reach the prompt cache:
 
 - Messages (Claude): the Anthropic executor marks the cache breakpoints (see "Anthropic, Google, and Mistral providers"). Without them Copilot caches nothing of a Claude request.
-- Responses (GPT, Grok, MAI): `ConfigureOpenAIResponsesRequest` sends `prompt_cache_key` = session id and `store: false`. The cache of these models is implicit; the key keeps the requests of one session on the cache that holds its prefix (without it, Grok requests miss at random). `prompt_cache_retention` is accepted but changes nothing on Copilot and is not sent.
-- Every route sends `X-Interaction-Id` = session id, as the Copilot clients do.
+- Responses (GPT, Grok, MAI): `ConfigureOpenAIResponsesRequest` sends `prompt_cache_key` = session id (for a session that was forked, the session it comes from: `AgentTurnRequest.PromptCacheKey`) and `store: false`. The cache of these models is implicit; the key keeps the requests of one session on the cache that holds its prefix (without it, Grok requests miss at random). `prompt_cache_retention` is accepted but changes nothing on Copilot and is not sent.
+- Every route sends `X-Interaction-Id` = session id, as the Copilot clients do, also for a fork: an interaction is the session, the cache key is its lineage.
 
 The Copilot endpoint reports what it bills beside the events of each protocol: a `copilot_usage` object (`total_nano_aiu` and `token_details` with `input`, `cache_read`, `cache_write` and `output`) on `response.completed`, on `message_delta` and on the last chat chunk. `CopilotRequestUsage` reads it from the stream (`CopilotUsageSseStream` through `OpenAIProviderOptions.ResponseStreamObserver` for the OpenAI SDK, `CopilotAnthropicSseHandler` for the Anthropic SDK) and puts it on the usage of the turn: `Cost` in AI credits (10^9 nano AIU, 0.01 USD), `CostUnit` and `CacheWriteTokens`. Optional settings control enterprise domain, model-policy handling, preview model inclusion, single-model pinning, models.dev metadata enrichment, model overrides, and protocol tracing.
 
@@ -426,7 +432,11 @@ browser or the Claude app. The provider implements `IAgentRemoteControlProvider`
 choices of a session.
 
 - **Turning it on** sends the control request `remote_control` (`enabled: true`, `name`: the title of the
-  session, `reattach_session_id`: the bridge of a process started again). The answer gives `session_url`
+  session, `reattach_session_id`: the bridge of a process started again, `keep_session_on_exit: true`). Without
+  `keep_session_on_exit` (the bridge's `neverArchive` in Claude Code 2.1.295), the CLI archives the claude.ai
+  session when its process ends; the next process un-archives it as it reattaches, but a page open on claude.ai
+  stays archived until it is reloaded. With it, no exit archives the session, also when Remote Control is turned
+  off or the session ends: it stays offline in the claude.ai list. The answer gives `session_url`
   (`https://claude.ai/code/session_…`) and `bridge_session_id` (`cse_…`). With no process running, one is
   started for it from a request `AgentSession` builds as for a compaction (no prompt, no tools: the tools of
   CodeAlta are announced at the first turn); while a turn starts one, the turn connects it. `initialize`
@@ -561,9 +571,45 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 - Usage is the usage of the last model request, the context window the CLI reports (`get_context_usage`, then `modelUsage`), the cost of the turn and the subscription limit events (`rate_limit_event`). The window holds what the request read and wrote. The operation keeps the three inputs apart, as the statistics expect: `InputTokens` is the input that was not cached, `CacheReadTokens` and `CacheWriteTokens` what was read from and written to the prompt cache. The output tokens are those of the whole message (`message_delta`): the assistant line of a block only has the tokens generated so far. Two values of a `result` are those of the whole conversation, also in a process that resumed it, and are read accordingly: `total_cost_usd` (the cost of a turn is what was added since the result before; the total is kept in the provider state of the session, and a session saved without it gives its next turn no cost), and `modelUsage`, which names every model the conversation used, a subagent's included (the window is the one of the model that answered).
 - The CLI keeps and compacts its context. Local compaction is disabled for the provider, and a manual compaction sends `/compact` to the CLI (`IAgentProviderCompaction`). For such a provider the session keeps the context count the provider reported when the images of a run leave the conversation the session would send again: the CLI still has them, and its count holds a prompt and tools the session cannot estimate.
 
+### Fork and rewind
+
+The CLI owns the conversation, so a fork or a rewind of the journal of CodeAlta is not enough: the CLI has to be started
+on the conversation of the point. It has the options for it, and CodeAlta uses them, checked with Claude Code 2.1.292:
+
+- `--resume=<id> --fork-session` continues a conversation as another one, whose id the CLI reports in `system/init` and in
+  the results; the transcript of the resumed one is not written.
+- `--resume=<id> --resume-session-at <uuid>` keeps the messages up to and including the entry of the transcript with that
+  id. The option is not in `--help`; it is the one the Agent SDK passes for `resumeSessionAt`, and it only works in print
+  mode. With `--fork-session` it is a fork at a point. Without it the same conversation goes on: the transcript is
+  append-only, the next prompt is written as a child of that entry, and the entries after it stay in the file, off the
+  conversation. **That cut exists only once a prompt was written**: a process started again before it resumes the whole
+  transcript.
+- The prompt cache of the model is read in both cases: the conversation the CLI sends starts with what it sent before.
+
+What the provider does with them:
+
+- Each answer records the entry of the transcript it ends with: the `uuid` of the last top-level `assistant` line or tool
+  result (`ClaudeCodeProviderState.Leaf`). The state written before a point therefore names the entry to resume at.
+- A session that was just forked or rewound carries `AgentSessionState.ProviderBranch` with the provider state of the
+  point. `ClaudeCodeSession.BindConversation` then starts the CLI on that conversation with `--resume-session-at <leaf>`,
+  and with `--fork-session` for a fork; a fork of a whole conversation needs no entry. It does so again for every
+  process it starts **until the CLI answered**, from the conversation of the source: a fork is reported under its new id
+  as soon as the CLI starts, before its transcript exists.
+- The cost the CLI reports is the total of the transcript, also of the turns a fork or a rewind leaves out. The cost of
+  the next turn is counted from what the conversation cost when it was last written
+  (`AgentProviderBranch.CurrentProviderState`), not from the cost at the point.
+- A point whose state has no entry (a turn recorded before entries were followed) cannot be cut in the CLI: the session
+  starts a new conversation and is told the recorded one as text, as for a missing transcript. A fork of the whole
+  conversation always works.
+- The CLI keeps the system prompt a conversation started with, also for a fork: instructions that differ reach it as an
+  update with the next prompt, as for any resumed conversation.
+
+`--rewind-files` of the CLI restores the files its own Write and Edit tools changed, when checkpointing was enabled for
+the conversation. CodeAlta does not use it: a rewind restores no file, for any provider.
+
 ### Robustness
 
-The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. A permission answered with **Cancel** is denied with `interrupt: true`: the CLI then ends the turn with an error result of its own (`error_during_execution`, an `[ede_diagnostic]` text), which the session reads as the end of a turn the user stopped, not as a failure. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write (the background task messages are those of 2.1.292). `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code, and one in which a background command ends after the turn and the turn the CLI starts by itself is shown as a run), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
+The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. A permission answered with **Cancel** is denied with `interrupt: true`: the CLI then ends the turn with an error result of its own (`error_during_execution`, an `[ede_diagnostic]` text), which the session reads as the end of a turn the user stopped, not as a failure. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write (the background task messages are those of 2.1.292). `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, a fork at a turn and a rewind to one, one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code, and one in which a background command ends after the turn and the turn the CLI starts by itself is shown as a run), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
 
 On Windows the provider runs a native `claude.exe` and refuses a `.cmd`/`.bat` shim, whose arguments cannot be escaped reliably for `cmd.exe`.
 

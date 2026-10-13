@@ -36,7 +36,7 @@ export type Page = Readonly<{
 }>;
 
 /** What the browser is started with. */
-export type HarnessOptions = Readonly<{ reducedMotion?: boolean; width?: number; height?: number; ratio?: number; colorScheme?: "light" | "dark"; /** Gives the page `gc()`, to measure the heap after a collection. */ exposeGc?: boolean; /** The page the test drives, relative to this folder (default `./statistics.mount.tsx`) and the global it defines (default `statsFixture`). */ entry?: string; fixture?: string; /** An inert RPC module for a page that normally imports the native host. */ rpcFixture?: string }>;
+export type HarnessOptions = Readonly<{ reducedMotion?: boolean; width?: number; height?: number; ratio?: number; colorScheme?: "light" | "dark"; /** Gives the page `gc()`, to measure the heap after a collection. */ exposeGc?: boolean; /** The page the test drives, relative to this folder (default `./statistics.mount.tsx`) and the global it defines (default `statsFixture`). */ entry?: string; fixture?: string; /** An inert RPC module for a page that normally imports the native host. */ rpcFixture?: string; /** The stylesheets of the feature the page shows, relative to this folder, after those of the application. */ styles?: readonly string[] }>;
 
 /** Starts the browser on the canvas page, runs `body`, and checks that the page raised no error and asked for nothing outside itself. */
 export async function withCanvas(body: (page: Page) => Promise<void>, options: HarnessOptions = {}): Promise<void> {
@@ -48,7 +48,8 @@ export async function withCanvas(body: (page: Page) => Promise<void>, options: H
       ...(options.rpcFixture ? { alias: { "#neoastra": fileURLToPath(new URL(options.rpcFixture, import.meta.url)) } } : {}),
       loader: { ".css": "empty" }, define: { "process.env.NODE_ENV": '"development"' } });
     const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
-    const style = (await read("../../node_modules/@blueprintjs/core/lib/css/blueprint.css")) + await read("../style.css") + await read("../charts/charts.css") + await read("./statistics.css") + hostCss;
+    const style = (await read("../../node_modules/@blueprintjs/core/lib/css/blueprint.css")) + await read("../style.css") + await read("../charts/charts.css") + await read("./statistics.css")
+      + (await Promise.all((options.styles ?? []).map(read))).join("\n") + hostCss;
     const assets = new Map<string, { type: string; body: string }>([
       [pageUrl, { type: "text/html", body: '<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="data:,"><link rel="stylesheet" href="/style.css"></head><body><div id="root"></div><script src="/fixture.js"></script></body></html>' }],
       [`${origin}/style.css`, { type: "text/css", body: style }], [`${origin}/fixture.js`, { type: "text/javascript", body: bundle.outputFiles[0].text }]]);

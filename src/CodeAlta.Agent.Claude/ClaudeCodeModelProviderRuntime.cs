@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.Claude;
 /// <summary>
 /// Model provider that runs CodeAlta sessions through the Claude Code CLI the user installed and signed in to.
 /// </summary>
-public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime
+public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime, IAgentSessionRelocationProvider
 {
     /// <summary>The provider type of the configuration (<c>type = "claude-code"</c>).</summary>
     public const string ProviderType = "claude-code";
@@ -165,4 +165,33 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _turnExecutor.DisposeAsync();
+
+    /// <summary>
+    /// Moves the transcript the CLI keeps of the conversation of a session to the folder of its new working directory,
+    /// so that <c>--resume</c> started there finds it.
+    /// </summary>
+    /// <inheritdoc />
+    public async Task<string?> RelocateSessionAsync(AgentSessionState state, string fromDirectory, string toDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fromDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toDirectory);
+        if (ClaudeCodeTranscriptRelocation.ReadCliSessionId(state.ProviderState) is not { } cliSessionId) return null;
+        var root = ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        ClaudeCodeTranscriptRelocationResult result;
+        try
+        {
+            result = await ClaudeCodeTranscriptRelocation.RelocateAsync(root, cliSessionId, fromDirectory, toDirectory, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (ArgumentException exception)
+        {
+            return $"The conversation of Claude Code could not be moved: {exception.Message}";
+        }
+
+        return result.IsAtTarget || result.Status == ClaudeCodeTranscriptRelocationStatus.NothingToMove
+            ? result.Message
+            : $"The conversation of Claude Code stayed with the old folder ({result.Status}): {result.Message}";
+    }
 }

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 
@@ -177,6 +178,87 @@ public sealed class ClaudeCodeLiveCliTests
         await live.RestartAsync(sessionId);
         await live.SendAsync("Which word did I ask you to remember at the start? Answer with the word only.");
         StringAssert.Contains(live.LastAnswer.ToLowerInvariant(), "kumquat");
+    }
+
+    [TestMethod]
+    public async Task Session_IsForkedAtATurnAndRewoundToOne()
+    {
+        // What the scripted CLI cannot say: that the real one cuts a conversation at an entry the provider recorded,
+        // copies it for a fork without touching the original, and keeps a rewind once a prompt followed it.
+        // The prompts keep the model from its memory file, which is outside the conversation: a word saved there would
+        // be found again by a fork that never was told it.
+        const string NoTools = "Use no tool and save nothing to memory.";
+        const string Question = "Which tokens did I say so far in this conversation? " + NoTools + " Answer with the tokens only, nothing else.";
+        using var live = await LiveSession.StartAsync();
+        await live.SendAsync("In this conversation I say the token ALPHA. " + NoTools + " Answer with OK only.");
+        await live.SendAsync("Now I say the token BRAVO. " + NoTools + " Answer with OK only.");
+        await live.SendAsync("Now I say the token CHARLIE. " + NoTools + " Answer with OK only.");
+        var sourceId = live.Session.SessionId;
+        await live.StopAsync();
+
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(live.Directory));
+        var turns = (await store.ReadTurnsAsync(sourceId)).Turns;
+        Assert.AreEqual(3, turns.Count);
+
+        // A fork before the second turn knows the first word only.
+        var point = await store.ReadBranchPointAsync(sourceId, turns[1].RunId, null, CancellationToken.None);
+        Assert.IsNotNull(ClaudeCodeProviderState.Read(point.State)?.Leaf, "The entry of the transcript is recorded with each answer.");
+        var forkId = Guid.CreateVersion7().ToString();
+        var now = DateTimeOffset.UtcNow;
+        await store.CommitForkAsync(
+            point,
+            point.Summary with { SessionId = forkId, CreatedAt = now, UpdatedAt = now },
+            point.State with
+            {
+                SessionId = forkId,
+                ProviderBranch = new(AgentProviderBranchKind.Fork, AtEnd: false) { CurrentProviderState = point.CurrentState.ProviderState },
+            },
+            header: null, [], includeRemainder: false, CancellationToken.None);
+        await live.RestartAsync(forkId);
+        await live.SendAsync(Question);
+        var forked = live.LastAnswer.ToUpperInvariant();
+        StringAssert.Contains(forked, "ALPHA");
+        Assert.IsFalse(forked.Contains("BRAVO", StringComparison.Ordinal) || forked.Contains("CHARLIE", StringComparison.Ordinal), forked);
+        var forkCost = live.Events.OfType<AgentSessionUpdateEvent>().Last(static e => e.Usage?.LastOperation?.Cost is not null).Usage!.LastOperation!;
+        Console.WriteLine($"fork: cost={forkCost.Cost} cached={forkCost.CachedInputTokens} input={forkCost.InputTokens} write={forkCost.CacheWriteTokens}");
+        Assert.IsTrue(forkCost.CachedInputTokens > 0, "The fork reads the prompt cache of its source.");
+        var forkConversation = ClaudeCodeProviderState.Read((await store.GetStateAsync(forkId))!)!.SessionId;
+        var sourceConversation = ClaudeCodeProviderState.Read((await store.GetStateAsync(sourceId))!)!.SessionId;
+        Assert.AreNotEqual(sourceConversation, forkConversation, "The fork has a conversation of its own in the CLI.");
+
+        // The source is as it was.
+        await live.RestartAsync(sourceId);
+        await live.SendAsync(Question);
+        var original = live.LastAnswer.ToUpperInvariant();
+        StringAssert.Contains(original, "ALPHA");
+        StringAssert.Contains(original, "BRAVO");
+        StringAssert.Contains(original, "CHARLIE");
+        await live.StopAsync();
+
+        // Rewound to before its third turn, it has forgotten the third word, and still has after another restart.
+        turns = (await store.ReadTurnsAsync(sourceId)).Turns;
+        point = await store.ReadBranchPointAsync(sourceId, turns[2].RunId, null, CancellationToken.None);
+        await store.CommitRewindAsync(
+            point,
+            point.Summary,
+            point.State with { ProviderBranch = new(AgentProviderBranchKind.Rewind, AtEnd: false) { CurrentProviderState = point.CurrentState.ProviderState } },
+            header: null, [], CancellationToken.None);
+        await live.RestartAsync(sourceId);
+        await live.SendAsync(Question);
+        var rewound = live.LastAnswer.ToUpperInvariant();
+        StringAssert.Contains(rewound, "ALPHA");
+        StringAssert.Contains(rewound, "BRAVO");
+        Assert.IsFalse(rewound.Contains("CHARLIE", StringComparison.Ordinal), rewound);
+        var rewindCost = live.Events.OfType<AgentSessionUpdateEvent>().Last(static e => e.Usage?.LastOperation?.Cost is not null).Usage!.LastOperation!;
+        Console.WriteLine($"rewind: cost={rewindCost.Cost} cached={rewindCost.CachedInputTokens}");
+        Assert.AreEqual(sourceConversation, ClaudeCodeProviderState.Read((await store.GetStateAsync(sourceId))!)!.SessionId, "A rewind keeps the conversation of the CLI.");
+        Assert.IsTrue(rewindCost.Cost < 0.01, $"The turns that were removed are not counted again with the next one: {rewindCost.Cost}.");
+
+        await live.RestartAsync(sourceId);
+        await live.SendAsync("Tell me again which tokens I said in this conversation. " + NoTools + " Answer with the tokens only.");
+        var later = live.LastAnswer.ToUpperInvariant();
+        StringAssert.Contains(later, "BRAVO");
+        Assert.IsFalse(later.Contains("CHARLIE", StringComparison.Ordinal), later);
     }
 
     [TestMethod]
@@ -499,11 +581,22 @@ public sealed class ClaudeCodeLiveCliTests
             return live;
         }
 
-        public async Task RestartAsync(string sessionId)
+        // Ends the session and its process, as an application that is closed does: its journal can then be rewritten.
+        public async Task StopAsync()
         {
+            if (_stopped) return;
+            _stopped = true;
             await Session.DisposeAsync();
             await _runtime!.DisposeAsync();
+        }
+
+        private bool _stopped;
+
+        public async Task RestartAsync(string sessionId)
+        {
+            await StopAsync();
             _runtime = new ClaudeCodeModelProviderRuntime(CreateOptions(_command));
+            _stopped = false;
             Attach(await _runtime.ResumeSessionAsync(sessionId, CreateSessionOptions<AgentSessionResumeOptions>()));
         }
 

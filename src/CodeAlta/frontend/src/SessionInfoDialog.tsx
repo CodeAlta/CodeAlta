@@ -10,6 +10,7 @@ import { readSessionInfoObservations, unavailableInfoObservations, type InfoFiel
 import { canonicalInfoCopy, infoDemoDescription, infoFieldLabel } from "./sessionInfoPresentation";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
+import { lineageDetail } from "./sessionBranch/SessionLineage";
 
 export type SessionInfoLifetime = { revision: number; current: () => boolean };
 
@@ -137,6 +138,9 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       <div><dt>{t("Provider")}</dt><dd>{info.provider ? <span className="with-logo"><ProviderIcon providerKey={info.provider} size={14} />{info.provider}</span> : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? recorded(info.updatedAt) : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Recorded creation time")}</dt><dd>{info.createdAt ? recorded(info.createdAt) : t("Not recorded or unavailable")}</dd></div>
+      {info.lineage && <div><dt>{t("Origin")}</dt><dd>{t(info.lineage.kind === "rewind" ? "Kept from a rewind of {title}" : "Forked from {title}", { title: info.lineage.title })}
+        {" · "}{lineageDetail(t, info.lineage)}
+        <small><code>{info.lineage.sourceId}</code></small></dd></div>}
     </dl>
     </section>
     <section data-info-copy aria-labelledby="session-info-runtime"><h3 id="session-info-runtime">{t("Observed runtime configuration")}</h3>

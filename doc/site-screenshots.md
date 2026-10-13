@@ -66,7 +66,7 @@ a restart of the instance removes both.
 - Hide what only says the timeline is long: `.load-more-bar, .timeline-bottom-button`.
 - Show hover-only controls (the buttons of a project row in `explorer`) only after real pointer input. Before
   capturing them, check that the row matches `:hover` and that its controls are visible through their computed
-  styles. The `hover` tool in the pinned NeoAstra 1.3.0 dispatches synthetic DOM events: its success message does
+  styles. The `hover` tool in the pinned NeoAstra 1.3.1 dispatches synthetic DOM events: its success message does
   not mean CSS `:hover` applies. Until the backend supports real hover, move the pointer manually or leave the
   row unhovered. Do not force `.project-row-action` or `.project-actions-trigger` visible with an injected style
   to stand in for hover.

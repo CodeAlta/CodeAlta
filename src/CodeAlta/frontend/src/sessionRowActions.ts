@@ -1,7 +1,7 @@
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 
 export type SessionMenuTarget = { id: string; projectId: string | null; hostEpoch: string | null };
-export type SessionAction = "open" | "rename" | "delete" | "remote-control";
+export type SessionAction = "open" | "rename" | "fork" | "delete" | "remote-control" | "move";
 
 export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTarget, selectedId: string | null,
   selectedProjectId: string | null, project: WorkspaceProject | undefined, hostEpoch: string | null,
@@ -15,7 +15,19 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
       && project.id === selectedProjectId && row.workspacePath === project.path;
   const mutate = open && exactScope && owned && !!hostEpoch && canMutate && !busy && !uncertain;
   // Remote Control acts on the session's provider: the same authority as a change of the session.
-  return { open, rename: mutate, delete: mutate, "remote-control": mutate };
+  // A fork leaves the session as it is, and is made while it works; it creates a session in the same scope.
+  // Only the session of a project moves to another project.
+  return { open, rename: mutate, fork: mutate, delete: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null };
+}
+
+/**
+ * Whether the row of a session can be dragged onto another project: a session of the exact scope of its project, on
+ * an owned host that can change sessions now. Unlike the menu, it does not ask for the session to be the selected one.
+ */
+export function sessionMoveAccess(row: WorkspaceSession, project: WorkspaceProject | undefined, hostEpoch: string | null,
+  owned: boolean, canMutate: boolean, busy: boolean, uncertain: boolean) {
+  return !!project && !project.archived && row.scopeKind === "project" && row.projectId === project.id && row.workspacePath === project.path
+    && owned && !!hostEpoch && canMutate && !busy && !uncertain;
 }
 
 export function isSessionContextKey(key: string, shiftKey: boolean, composing: boolean, editing: boolean) {

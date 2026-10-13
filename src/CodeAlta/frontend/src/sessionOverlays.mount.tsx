@@ -41,7 +41,7 @@ function render() {
   flushSync(() => root.render(<div className="ide-shell" style={{ display: "block", width, height }}>
     <div className="session-workspace" style={{ width: "100%" }} key={generation}>
       <div className="session-timeline-area">
-        <div className="timeline-scroll"><div className="messages"><TimelineMessage item={message} /></div></div>
+        <div className="timeline-scroll"><div className="messages"><TimelineMessage item={message} onBranch={forbidden} /></div></div>
         <SessionNotesOverlay sessionId="fixture" epoch={epoch} capability={capability} reader={reader} fallbackMarkdown="" />
         <WorkItemCards hub={hub} items={proposals ? items : []} preferredStart="worktree" busy={busy} onStart={forbidden} onOpenList={forbidden} />
       </div>

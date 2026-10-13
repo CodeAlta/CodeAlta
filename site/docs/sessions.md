@@ -32,9 +32,27 @@ In CodeAlta Desktop, the links of a message work, yours and the agent's:
 
 Click a link, or press Enter on a link that has the keyboard focus, which Tab moves to. Cmd-click on macOS, Ctrl-click on Windows and Linux, Shift-click and middle click work too. Agents are asked to write the files they name as such links. The same links work in the notes of a session, in issues and pull requests, in work items and in the Markdown preview of the code editor, where a relative path is read from the folder of the document.
 
+## Move a session to another project
+
+In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.
+
+- Choose **Move to project…** in the menu of the session (or `/move_to_project` in the search), then the project. Or drag the row of the session onto the row of the project in the sidebar.
+- The sessions it started in its project, its [sub-agents](#sub-agents), move with it.
+- A session can move only while it is idle: not while it runs, waits for an answer, has queued prompts or has background tasks.
+- A session with [Remote Control](workspace.md#remote-control-claude-code) on restarts in its new folder with Remote Control on again.
+- From then on the session works in the folder of its new project. When the new project is another checkout of the same repository, a session that worked in its own git worktree keeps working there.
+- Its history moves with it, and its agent is told where it comes from. Messages from before the move still name the old folder.
+- A session of Claude Code goes on with the same conversation: CodeAlta moves the copy Claude Code keeps of it (under `~/.claude/projects/`) to the folder of the new project. If that copy cannot be moved, a message says so, and the session goes on in a new conversation of Claude Code that starts with the history.
+- A session that was never named takes the name of its new project.
+
+Chats cannot be moved to a project, and a project session cannot become a chat.
+
 ## Busy sessions and queues
 
-If a session is busy, `Enter` queues your prompt instead of losing it. The waiting list appears above the status line.
+`Enter` sends immediately when idle and enqueues when busy, in both Desktop and TUI.
+In Desktop, `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now, steering a busy turn.
+Choosing **Enqueue until idle** submits the prompt immediately if already idle.
+The waiting list appears above the status line.
 
 Queued prompts can be:
 
@@ -44,7 +62,9 @@ Queued prompts can be:
 - cleared with `F10`;
 - converted to live steering when the provider supports it.
 
-Use `Ctrl+Enter` with an empty draft to steer the first queued prompt immediately when queued work exists.
+In Desktop, `Enter` keeps its idle-send / busy-enqueue behavior regardless of the Send options selection.
+**Send now** is labelled **Send now (steer)** while busy. Use the **Steer the running turn**
+button with an empty draft to steer the first queued prompt immediately. In TUI, use `Ctrl+Enter`.
 
 In Desktop, steering accepts text only. Prompts with pasted images stay in the queue for the next turn, with their attachments intact. Their **Steer now** button is disabled; its tooltip explains why. To adjust the running turn now, send a separate text-only steering prompt.
 
@@ -65,6 +85,44 @@ Press `Ctrl+F11`, use `/compact`, or click the compact button beside the provide
 Local compaction targets a smaller post-compaction context by default so long sessions can continue without immediately hitting the context limit.
 
 A compaction asks the model for a summary, and the provider bills that request like any other. CodeAlta counts it with the requests of the session: the details of the completion notice give what the summary used (input, cached input, output and, for Copilot, the cost in AI credits), and the [context usage](workspace.md#context-usage-popup) shows it as the last operation until the next request.
+
+## Fork and rewind
+
+In CodeAlta Desktop, a session can be continued from an earlier point in two ways.
+
+- **Fork** creates a new session that starts with the turns before a point. The session you fork is not changed, and it may even be working: a turn that is still running is never part of a fork. Fork a review once per finding, for example, and treat each finding in its own session.
+- **Rewind** takes the session itself back: the turn you choose and every later one are removed from it. The session must be idle.
+
+A point is the start of a turn, that is, just before one of its prompts, or the end of the session (for a fork). In both cases the prompt of the turn at the point is put in the composer, of the new session for a fork and of the same session for a rewind, so that you can edit it and send it again.
+
+Three ways lead to the same window:
+
+- the `/fork` and `/rewind` commands, from the search window or by typing `/` in an empty prompt;
+- **Fork from here** and **Rewind to here** on one of your prompts in the timeline, beside **Copy** when the pointer is over the message, or in the menu of a right-click on it;
+- **Fork…** in the **Actions** menu of a session in the Explorer.
+
+None of them acts at once. The window lists the points of the session, the newest first: **End of the session**, then one row per turn with its number, its prompt, when it started and what it did. Select a point and the window shows its prompt and says in plain words what the action does there, for example "Turns 4 to 9 (6 turns) are removed from this session". The conversation behind the window scrolls to that prompt when it is loaded.
+
+| Key | Action |
+| --- | --- |
+| type | Filter the turns by the text of their prompt |
+| `Up` / `Down`, `PageUp` / `PageDown` | Move the selection |
+| `Tab` (in the filter) | Switch between **Fork** and **Rewind** |
+| `Ctrl+O` | List every turn, or **Only my prompts** |
+| `Enter` | Fork or rewind at the selected point |
+| `Esc` | Close without changing anything |
+
+**Only my prompts** is on when the window opens: it leaves out the turns that another agent, the answer to a question or the result of a background job started.
+
+After a fork, the new session opens in a tab with the copied conversation, and a line above its timeline says which session it was forked from and how many turns it started with; the title in that line opens the source. A fork is a session of its own, listed beside the others, not a sub-agent of its source. It keeps the provider's prompt cache of its source, so its first request does not pay for the copied turns again.
+
+After a rewind, the session shows the turns that are left, and a message says how many were removed.
+
+- **Files are not restored.** A rewind removes turns from the conversation. What those turns changed on disk stays as it is: use git, or the [Changes](workspace.md#changes-desktop) tab, to undo edits.
+- **Nothing is lost by default.** **Keep the removed turns in a separate session** is checked: the session as it was before the rewind is kept as "*title* (before rewind)", and the message offers to open it. Clear the box and the removed turns are deleted; the button then reads **Rewind and delete**. Your choice is remembered.
+- If the composer already holds a draft, the draft is kept, and the message offers the prompt of the removed turn to copy instead.
+
+When a rewind cannot be made now, the window says why before you ask: the session is working, a question waits for your answer, or a command or a task still runs in its background. A fork remains possible while the session works.
 
 ## Long instructions
 

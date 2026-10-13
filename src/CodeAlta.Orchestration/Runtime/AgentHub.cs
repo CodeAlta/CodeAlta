@@ -503,6 +503,26 @@ public sealed partial class AgentHub : IAsyncDisposable
         return handle;
     }
 
+    /// <summary>
+    /// Moves what the provider of a session keeps of it from the place of one folder to the place of another, when
+    /// the provider keeps such a copy. Nothing of the provider is started.
+    /// </summary>
+    /// <returns><see langword="null"/> when there was nothing to do or the move succeeded; otherwise what went wrong.</returns>
+    internal async Task<string?> RelocateProviderSessionAsync(AgentSessionState state, string fromDirectory, string toDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.CreateRuntimeAsync(new ModelProviderId(state.ProviderKey), cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return null; }
+        await using (runtime.ConfigureAwait(false))
+        {
+            return runtime is IAgentSessionRelocationProvider relocation
+                ? await relocation.RelocateSessionAsync(state, fromDirectory, toDirectory, cancellationToken).ConfigureAwait(false)
+                : null;
+        }
+    }
+
     private async Task<ProviderSessionRuntimeLease> CreateStartedProviderRuntimeAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken)

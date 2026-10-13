@@ -57,7 +57,7 @@ The exact command set depends on the host, active plugins, and session context. 
 | `tool` | Inspect live-tool availability, policies, and capabilities. | “Before coordinating sessions, check which live-tool capabilities are available.” | Read-only; useful for diagnostics. |
 | `project` | List, show, resolve, or upsert project catalog entries. | “Resolve the current project and summarize its catalog entry.” | `upsert` changes the project catalog. |
 | `space` | List, show, create, update, delete and reorder the [spaces](spaces.md) that group your projects, put projects in them, and show one in the window. | “Create a space called Client work with these three projects and show it.” | Changes the spaces, which are shared by CodeAlta Desktop and CodeAlta TUI. `switch` changes the space the window shows. |
-| `session` | Inspect, create, send, queue, steer, abort, compact, report, and coordinate sessions. | “Create a same-model child session to inspect the failing tests, then report its final answer here.” | Can start work, queue prompts, abort runs, and compact history. Ask for confirmation for disruptive actions. |
+| `session` | Inspect, create, send, queue, steer, abort, compact, report, and coordinate sessions; list the turns of a session, fork it at a turn, rewind it to one. | “Create a same-model child session to inspect the failing tests, then report its final answer here.” | Can start work, queue prompts, abort runs, compact history, and remove turns from a session. Ask for confirmation for disruptive actions. |
 | `prompt` | List, inspect, create, edit, and select file-backed agent/system prompts. | “Create a project prompt named reviewer for read-only code reviews.” | Create/edit writes prompt files under global or project prompt roots. |
 | `ask` | Queue structured questions or approvals for the current session. | “Before changing files, ask me to approve the plan with Approve/Revise choices.” | The agent should yield after queuing an ask and wait for your answer. |
 | `notes` (`note`) | Get, replace, or clear session-scoped sticky Markdown notes. | “Keep a 5-item checklist visible in Notes while you work.” | Replaces the current session’s notes document; `note` is a compatibility alias. |
@@ -221,6 +221,26 @@ Before changing files, inspect the recent sessions for this project and tell me 
 ```text
 Find the child sessions created from this session and summarize their final answers, grouped by model.
 ```
+
+### Fork a session, or rewind it
+
+A session is a list of turns: one prompt, and everything the agent did until it stopped. An agent can read them, start a new session from one of them, or take a session back to one of them.
+
+```text
+List the turns of this session, then fork it before the turn where you started the cache rewrite and try the other design there. Leave this session as it is.
+```
+
+```text
+The last two turns of the review session went the wrong way. Rewind it to before them, then send it this prompt instead: ...
+```
+
+The agent runs `alta session turns` to find the turn, by its number or its run id, then one of:
+
+- `alta session fork [<session-id>] [--before <turn> | --after <turn>]` creates a new session that starts with the turns up to that point. The source is left as it is and may still be running; the turn in progress is not part of the fork, so a session can fork itself. The fork is an ordinary session beside its source, not a sub-agent of the agent that created it: it continues from the same conversation, and its first request can reuse what the provider cached for the source. `--parent <session-id>` makes it a sub-agent, which gives it other instructions. `--worktree` gives it a git worktree of its own, so that two attempts do not write the same files.
+- `alta session rewind <session-id> (--before <turn> | --after <turn>)` removes that turn and every turn after it. The session must be idle, and a session cannot rewind itself. The session as it was is kept as a new session titled “… (before rewind)”, unless the agent passes `--discard`.
+
+> [!WARNING]
+> A fork or a rewind changes the conversation only. The files that the removed turns changed are **not** restored, and a fork sees the folder as it is now: ask the agent to restore the files as well (with git, for example) when you need them back. A rewind with `--discard` cannot be undone.
 
 ## Safety and review checklist
 

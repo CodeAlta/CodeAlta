@@ -135,6 +135,7 @@ The current provider/session split is intentional and should be preserved:
 - Provider initialization starts eagerly after provider descriptors/configuration are available and runs concurrently with session catalog listing and pending-session restore. A slow or failing provider must become a provider state, not an application startup failure.
 - Active sessions must remain independently scheduled. Use per-session ownership/serialization for mutable runtime state and event append ordering; do not add a process-wide run lock, event-writer lock, or provider/session deduplication layer.
 - Parent/sub-session relationships are lineage/orchestration metadata only. Do not make child sessions share the parent's run gate, cancellation token, provider continuation state, or journal writer after creation.
+- A fork and a rewind are journal operations of the stores (`FileSystemAgentSessionStore.CommitForkAsync` / `CommitRewindAsync`, through `SessionViewJournalStore` and `SessionRuntimeService.Branch.cs`), committed by one rename; never copy, cut or patch a journal elsewhere. A point is the start of a turn and is named by its run id, never by a count or an offset a caller kept. A fork is not a child: its origin is `ForkedFrom`, never `ParentSessionId` (which is prompt text, sub-agent nesting and a deletion and retention family). Keep what a fork sends first identical to what its source sent: the records are copied as bytes (only the session id a record ends with and the attachment paths change), nothing of the composed instructions may depend on the id of the fork (the scratchpad name comes from `ForkedFrom.RootSessionId`), and a provider that routes its prompt cache by a key sends `AgentTurnRequest.PromptCacheKey`, not the session id. Do not inject a "forked from" message into the conversation. A rewind requires an idle session, retires its attachment before the journal changes, and writes the header again (`rewind_count`): a reader that follows a journal by offset recognizes it by its first line, and a view reloads on `RewindCount`. A reader that counts what sessions did leaves out the records of a fork older than `forked_from.counted_from`. A provider that keeps the conversation takes it up from `AgentSessionState.ProviderBranch` and the provider state of the point; qualify such a change with the scripted CLI and with the live test. See "Fork and rewind" in `runtime.md` and in `providers.md`.
 - Conversation-like orchestration and UI concepts should use `Session` or `SessionView` naming. Keep `Thread` only for actual OS/runtime threading, framework terms, or explicit tolerant readers/legacy view-state APIs that still load old session-view data.
 - Removed `AgentBackendId`, `BackendId`, `IAgentBackend`, and `AgentBackendFactory` symbols must not be reintroduced. Use `ModelProviderId`, `ModelProviderDescriptor`, `IModelProviderRegistry`, and `IModelProviderRuntime` for selectable providers.
 - Avoid `LocalRuntime`, active `LocalAgent*`, and broad `CodeAlta*` runtime class prefixes in `CodeAlta.Agent`; use neutral agent/session/provider names such as `AgentRuntime`, `AgentSession`, and `AgentModelProviderRuntime`. Keep legacy `backend*`, `Local*`, and `Thread*` terminology only for explicit persisted/wire/config compatibility or genuine external framework/runtime terms.
@@ -164,6 +165,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `pluginScript/`: what runs the script of plugins (the `alta` object, the module loader, the error boundary, the `html` tag, the components of the `codealta` module).
 - `lent/`: the entries of the libraries lent to plugins and the `codealta` module (below).
 - `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
+- `bookmarks/`: the bookmarks (the link to the host, the tab that lists them, the marks of the rows of a timeline and the rail beside it, the requests that show a message of a timeline).
 
 Rules for these sources:
 
@@ -181,12 +183,23 @@ Rules for these sources:
 passed, skipped or TODO test. Test diagnostics, stdout/stderr, cancellations and module crashes remain
 visible, and failures still return a nonzero exit code. Use `npm run test:verbose` for the full test tree.
 Both scripts bound test-file concurrency to two, instead of starting one headless Edge per CPU core.
-Browser fixtures share `browserTarget.ts`: guest-mode startup flags prevent OS sign-in attempts, and
+Browser fixtures share `browserTarget.ts`. `browserExecutable` is the Edge of the system, looked for where
+it is installed on Windows, macOS (`/Applications` and `~/Applications`) and Linux (`/usr/bin/microsoft-edge`,
+`/usr/bin/microsoft-edge-stable`, `/opt/microsoft/msedge/msedge`); the tests skip only where none is found.
+`CODEALTA_TEST_BROWSER` names another Chromium to drive: its path is taken as it is, so a browser that was
+asked for and is missing fails the tests at its start instead of skipping them. Guest-mode startup flags
+prevent OS sign-in attempts, and
 `waitForBrowserPort` waits through missing, empty or partial `DevToolsActivePort` files within a
 five-second wall-clock deadline. Pipe stderr so failures include its bounded tail, the child PID,
 exit/signal and last file probe. A successful launcher exit may precede readiness; a nonzero exit or
 spawn error fails the test. Keep fixture-owned process/profile cleanup; never hide failures with
-automatic relaunches or skips.
+automatic relaunches or skips. A test that has to know its browser is gone before it removes the profile
+ends it with `endBrowser`, never with a command of one system (`taskkill` ends the whole tree on Windows,
+the process is killed elsewhere).
+
+The browser tests run on three systems with three fonts and their own gestures. Assert what the product
+promises (an order, "no overlap", "shorter than"), not a margin that one font gives, and name the system
+where a gesture differs: on macOS a Ctrl+click opens the context menu and gives the page no `click`.
 `npm run build` and `npm run build:demo` run Vite with `--logLevel warn`, retaining warnings and errors
 without the asset-size listing. NeoAstra invokes the same build script from the desktop `.csproj`.
 

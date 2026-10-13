@@ -582,6 +582,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
 
         replaced?.Complete();
         // The connections of the page that was replaced are gone with it: its frames are never answered.
+        // They are dropped outside the lock, so a frame of that page can still be taken until here, as one that came
+        // just before the reload is: the new page hears `rpcClosed` for each connection once it is dropped.
         DropRpcSessions(generation - 1);
         try
         {

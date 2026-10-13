@@ -28,6 +28,15 @@ test("browser demo history follows the selected session and has no paging", asyn
   assert.ok(page.entries.every(entry => entry.sessionId === "chosen-session"));
 });
 
+test("browser demo answers that it has no turn to list, no session to fork and none to rewind", async () => {
+  const turns = await workspace.sessionTurns({ expectedHostEpoch: "demo", sessionId: "demo-active", beforeTurn: null });
+  assert.deepEqual([turns.status, turns.sessionId, turns.turns.length, turns.total], ["unconfigured", "demo-active", 0, 0]);
+  const fork = await workspace.forkSession({ expectedHostEpoch: "demo", scope: "global", projectId: null, projectPath: null, sessionId: "demo-active", beforeRunId: null, title: null });
+  assert.deepEqual([fork.status, fork.forkSessionId], ["unconfigured", null]);
+  const rewind = await workspace.rewindSession({ expectedHostEpoch: "demo", scope: "global", projectId: null, projectPath: null, sessionId: "demo-active", beforeRunId: "run", keepRemovedTurns: true });
+  assert.deepEqual([rewind.status, rewind.removedTurnCount, rewind.rewindCount], ["unconfigured", 0, 0]);
+});
+
 test("browser demo stands in for every service of the generated client", t => {
   // The page imports its services by name: one that the demo lacks keeps the whole page from loading.
   const generated = new URL("../../obj/neoastra/neoastra.ts", import.meta.url);

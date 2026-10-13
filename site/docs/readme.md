@@ -30,6 +30,7 @@ This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pag
 - [Worktrees](worktrees.md): sessions that work in their own git worktree, so that several can change the same project at the same time.
 - [Automations](automations.md): prompts that CodeAlta Desktop runs on a schedule, on a new issue or pull request, when a command succeeds, or on demand.
 - [Work items](work-items.md): the follow-up tasks agents propose and the plans you approved, and where each one is carried out.
+- [Bookmarks](bookmarks.md): the messages and the sessions you marked in CodeAlta Desktop, beside their timeline and in one tab.
 - [GitHub Copilot layout](copilot-layout.md): the instructions, the skills, the custom agents and the MCP servers a project keeps for GitHub Copilot, read as they are.
 - [Issues and pull requests](issues.md): the issues and the pull requests of a project, from GitHub, GitLab, Azure DevOps, Bitbucket or Jira, and a session started on one of them.
 - [UI tools and MCP server](ui-tools.md): an agent sees and drives the window of CodeAlta Desktop, from a session or from another application.

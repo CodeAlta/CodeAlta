@@ -55,7 +55,7 @@ function host(): PluginButtonsHost {
 }
 
 const session = (id: string, projectId: string | null, parentSessionId: string | null = null): WorkspaceSession => ({
-  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id, title: `title of ${id}`, fullTitle: `title of ${id}`, fullTitleTruncated: false, parentSessionId,
+  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, createdAt: null, id, title: `title of ${id}`, fullTitle: `title of ${id}`, fullTitleTruncated: false, parentSessionId,
   scopeKind: projectId === null ? "global" : "project", projectId, lineageIssue: null, workspacePath: projectId === null ? "/home" : `/${projectId}`,
   providerKey: "codex", updatedAt: "2026-01-01T00:00:00Z",
 });
@@ -66,13 +66,14 @@ const tree = { toggle: () => { }, more: () => { }, fewer: () => { } };
 function Scope({ scope }: { scope: string | null }) {
   const rows = sessionHierarchy(sessions.filter(value => value.projectId === scope), sessions, scope);
   const entries = sessionList(rows, { count: 50, subCount: 4, active: null, extra: () => 0, collapsed: () => false }).entries;
-  return <section data-scope={scope ?? "chats"}><h2>{scope ?? "Chats"}</h2>
+  // The lists are where the Explorer puts them, under the tree of the projects: the rules of that tree apply to their buttons.
+  return <section data-scope={scope ?? "chats"}><h2>{scope ?? "Chats"}</h2><ul className="nav-list project-root-list"><li className="project-session-branch">
     <ExplorerSessions entries={entries} global={scope === null} projectId={scope} more={0} extended={false} tree={tree}
       menuEntries={row => sessionCanvasMenuEntries(state.catalog, row, projects.find(value => value.id === scope), {
         label: title => `Open ${title}`, more: "More…", openPage: () => { state.pages++; },
         open: (item, target) => { state.canvases.push({ canvas: item.id, project: target.project, sessionId: target.sessionId }); } })}
       access={() => ({ rename: true, delete: true })} marks={() => null} onAction={(value, action) => { state.actions.push({ session: value.id, action }); }}
-      onMore={() => { }} onFewer={() => { }} /></section>;
+      onMore={() => { }} onFewer={() => { }} /></li></ul></section>;
 }
 
 const fixture = {

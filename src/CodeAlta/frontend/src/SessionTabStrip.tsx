@@ -1,21 +1,23 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Actions, DockLocation, Layout, TabNode, TabSetNode, type Action, type Model } from "flexlayout-react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
+import { isPreviewTab, resolveSessionTab, type DraftTab, type SessionTab } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { SessionWaitingBadge } from "./WaitingBadge";
-import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, tabMiddleClickAction } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
+  type SessionTabView as Tabs } from "./sessionTabLayout";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
 import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
+import { dockTab, dockTabs, tabsToClose, type DockTab, type DockTabs, type TabCloseCommand } from "./sessionTabClosing";
 
 export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedId: string | null }>;
 
@@ -70,6 +72,7 @@ export function FileTabLabel({ tab, project, dirty, terminal, status }: {
   if (isIssuesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Issues")}>{t("Issues")}</span></span>;
   if (isCanvasesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Canvases")}>{t("Canvases")}</span></span>;
   if (isDocumentationTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Documentation")}>{t("Documentation")}</span></span>;
+  if (isBookmarksTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Bookmarks")}>{t("Bookmarks")}</span></span>;
   if (isCanvasTab(tab)) {
     // The title the plugin gave, with the project when the canvas is about one; the status beside it.
     const title = tab.name ?? t("Canvas"), about = tab.projectId ? project : "";
@@ -88,7 +91,8 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout }: {
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
+  keep, draftLabel, selectDraft, closeDraft, keepDraft, closeTabs }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
    * The model of the dock, when its owner keeps one: a dock that is taken away and shown again (the tabs of a
@@ -114,12 +118,26 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   terminal?: (id: string) => TerminalItem | undefined;
   /** A session tab or the New session tab was clicked (not its close button): the shell moves the focus to its prompt. */
   onSessionTabClick?: () => void;
+  /** Keeps the session of the transient tab, whose title was double-clicked: its tab is its own from now on. */
+  keep?: (tab: SessionTab) => void;
+  /** The title of the tab of the new-session prompt of a scope. */
+  draftLabel?: (draft: DraftTab) => string;
+  /** Shows the new-session prompt of a scope that has a tab of its own. */
+  selectDraft?: (draft: DraftTab) => void;
+  closeDraft?: (draft: DraftTab) => void;
+  /** Gives the new-session prompt of the transient tab, whose title was double-clicked, a tab of its own. */
+  keepDraft?: () => void;
+  /**
+   * Closes several tabs of a pane at once, from the menu of a tab or of the pane. `from` is the tab the command was
+   * asked from, which is shown when the tab in front is among those closed; null when every tab of the pane closes.
+   */
+  closeTabs?: (closing: DockTabs, from: DockTab | null) => void;
 }) {
   const { t } = useShellLanguage();
   const [model] = useState(() => layout ?? createSessionTabModel());
   const root = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
-  const [menu, setMenu] = useState<{ anchor: HTMLElement; items: SessionMenuEntry[]; current: () => boolean } | null>(null);
+  const [menu, setMenu] = useState<{ anchor: HTMLElement; at?: Readonly<{ x: number; y: number }>; title?: string; items: SessionMenuEntry[]; current: () => boolean } | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   // The tab bars along the top edge of the dock are the window's title bar: their empty space moves the
   // window, and the first and last one leave room for the application mark and the window controls.
@@ -156,12 +174,14 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     if (isIssuesTab(file)) return t("Issues");
     if (isCanvasesTab(file)) return t("Canvases");
     if (isDocumentationTab(file)) return t("Documentation");
+    if (isBookmarksTab(file)) return t("Bookmarks");
     if (isCanvasTab(file)) return `${file.name ?? t("Canvas")}${file.projectId ? ` · ${projectName(file)}` : ""}`;
     if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : isPluginTab(file) ? "Plugin" : isSkillTab(file) ? "Skill" : "Editor")} · ${projectName(file)}`;
     const shown = shownTerminal(file);
     return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
   };
-  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel); });
+  const promptLabel = (draft: DraftTab) => draftLabel?.(draft) ?? label(null);
+  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel, promptLabel); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {
     const current = capture();
@@ -169,8 +189,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   }
   function dispatch(action: Action, current = guard()) {
     if (action.type === Actions.DELETE_TAB && action.data.node === sessionDraftNodeId && !state.active && current()) {
+      // Closing the transient prompt shows another tab: a session, else a prompt that has a tab of its own.
       const tab = state.open.find(tab => snapshot && resolveSessionTab(snapshot, tab));
       if (tab) select(tab);
+      else if (state.drafts?.length) selectDraft?.(state.drafts[0]);
       return undefined;
     }
     if (sessionLayoutActionAllowed(model, action, state, snapshot, current, files)) {
@@ -181,6 +203,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     }
     const file = fileTabAction(action, files, current);
     if (file?.kind === "close") { closeFile?.(file.file); return undefined; }
+    const prompt = draftTabAction(action, state, snapshot, current);
+    if (prompt?.kind === "close") { closeDraft?.(prompt.draft); return undefined; }
     const intent = sessionTabAction(action, state, snapshot, current);
     if (intent?.kind === "close") close(intent.tab);
     // App must accept closing a session or a file; unsupported actions never reach the model.
@@ -194,6 +218,9 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     const current = guard();
     const file = fileTabAction(Actions.selectTab(selected.getId()), files, current);
     if (file) { if (!sameFileTab(files.active, file.file)) selectFile?.(file.file); return; }
+    // The prompt of a scope that has a tab of its own: shown when it is not the one shown already.
+    const prompt = draftTabAction(Actions.selectTab(selected.getId()), state, snapshot, current);
+    if (prompt) { if (files.active || state.active || shownDraftNodeId(state) !== selected.getId()) selectDraft?.(prompt.draft); return; }
     const intent = sessionTabAction(Actions.selectTab(selected.getId()), state, snapshot, current);
     if (intent?.kind === "select" && (files.active || !state.active || sessionNodeId(state.active) !== selected.getId())) select(intent.tab);
     else if (files.active && selected.getId() === sessionDraftNodeId && !state.active && current()) selectFile?.(null);
@@ -205,6 +232,15 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   }
   const drag = useSessionTabDrag(root, model, guard,
     (action, current) => sessionLayoutActionAllowed(model, action, state, snapshot, current, files), apply);
+  // A double click on the title of the transient tab keeps what it shows, as in a code editor: the session that was
+  // looked at, or the prompt of a new session.
+  const lastClick = useRef<{ id: string; at: number } | null>(null);
+  function keepNode(id: string) {
+    if (!guard()()) return;
+    if (id === sessionDraftNodeId) { if (!state.active) keepDraft?.(); return; }
+    const tab = state.open.find(value => sessionNodeId(value) === id);
+    if (tab && isPreviewTab(state, tab)) keep?.(tab);
+  }
   function returnToSession(target: HTMLElement) {
     if (target.closest(".flexlayout__tab_button_trailing")) return false;
     const id = target.closest('[role="tab"]')?.querySelector<HTMLElement>('[data-session-node]')?.dataset.sessionNode;
@@ -212,35 +248,83 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     const current = guard();
     const file = fileTabAction(Actions.selectTab(id), files, current);
     if (file) { if (!sameFileTab(files.active, file.file)) selectFile?.(file.file); return true; }
+    const prompt = draftTabAction(Actions.selectTab(id), state, snapshot, current);
+    if (prompt) { if (files.active || state.active || shownDraftNodeId(state) !== id) selectDraft?.(prompt.draft); return true; }
     if (state.active && !files.active) return false;
     const intent = sessionTabAction(Actions.selectTab(id), state, snapshot, current);
     if (intent?.kind === "select") select(intent.tab);
     return intent?.kind === "select";
   }
-  function more(anchor: HTMLElement, node: unknown) {
-    const current = guard();
-    if (!current()) return;
-    const selected = node instanceof TabSetNode ? node.getSelectedNode() : undefined;
-    const split = (location: DockLocation) => selected instanceof TabNode && node instanceof TabSetNode
-      ? Actions.moveNode(selected.getId(), node.getId(), location, -1, true) : undefined;
+  // Moving a tab of a pane to a new pane beside it or under it.
+  function splitEntries(pane: TabSetNode | undefined, tab: TabNode | undefined, current: () => boolean): SessionMenuEntry[] {
+    const split = (location: DockLocation) => tab && pane ? Actions.moveNode(tab.getId(), pane.getId(), location, -1, true) : undefined;
     const right = split(DockLocation.RIGHT), below = split(DockLocation.BOTTOM);
-    const canSplit = node instanceof TabSetNode && node.isEnableDivide() && node.getTabNodes().length > 1 && selected?.isEnableDrag();
-    setMenu({ anchor, current, items: [
+    const canSplit = !!pane && pane.isEnableDivide() && pane.getTabNodes().length > 1 && tab?.isEnableDrag();
+    return [
       { key: "split-right", label: t("Split right"), disabled: !canSplit || !right || !sessionLayoutActionAllowed(model, right, state, snapshot, current, files),
         onSelect: () => { if (right) apply(right, current); } },
       { key: "split-below", label: t("Split below"), disabled: !canSplit || !below || !sessionLayoutActionAllowed(model, below, state, snapshot, current, files),
         onSelect: () => { if (below) apply(below, current); } },
+    ];
+  }
+  // Closing several tabs of a pane, counted from one of them: the others, the ones after it, or all of them.
+  function closeEntry(pane: TabSetNode, tab: TabNode | undefined, command: TabCloseCommand, label: string, current: () => boolean): SessionMenuEntry {
+    const closing = dockTabs(tabsToClose(pane.getChildren().map(child => child.getId()), tab?.getId() ?? null, command), state, files);
+    const from = tab && command !== "all" ? dockTab(tab.getId(), state, files) : null;
+    return { key: `close-${command}`, label, disabled: !closeTabs || !snapshot || closing.sessions.length + closing.drafts.length + closing.files.length === 0,
+      onSelect: () => { if (current()) closeTabs?.(closing, from); } };
+  }
+  function more(anchor: HTMLElement, node: unknown) {
+    const current = guard();
+    if (!current()) return;
+    const pane = node instanceof TabSetNode ? node : undefined;
+    const selected = pane?.getSelectedNode();
+    const tab = selected instanceof TabNode ? selected : undefined;
+    setMenu({ anchor, current, items: [
+      ...splitEntries(pane, tab, current),
+      ...(pane ? [{ key: "d-close", divider: true as const }, closeEntry(pane, tab, "others", t("Close others"), current), closeEntry(pane, tab, "all", t("Close all"), current)] : []),
+      { key: "d-reopen", divider: true },
       { key: "reopen", label: t("Reopen closed tab"), disabled: !snapshot || !state.closed.length && !files.closed.length,
         onSelect: () => { if (current()) reopen(); } },
       { key: "refresh", label: t("Refresh statuses"), disabled: !observations?.enabled || !state.open.length,
         onSelect: () => { if (current()) observations?.refresh(state.open); } },
     ] });
   }
+  // The menu of a tab, asked for with the other button of the pointer or the menu key: closing it, the others of its
+  // pane, the ones after it or all of them; keeping the transient tab; moving the tab to a pane of its own.
+  function tabMenu(node: TabNode, event: ReactMouseEvent<HTMLElement>) {
+    const current = guard();
+    const pane = node.getParent();
+    if (!current() || !(pane instanceof TabSetNode)) return;
+    const id = node.getId();
+    const shown = dockTab(id, state, files);
+    const transient = id === sessionDraftNodeId ? !state.active : !!shown && "session" in shown && isPreviewTab(state, shown.session);
+    // The menu key asks at the tab itself: it has no place of the pointer.
+    const box = event.currentTarget.getBoundingClientRect();
+    const at = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left, y: box.bottom };
+    setMenu({ anchor: event.currentTarget, at, title: node.getName(), current, items: [
+      { key: "close", label: t("Close"), icon: "close", disabled: !node.isEnableClose(), onSelect: () => apply(Actions.deleteTab(id), current) },
+      closeEntry(pane, node, "others", t("Close others"), current),
+      closeEntry(pane, node, "right", t("Close to the right"), current),
+      closeEntry(pane, node, "all", t("Close all"), current),
+      ...(transient ? [{ key: "d-keep", divider: true as const }, { key: "keep", label: t("Keep open"), onSelect: () => keepNode(id) }] : []),
+      ...(node.isEnableDrag() ? [{ key: "d-split", divider: true as const }, ...splitEntries(pane, node, current)] : []),
+    ] });
+  }
   return <div className="session-tabs workspace-layout" ref={root} data-dragging={!!drag.preview}
-    onPointerDownCapture={drag.down} onPointerMoveCapture={drag.move} onPointerUpCapture={event => {
+    onPointerDownCapture={event => {
+      // A press on a tab is the dock's, which may drag it: no mouse press follows for an open menu to close on.
+      if (menu && !(event.target as HTMLElement).closest(".session-tab-popup")) setMenu(null);
+      drag.down(event);
+    }} onPointerMoveCapture={drag.move} onPointerUpCapture={event => {
       // A click on a session tab (or the New session tab) hands the keyboard to that session's prompt.
       const clicked = drag.up(event);
       if (clicked && !clicked.startsWith("file:")) onSessionTabClick?.();
+      // A press on a tab is captured by the dock, which may be dragging it: no double click names the tab, so two
+      // clicks of the same tab in a short time are one.
+      const twice = !!clicked && lastClick.current?.id === clicked && event.timeStamp - lastClick.current.at < 500;
+      lastClick.current = clicked && !twice ? { id: clicked, at: event.timeStamp } : null;
+      if (twice) keepNode(clicked!);
     }}
     onPointerCancelCapture={drag.end} onLostPointerCapture={drag.end}
     onMouseDownCapture={event => {
@@ -252,6 +336,12 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     }} onClickCapture={event => {
       if (drag.click(event.detail)) { event.preventDefault(); event.stopPropagation(); return; }
       returnToSession(event.target as HTMLElement);
+    }} onDoubleClick={event => {
+      // The tab of the transient prompt is not dragged, so its press is not captured: its double click arrives as one.
+      const target = event.target as HTMLElement;
+      if (target.closest(".flexlayout__tab_button_trailing")) return;
+      const id = target.closest('[role="tab"]')?.querySelector<HTMLElement>('[data-session-node]')?.dataset.sessionNode;
+      if (id) keepNode(id);
     }} onKeyDownCapture={event => {
     if (drag.keyDown(event)) return;
     // Do not intercept the editor inside a factory; only the tab/menu chrome.
@@ -268,7 +358,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       keyMap={{ closeTab: undefined, renameTab: undefined, focusTabToggle: undefined,
         focusNextTabset: undefined, focusPreviousTabset: undefined, closeOverlayBorder: undefined }}
       onAction={action => dispatch(action)} onModelChange={(_model, action) => changed(action)}
-      onContextMenu={(_node, event) => event.preventDefault()}
+      onContextMenu={(node, event) => {
+        event.preventDefault();
+        if (node instanceof TabNode) tabMenu(node, event as ReactMouseEvent<HTMLElement>);
+      }}
       onAuxMouseClick={(node, event) => {
         // A middle click closes the tab, as its close button does.
         const close = tabMiddleClickAction(node, event.button);
@@ -277,7 +370,14 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         apply(close);
       }}
       onRenderTab={(node, values) => {
-        if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
+        // The transient tab says so with its title in italics: the prompt of the selected scope, or the session looked at.
+        if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()} data-transient="true">{label(null)}</span>; return; }
+        const prompt = state.drafts?.find(value => draftNodeId(value) === node.getId());
+        if (prompt) {
+          values.leading = <span className="file-tab-icon" data-file-tone="teal"><AppIcon name="newSession" size={14} /></span>;
+          values.content = <span data-session-node={node.getId()}><span className="session-tab-title"><span className="session-tab-label" title={`${promptLabel(prompt)}\n${prompt.path ?? ""}`}>{promptLabel(prompt)}</span></span></span>;
+          return;
+        }
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) {
           const shown = shownTerminal(file);
@@ -288,6 +388,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
             : isIssuesTab(file) ? { icon: "issueOpen" as const, tone: "green" }
             : isCanvasesTab(file) ? { icon: "canvases" as const, tone: "purple" }
             : isDocumentationTab(file) ? { icon: "documentation" as const, tone: "azure" }
+            : isBookmarksTab(file) ? { icon: "bookmark" as const, tone: "gold" }
             : isPluginTab(file) ? { icon: "plugin" as const, tone: "purple" }
             : isSkillTab(file) ? { icon: "skill" as const, tone: "teal" } : { icon: "code" as const, tone: "azure" };
           // A terminal whose shell runs a command shows it where its icon is.
@@ -298,7 +399,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
           return;
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
-        values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
+        values.content = <span data-session-node={node.getId()} data-transient={isPreviewTab(state, tab) ? "true" : undefined}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
         // A session that waits for the user says so before anything else: its run goes nowhere until it is answered.
         if (tab?.sessionId && waiting?.has(tab.sessionId)) values.leading = <SessionWaitingBadge waiting />;
         else if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
@@ -320,6 +421,11 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       }}
       factory={node => {
         if (node.getId() === sessionDraftNodeId) return <div className="session-tab-content">{children}</div>;
+        // A prompt with a tab of its own is written in when its scope is the selected one and no session is shown;
+        // otherwise its tab says what it is, and showing it selects its scope.
+        const prompt = state.drafts?.find(value => draftNodeId(value) === node.getId());
+        if (prompt) return <div className="session-tab-content">{!state.active && shownDraftNodeId(state) === node.getId() ? children
+          : <div className="session-draft-placeholder"><AppIcon name="newSession" size={28} /><span>{promptLabel(prompt)}</span></div>}</div>;
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) return renderFile ? <SessionTabContent node={node}>{visible => renderFile(file, visible)}</SessionTabContent> : null;
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());
@@ -327,7 +433,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       }} /></div>
     {drag.preview && <div className="session-drop-preview" aria-hidden="true" style={{ left: drag.preview.rect.x, top: drag.preview.rect.y,
       width: drag.preview.rect.width, height: drag.preview.rect.height }} />}
-    {menu && root.current && <SessionTabMenu anchor={menu.anchor} items={menu.items} title={t("Open sessions")}
+    {menu && root.current && <SessionTabMenu anchor={menu.anchor} at={menu.at} items={menu.items} title={menu.title ?? t("Open sessions")}
       container={root.current} current={menu.current} onClose={() => setMenu(null)} />}
   </div>;
 }

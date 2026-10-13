@@ -316,7 +316,10 @@ Zoom** `Ctrl+0`, also `/zoom_in`, `/zoom_out` and `/reset_zoom`) zoom the whole 
 percent in Chrome's steps, and work whatever window of the app is open. A focused terminal keeps those
 keys for its program. The host applies the zoom to the view (`desktopShell.zoom`) and keeps it in
 `preferences.json` (`zoom`, written only when it is not 100), so the next start opens at the same zoom
-before the page loads.
+before the page loads. A zoom lays the page out again in a viewport of the size of the window divided by the
+zoom, on every system: the content always fills the window. On macOS this needs NeoAstra 1.3.1, whose zoom is
+the page zoom of WKWebView; an earlier one scaled the picture of the page, which left a part of the window
+empty below 100 percent.
 
 The title bar shows the zoom as a percentage, before the theme switch (`WindowZoom`). A click opens **Zoom
 out**, the percentage, which goes back to 100%, and **Zoom in**; a step that does not exist is disabled (at
@@ -406,9 +409,11 @@ The **Chats** are the sessions of no project, which the TUI calls global session
 first of the Explorer, above the projects, and is closed until it is opened.
 
 Each project opens and closes on its own, and several can be open, each with its sessions. The chevron
-of a row opens and closes it without selecting it. Clicking a project selects it and opens it; clicking
-the selected project closes and opens it. A project that becomes the selected one in any other way (a
-session tab of another project, **Open project**) is opened too. **Collapse all** in the Projects header
+of a row opens and closes it without selecting it. Clicking a project selects it and shows the prompt of
+a new session of it, without opening or closing it, as the row of a session with sub-agents shows the
+session; a double click gives that prompt a tab of its own (see `doc/session-tabs.md`). A project that
+becomes the selected one with a session (a session tab of another project, a session of the search) is
+opened, so that the session is in view. **Collapse all** in the Projects header
 closes every project and the chats. What is open is kept with the favorites and the collapsed sessions in
 this WebView's local storage (`codealta.desktop.projectTree.v1`) and restored as it was at the next start;
 with nothing stored, the selected project is the one open.
@@ -428,6 +433,63 @@ the session, which selects its project. **Rename…** and **Delete…** act on t
 another project they open the session first. `Delete` on the row that has the focus does what
 **Delete…** does. The form of a new session and the
 notices of an unconfirmed action belong to the selected project.
+
+**Move to project…** in the menu of a session of a project (not of a chat) opens a window that lists the
+other projects of the shown space that are not archived (`MoveSessionDialog.tsx`); choosing one moves the
+session there. Dragging the row of a session onto the row of another project does the same
+(`useSessionRowDrag` in `explorer/sessionDrag.ts`): any row of a project can be dragged, not only the selected
+one, a label of the session follows the pointer, and the project row under it is highlighted (`data-over`).
+The drag is made of pointer events, like the drag of a session tab: a native HTML5 drag goes through the drop
+handling of the window's host (WebView2/OLE), which ends it at once. A press that does not move is a click,
+the click that ends a drag is swallowed, and Escape or leaving the window cancels it. Both call
+`workspace.moveSession` (`WorkspaceMoveSessionRpc.cs`), single-flight with rename and delete, which goes to
+`OwnedSessionCommandService.MoveSessionAsync` and `SessionRuntimeService.Move.cs`:
+
+- The session moves with the sessions it started in the same project, at every level; they move first and it
+  moves last, so a move stopped half way (`move_partial`) leaves the session where it was. Those already moved
+  stay moved and the answer names them (also for a journal that could not be replaced, `move_unconfirmed`), so
+  that their tabs and their Remote Control follow them.
+- Nothing moves while one of them runs, has queued work, waits for an answer or has background tasks of its
+  provider (`session_in_use`, `interaction_pending`, `requires_recovery`). A session with Remote Control wanted
+  moves: once the move is done, `OwnedSessionCommandService` attaches it again in its new folder and turns
+  Remote Control on there (the move ended the process that held the link), after its transcript was moved.
+- Each journal is rewritten once, atomically (`SessionViewJournalStore.MoveSessionAsync`, temporary file then
+  replace): the header (`project_ref`, `working_directory`), the summary and the local state change together,
+  so the lists never see the session half moved. No file moves: journals are kept by date.
+- A session that works in a git worktree keeps it when the target project is another checkout of the same
+  repository (and not the checkout of that worktree itself); otherwise it leaves it. A worktree folder is never
+  deleted.
+- A session that was never named takes the name and the default summary of its new project.
+- The attachment of the session is retired: the next send starts it in its new folder, and its first
+  attachment tells the agent in its developer instructions that it was moved, from which folder to which.
+  That notice is kept in memory only: after a restart the agent learns its folder from its instructions alone.
+  A turn the retirement ended (one started from claude.ai) writes the summary its session held, with the old
+  folder, title and preview: the move writes its folder again over it, and the title and preview it gave where
+  they are still the ones it replaced (`RestoreMovedSummaryAsync`), also when the provider did not stop cleanly;
+  the session catalog is then told. The retired attachment's transition is removed whatever happens after the
+  journal was rewritten, or the session could never be attached again. A failure after that point is a warning
+  of a session that moved, never "not moved".
+- A provider that keeps its own copy of a conversation per folder moves it (`IAgentSessionRelocationProvider`,
+  called through `AgentHub` without starting the provider). Claude Code keeps its transcript under
+  `projects/<folder name>/` of its configuration folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`), with the
+  CLI's own folder naming (`ClaudeCodeProjectFolders`): the transcript and its companion folder are copied,
+  checked and the source deleted (`ClaudeCodeTranscriptRelocation`), so that `--resume` started in the new
+  folder finds the real conversation. Two folder names can be one folder (users link the folders of the
+  worktrees of a repository, often as junctions, so that they share conversations): a probe file created in
+  one and looked for in the other tells it, and such a transcript is left where it is. The CLI also records
+  its Remote Control bridge in the transcript, so a moved transcript keeps the claude.ai link. A transcript that cannot be moved is a warning, never a failure: the
+  session then goes on in a new conversation of the CLI seeded with the history CodeAlta recorded.
+
+The window shows the outcome in a toast, with the first warning of the host if there is one (the log has
+them all). The tabs of the moved sessions are pointed at their new project in every space, in the same update
+as the list that shows them there (`retargetSessionTabs`); otherwise the reconciliation of the list would drop
+them. The transient tab stays the transient one when its session moves, and the prompts of new sessions keep
+their tabs. The moves whose tabs have not followed yet are kept, and each list published applies those it shows in
+their new project (`splitPendingTabMoves`), so a fresh read that fails does not lose them. For the same reason
+the background reads of the session list are held while a move runs, and done once it ends
+(`createCoalescedRead`), as is a read after a move whose own read failed. **Move to
+project…** is offered under the same locks as **Rename…** and **Delete…**; Escape during a drag also swallows
+the click of the release that follows. A moved tab is a new tab of the dock, so it can open in another place of its pane.
 
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
 **Other projects**. The star of a row and the menu of the row add and remove a favorite. A favorite is
@@ -469,7 +531,11 @@ so several sessions are deleted from the keyboard. A question goes away with its
 is hidden.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
-before creation. Selecting an existing session tab or sidebar session removes it. Real session
+before creation. Selecting an existing session tab or sidebar session removes it. It is the transient
+tab of the dock, which a session that is only looked at takes as well: one tab, with its title in
+italics, for what the Explorer shows on a click, and a double click to keep it (a session, or the
+prompt of a project, of which several can then be open). See "The transient tab" in
+`doc/session-tabs.md`. Real session
 panes, drafts and split geometry are retained, rather than replaced with a project placeholder.
 The welcome view renders the same 3-D FIGlet/ASCII logo asset as the TUI, with the project name,
 folder and launch guidance below it. Its composer uses the same surface, status line, editor,
@@ -485,7 +551,10 @@ reserves space within its own pane, independently of session dividers. Sizing ob
 actual portal DOM mount, including late-mounted panes. Session tab dragging uses pointer capture
 and public FlexLayout move actions, avoiding native HTML5 drag/drop handling. A highlighted target
 previews the split/merge/insertion, and Escape or loss of capture cancels. The tab menu's **Split right** and
-**Split below** actions provide a keyboard alternative when a pane contains multiple tabs.
+**Split below** actions provide a keyboard alternative when a pane contains multiple tabs. A tab has a menu of
+its own, opened with the other button of the pointer: **Close**, **Close others**, **Close to the right** and
+**Close all** for the tabs of its pane, **Keep open** for the transient tab, and the two splits; the menu of a
+pane has **Close others** and **Close all** as well. See "The menu of a tab" in [session tabs](session-tabs.md).
 
 Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
@@ -818,7 +887,8 @@ edits when leaving, including editors opened after the toast appeared or while i
 Personal, Open source, Experiments, Learning, Clients; a name, an icon and a color in one click, the
 names already taken are not offered), the name, the icon, the color, "What it is for" and a checklist of
 the projects. A space created from the title bar is shown at once. An empty space says "No project in
-this space yet." with **Add projects…**, which opens Settings → Spaces.
+this space yet." with **Add projects…**, which opens the folder picker, just like **+** in the
+Projects header. **Organize spaces…** remains available in the space switch.
 
 **Implementation.**
 
@@ -861,12 +931,14 @@ project; its `alta` tool has the `alta space` commands except `switch`.
 
 ## Composer
 
-A prompt sent while the session works is never refused. `Enter` during a running turn, or behind
-prompts that already wait, adds the prompt to the queue; `Ctrl+Enter` sends it to the running turn as
-steering, and sends it normally when no turn runs. Both wait in compact rows above the prompt card:
+A prompt sent while the session works is never refused. `Enter` sends normally when idle and
+enqueues during a running turn, regardless of the split-button selection, preserving its familiar behavior.
+`Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux uses **Send now**: a normal Send when idle,
+**Send now (steer)** during a running turn. The explicit
+**Steer the running turn** button also sends text to the running turn as steering. Both wait in compact rows above the prompt card:
 steering first, then the queue in the order it is sent. A queued row has a repeat count (stepper or
 typed number), copy, edit, **Steer now** and delete; **Clear queue** or `F10` removes the prompts
-that have not left, and `Ctrl+Enter` with an empty prompt steers with the first queued prompt.
+that have not left. The Steer button with an empty prompt steers with the first queued prompt.
 
 When the session is idle the first queued prompt leaves as a normal Send, with the selection, the
 project references and the images of that moment, also while its tab is hidden. A Send the host
@@ -886,6 +958,10 @@ popover to change them (reasoning is a stepped slider over the model's supported
 browse the agent-prompt and model catalogs. Enabled-provider readiness appears in the same bar.
 The expanded prompt editor retains file insertion without reference-inspection diagnostics.
 
+Enqueueing while idle submits immediately. A pending next-turn agent-prompt selection is consumed
+by normal Send; it is not a reason to hold the frontend queue. Run, drain, transition and retirement
+checks still apply. Prompts with images enqueue instead of steering, since steering accepts text only.
+
 The model list holds the models the provider reports and the slider the efforts of the selected
 model: neither has a "default" entry, and a model without reasoning shows **None**. A draft or a
 session that has no model yet starts as in the TUI: with the provider's configured model when the
@@ -895,6 +971,14 @@ applies the same rule (`AgentModelDefaults`) to what it reports for a session an
 selects nothing, so a Send never reaches a provider without a model while the provider lists one.
 Choosing another model starts it with its own effort. A saved model the provider does not list is
 kept and shown as **Unverified**; settings change again once a listed model is chosen.
+
+The model list (`ComposerModelPicker`, shared by a session and a draft) is a button that opens a search
+box over the models. The focus stays in the box: a search keeps the models whose name or id holds
+every word (`matchingModels`), Up, Down, Page Up and Page Down move the active model, Enter takes it,
+and Escape closes the list without closing the form. The list opens on the model in use. It shows ten
+models and scrolls for the others; **Models shown in the model list of the prompt** on the **Models**
+page of Settings changes that number (4 to 30). The number is a preference of the window
+(`modelPicker.ts`, local storage key `codealta.desktop.modelPicker.rows.v1`).
 
 Beside the chip, a small button (`PermissionModeMenu`) names the permission mode the session runs in and
 opens the modes it can be given (`SessionChoicesResponse.PermissionModes`; empty hides the button, as in
@@ -1500,6 +1584,94 @@ race. Selecting another session, changing page or closing the view cancels the w
 suppresses late results. These checks are not reparse
 isolation or live recovery.
 
+### Fork and rewind
+
+A session is forked or rewound from one window, `SessionBranchDialog`, in the folder of the feature
+(`frontend/src/sessionBranch/`). The host side is `workspace.sessionTurns`, `workspace.forkSession` and
+`workspace.rewindSession` (`WorkspaceBranchSessionRpc.cs`).
+
+**What opens the window.** Nothing forks or rewinds at once: each entry asks for the window, preselected.
+
+- The commands `fork` and `rewind` of the command registry (category **Session**, beside `compact`; no
+  key). They are offered for an owned session of a project that is not archived, and open the window on
+  the end of the session for a fork and on the last prompt for a rewind.
+- **Fork from here** and **Rewind to here** on a user message of the timeline: two buttons in its hover
+  actions, before **Copy**, and a context menu on the message (the menu of the system is kept while text is
+  selected, and on a link or a field). Only the prompt of a turn that the user wrote and the journal holds
+  gets them (`canBranchFrom`, `turnPromptKeys`): not a message of another agent, not the result of a
+  background job, not a prompt being sent, not a live row, and not a message sent while a turn ran (a steer
+  belongs to the turn that was running). The message is named by its journal offset, which is the
+  `promptOffset` of its turn, not by the key of its row: a row takes a `text:` key while the live view shows
+  the same text.
+- **Fork…** in the menu of a session row of the Explorer (`SessionAction` `fork`, with the authority of a
+  rename): the session is selected first, and its pane shows the window.
+
+All three go through one store, `createBranchRequests` (`branchRequests.ts`): a request names a session, a
+mode and, for a message, its offset. The pane of that session follows its own request with
+`useSyncExternalStore` and renders the window; `App` does not follow the store, so opening the window
+renders one pane. A change that was made closes the request from `App` (`requests.done`), because the
+pane that showed the window may be gone by then.
+
+**The window.** It reads the turns by pages of 100, the newest first (`readSessionTurns`), and reads older
+pages by itself until the turn of a message that was pointed at is among them; **Load older turns** reads
+the page before. The list is the end of the session, then the turns from the last to the first
+(`branchRows`); **Only my prompts** (on when it opens, `Ctrl+O`) hides the turns an agent, the answer to a
+question or a background job started, and typing filters by the words of the prompt. The preview shows the
+prompt of the selected turn, what the turn did, and what the action does there with its numbers
+(`forkConsequence`, `rewindConsequence`): a fork before turn N starts with turns 1 to N-1, a rewind to turn N
+removes turns N to the last. `Tab` in the filter switches between Fork and Rewind, as it switches the
+category in the search window; the arrows and the page keys move, `Enter` acts, `Escape` closes. While a
+point is selected the conversation behind scrolls to its prompt when the loaded window holds it
+(`showRow` of the pane's timeline command), and goes back to where it was when the window closes without a
+change.
+
+A rewind is refused before it is asked when the pane knows why (`rewindBlock`): no turn is selected, the
+session works (the pane's run activity, the `activeRunId` of the turns, a turn whose status is `running`), a
+question waits, a task still runs in the background, or the session is read-only. A queued prompt and a
+pending permission are known to the host only: its refusal is shown in the window, which stays open. Every
+status of the host has its own message (`branchMessage`). `session_changed` and `turn_not_found` read the
+turns again. `fork_unconfirmed` and `rewind_unconfirmed` end what the window sends: the outcome is not
+known, and nothing is retried.
+
+**One change at a time.** `createSessionBranch` (`sessionBranchRpc.ts`) sends a fork or a rewind once, with
+the scope the host checks (`branchTarget`: the chats, or the exact project of the pane), refuses a second
+change while the first is under way, and takes an answer that is lost, of another host or about another
+session as an unknown outcome.
+
+**After a fork** (`showFork`): the prompt the host returns is written as the draft of the new session
+before its composer exists (`transferPromptDraft`, which never replaces a draft), the session list is read
+again, the fork is revealed in a tab, and a toast says how many turns it started with. The result of a
+background job and a message of another agent are prompts of the host: `composerPrompt` keeps them out of
+a composer.
+
+**After a rewind** (`showRewind`): the prompt goes to the composer of the session when it is empty; when it
+holds a draft, the draft is kept and a toast offers the prompt to copy. A toast says how many turns were
+removed and that changed files were left as they are, with **Open the kept session** when the removed
+turns were kept (the choice is remembered in `codealta.desktop.rewind.keep-removed-turns.v1`).
+
+**The pane after a rewind.** A rewind writes the journal again, its first line included, so every offset
+moves, while the page assumes a journal only grows. The pane of a rewound session is therefore mounted
+again: its key is `sessionPaneKey(hostEpoch, tab, createdAt, rewinds)`, where `rewinds` is the
+`rewindCount` of the session row, or the count the host answered when the rewind was made from this window
+(the pane does not wait for the list of sessions). The image cache, the tool-record cache and the scroll
+memory, which are kept by session and offset beyond a pane, take the same count. `sessionListSignature`
+includes `rewindCount`, so a rewind made through the `alta` tool publishes a new list and reloads the pane
+as well. The host forgets what its live view held of the removed turns (`RuntimeDisplayProjection`), or the
+pane would show them again as live rows.
+
+**Where a session comes from.** A session row has `forkedFromSessionId`, `forkedFromTitle`, `forkKind`
+(`fork`, or `rewind` for the session that keeps what a rewind removed) and `forkTurnCount`, the number of
+turns before the point: those a fork started with, and those the source kept for a `rewind` session, which
+itself holds every turn the source had. `sessionLineage` reads them. A line above the timeline says
+"Forked from *title* · started with N turns" or "Kept from a rewind of *title* · rewound to the end of turn
+N", the title opening the source while the catalog lists it; Session info has an **Origin** row, also in
+the copied details; the row of the session in the Explorer has a small mark with the same words as its
+tooltip. A fork is not a sub-agent: `parentSessionId` stays null and it is listed beside its source.
+
+The pure modules have their tests beside them, and `sessionBranchDialog.browser.test.ts` mounts the window
+with a fake host (`sessionBranchDialog.mount.tsx`): the keyboard, the filter, the switch of mode, the
+reasons a rewind is not offered, and the request each action sends.
+
 ### Notes
 
 Each open owned-host session has a read-only **Notes** overlay at the top right above its timeline.
@@ -1511,7 +1683,9 @@ automatically, refreshes every ten seconds after the previous read completes, an
 notes, cleared notes and no notes event share the same empty result; a failed read is distinct.
 There is no editing, automatic mutation retry or browser persistence. This feature does not require ask opt-in.
 
-The default Notes position leaves the first message heading clear. Proposal cards sit to the left of
+The default Notes position leaves the first message heading clear. That heading is one line at every
+width: in a narrow pane the time beside the actions of the message is cut short (its tooltip has it
+whole) instead of going under the title, where Notes is. Proposal cards sit to the left of
 Notes, or to its right if Notes was dragged left. When neither side fits, proposals use a scrollable
 bottom strip in the timeline, and Notes is temporarily clamped above it. This does not overwrite saved
 Notes geometry or change either overlay's collapsed state; removing the proposals releases that space.
@@ -3230,6 +3404,68 @@ The prompt of a run is one of the commands the host keeps a receipt of, with the
 the reminders. A run is refused, before a session is created for it, only while as many commands are
 pending as the host keeps (256); it runs again at its next trigger.
 
+## Bookmarks
+
+A **bookmark** marks a whole session, or one message of its timeline (a prompt of the user or a message
+of the assistant), so that it is found again. The sources are `CodeAlta.Catalog/Bookmarks/` (the store
+and the service), `Desktop/Rpc/BookmarksRpc.cs` (host), `frontend/src/bookmarks/` (page) and
+`BuiltInAltaCommandContributor.Bookmarks.cs` (`alta bookmark`; see `doc/live-tool.md`).
+
+- **What a bookmark holds.** The session, and for a message what names it for good: the run of its turn
+  and the id of its content, read by the host from the journal. The byte offset of the record is kept
+  only as the place to look first: a provider change and a rewind rewrite the header of a journal and
+  move every record after it. The bookmark also keeps the beginning of the message as plain text, when
+  the message was written, the name the user gave it (none at first), and the title its session had.
+  Bookmarks are in the application database (owner `bookmarks`), under the state root: the developer
+  instance has its own, as it has its own sessions.
+- **Which rows.** A message of the user or of the assistant that the journal holds whole
+  (`canBookmark`: a completed content record with a numeric key). A row that is being written, the echo
+  of a prompt being sent, a tool call, a status row and a card of a plugin have no bookmark button.
+- **In the timeline.** The button is among the actions of the row, shown as they are under the pointer
+  or with the keyboard focus in the row; it stays drawn, filled, once the message is bookmarked. The
+  rows do not receive the bookmarks as properties: each follows its own mark in a store of the pane
+  (`timelineBookmarks.ts`), which matches the bookmarks of the session with the records of the loaded
+  window by run and content id, so that a bookmark renders one row again. The host sends the content id
+  as the timeline entries carry it.
+- **The rail.** `BookmarkRail` draws one mark for each bookmarked message of the session at the right
+  edge of the timeline, in the order of the conversation, centered in its height; a session without one
+  has no rail. A mark shows a card (whose message it is, its name, its date) under the pointer or with
+  the focus, and goes to its message when pressed. The marks of the messages in view are lit; this is
+  read from the layout once a frame at most, while the timeline scrolls or changes size. Up, Down, Home
+  and End move through the marks. `Shift+F3` / `Shift+F4` go to the bookmark before or after the rows in
+  view (`bookmarkStep`); a bookmark whose message is older than the loaded window counts as before.
+- **Going to a message.** The page asks the host where the message is now (`bookmarks.resolve`), opens
+  the session, and leaves a request for its pane (`revealRequests.ts`, one at a time, each its own
+  object). The history of the pane (`History`, `reveal` / `onReveal`) answers at once when its window
+  holds the offset; otherwise it reads older history a chunk of turns at a time (`revealStep`) until it
+  does, then the timeline puts the message at its top and points it out for a moment
+  (`data-revealed`). A window that slid away from the end of the journal reads the newest history
+  first. While a session works its journal changes under the read: the newest history is read again,
+  which keeps what was loaded, a few times before the request fails. A message the session no longer
+  holds (it was rewound past it) is said in a toast, and the bookmark stays until it is removed.
+- **A session.** **Bookmark session** / **Remove session bookmark** is in the menu of a session row,
+  before **Delete**, and `/bookmark` does the same for the session in front. A bookmarked session has a
+  small mark on its row (`SessionBookmarkMark`, which follows that one fact).
+- **The tab.** `Ctrl+G` then `Ctrl+F`, the bookmark icon of the activity rail or `/bookmarks` open the
+  **Bookmarks** tab, one tab of no project like Work items (`view: "bookmarks"`). It lists the bookmarks
+  of every project and space: by project (the chats are a group), then by session, the project and the
+  session with the newest bookmark first, and the messages of a session in the order of its
+  conversation (`groupBookmarks`). A row says whose message it is, its name, what follows it and when it
+  was written; pressing it goes to the message. The name of a bookmark is edited in place (an empty name
+  gives it back the beginning of its message) and a bookmark is removed with the button beside it,
+  without a question. A search looks in the names, the messages, the titles of the sessions and the
+  names of the projects; a filter keeps the messages or the sessions.
+- **Sessions that go away.** Deleting a session on purpose removes its bookmarks
+  (`SessionRuntimeService.SessionDeleted`). The retention of sessions keeps a session that has a
+  bookmark, of its own or of one of its messages (`DesktopBookmarks`, `doc/session-retention-runtime.md`).
+  A session that is gone otherwise is marked **Session deleted** in the tab: its bookmarks lead nowhere
+  and are removed by hand. A list of sessions that cannot be read never marks one as gone.
+- **The link to the host.** `bookmarksHub.ts` lists the bookmarks when it connects and each time the
+  host tells that they changed (`bookmarks.watch`), so a bookmark an agent adds with `alta bookmark add`
+  appears without a refresh; a change made in the window is shown at once and confirmed by the list
+  that follows. The window of the application does not follow the hub: the tab, the rail and the marks
+  do.
+
 ## Work items
 
 A **work item** is something left to do in a project: a **task** an agent proposed, or a **plan**
@@ -3561,6 +3797,9 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
 | `Ctrl+G` then `Ctrl+I` | Work items (`/work_items`) |
 | `Ctrl+G` then `Ctrl+B` | Issues and pull requests (`/issues`) |
+| `Ctrl+G` then `Ctrl+F` | Bookmarks (`/bookmarks`), the tab of the bookmarks of every project |
+| `Shift+F3` / `Shift+F4` | Previous / next bookmarked message of the session (`/bookmark_prev`, `/bookmark_next`) |
+| No key | Bookmark Session (`/bookmark`): bookmarks the session in front, or removes its bookmark |
 | `Ctrl+G` then `C` | Statistics (`/statistics`), the dashboards of the numbers of all the sessions |
 | `Ctrl+G` then `Ctrl+V`, `Ctrl+G` then `1`…`9` | Go to Space (`/space`, opens the space switch), show the space at that place of the list (Default is 1) |
 | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` (also from a terminal) | Previous / next space (`/space_prev`, `/space_next`) |
@@ -3568,7 +3807,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | No key | Worktrees (`/worktree`), the window of the git worktrees of the project in front |
 | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
-| `Enter`, `Ctrl+Enter`, `Shift+Enter` | Send (queued while a turn runs), steer the running turn, new line |
+| `Enter`, `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows/Linux), `Shift+Enter` | Send when idle / enqueue while busy, send now (steer while a turn runs), new line |
 | `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |
 | `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |
 | `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
@@ -3695,12 +3934,13 @@ sent, and keeps no intent for it. `sessions.receipts` pages what the host still 
 the pending commands first, which are the ones that can still be aborted or cancelled, then the
 settled ones, the most recent first.
 
-The composer visibly emphasizes **Cancel observed run** when an eligible point-in-time target
-is available, keeping **Send** as a separate secondary button. This is not a live-running indicator.
+The composer keeps **Cancel observed run** separate when an eligible point-in-time target
+is available, alongside the Send split button. This is not a live-running indicator.
 A retained original Send keeps **Retry exact request** primary; retained run cancellation instead
 reads **Retry exact cancellation**, preserving its original target and manual recovery. Neither
 presentation changes nor cancellation clear the draft or initiate runtime reads. The two controls
-keep separate identities and handlers: editor Enter still sends, Ctrl+Enter steers, and in the expanded
+keep separate identities and handlers: editor Enter sends when idle and enqueues while busy,
+Cmd+Enter (macOS) or Ctrl+Enter (Windows/Linux) sends now (steers while busy), and in the expanded
 editor Enter inserts a new line while Escape or Ctrl+Enter closes without sending. Cancellation
 signalling does not establish run completion.
 On narrow screens the labelled controls wrap rather than clip; exact-target evidence and the
@@ -3946,7 +4186,7 @@ attachment and recorded non-null run. It never creates or replaces a runtime, fa
 send/queue, or silently targets a later run. The host rechecks ownership and target identity;
 stale, retiring, transitioning, terminated or unsupported targets fail rather than retarget.
 While a turn runs, the compact composer offers a **Steer the running turn** icon beside Send; it is
-the same action as `Ctrl+Enter` (see Composer) and is disabled for empty text with nothing queued.
+the explicit steering action (see Composer) and is disabled for empty text with nothing queued.
 The composer captures the run to steer when the prompt leaves, not when the key is pressed. A pending
 Send is not an editable steering draft.
 Steering preserves the existing run's permission authority and cannot reopen a closed review

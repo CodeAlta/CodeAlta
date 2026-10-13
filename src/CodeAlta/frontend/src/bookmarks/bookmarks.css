@@ -1,0 +1,93 @@
+/* Bookmarks: the mark of a message and of a session row, the rail beside a timeline, and the tab that lists them all. */
+:root { --bookmark-tone: var(--yellow); }
+
+/* A message of the timeline: its bookmark button stays drawn once the message is bookmarked. */
+.ide-shell .message-actions > button.bookmark-message[aria-pressed="true"] { opacity: 1; pointer-events: auto; background: transparent; color: var(--bookmark-tone); }
+.ide-shell .message-actions > button.bookmark-message[aria-pressed="true"] svg { fill: currentColor; }
+.ide-shell .message-actions > button.bookmark-message:hover { color: var(--bookmark-tone); }
+/* The message a bookmark led to is pointed out for a moment. */
+@keyframes bookmark-reveal {
+  0%, 35% { box-shadow: 0 0 0 2px var(--bookmark-tone); background-color: color-mix(in srgb, var(--bookmark-tone) 18%, var(--panel)); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+.ide-shell .timeline-message[data-revealed="true"] { animation: bookmark-reveal 1.8s ease-out; }
+
+/* A bookmarked session, on its row of the Explorer. */
+.session-bookmark-mark { display: inline-flex; align-items: center; flex: none; margin-left: 4px; color: var(--bookmark-tone); }
+.session-bookmark-mark svg { fill: currentColor; }
+
+/* The rail: one mark for each bookmarked message of the session, beside the timeline. */
+.bookmark-rail { position: absolute; top: 50%; right: 13px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; max-height: min(70%, 440px);
+  padding: 4px 0; overflow: hidden auto; scrollbar-width: none; transform: translateY(-50%); }
+.session-timeline-area[data-ask="file"] > .bookmark-rail { display: none; }
+.bookmark-rail > .bp6-popover-target { display: block; line-height: 0; }
+.bookmark-rail-mark { display: grid; justify-items: end; align-items: center; width: 28px; height: 13px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.bookmark-rail-mark > span { display: block; width: 12px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--bookmark-tone) 55%, var(--muted)); opacity: .75;
+  transition: width 120ms ease, opacity 120ms ease, background-color 120ms ease; }
+.bookmark-rail-mark[data-in-view="true"] > span { width: 18px; opacity: 1; background: var(--accent); }
+.bookmark-rail-mark:hover > span, .bookmark-rail-mark:focus-visible > span, .bp6-popover-open > .bookmark-rail-mark > span { width: 24px; opacity: 1; background: var(--bookmark-tone); }
+.bookmark-rail-mark:focus-visible { outline: none; }
+@media (prefers-reduced-motion: reduce) { .bookmark-rail-mark > span { transition: none; } }
+/* What a mark leads to. The popover is drawn outside the shell, so its rules are not shell-scoped. */
+.bookmark-rail-popover .bp6-popover-content { padding: 0; border-radius: 10px; }
+.bookmark-rail-card { display: grid; gap: 3px; width: max-content; max-width: min(320px, 60vw); padding: 9px 12px; }
+.bookmark-rail-card-kind { display: inline-flex; align-items: center; gap: 5px; color: var(--bookmark-tone); font-size: 11.5px; font-weight: 600; }
+.bookmark-rail-card-kind svg { fill: currentColor; }
+.bookmark-rail-card strong { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-weight: 600; line-height: 1.35; }
+.bookmark-rail-card time { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
+/* The tab. */
+.bookmarks-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); color: var(--text); container: bookmarks / inline-size; }
+/* In a narrow tab the date of a message goes under its text, which keeps the width. */
+@container bookmarks (max-width: 460px) {
+  .bookmarks-header { padding-inline: 12px; }
+  .bookmarks-list { padding-inline: 12px; }
+  .bookmark-open { grid-template-columns: 22px minmax(0, 1fr); }
+  .bookmark-open > time { grid-column: 2; padding-top: 0; }
+  .bookmarks-tools { justify-content: flex-start; }
+}
+.bookmarks-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 20px 12px; border-bottom: 1px solid var(--line); }
+.bookmarks-heading { display: flex; flex: none; align-items: center; gap: 8px; color: var(--bookmark-tone); }
+.bookmarks-heading > svg { fill: currentColor; }
+.bookmarks-heading h1 { margin: 0; color: var(--text); font-size: 17px; }
+.bookmarks-count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--panel-3); color: var(--muted);
+  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; }
+/* The search and the filter take the rest of the row of the title, at its end; in a narrow tab they go under it. */
+.bookmarks-tools { display: flex; flex: 1 1 320px; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.bookmarks-search { flex: 0 1 280px; min-width: 140px; }
+.bookmarks-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px 20px 28px; }
+.bookmarks-list > * { max-width: 980px; margin-inline: auto; }
+.bookmarks-list > .bp6-non-ideal-state { height: 100%; }
+.bookmarks-list > .bp6-non-ideal-state .bp6-non-ideal-state-visual { color: var(--muted); }
+.bookmarks-status { margin: 12px auto; color: var(--muted); text-align: center; }
+.bookmarks-project { margin-bottom: 22px; }
+.bookmarks-project > h2 { display: flex; align-items: center; gap: 7px; margin: 0 0 8px; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.bookmarks-project > h2 > span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bookmarks-session { margin-bottom: 8px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.bookmarks-session-heading { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 8px 4px 6px; background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
+.bookmarks-session-open { display: inline-flex; align-items: center; flex: 0 1 auto; gap: 7px; min-width: 0; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.bookmarks-session-open > svg { flex: none; color: var(--muted); }
+.bookmarks-session-open > strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.bookmarks-session-open:hover:not(:disabled), .bookmarks-session-open:focus-visible { outline: none; background: var(--panel-3); }
+.bookmarks-session-open:disabled { cursor: default; }
+.bookmarks-session-title { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.bookmarks-session-heading:has(.bookmarks-session-tag) .bookmarks-session-open > svg { color: var(--bookmark-tone); fill: currentColor; }
+.bookmarks-session-heading > .bp6-tag { flex: none; }
+.bookmarks-session-heading > .bookmark-actions { margin-left: auto; }
+.bookmarks-messages { margin: 0; padding: 0; list-style: none; }
+.bookmark-row { display: flex; align-items: center; gap: 4px; padding-right: 8px; border-top: 1px solid var(--line); }
+.bookmark-open { display: grid; flex: 1 1 auto; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 10px; min-width: 0; padding: 9px 8px 9px 12px; border: 0;
+  background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.bookmark-open:hover:not(:disabled), .bookmark-open:focus-visible { outline: none; background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.bookmark-open:disabled { cursor: default; }
+.bookmark-role { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.bookmark-row[data-role="user"] .bookmark-role { background: color-mix(in srgb, var(--user-accent) 14%, transparent); color: var(--user-accent); }
+.bookmark-text { display: grid; gap: 2px; min-width: 0; }
+.bookmark-text > strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-detail { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.bookmark-open > time { padding-top: 2px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bookmark-actions { display: inline-flex; flex: none; gap: 2px; color: var(--muted); }
+.bookmark-rename { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; padding: 6px 0 6px 12px; }
+.bookmark-rename > .bp6-input-group { flex: 1 1 auto; min-width: 0; }
+.bookmarks-session[data-missing="true"] .bookmark-open, .bookmarks-session[data-missing="true"] .bookmarks-session-open { opacity: .6; }

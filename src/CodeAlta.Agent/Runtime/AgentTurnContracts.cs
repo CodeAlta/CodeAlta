@@ -203,6 +203,13 @@ public sealed record AgentTurnRequest
     public required AgentRunId RunId { get; init; }
 
     /// <summary>
+    /// Gets or initializes the key that groups the requests of the session for the prompt cache of a provider that
+    /// routes by one; null for the session identifier. A session that was forked has the key of the session at the
+    /// start of its chain of forks, so that its first request reads what the source wrote to the cache.
+    /// </summary>
+    public string? PromptCacheKey { get; init; }
+
+    /// <summary>
     /// Gets or initializes the model identifier.
     /// </summary>
     public string? ModelId { get; init; }

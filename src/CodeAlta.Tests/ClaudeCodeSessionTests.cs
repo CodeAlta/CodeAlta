@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -1067,6 +1068,170 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task ForkedSession_StartsTheCliOnACopyOfTheConversation_CutAtThePoint()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        string sourceId, claudeSessionId, firstAnswer;
+        await using (var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var session = await CreateSessionAsync(runtime, directory))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
+            firstAnswer = SessionProcess(cli).Entries.Single();
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second") }).WaitAsync(Timeout);
+            sourceId = session.SessionId;
+            claudeSessionId = SessionProcess(cli).SessionId;
+        }
+
+        // What a fork writes: the records before the second turn, and the state of that point for the provider to take up.
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
+        var turns = await store.ReadTurnsAsync(sourceId);
+        var point = await store.ReadBranchPointAsync(sourceId, turns.Turns[1].RunId, null, CancellationToken.None);
+        Assert.AreEqual(firstAnswer, ClaudeCodeProviderState.Read(point.State)!.Leaf, "Each answer records the entry of the transcript it ends with.");
+        var forkId = Guid.CreateVersion7().ToString();
+        var now = DateTimeOffset.UtcNow;
+        await store.CommitForkAsync(
+            point,
+            point.Summary with { SessionId = forkId, CreatedAt = now, UpdatedAt = now },
+            point.State with
+            {
+                SessionId = forkId,
+                ProviderBranch = new(AgentProviderBranchKind.Fork, AtEnd: false) { CurrentProviderState = point.CurrentState.ProviderState },
+            },
+            header: null, [], includeRemainder: false, CancellationToken.None);
+
+        string forkedConversation;
+        await using (var forkRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var fork = await forkRuntime.ResumeSessionAsync(forkId, CreateResumeOptions(directory)))
+        {
+            var events = Collect(fork);
+            await fork.SendAsync(new AgentSendOptions { Input = AgentInput.Text("another second") }).WaitAsync(Timeout);
+
+            var process = SessionProcess(cli);
+            Assert.AreEqual(claudeSessionId, process.ResumedSessionId);
+            Assert.IsTrue(process.ForksSession, "The conversation of the source is not written.");
+            Assert.AreEqual(firstAnswer, process.ResumedAt);
+            Assert.AreEqual("another second", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()), "The CLI holds the conversation up to the point.");
+            forkedConversation = process.SessionId;
+            Assert.AreNotEqual(claudeSessionId, forkedConversation);
+            // The source spent two turns; the fork is counted its own one.
+            var usage = events.Snapshot().OfType<AgentSessionUpdateEvent>().Last(static e => e.Usage?.LastOperation?.Cost is not null).Usage!;
+            Assert.AreEqual(0.01, usage.LastOperation!.Cost!.Value, 1e-9);
+        }
+
+        var state = (await store.GetStateAsync(forkId))!;
+        Assert.IsNull(state.ProviderBranch, "The CLI answered: the fork has a conversation of its own from here on.");
+        Assert.AreEqual(forkedConversation, ClaudeCodeProviderState.Read(state)!.SessionId);
+        Assert.AreEqual(claudeSessionId, ClaudeCodeProviderState.Read((await store.GetStateAsync(sourceId))!)!.SessionId, "The source keeps its own.");
+
+        await using var laterRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var later = await laterRuntime.ResumeSessionAsync(forkId, CreateResumeOptions(directory));
+        await later.SendAsync(new AgentSendOptions { Input = AgentInput.Text("third") }).WaitAsync(Timeout);
+        var resumed = SessionProcess(cli);
+        Assert.AreEqual(forkedConversation, resumed.ResumedSessionId);
+        Assert.IsFalse(resumed.ForksSession);
+        Assert.IsNull(resumed.ResumedAt);
+    }
+
+    [TestMethod]
+    public async Task RewoundSession_ResumesItsConversationAtThePoint()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        string sessionId, claudeSessionId, firstAnswer;
+        await using (var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var session = await CreateSessionAsync(runtime, directory))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
+            firstAnswer = SessionProcess(cli).Entries.Single();
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second") }).WaitAsync(Timeout);
+            sessionId = session.SessionId;
+            claudeSessionId = SessionProcess(cli).SessionId;
+        }
+
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
+        var turns = await store.ReadTurnsAsync(sessionId);
+        var point = await store.ReadBranchPointAsync(sessionId, turns.Turns[1].RunId, null, CancellationToken.None);
+        await store.CommitRewindAsync(
+            point,
+            point.Summary,
+            point.State with { ProviderBranch = new(AgentProviderBranchKind.Rewind, AtEnd: false) { CurrentProviderState = point.CurrentState.ProviderState } },
+            header: null, [], CancellationToken.None);
+
+        await using var rewoundRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var rewound = await rewoundRuntime.ResumeSessionAsync(sessionId, CreateResumeOptions(directory));
+        var events = Collect(rewound);
+        await rewound.SendAsync(new AgentSendOptions { Input = AgentInput.Text("another second") }).WaitAsync(Timeout);
+
+        var process = SessionProcess(cli);
+        Assert.AreEqual(claudeSessionId, process.ResumedSessionId);
+        Assert.IsFalse(process.ForksSession, "The session keeps its conversation, cut after the entry.");
+        Assert.AreEqual(firstAnswer, process.ResumedAt);
+        Assert.AreEqual(claudeSessionId, process.SessionId);
+        Assert.AreEqual("another second", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()));
+        // The turn that was removed is not counted again with the next one.
+        var usage = events.Snapshot().OfType<AgentSessionUpdateEvent>().Last(static e => e.Usage?.LastOperation?.Cost is not null).Usage!;
+        Assert.AreEqual(0.01, usage.LastOperation!.Cost!.Value, 1e-9);
+        Assert.IsNull((await store.GetStateAsync(sessionId))!.ProviderBranch);
+    }
+
+    [TestMethod]
+    public async Task ConversationRecordedWithoutEntries_IsForkedWhole_AndToldAsTextFromAnEarlierPoint()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        string sessionId, claudeSessionId;
+        await using (var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var session = await CreateSessionAsync(runtime, directory))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first question") }).WaitAsync(Timeout);
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second question") }).WaitAsync(Timeout);
+            sessionId = session.SessionId;
+            claudeSessionId = SessionProcess(cli).SessionId;
+        }
+
+        // A state as a version that did not follow the entries of the transcript recorded it.
+        static AgentSessionState WithoutLeaf(AgentSessionState state, string id, AgentProviderBranch branch)
+        {
+            var recorded = ClaudeCodeProviderState.Read(state)!;
+            return state with { SessionId = id, ProviderState = (recorded with { Leaf = null }).ToJson(), ProviderBranch = branch };
+        }
+
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
+        var turns = await store.ReadTurnsAsync(sessionId);
+        var now = DateTimeOffset.UtcNow;
+        var whole = await store.ReadBranchPointAsync(sessionId, null, null, CancellationToken.None);
+        var wholeId = Guid.CreateVersion7().ToString();
+        await store.CommitForkAsync(whole, whole.Summary with { SessionId = wholeId, CreatedAt = now, UpdatedAt = now },
+            WithoutLeaf(whole.State, wholeId, new(AgentProviderBranchKind.Fork, AtEnd: true)), null, [], false, CancellationToken.None);
+        var earlier = await store.ReadBranchPointAsync(sessionId, turns.Turns[1].RunId, null, CancellationToken.None);
+        var earlierId = Guid.CreateVersion7().ToString();
+        await store.CommitForkAsync(earlier, earlier.Summary with { SessionId = earlierId, CreatedAt = now, UpdatedAt = now },
+            WithoutLeaf(earlier.State, earlierId, new(AgentProviderBranchKind.Fork, AtEnd: false)), null, [], false, CancellationToken.None);
+
+        await using var runtimeOfForks = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using (var fork = await runtimeOfForks.ResumeSessionAsync(wholeId, CreateResumeOptions(directory)))
+        {
+            await fork.SendAsync(new AgentSendOptions { Input = AgentInput.Text("third question") }).WaitAsync(Timeout);
+            var process = SessionProcess(cli);
+            Assert.AreEqual(claudeSessionId, process.ResumedSessionId);
+            Assert.IsTrue(process.ForksSession);
+            Assert.IsNull(process.ResumedAt, "The whole conversation is copied: no entry is needed.");
+            Assert.AreEqual("third question", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()));
+        }
+
+        await using var cut = await runtimeOfForks.ResumeSessionAsync(earlierId, CreateResumeOptions(directory));
+        await cut.SendAsync(new AgentSendOptions { Input = AgentInput.Text("another question") }).WaitAsync(Timeout);
+        var started = SessionProcess(cli);
+        Assert.IsNull(started.ResumedSessionId, "Without the entry of the point the CLI cannot cut its conversation there.");
+        var sent = ClaudeCodeFakeProcess.UserText(started.UserMessages.Single());
+        StringAssert.Contains(sent, "<codealta_previous_conversation>");
+        StringAssert.Contains(sent, "first question");
+        Assert.IsFalse(sent.Contains("second question", StringComparison.Ordinal), "What follows the point is not told.");
+        StringAssert.EndsWith(sent, "another question");
+    }
+
+    [TestMethod]
     public async Task MissingTranscript_StartsAgainWithTheRecordedConversationAsContext()
     {
         using var directory = TestTempDirectory.Create();
@@ -1340,6 +1505,10 @@ public sealed class ClaudeCodeSessionTests
             "Claude Code started a turn by itself: Background command \"Run the tests\" completed (exit code 0)",
             shown.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.User).Content);
         Assert.AreEqual(1, process.UserMessages.Count);
+        // Nobody wrote that message: the turns of the session say so, for what offers prompts to continue from.
+        var turns = (await new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path)).ReadTurnsAsync(session.SessionId)).Turns;
+        Assert.IsFalse(turns[0].StartedByProvider);
+        Assert.IsTrue(turns.Single(turn => turn.RunId == secondRun.Value).StartedByProvider);
         CollectionAssert.AreEqual(
             new[] { AgentActivityPhase.Requested, AgentActivityPhase.Started, AgentActivityPhase.Completed },
             shown.OfType<AgentActivityEvent>().Where(static e => e.ActivityId == "toolu_bg").Select(static e => e.Phase).ToArray());

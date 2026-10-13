@@ -39,7 +39,14 @@ public sealed record AgentSessionMetadata(
     string? CreatedBySessionId = null,
     AgentRunId? CreatedByRunId = null,
     AgentSessionViewStateMetadata? ViewState = null,
-    string? WorktreePath = null);
+    string? WorktreePath = null)
+{
+    /// <summary>Gets where the session comes from when it starts with the turns of another one; null otherwise.</summary>
+    public Runtime.AgentSessionForkOrigin? ForkedFrom { get; init; }
+
+    /// <summary>Gets the number of times the session was rewound: its journal became shorter each time.</summary>
+    public int RewindCount { get; init; }
+}
 
 /// <summary>
 /// Describes cached CodeAlta-local session view state associated with a persisted agent session.
