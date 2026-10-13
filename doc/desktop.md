@@ -434,6 +434,63 @@ another project they open the session first. `Delete` on the row that has the fo
 **Delete…** does. The form of a new session and the
 notices of an unconfirmed action belong to the selected project.
 
+**Move to project…** in the menu of a session of a project (not of a chat) opens a window that lists the
+other projects of the shown space that are not archived (`MoveSessionDialog.tsx`); choosing one moves the
+session there. Dragging the row of a session onto the row of another project does the same
+(`useSessionRowDrag` in `explorer/sessionDrag.ts`): any row of a project can be dragged, not only the selected
+one, a label of the session follows the pointer, and the project row under it is highlighted (`data-over`).
+The drag is made of pointer events, like the drag of a session tab: a native HTML5 drag goes through the drop
+handling of the window's host (WebView2/OLE), which ends it at once. A press that does not move is a click,
+the click that ends a drag is swallowed, and Escape or leaving the window cancels it. Both call
+`workspace.moveSession` (`WorkspaceMoveSessionRpc.cs`), single-flight with rename and delete, which goes to
+`OwnedSessionCommandService.MoveSessionAsync` and `SessionRuntimeService.Move.cs`:
+
+- The session moves with the sessions it started in the same project, at every level; they move first and it
+  moves last, so a move stopped half way (`move_partial`) leaves the session where it was. Those already moved
+  stay moved and the answer names them (also for a journal that could not be replaced, `move_unconfirmed`), so
+  that their tabs and their Remote Control follow them.
+- Nothing moves while one of them runs, has queued work, waits for an answer or has background tasks of its
+  provider (`session_in_use`, `interaction_pending`, `requires_recovery`). A session with Remote Control wanted
+  moves: once the move is done, `OwnedSessionCommandService` attaches it again in its new folder and turns
+  Remote Control on there (the move ended the process that held the link), after its transcript was moved.
+- Each journal is rewritten once, atomically (`SessionViewJournalStore.MoveSessionAsync`, temporary file then
+  replace): the header (`project_ref`, `working_directory`), the summary and the local state change together,
+  so the lists never see the session half moved. No file moves: journals are kept by date.
+- A session that works in a git worktree keeps it when the target project is another checkout of the same
+  repository (and not the checkout of that worktree itself); otherwise it leaves it. A worktree folder is never
+  deleted.
+- A session that was never named takes the name and the default summary of its new project.
+- The attachment of the session is retired: the next send starts it in its new folder, and its first
+  attachment tells the agent in its developer instructions that it was moved, from which folder to which.
+  That notice is kept in memory only: after a restart the agent learns its folder from its instructions alone.
+  A turn the retirement ended (one started from claude.ai) writes the summary its session held, with the old
+  folder, title and preview: the move writes its folder again over it, and the title and preview it gave where
+  they are still the ones it replaced (`RestoreMovedSummaryAsync`), also when the provider did not stop cleanly;
+  the session catalog is then told. The retired attachment's transition is removed whatever happens after the
+  journal was rewritten, or the session could never be attached again. A failure after that point is a warning
+  of a session that moved, never "not moved".
+- A provider that keeps its own copy of a conversation per folder moves it (`IAgentSessionRelocationProvider`,
+  called through `AgentHub` without starting the provider). Claude Code keeps its transcript under
+  `projects/<folder name>/` of its configuration folder (`CLAUDE_CONFIG_DIR`, else `~/.claude`), with the
+  CLI's own folder naming (`ClaudeCodeProjectFolders`): the transcript and its companion folder are copied,
+  checked and the source deleted (`ClaudeCodeTranscriptRelocation`), so that `--resume` started in the new
+  folder finds the real conversation. Two folder names can be one folder (users link the folders of the
+  worktrees of a repository, often as junctions, so that they share conversations): a probe file created in
+  one and looked for in the other tells it, and such a transcript is left where it is. The CLI also records
+  its Remote Control bridge in the transcript, so a moved transcript keeps the claude.ai link. A transcript that cannot be moved is a warning, never a failure: the
+  session then goes on in a new conversation of the CLI seeded with the history CodeAlta recorded.
+
+The window shows the outcome in a toast, with the first warning of the host if there is one (the log has
+them all). The tabs of the moved sessions are pointed at their new project in every space, in the same update
+as the list that shows them there (`retargetSessionTabs`); otherwise the reconciliation of the list would drop
+them. The transient tab stays the transient one when its session moves, and the prompts of new sessions keep
+their tabs. The moves whose tabs have not followed yet are kept, and each list published applies those it shows in
+their new project (`splitPendingTabMoves`), so a fresh read that fails does not lose them. For the same reason
+the background reads of the session list are held while a move runs, and done once it ends
+(`createCoalescedRead`), as is a read after a move whose own read failed. **Move to
+project…** is offered under the same locks as **Rename…** and **Delete…**; Escape during a drag also swallows
+the click of the release that follows. A moved tab is a new tab of the dock, so it can open in another place of its pane.
+
 Favorite projects are listed first, under **Favorites**, in the chosen order; the others follow under
 **Other projects**. The star of a row and the menu of the row add and remove a favorite. A favorite is
 a preference of the window: nothing is written to the project or to the catalog.
@@ -830,7 +887,8 @@ edits when leaving, including editors opened after the toast appeared or while i
 Personal, Open source, Experiments, Learning, Clients; a name, an icon and a color in one click, the
 names already taken are not offered), the name, the icon, the color, "What it is for" and a checklist of
 the projects. A space created from the title bar is shown at once. An empty space says "No project in
-this space yet." with **Add projects…**, which opens Settings → Spaces.
+this space yet." with **Add projects…**, which opens the folder picker, just like **+** in the
+Projects header. **Organize spaces…** remains available in the space switch.
 
 **Implementation.**
 

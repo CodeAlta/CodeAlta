@@ -11,6 +11,7 @@ import { plainTitle } from "../sessionTitle";
 import { providerHasRemoteControl } from "../remoteControl";
 import { useShellLanguage } from "../shellLanguage";
 import type { SessionListEntry } from "./sessionTree";
+import type { SessionRowDrag } from "./sessionDrag";
 
 /** How far a row is pushed in for each level of its session under its parents. */
 export const sessionRowIndent = (depth: number) => 14 + Math.min(depth, 8) * 12;
@@ -71,7 +72,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, onMore, onFewer, tree }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, onMore, onFewer, tree, drag }: {
   /** The sessions listed, and what stands for the sub-agents that are not. */
   entries: readonly SessionListEntry[];
   /** Whether the scope is the global sessions, and not a project. */
@@ -83,7 +84,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
-  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; fork?: boolean; "remote-control"?: boolean }>;
+  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean }>;
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
@@ -99,6 +100,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   onFewer: () => void;
   /** The sub-agents of a session: hidden or shown, and more or fewer of them listed. */
   tree: Readonly<{ toggle: (session: WorkspaceSession, collapsed: boolean) => void; more: (sessionId: string) => void; fewer: (sessionId: string) => void }>;
+  /** What makes the row of a session draggable onto another project. */
+  drag?: (session: WorkspaceSession) => SessionRowDrag;
 }) {
   const { t } = useShellLanguage();
   const brands = useContext(ProviderBrandsContext);
@@ -114,7 +117,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
       const twist = sessionTwist(entry, tree.toggle);
       const shown = menu?.id === session.id ? menu : null;
       const allowed = shown ? access(session) : null;
-      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id}
+      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} {...drag?.(session)}
         onContextMenu={event => {
           if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
           event.preventDefault();
@@ -147,6 +150,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
             ...(actionEntries?.(session) ?? []),
+            ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
             { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
             ...(menuEntries?.(session) ?? []),
             ...pluginEntries,

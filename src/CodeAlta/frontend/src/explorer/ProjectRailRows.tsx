@@ -2,7 +2,7 @@ import type { WorkspaceProject } from "#neoastra";
 import { Fragment, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
-import { ProjectRowActions, type ProjectRowAuthority } from "./ProjectRowActions";
+import { ProjectRowActions, type ProjectRowAuthority, type ProjectRowDrop } from "./ProjectRowActions";
 import { SessionTabMenu } from "../SessionTabMenu";
 
 /** What the Explorer remembers and shows of its scopes: which are open, which projects are favorites. */
@@ -47,7 +47,7 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, editor, changes, terminals, tree, head }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, editor, changes, terminals, tree, head, drop }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -78,6 +78,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   children?: ReactNode;
   /** What stands between the chats and the projects: the title of the projects and their filter. */
   head?: ReactNode;
+  /** What makes the row of a project a place a dragged session is dropped on. */
+  drop?: (project: WorkspaceProject) => ProjectRowDrop | undefined;
 }) {
   const { t } = useShellLanguage();
   const [folded, setFolded] = useState<{ id: string | null } | null>(null);
@@ -105,7 +107,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     const editing = !!editor?.open(project.id);
     const changing = !!changes?.open(project.id);
     const running = terminals?.count(project.id) ?? 0;
-    return <Fragment key={project.id}><ProjectRowActions project={project} authority={actions}
+    return <Fragment key={project.id}><ProjectRowActions project={project} authority={actions} drop={drop?.(project)}
       favorite={tree ? { value: favorite, set: value => tree.setFavorite(project, value) } : undefined}>
       <button type="button" title={`${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
         data-scope={project.id} onClick={() => select(project.id)} onDoubleClick={() => onKeep?.(project.id)}>

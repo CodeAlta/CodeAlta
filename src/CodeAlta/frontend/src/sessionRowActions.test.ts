@@ -14,8 +14,8 @@ const access = (session = row, menu = target, selected: string | null = "s", sco
   sessionActionAccess(session, menu, selected, scope, selectedProject, epoch, owned, canMutate, busy, uncertain);
 
 test("unselected row must establish exact selection and project scope before context mutation", () => {
-  assert.deepEqual(access(row, target, "other"), { open: false, rename: false, fork: false, delete: false, "remote-control": false });
-  assert.deepEqual(access(row, target, "s"), { open: true, rename: true, fork: true, delete: true, "remote-control": true });
+  assert.deepEqual(access(row, target, "other"), { open: false, rename: false, fork: false, delete: false, "remote-control": false, move: false });
+  assert.deepEqual(access(row, target, "s"), { open: true, rename: true, fork: true, delete: true, "remote-control": true, move: true });
   assert.equal(access(row, target, "s", "other").open, false);
   assert.equal(access({ ...row, id: "other" }, target).open, false);
   assert.equal(access(row, { ...target, projectId: "other" }).open, false);
@@ -25,8 +25,8 @@ test("unselected row must establish exact selection and project scope before con
 test("project/global headers are exact; unmatched, archived, stale, read-only and locked rows cannot mutate", () => {
   const global = { ...row, scopeKind: "global", projectId: null };
   const globalTarget = { ...target, projectId: null };
-  assert.deepEqual(access(global, globalTarget, "s", null, undefined), { open: true, rename: true, fork: true, delete: true, "remote-control": true });
-  // A fork creates a session in the scope of the row: it takes the authority of a change, and none on an archived project or a read-only host.
+  assert.deepEqual(access(global, globalTarget, "s", null, undefined), { open: true, rename: true, fork: true, delete: true, "remote-control": true, move: false });
+  // A global session belongs to no project: it has none to move from. A fork creates a session in the scope of the row: it takes the authority of a change, and none on an archived project or a read-only host.
   assert.equal(access(row, target, "s", "p", { ...project, archived: true }).fork, false);
   assert.equal(access(row, target, "s", "p", project, "epoch", false).fork, false);
   assert.equal(access({ ...row, workspacePath: "/other" }).fork, false);
