@@ -159,6 +159,35 @@ only when a session of it is shown, so that the session is in view.
 - The tab keys go through these tabs too, after the sessions (`cycleTab`); the
   prompt of the selected scope is in the ring once.
 
+### The menu of a tab
+
+The other button of the pointer on a tab, or the menu key, opens its menu
+(`tabMenu` in `SessionTabStrip.tsx`, from the `onContextMenu` of the dock, shown
+by `SessionTabMenu` at the pointer). It does not show the tab it is asked from.
+
+- **Close** closes the tab, as its close button does and through the same action.
+  **Close others**, **Close to the right** and **Close all** close tabs of the
+  same pane, of any kind: sessions, prompts of new sessions, tabs of projects.
+  The menu of a pane (`…`) has **Close others** and **Close all** too, counted
+  from the tab in front of the pane.
+- `sessionTabClosing.ts` holds what these commands mean: `tabsToClose` names the
+  nodes, `dockTabs` says what they show, `closeSessionTabs` closes sessions and
+  prompts in one change of the state, and `shownAfterClosing` says whether the
+  tab the command was asked from comes in front, which it does only when what was
+  in front is among the tabs closed. `App.closeTabs` writes the tabs once: the
+  close handler of one tab reads the tabs of the render, so it cannot be called
+  in a loop.
+- The transient prompt of a new session is never closed by these commands: it is
+  what a pane shows when nothing else is. An editor with unsaved changes stays
+  open, and the first of them asks what to do with its changes, as its close
+  button does; the tab in front is then left as it is.
+- Each closed tab can be reopened, the last one first.
+- **Keep open** is in the menu of the transient tab: the session looked at, or the
+  prompt of a new session. **Split right** and **Split below** move the tab to a
+  pane of its own, when its pane has another tab.
+- A press on a tab is captured by the dock, so an open menu sees no mouse press to
+  close on: the strip closes it on any press outside it.
+
 `SessionTabStrip` is the FlexLayout dock of the content area: its model
 (`createSessionTabModel` in `sessionTabLayout.ts`) holds the tabs of sessions and
 the tabs of projects (see File editor tabs below), which can be moved and split

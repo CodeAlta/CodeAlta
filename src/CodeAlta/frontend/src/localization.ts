@@ -1882,6 +1882,7 @@ export const messages = dictionary({
   "Find in folder": ["Buscar en la carpeta", "Rechercher dans le dossier", "Im Ordner suchen", "フォルダー内を検索", "在文件夹中查找"],
   "Files": ["Archivos", "Fichiers", "Dateien", "ファイル", "文件"],
   "Close others": ["Cerrar los demás", "Fermer les autres", "Andere schließen", "他を閉じる", "关闭其他"],
+  "Close to the right": ["Cerrar a la derecha", "Fermer à droite", "Rechts schließen", "右側を閉じる", "关闭右侧"],
   "Close saved": ["Cerrar los guardados", "Fermer les fichiers enregistrés", "Gespeicherte schließen", "保存済みを閉じる", "关闭已保存"],
   "Close all": ["Cerrar todo", "Tout fermer", "Alle schließen", "すべて閉じる", "全部关闭"],
   "Keep open": ["Mantener abierto", "Garder ouvert", "Geöffnet lassen", "開いたままにする", "保持打开"],

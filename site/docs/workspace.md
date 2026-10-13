@@ -79,6 +79,22 @@ In the desktop app, going through your sessions does not open a tab for each of 
 
 A session you create is kept from the start. Closing a tab never deletes a session.
 
+### Close several tabs at once
+
+Right-click a tab to open its menu:
+
+{.table}
+| Command | What it closes |
+|---|---|
+| **Close** | This tab. |
+| **Close others** | Every other tab of the same pane. |
+| **Close to the right** | The tabs after this one in the same pane. |
+| **Close all** | Every tab of the pane. |
+
+The menu of a tab with an italic title also has **Keep open**. The menu of a pane (`…`, at the end of its tabs) has **Close others** and **Close all**, counted from the tab in front.
+
+A code editor with unsaved changes stays open and asks what to do with them. **Reopen closed tab** in the menu of a pane, or `Ctrl+Shift+T`, brings the closed tabs back one at a time.
+
 ### Split panes (desktop)
 
 In the desktop app, session tabs, the code editor and the Changes tab can be arranged in panes:

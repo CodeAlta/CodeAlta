@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Actions, DockLocation, Layout, TabNode, TabSetNode, type Action, type Model } from "flexlayout-react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
@@ -17,6 +17,7 @@ import { terminalTabLabel } from "./terminal/terminals";
 import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
 import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
+import { dockTab, dockTabs, tabsToClose, type DockTab, type DockTabs, type TabCloseCommand } from "./sessionTabClosing";
 
 export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedId: string | null }>;
 
@@ -91,7 +92,7 @@ const noFiles = emptyFileTabs();
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
-  keep, draftLabel, selectDraft, closeDraft, keepDraft }: {
+  keep, draftLabel, selectDraft, closeDraft, keepDraft, closeTabs }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
    * The model of the dock, when its owner keeps one: a dock that is taken away and shown again (the tabs of a
@@ -126,12 +127,17 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   closeDraft?: (draft: DraftTab) => void;
   /** Gives the new-session prompt of the transient tab, whose title was double-clicked, a tab of its own. */
   keepDraft?: () => void;
+  /**
+   * Closes several tabs of a pane at once, from the menu of a tab or of the pane. `from` is the tab the command was
+   * asked from, which is shown when the tab in front is among those closed; null when every tab of the pane closes.
+   */
+  closeTabs?: (closing: DockTabs, from: DockTab | null) => void;
 }) {
   const { t } = useShellLanguage();
   const [model] = useState(() => layout ?? createSessionTabModel());
   const root = useRef<HTMLDivElement>(null);
   const alive = useRef(true);
-  const [menu, setMenu] = useState<{ anchor: HTMLElement; items: SessionMenuEntry[]; current: () => boolean } | null>(null);
+  const [menu, setMenu] = useState<{ anchor: HTMLElement; at?: Readonly<{ x: number; y: number }>; title?: string; items: SessionMenuEntry[]; current: () => boolean } | null>(null);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   // The tab bars along the top edge of the dock are the window's title bar: their empty space moves the
   // window, and the first and last one leave room for the application mark and the window controls.
@@ -249,27 +255,68 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     if (intent?.kind === "select") select(intent.tab);
     return intent?.kind === "select";
   }
-  function more(anchor: HTMLElement, node: unknown) {
-    const current = guard();
-    if (!current()) return;
-    const selected = node instanceof TabSetNode ? node.getSelectedNode() : undefined;
-    const split = (location: DockLocation) => selected instanceof TabNode && node instanceof TabSetNode
-      ? Actions.moveNode(selected.getId(), node.getId(), location, -1, true) : undefined;
+  // Moving a tab of a pane to a new pane beside it or under it.
+  function splitEntries(pane: TabSetNode | undefined, tab: TabNode | undefined, current: () => boolean): SessionMenuEntry[] {
+    const split = (location: DockLocation) => tab && pane ? Actions.moveNode(tab.getId(), pane.getId(), location, -1, true) : undefined;
     const right = split(DockLocation.RIGHT), below = split(DockLocation.BOTTOM);
-    const canSplit = node instanceof TabSetNode && node.isEnableDivide() && node.getTabNodes().length > 1 && selected?.isEnableDrag();
-    setMenu({ anchor, current, items: [
+    const canSplit = !!pane && pane.isEnableDivide() && pane.getTabNodes().length > 1 && tab?.isEnableDrag();
+    return [
       { key: "split-right", label: t("Split right"), disabled: !canSplit || !right || !sessionLayoutActionAllowed(model, right, state, snapshot, current, files),
         onSelect: () => { if (right) apply(right, current); } },
       { key: "split-below", label: t("Split below"), disabled: !canSplit || !below || !sessionLayoutActionAllowed(model, below, state, snapshot, current, files),
         onSelect: () => { if (below) apply(below, current); } },
+    ];
+  }
+  // Closing several tabs of a pane, counted from one of them: the others, the ones after it, or all of them.
+  function closeEntry(pane: TabSetNode, tab: TabNode | undefined, command: TabCloseCommand, label: string, current: () => boolean): SessionMenuEntry {
+    const closing = dockTabs(tabsToClose(pane.getChildren().map(child => child.getId()), tab?.getId() ?? null, command), state, files);
+    const from = tab && command !== "all" ? dockTab(tab.getId(), state, files) : null;
+    return { key: `close-${command}`, label, disabled: !closeTabs || !snapshot || closing.sessions.length + closing.drafts.length + closing.files.length === 0,
+      onSelect: () => { if (current()) closeTabs?.(closing, from); } };
+  }
+  function more(anchor: HTMLElement, node: unknown) {
+    const current = guard();
+    if (!current()) return;
+    const pane = node instanceof TabSetNode ? node : undefined;
+    const selected = pane?.getSelectedNode();
+    const tab = selected instanceof TabNode ? selected : undefined;
+    setMenu({ anchor, current, items: [
+      ...splitEntries(pane, tab, current),
+      ...(pane ? [{ key: "d-close", divider: true as const }, closeEntry(pane, tab, "others", t("Close others"), current), closeEntry(pane, tab, "all", t("Close all"), current)] : []),
+      { key: "d-reopen", divider: true },
       { key: "reopen", label: t("Reopen closed tab"), disabled: !snapshot || !state.closed.length && !files.closed.length,
         onSelect: () => { if (current()) reopen(); } },
       { key: "refresh", label: t("Refresh statuses"), disabled: !observations?.enabled || !state.open.length,
         onSelect: () => { if (current()) observations?.refresh(state.open); } },
     ] });
   }
+  // The menu of a tab, asked for with the other button of the pointer or the menu key: closing it, the others of its
+  // pane, the ones after it or all of them; keeping the transient tab; moving the tab to a pane of its own.
+  function tabMenu(node: TabNode, event: ReactMouseEvent<HTMLElement>) {
+    const current = guard();
+    const pane = node.getParent();
+    if (!current() || !(pane instanceof TabSetNode)) return;
+    const id = node.getId();
+    const shown = dockTab(id, state, files);
+    const transient = id === sessionDraftNodeId ? !state.active : !!shown && "session" in shown && isPreviewTab(state, shown.session);
+    // The menu key asks at the tab itself: it has no place of the pointer.
+    const box = event.currentTarget.getBoundingClientRect();
+    const at = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left, y: box.bottom };
+    setMenu({ anchor: event.currentTarget, at, title: node.getName(), current, items: [
+      { key: "close", label: t("Close"), icon: "close", disabled: !node.isEnableClose(), onSelect: () => apply(Actions.deleteTab(id), current) },
+      closeEntry(pane, node, "others", t("Close others"), current),
+      closeEntry(pane, node, "right", t("Close to the right"), current),
+      closeEntry(pane, node, "all", t("Close all"), current),
+      ...(transient ? [{ key: "d-keep", divider: true as const }, { key: "keep", label: t("Keep open"), onSelect: () => keepNode(id) }] : []),
+      ...(node.isEnableDrag() ? [{ key: "d-split", divider: true as const }, ...splitEntries(pane, node, current)] : []),
+    ] });
+  }
   return <div className="session-tabs workspace-layout" ref={root} data-dragging={!!drag.preview}
-    onPointerDownCapture={drag.down} onPointerMoveCapture={drag.move} onPointerUpCapture={event => {
+    onPointerDownCapture={event => {
+      // A press on a tab is the dock's, which may drag it: no mouse press follows for an open menu to close on.
+      if (menu && !(event.target as HTMLElement).closest(".session-tab-popup")) setMenu(null);
+      drag.down(event);
+    }} onPointerMoveCapture={drag.move} onPointerUpCapture={event => {
       // A click on a session tab (or the New session tab) hands the keyboard to that session's prompt.
       const clicked = drag.up(event);
       if (clicked && !clicked.startsWith("file:")) onSessionTabClick?.();
@@ -311,7 +358,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       keyMap={{ closeTab: undefined, renameTab: undefined, focusTabToggle: undefined,
         focusNextTabset: undefined, focusPreviousTabset: undefined, closeOverlayBorder: undefined }}
       onAction={action => dispatch(action)} onModelChange={(_model, action) => changed(action)}
-      onContextMenu={(_node, event) => event.preventDefault()}
+      onContextMenu={(node, event) => {
+        event.preventDefault();
+        if (node instanceof TabNode) tabMenu(node, event as ReactMouseEvent<HTMLElement>);
+      }}
       onAuxMouseClick={(node, event) => {
         // A middle click closes the tab, as its close button does.
         const close = tabMiddleClickAction(node, event.button);
@@ -383,7 +433,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       }} /></div>
     {drag.preview && <div className="session-drop-preview" aria-hidden="true" style={{ left: drag.preview.rect.x, top: drag.preview.rect.y,
       width: drag.preview.rect.width, height: drag.preview.rect.height }} />}
-    {menu && root.current && <SessionTabMenu anchor={menu.anchor} items={menu.items} title={t("Open sessions")}
+    {menu && root.current && <SessionTabMenu anchor={menu.anchor} at={menu.at} items={menu.items} title={menu.title ?? t("Open sessions")}
       container={root.current} current={menu.current} onClose={() => setMenu(null)} />}
   </div>;
 }

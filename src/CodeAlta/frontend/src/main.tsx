@@ -48,6 +48,7 @@ import { browserActivation } from "./sessionBrowser";
 import { closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
 import { OpenFileDialog } from "./editor/OpenFileDialog";
@@ -977,6 +978,36 @@ function App() {
     tabFocusPending.current = true;
     const shown = !valid.active && !fileTabs.active && draftKey(draft) === draftKey({ projectId, path: draft.path });
     if (shown && next.open.length) applyTabState({ ...next, active: next.open[0] }); else setTabs(next);
+  }
+  // Several tabs closed at once, from the menu of a tab or of a pane: one change of the tabs. When what is in front
+  // closes, the tab the command was asked from comes in front. An editor with unsaved changes stays open, and the
+  // first of them asks what to do with its changes, as its close button does.
+  function closeTabs(closing: DockTabs, from: DockTab | null) {
+    if (!snapshot || snapshot !== currentSnapshot.current) return;
+    const valid = reconcileSessionTabs(tabs, snapshot);
+    const unsaved = closing.files.filter(file => fileEditors.dirty(fileTabKey(file)));
+    const closed = { ...closing, files: closing.files.filter(file => !unsaved.includes(file)) };
+    const front = fileTabs.active;
+    const show = unsaved.length ? null : shownAfterClosing(closed, { file: front, session: valid.active, scope: draftTabOf(snapshot, projectId) }, from);
+    const next = closeSessionTabs(valid, closed.sessions, closed.drafts, show && "session" in show ? show.session : null);
+    if (next === valid && !closing.files.length) return;
+    advanceBrowserRevision();
+    closedTabKinds.current = [...closedTabKinds.current, ...valid.open.filter(tab => !next.open.includes(tab)).map(() => "session" as const)].slice(-64);
+    tabFocusPending.current = true;
+    for (const file of closed.files) closeFile(file);
+    const key = (tab: SessionTab | null) => tab ? tabKey(tab) : null;
+    if (show && "draft" in show) {
+      // The prompt of a new session is shown by selecting its scope with no session.
+      applyTabState({ ...next, active: null });
+      if (show.draft.projectId !== projectId) selectProject(show.draft.projectId);
+    } else if (key(next.active) !== key(valid.active)) {
+      // Closing the session behind a tab of a project does not leave that tab.
+      const kept = front && !closed.files.some(file => sameFileTab(file, front)) ? front : null;
+      applyTabState(next);
+      if (kept) activateFile(kept);
+    } else if (next !== tabs) setTabs(next);
+    if (show && "file" in show) activateFile(show.file);
+    if (unsaved.length) closeFile(unsaved[0]);
   }
   // What each space had open when the window left it: its tabs come back with it, and the dock of each space
   // keeps where its panes were. The panes of a space that is not shown are not in the page at all.
@@ -3457,7 +3488,7 @@ function App() {
             keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}
             keepDraft={() => { const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, projectId) : null;
               if (draft) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
-            selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft}
+            selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft} closeTabs={closeTabs}
             newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
