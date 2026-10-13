@@ -19,6 +19,7 @@ import { plainTitle } from "./sessionTitle";
 import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
 import { dockTab, dockTabs, tabsToClose, type DockTab, type DockTabs, type TabCloseCommand } from "./sessionTabClosing";
 import { isSessionContextKey } from "./sessionRowActions";
+import { takeKeyContextMenu } from "./keyContextMenu";
 
 export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedId: string | null }>;
 
@@ -353,10 +354,11 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       event.preventDefault(); event.stopPropagation();
     } else if (tab && isSessionContextKey(event.key, event.shiftKey, false, false)) {
       // The menu key and Shift+F10 are read here: only some systems turn them into a request for a context menu,
-      // and macOS never does.
+      // and macOS never does. Where one follows, it is taken: the menu is open already, and asked a second time it
+      // loses the keyboard to the prompt.
       const node = model.getNodeById(tab.querySelector<HTMLElement>("[data-session-node]")?.dataset.sessionNode ?? "");
       event.preventDefault(); event.stopPropagation();
-      if (node instanceof TabNode) tabMenu(node, tab, null);
+      if (node instanceof TabNode) { takeKeyContextMenu(); tabMenu(node, tab, null); }
     } else if (event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
       && target.closest('[role="tab"]') && (returnToSession(target) || !state.active)) {
       event.preventDefault(); event.stopPropagation();

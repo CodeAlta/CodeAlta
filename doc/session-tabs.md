@@ -166,8 +166,11 @@ that has the keyboard, opens its menu (`tabMenu` in `SessionTabStrip.tsx`, shown
 by `SessionTabMenu` at the pointer, or under the tab for the keyboard). The pointer
 asks through the `onContextMenu` of the dock. The keys are read by the key handler
 of the strip (`isSessionContextKey`), as the rows of the Explorer do: only some
-systems turn them into a request for a context menu, and macOS never does. The
-menu does not show the tab it is asked from.
+systems turn them into a request for a context menu, and macOS never does.
+Windows and Linux make that request of the same key press as well (Windows a
+moment after the key went up): `takeKeyContextMenu` takes it, wherever the focus
+is by then, so that one key press opens one menu. Asked a second time, the menu
+lost the keyboard to the prompt. The menu does not show the tab it is asked from.
 
 - **Close** closes the tab, as its close button does and through the same action.
   **Close others**, **Close to the right** and **Close all** close tabs of the
