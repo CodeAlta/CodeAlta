@@ -409,9 +409,11 @@ The **Chats** are the sessions of no project, which the TUI calls global session
 first of the Explorer, above the projects, and is closed until it is opened.
 
 Each project opens and closes on its own, and several can be open, each with its sessions. The chevron
-of a row opens and closes it without selecting it. Clicking a project selects it and opens it; clicking
-the selected project closes and opens it. A project that becomes the selected one in any other way (a
-session tab of another project, **Open project**) is opened too. **Collapse all** in the Projects header
+of a row opens and closes it without selecting it. Clicking a project selects it and shows the prompt of
+a new session of it, without opening or closing it, as the row of a session with sub-agents shows the
+session; a double click gives that prompt a tab of its own (see `doc/session-tabs.md`). A project that
+becomes the selected one with a session (a session tab of another project, a session of the search) is
+opened, so that the session is in view. **Collapse all** in the Projects header
 closes every project and the chats. What is open is kept with the favorites and the collapsed sessions in
 this WebView's local storage (`codealta.desktop.projectTree.v1`) and restored as it was at the next start;
 with nothing stored, the selected project is the one open.
@@ -472,7 +474,11 @@ so several sessions are deleted from the keyboard. A question goes away with its
 is hidden.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
-before creation. Selecting an existing session tab or sidebar session removes it. Real session
+before creation. Selecting an existing session tab or sidebar session removes it. It is the transient
+tab of the dock, which a session that is only looked at takes as well: one tab, with its title in
+italics, for what the Explorer shows on a click, and a double click to keep it (a session, or the
+prompt of a project, of which several can then be open). See "The transient tab" in
+`doc/session-tabs.md`. Real session
 panes, drafts and split geometry are retained, rather than replaced with a project placeholder.
 The welcome view renders the same 3-D FIGlet/ASCII logo asset as the TUI, with the project name,
 folder and launch guidance below it. Its composer uses the same surface, status line, editor,

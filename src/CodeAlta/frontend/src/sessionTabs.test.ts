@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit } from "./sessionTabs";
+import { closeDraftTab, closePreviewTab, closeSessionTab, draftTabLimit, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit } from "./sessionTabs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionTabLabel } from "./SessionTabStrip";
@@ -92,4 +92,108 @@ test("the pane of a session is another one after a rewind, another host or anoth
   assert.notEqual(sessionPaneKey("epoch", tab("one", null), "2026-10-12T10:00:00Z", 0), key);
   assert.notEqual(sessionPaneKey("epoch", tab("one"), null, 0), key);
   assert.equal(sessionPaneKey(undefined, tab("one"), null, 0), sessionPaneKey(null, tab("one"), null, 0));
+});
+
+test("a session that is looked at takes the transient tab, in the place of the one that was there", () => {
+  const first = openSessionTab(emptySessionTabs(), tab("one"), "preview");
+  assert.deepEqual(first, { open: [tab("one")], active: tab("one"), closed: [], preview: tab("one") });
+  assert.ok(isPreviewTab(first, tab("one")) && !isPreviewTab(first, tab("two")) && !isPreviewTab(emptySessionTabs(), tab("one")));
+
+  // A kept session beside it; the next session looked at replaces the transient one where it was, and leaves no closed tab.
+  const beside = openSessionTab(openSessionTab(emptySessionTabs(), tab("one"), "preview"), tab("global", null));
+  assert.deepEqual(beside.open, [tab("one"), tab("global", null)]);
+  assert.ok(isPreviewTab(beside, tab("one")) && !isPreviewTab(beside, tab("global", null)));
+  const next = openSessionTab(beside, tab("two"), "preview");
+  assert.deepEqual(next, { open: [tab("two"), tab("global", null)], active: tab("two"), closed: [], preview: tab("two") });
+
+  // Looking at a session that has a tab shows it and changes nothing else: a kept tab is not made transient again.
+  const shown = openSessionTab(next, tab("global", null), "preview");
+  assert.deepEqual(shown, { ...next, active: tab("global", null) });
+  assert.equal(openSessionTab(shown, tab("global", null), "preview"), shown);
+  // With no transient tab, the session looked at is added as the transient one.
+  const none = openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"), "preview");
+  assert.deepEqual(none.open, [tab("one"), tab("two")]);
+  assert.ok(isPreviewTab(none, tab("two")));
+});
+
+test("the transient tab is kept by opening its session to keep it, or by pinning it; closing it leaves none", () => {
+  const preview = openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"), "preview");
+  const kept = openSessionTab(preview, tab("two"));
+  assert.deepEqual(kept, { open: [tab("one"), tab("two")], active: tab("two"), closed: [], preview: null });
+  assert.deepEqual(pinSessionTab(preview, tab("two")), { ...preview, preview: null });
+  assert.equal(pinSessionTab(preview, tab("one")), preview, "a tab that is not the transient one is as it was");
+  assert.equal(pinSessionTab(kept, tab("two")), kept);
+  // A session opened to be kept while another is looked at: the transient tab stays.
+  const both = openSessionTab(preview, tab("global", null));
+  assert.ok(isPreviewTab(both, tab("two")) && both.open.length === 3);
+
+  const closed = closeSessionTab(preview, tab("two"));
+  assert.deepEqual(closed, { open: [tab("one")], active: tab("one"), closed: [tab("two")], preview: null });
+  assert.ok(isPreviewTab(closeSessionTab(preview, tab("one")), tab("two")), "closing another tab leaves the transient one");
+
+  // What takes the place of the transient tab takes its session away without listing it as closed.
+  assert.deepEqual(closePreviewTab(preview), { open: [tab("one")], active: null, closed: [], preview: null });
+  assert.deepEqual(closePreviewTab({ ...preview, active: tab("one") }), { open: [tab("one")], active: tab("one"), closed: [], preview: null });
+  assert.equal(closePreviewTab(kept).open.length, 2);
+  const plain = openSessionTab(emptySessionTabs(), tab("one"));
+  assert.equal(closePreviewTab(plain), plain);
+});
+
+test("the oldest inactive tab that leaves a full strip can be the transient one", () => {
+  let state = openSessionTab(emptySessionTabs(), tab("one"), "preview");
+  for (let index = 0; index < sessionTabLimit; index++) state = openSessionTab(state, tab(`s${index}`));
+  assert.equal(state.open.length, sessionTabLimit);
+  assert.equal(state.open.some(value => value.sessionId === "one"), false);
+  assert.equal(state.preview, null);
+});
+
+test("the new-session prompt of a scope can have a tab of its own, as many scopes can", () => {
+  const project = draftTabOf(catalog, "p"), chats = draftTabOf(catalog, null);
+  assert.deepEqual([project, chats], [{ projectId: "p", path: "/p" }, { projectId: null, path: null }]);
+  assert.equal(draftTabOf(catalog, "missing"), null);
+  assert.equal(draftTabOf({ ...catalog, projects: [...catalog.projects, catalog.projects[0]] }, "p"), null, "a project listed twice names no scope");
+  assert.ok(resolveDraftTab(catalog, project!) && resolveDraftTab(catalog, chats!));
+  assert.equal(resolveDraftTab(catalog, { projectId: "p", path: "/moved" }), false);
+
+  const state = openSessionTab(emptySessionTabs(), tab("one"));
+  assert.equal(hasDraftTab(state, project), false);
+  const one = openDraftTab(state, project!);
+  assert.deepEqual(one.drafts, [project]);
+  assert.equal(openDraftTab(one, { projectId: "p", path: "/p" }), one, "a scope has one tab");
+  const two = openDraftTab(one, chats!);
+  assert.deepEqual(two.drafts, [project, chats]);
+  assert.ok(hasDraftTab(two, project) && hasDraftTab(two, chats) && !hasDraftTab(two, null));
+  assert.deepEqual(two.open, state.open, "the tabs of sessions are as they were");
+  assert.deepEqual(closeDraftTab(two, project!).drafts, [chats]);
+  assert.equal(closeDraftTab(one, chats!), one);
+  // More scopes than tabs are kept for: the oldest leaves.
+  let many = emptySessionTabs();
+  for (let index = 0; index <= draftTabLimit; index++) many = openDraftTab(many, { projectId: `p${index}`, path: `/p${index}` });
+  assert.equal(many.drafts!.length, draftTabLimit);
+  assert.equal(many.drafts![0].projectId, "p1");
+});
+
+test("the transient tab and the tabs of prompts follow the catalog, and are kept for the next start", () => {
+  const state = openDraftTab(openDraftTab(openSessionTab(openSessionTab(emptySessionTabs(), tab("one")), tab("two"), "preview"),
+    { projectId: "p", path: "/p" }), { projectId: null, path: null });
+  assert.equal(reconcileSessionTabs(state, catalog), state);
+  // The session of the transient tab is gone, and so is the project of a prompt: neither keeps a tab.
+  const without = { ...catalog, projects: [], sessions: catalog.sessions.filter(row => row.id === "global") };
+  assert.deepEqual(reconcileSessionTabs(state, without), { open: [], active: null, closed: [], preview: null, drafts: [{ projectId: null, path: null }] });
+  const plain = openSessionTab(emptySessionTabs(), tab("one"));
+  assert.deepEqual(Object.keys(reconcileSessionTabs({ ...plain, open: [...plain.open, tab("gone")] }, catalog)), ["open", "active", "closed"], "a state without them keeps its shape");
+
+  let stored = "";
+  assert.ok(persistSessionTabs(value => { stored = value; }, state));
+  assert.deepEqual(JSON.parse(stored), { version: 1, open: [tab("one"), tab("two")], active: tab("two"), preview: tab("two"),
+    drafts: [{ projectId: "p", path: "/p" }, { projectId: null, path: null }] });
+  assert.deepEqual(restoreSessionTabs(() => stored), { open: state.open, active: state.active, closed: [], preview: tab("two"), drafts: state.drafts });
+  // What was stored before there was a transient tab is restored as it was, and a state without one is stored as before.
+  persistSessionTabs(value => { stored = value; }, plain);
+  assert.deepEqual(JSON.parse(stored), { version: 1, open: [tab("one")], active: tab("one") });
+  assert.deepEqual(restoreSessionTabs(() => stored), { open: [tab("one")], active: tab("one"), closed: [] });
+  // A transient tab that is not one of the open tabs, and a prompt that is not understood, are left out: the tabs are restored.
+  const odd = JSON.stringify({ version: 1, open: [tab("one")], active: tab("one"), preview: tab("two"),
+    drafts: [{ projectId: "p", path: "/p" }, { projectId: 7, path: "/x" }, "text", { projectId: "p", path: "/p" }] });
+  assert.deepEqual(restoreSessionTabs(() => odd), { open: [tab("one")], active: tab("one"), closed: [], drafts: [{ projectId: "p", path: "/p" }] });
 });

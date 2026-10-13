@@ -5,10 +5,11 @@ import { AppIcon } from "./AppIcon";
 import { SessionTabMenu, type SessionMenuEntry } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { resolveSessionTab, type SessionTab, type SessionTabs as Tabs } from "./sessionTabs";
+import { isPreviewTab, resolveSessionTab, type DraftTab, type SessionTab } from "./sessionTabs";
 import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeObservation";
 import { SessionWaitingBadge } from "./WaitingBadge";
-import { createSessionTabModel, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, tabMiddleClickAction } from "./sessionTabLayout";
+import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
+  type SessionTabView as Tabs } from "./sessionTabLayout";
 import { emptyFileTabs, fileNodeId, isAutomationsTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
@@ -89,7 +90,8 @@ const noFiles = emptyFileTabs();
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, capture, children, renderSession, newSessionLabel,
-  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout }: {
+  files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
+  keep, draftLabel, selectDraft, closeDraft, keepDraft }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
    * The model of the dock, when its owner keeps one: a dock that is taken away and shown again (the tabs of a
@@ -115,6 +117,15 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   terminal?: (id: string) => TerminalItem | undefined;
   /** A session tab or the New session tab was clicked (not its close button): the shell moves the focus to its prompt. */
   onSessionTabClick?: () => void;
+  /** Keeps the session of the transient tab, whose title was double-clicked: its tab is its own from now on. */
+  keep?: (tab: SessionTab) => void;
+  /** The title of the tab of the new-session prompt of a scope. */
+  draftLabel?: (draft: DraftTab) => string;
+  /** Shows the new-session prompt of a scope that has a tab of its own. */
+  selectDraft?: (draft: DraftTab) => void;
+  closeDraft?: (draft: DraftTab) => void;
+  /** Gives the new-session prompt of the transient tab, whose title was double-clicked, a tab of its own. */
+  keepDraft?: () => void;
 }) {
   const { t } = useShellLanguage();
   const [model] = useState(() => layout ?? createSessionTabModel());
@@ -163,7 +174,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     const shown = shownTerminal(file);
     return shown ? terminalTabLabel(shown, t("Terminal")) : t("Terminal");
   };
-  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel); });
+  const promptLabel = (draft: DraftTab) => draftLabel?.(draft) ?? label(null);
+  useLayoutEffect(() => { reconcileSessionTabModel(model, state, label, files, fileLabel, promptLabel); });
   useLayoutEffect(() => { if (menu && !menu.current()) setMenu(null); });
   function guard() {
     const current = capture();
@@ -171,8 +183,10 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   }
   function dispatch(action: Action, current = guard()) {
     if (action.type === Actions.DELETE_TAB && action.data.node === sessionDraftNodeId && !state.active && current()) {
+      // Closing the transient prompt shows another tab: a session, else a prompt that has a tab of its own.
       const tab = state.open.find(tab => snapshot && resolveSessionTab(snapshot, tab));
       if (tab) select(tab);
+      else if (state.drafts?.length) selectDraft?.(state.drafts[0]);
       return undefined;
     }
     if (sessionLayoutActionAllowed(model, action, state, snapshot, current, files)) {
@@ -183,6 +197,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     }
     const file = fileTabAction(action, files, current);
     if (file?.kind === "close") { closeFile?.(file.file); return undefined; }
+    const prompt = draftTabAction(action, state, snapshot, current);
+    if (prompt?.kind === "close") { closeDraft?.(prompt.draft); return undefined; }
     const intent = sessionTabAction(action, state, snapshot, current);
     if (intent?.kind === "close") close(intent.tab);
     // App must accept closing a session or a file; unsupported actions never reach the model.
@@ -196,6 +212,9 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     const current = guard();
     const file = fileTabAction(Actions.selectTab(selected.getId()), files, current);
     if (file) { if (!sameFileTab(files.active, file.file)) selectFile?.(file.file); return; }
+    // The prompt of a scope that has a tab of its own: shown when it is not the one shown already.
+    const prompt = draftTabAction(Actions.selectTab(selected.getId()), state, snapshot, current);
+    if (prompt) { if (files.active || state.active || shownDraftNodeId(state) !== selected.getId()) selectDraft?.(prompt.draft); return; }
     const intent = sessionTabAction(Actions.selectTab(selected.getId()), state, snapshot, current);
     if (intent?.kind === "select" && (files.active || !state.active || sessionNodeId(state.active) !== selected.getId())) select(intent.tab);
     else if (files.active && selected.getId() === sessionDraftNodeId && !state.active && current()) selectFile?.(null);
@@ -207,6 +226,15 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   }
   const drag = useSessionTabDrag(root, model, guard,
     (action, current) => sessionLayoutActionAllowed(model, action, state, snapshot, current, files), apply);
+  // A double click on the title of the transient tab keeps what it shows, as in a code editor: the session that was
+  // looked at, or the prompt of a new session.
+  const lastClick = useRef<{ id: string; at: number } | null>(null);
+  function keepNode(id: string) {
+    if (!guard()()) return;
+    if (id === sessionDraftNodeId) { if (!state.active) keepDraft?.(); return; }
+    const tab = state.open.find(value => sessionNodeId(value) === id);
+    if (tab && isPreviewTab(state, tab)) keep?.(tab);
+  }
   function returnToSession(target: HTMLElement) {
     if (target.closest(".flexlayout__tab_button_trailing")) return false;
     const id = target.closest('[role="tab"]')?.querySelector<HTMLElement>('[data-session-node]')?.dataset.sessionNode;
@@ -214,6 +242,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     const current = guard();
     const file = fileTabAction(Actions.selectTab(id), files, current);
     if (file) { if (!sameFileTab(files.active, file.file)) selectFile?.(file.file); return true; }
+    const prompt = draftTabAction(Actions.selectTab(id), state, snapshot, current);
+    if (prompt) { if (files.active || state.active || shownDraftNodeId(state) !== id) selectDraft?.(prompt.draft); return true; }
     if (state.active && !files.active) return false;
     const intent = sessionTabAction(Actions.selectTab(id), state, snapshot, current);
     if (intent?.kind === "select") select(intent.tab);
@@ -243,6 +273,11 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       // A click on a session tab (or the New session tab) hands the keyboard to that session's prompt.
       const clicked = drag.up(event);
       if (clicked && !clicked.startsWith("file:")) onSessionTabClick?.();
+      // A press on a tab is captured by the dock, which may be dragging it: no double click names the tab, so two
+      // clicks of the same tab in a short time are one.
+      const twice = !!clicked && lastClick.current?.id === clicked && event.timeStamp - lastClick.current.at < 500;
+      lastClick.current = clicked && !twice ? { id: clicked, at: event.timeStamp } : null;
+      if (twice) keepNode(clicked!);
     }}
     onPointerCancelCapture={drag.end} onLostPointerCapture={drag.end}
     onMouseDownCapture={event => {
@@ -254,6 +289,12 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     }} onClickCapture={event => {
       if (drag.click(event.detail)) { event.preventDefault(); event.stopPropagation(); return; }
       returnToSession(event.target as HTMLElement);
+    }} onDoubleClick={event => {
+      // The tab of the transient prompt is not dragged, so its press is not captured: its double click arrives as one.
+      const target = event.target as HTMLElement;
+      if (target.closest(".flexlayout__tab_button_trailing")) return;
+      const id = target.closest('[role="tab"]')?.querySelector<HTMLElement>('[data-session-node]')?.dataset.sessionNode;
+      if (id) keepNode(id);
     }} onKeyDownCapture={event => {
     if (drag.keyDown(event)) return;
     // Do not intercept the editor inside a factory; only the tab/menu chrome.
@@ -279,7 +320,14 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         apply(close);
       }}
       onRenderTab={(node, values) => {
-        if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()}>{label(null)}</span>; return; }
+        // The transient tab says so with its title in italics: the prompt of the selected scope, or the session looked at.
+        if (node.getId() === sessionDraftNodeId) { values.content = <span data-session-node={node.getId()} data-transient="true">{label(null)}</span>; return; }
+        const prompt = state.drafts?.find(value => draftNodeId(value) === node.getId());
+        if (prompt) {
+          values.leading = <span className="file-tab-icon" data-file-tone="teal"><AppIcon name="newSession" size={14} /></span>;
+          values.content = <span data-session-node={node.getId()}><span className="session-tab-title"><span className="session-tab-label" title={`${promptLabel(prompt)}\n${prompt.path ?? ""}`}>{promptLabel(prompt)}</span></span></span>;
+          return;
+        }
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) {
           const shown = shownTerminal(file);
@@ -301,7 +349,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
           return;
         }
         const tab = state.open.find(value => sessionNodeId(value) === node.getId());
-        values.content = <span data-session-node={node.getId()}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
+        values.content = <span data-session-node={node.getId()} data-transient={isPreviewTab(state, tab) ? "true" : undefined}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
         // A session that waits for the user says so before anything else: its run goes nowhere until it is answered.
         if (tab?.sessionId && waiting?.has(tab.sessionId)) values.leading = <SessionWaitingBadge waiting />;
         else if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
@@ -323,6 +371,11 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       }}
       factory={node => {
         if (node.getId() === sessionDraftNodeId) return <div className="session-tab-content">{children}</div>;
+        // A prompt with a tab of its own is written in when its scope is the selected one and no session is shown;
+        // otherwise its tab says what it is, and showing it selects its scope.
+        const prompt = state.drafts?.find(value => draftNodeId(value) === node.getId());
+        if (prompt) return <div className="session-tab-content">{!state.active && shownDraftNodeId(state) === node.getId() ? children
+          : <div className="session-draft-placeholder"><AppIcon name="newSession" size={28} /><span>{promptLabel(prompt)}</span></div>}</div>;
         const file = files.open.find(value => fileNodeId(value) === node.getId());
         if (file) return renderFile ? <SessionTabContent node={node}>{visible => renderFile(file, visible)}</SessionTabContent> : null;
         const tab = state.open.find(tab => sessionNodeId(tab) === node.getId());

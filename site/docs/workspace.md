@@ -38,6 +38,8 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 
 - **Chats**, at the top, are the sessions that belong to no project.
 - Click the arrow of a project to show or hide its sessions. Several projects can stay open, and CodeAlta shows them the same way at the next start. **Collapse all** at the top closes them all.
+- Click a project to select it and write the prompt of a new session in it. This does not show or hide its sessions: its arrow does.
+- Click a session to look at it, and double-click it to keep its tab (see [Tabs you look at and tabs you keep](#tabs-you-look-at-and-tabs-you-keep)).
 - Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open. The last one opens a [terminal](#terminal-desktop).
 - The `…` button of a project or a session, or a right-click, opens its menu.
 - **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session.
@@ -62,6 +64,20 @@ Type a few words and press `Enter` to open what is selected. `Tab` switches betw
 {{ alta_shot "alta-desktop-search.webp" "alta-command-palette.png" "Search listing sessions, projects and files that match, or the command palette of the TUI" "One search for sessions, projects, files and commands in the desktop app. The TUI has a command palette." }}
 
 **Search sessions…** in the menu of a project searches the sessions of that project only.
+
+### Tabs you look at and tabs you keep
+
+In the desktop app, going through your sessions does not open a tab for each of them. A session you click in the sidebar opens in one tab whose title is in *italics*: the next session you click takes its place.
+
+{.table}
+| To | Do this |
+|---|---|
+| Look at a session | Click it. It opens in the tab with the italic title. |
+| Keep a session open | Double-click it in the sidebar, or double-click the title of its tab. Typing in its prompt keeps it too. |
+| Start a new session in a project | Click the project: its new-session prompt takes the tab with the italic title. |
+| Keep the prompt of a new session open | Double-click the project, or the title of that tab. Several projects can each keep theirs. |
+
+A session you create is kept from the start. Closing a tab never deletes a session.
 
 ### Split panes (desktop)
 

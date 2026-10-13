@@ -46,7 +46,7 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist }
   // The logo of its provider tells the sessions apart at a glance. A session of a provider of no known brand
   // keeps the icon of a session.
   return <>{twist && <span className="tree-twist session-twist" title={t(twist.collapsed ? "Show the sub-agents" : "Hide the sub-agents")}
-    onClick={event => { event.stopPropagation(); twist.toggle(); }}>
+    onClick={event => { event.stopPropagation(); twist.toggle(); }} onDoubleClick={event => event.stopPropagation()}>
     <AppIcon name="chevronDown" size={12} className={twist.collapsed ? "tree-chevron" : "tree-chevron expanded"} /></span>}
     {(depth > 0 || automated) && <span className="session-icon" data-file-tone={depth > 0 ? "teal" : "gold"} title={automated && depth === 0 ? t("Started by an automation") : undefined}>
     <AppIcon name={depth > 0 ? "childSession" : "automation"} size={13} /></span>}
@@ -71,7 +71,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, menuEntries, actionEntries, deleteAsks = true, onMore, onFewer, tree }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, onMore, onFewer, tree }: {
   /** The sessions listed, and what stands for the sub-agents that are not. */
   entries: readonly SessionListEntry[];
   /** Whether the scope is the global sessions, and not a project. */
@@ -87,6 +87,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
+  /** A row was double-clicked: its session is opened in a tab of its own, which stays. */
+  onKeep?: (session: WorkspaceSession) => void;
   /** What the menu of a row has after its own lines and before those of plugins, for the session of that row. */
   menuEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
   /** What the menu of a row does with its session besides its own lines, listed before the line that deletes it. */
@@ -131,7 +133,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           show(session.id, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
         }}>
         <button type="button" aria-pressed={false} aria-expanded={twist && !twist.collapsed} title={tooltip} style={{ paddingLeft: sessionRowIndent(depth) }}
-          onClick={() => onAction(session, "open")} onKeyDown={event => sessionTwistKey(event, twist)}>
+          onClick={() => onAction(session, "open")} onDoubleClick={() => onKeep?.(session)} onKeyDown={event => sessionTwistKey(event, twist)}>
           <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{marks(session)}
         </button>
         <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}

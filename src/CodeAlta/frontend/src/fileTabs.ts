@@ -188,13 +188,21 @@ export function reopenTabKind(order: readonly TabKind[], sessionsClosed: number,
   return available("file") ? "file" : available("session") ? "session" : null;
 }
 
-export type TabPosition = Readonly<{ kind: "draft" } | { kind: TabKind; index: number }>;
-/** Next/previous tab over one ring: the new-session tab, the session tabs, then the tabs of projects. */
-export function cycleTab(sessions: number, files: number, current: TabPosition, delta: 1 | -1): TabPosition {
-  const count = 1 + sessions + files;
-  const at = current.kind === "draft" ? 0 : current.kind === "session" ? 1 + current.index : 1 + sessions + current.index;
-  const next = (at + delta + count) % count;
-  return next === 0 ? { kind: "draft" } : next <= sessions ? { kind: "session", index: next - 1 } : { kind: "file", index: next - 1 - sessions };
+export type TabPosition = Readonly<{ kind: "draft" } | { kind: TabKind | "prompt"; index: number }>;
+/**
+ * Next/previous tab over one ring: the new-session tab, the session tabs, the new-session prompts that have a tab of
+ * their own (`prompts`), then the tabs of projects. Without `transient` the ring has no new-session tab: the prompt of
+ * the selected scope is one of those that have their own.
+ */
+export function cycleTab(sessions: number, files: number, current: TabPosition, delta: 1 | -1, prompts = 0, transient = true): TabPosition {
+  const first = transient ? 1 : 0;
+  const count = first + sessions + prompts + files;
+  if (count === 0) return current;
+  const at = current.kind === "draft" ? 0 : current.kind === "session" ? first + current.index
+    : current.kind === "prompt" ? first + sessions + current.index : first + sessions + prompts + current.index;
+  const next = (at + delta + count) % count - first;
+  return next < 0 ? { kind: "draft" } : next < sessions ? { kind: "session", index: next }
+    : next < sessions + prompts ? { kind: "prompt", index: next - sessions } : { kind: "file", index: next - sessions - prompts };
 }
 
 type StoredTab = { projectId?: unknown; projectPath?: unknown; path?: unknown; view?: unknown; name?: unknown; pluginKey?: unknown; canvasId?: unknown; sessionId?: unknown; key?: unknown; icon?: unknown; plugin?: unknown };

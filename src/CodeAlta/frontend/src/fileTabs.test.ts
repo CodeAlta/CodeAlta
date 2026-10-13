@@ -257,6 +257,19 @@ test("next and previous tab walk one ring: the new-session tab, the sessions, th
   assert.deepEqual(cycleTab(1, 0, { kind: "session", index: 0 }, 1), { kind: "draft" });
 });
 
+test("the prompts that have a tab of their own are in the ring, after the sessions; the prompt of the selected scope is there once", () => {
+  // The transient prompt, a session, two prompts with their own tab, a file.
+  assert.deepEqual(cycleTab(1, 1, { kind: "session", index: 0 }, 1, 2), { kind: "prompt", index: 0 });
+  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 0 }, 1, 2), { kind: "prompt", index: 1 });
+  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 1 }, 1, 2), { kind: "file", index: 0 });
+  assert.deepEqual(cycleTab(1, 1, { kind: "file", index: 0 }, 1, 2), { kind: "draft" });
+  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 0 }, -1, 2), { kind: "session", index: 0 });
+  // The selected scope has its own tab: there is no transient prompt to stop at.
+  assert.deepEqual(cycleTab(1, 1, { kind: "file", index: 0 }, 1, 2, false), { kind: "session", index: 0 });
+  assert.deepEqual(cycleTab(1, 0, { kind: "session", index: 0 }, -1, 1, false), { kind: "prompt", index: 0 });
+  assert.deepEqual(cycleTab(0, 0, { kind: "prompt", index: 0 }, 1, 1, false), { kind: "prompt", index: 0 });
+});
+
 test("an editor tab is labeled with its project and marks unsaved edits in every language; a changes tab holds none", () => {
   for (const locale of locales) {
     const render = (tab: FileTab, dirty: boolean) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,

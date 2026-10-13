@@ -1587,6 +1587,10 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .ide-shell .flexlayout__tab_button_content { min-width: 0; overflow: hidden; }
 .ide-shell .flexlayout__tab_button_content > span { display: block; min-width: 0; }
 .session-tab-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The transient tab: what is looked at there leaves with the next thing looked at. Its title is in italics, as in a code editor. */
+.session-tabs [data-transient="true"] { font-style: italic; }
+/* The new-session prompt of a scope, in a tab of its own that is not the one written in: showing the tab selects its scope. */
+.session-draft-placeholder { display: grid; place-content: center; justify-items: center; gap: 10px; height: 100%; color: var(--muted); font-size: 14px; }
 .session-tab-dirty { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .ide-shell .flexlayout__tab_button_trailing { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--muted); }
 .ide-shell .flexlayout__tab_button_trailing:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }

@@ -45,7 +45,8 @@ import { SessionBrowser } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { browserActivation } from "./sessionBrowser";
-import { closeSessionTab, emptySessionTabs, openSessionTab, persistSessionTabs, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, tabKey, type SessionTab, type SessionTabs as SessionTabsState } from "./sessionTabs";
+import { closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, tabKey,
+  type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -389,6 +390,10 @@ function App() {
   const [retentionLifetime, setRetentionLifetime] = useState<string | null>(null);
   const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, spaceId))));
   const [tabs, writeTabs] = useState(emptySessionTabs);
+  // A session that is selected without a tab is looked at: it takes the transient tab. The one named here is opened
+  // to be kept instead (a session that was just created, a fork), until its tab is there.
+  const keptSession = useRef<string | null>(null);
+  const openingMode = (id: string | null): SessionTabMode => id !== null && keptSession.current === id ? "permanent" : "preview";
   const retentionNavigation = useRef(0);
   // All shell routes, including recovery callbacks, use these admission boundaries. A newer navigation
   // invalidates an older held acknowledgement; a catalog/host/lifetime change cannot revive it either.
@@ -898,9 +903,18 @@ function App() {
       return;
     }
     const selection = selectedTab(snapshot, projectId, sessionId);
-    const next = selection ? openSessionTab(valid, selection) : valid.active ? { ...valid, active: null } : valid;
+    const next = selection ? openSessionTab(valid, selection, openingMode(selection.sessionId)) : valid.active ? { ...valid, active: null } : valid;
     if (next !== tabs) setTabs(next);
+    else if (selection && keptSession.current === selection.sessionId) keptSession.current = null;
   }, [snapshot, projectId, sessionId, tabsReady, tabs]);
+  // What is typed in the prompt of the session that is looked at keeps its tab, as an edit keeps the preview tab of
+  // a code editor. The window does not follow the prompts: it is told of an edit, and only this one changes it.
+  const keepEdited = useRef(() => { });
+  keepEdited.current = () => {
+    const preview = tabs.preview;
+    if (preview && draftIndicators.visible(preview.sessionId, preview.sessionId)) setTabs(pinSessionTab(tabs, preview));
+  };
+  useEffect(() => draftIndicators.subscribe(() => keepEdited.current()), [draftIndicators]);
   useEffect(() => {
     if (tabsReady && snapshot) persistSessionTabs(value => localStorage.setItem(spaceStorageKey(sessionTabsKey, spaceId), value), tabs);
   }, [tabs, tabsReady, snapshot, spaceId]);
@@ -908,7 +922,7 @@ function App() {
     if (tabsReady && snapshot) persistFileTabs(value => localStorage.setItem(spaceStorageKey(fileTabsKey, spaceId), value), fileTabs);
   }, [fileTabs, tabsReady, snapshot, spaceId]);
 
-  // A scope that becomes the selected one is opened. At the start what was remembered is kept as it is; with
+  // A scope that becomes the selected one with a session is opened. At the start what was remembered is kept as it is; with
   // nothing remembered the selected scope is the one open, as it was before the Explorer remembered anything.
   const treeScope = useRef<{ id: string | null } | null>(null);
   useEffect(() => {
@@ -916,7 +930,8 @@ function App() {
     const seen = treeScope.current;
     treeScope.current = { id: projectId };
     // The chats stay closed until the user opens them: a start with nothing selected does not open them.
-    if (seen ? seen.id !== projectId : !storedProjectTree && projectId !== null) setProjectTree(current => expandScope(current, projectId));
+    // The row of a scope selects it without opening it: only a session that is shown opens the scope it is in.
+    if (seen ? seen.id !== projectId && sessionId !== null : !storedProjectTree && projectId !== null) setProjectTree(current => expandScope(current, projectId));
   }, [projectId, tabsReady]);
 
   function applyTabState(next: SessionTabsState) {
@@ -929,9 +944,39 @@ function App() {
     if (target && selectedScope.current !== target.projectId) selectProject(target.projectId, target.sessionId);
     else setSessionId(target?.sessionId ?? null);
   }
-  function selectSessionTab(tab: SessionTab) {
+  // Shows the tab of a session. One that has none is given its own, unless it is only looked at (`preview`); a tab
+  // that is shown again stays what it is.
+  function selectSessionTab(tab: SessionTab, mode: SessionTabMode = "permanent") {
     if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
-    applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab));
+    applyTabState(openSessionTab(reconcileSessionTabs(tabs, snapshot), tab, mode));
+  }
+  // A double click on the row of a session: its tab is its own, and stays when another session is looked at.
+  function keepSession(scope: string | null, session: WorkspaceSession) {
+    const tab = snapshot ? selectedTab(snapshot, scope, session.id) : null;
+    if (tab) selectSessionTab(tab);
+  }
+  // The row of a scope in the Explorer shows the prompt of a new session of it. The prompt takes the transient tab:
+  // a session that was only looked at leaves it. Kept (a double click), it has a tab of its own, as many scopes can.
+  function showScopeDraft(id: string | null, keep = false) {
+    const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, id) : null;
+    if (draft) {
+      const valid = reconcileSessionTabs(tabs, snapshot!);
+      const next = keep ? openDraftTab(valid, draft) : hasDraftTab(valid, draft) ? valid : closePreviewTab(valid);
+      if (next !== tabs) setTabs(next);
+    }
+    selectProject(id);
+  }
+  // The prompt of a new session that has a tab of its own is closed like any tab: the tab goes, what was typed stays
+  // with its scope. When it was the one shown, a session is shown in its place if one is open.
+  function closeScopeDraft(draft: DraftTab) {
+    if (!snapshot || snapshot !== currentSnapshot.current) return;
+    const valid = reconcileSessionTabs(tabs, snapshot);
+    const next = closeDraftTab(valid, draft);
+    if (next === valid) return;
+    advanceBrowserRevision();
+    tabFocusPending.current = true;
+    const shown = !valid.active && !fileTabs.active && draftKey(draft) === draftKey({ projectId, path: draft.path });
+    if (shown && next.open.length) applyTabState({ ...next, active: next.open[0] }); else setTabs(next);
   }
   // What each space had open when the window left it: its tabs come back with it, and the dock of each space
   // keeps where its panes were. The panes of a space that is not shown are not in the page at all.
@@ -1610,6 +1655,10 @@ function App() {
       else if (valid.active) {
         closedTabKinds.current = [...closedTabKinds.current, "session" as const].slice(-64);
         tabFocusPending.current = true; applyTabState(closeSessionTab(valid, valid.active));
+      } else {
+        // The prompt of a new session closes when it has a tab of its own; the transient one stays, as the last tab does.
+        const scope = draftTabOf(snapshot, projectId);
+        if (scope && hasDraftTab(valid, scope)) closeScopeDraft(scope);
       }
     } else if (action === "reopenTab") {
       const kind = reopenTabKind(closedTabKinds.current, valid.closed.length, fileTabs.closed.length);
@@ -1618,14 +1667,21 @@ function App() {
       if (at >= 0) closedTabKinds.current = closedTabKinds.current.filter((_kind, index) => index !== at);
       tabFocusPending.current = true;
       if (kind === "file") openFile(fileTabs.closed.at(-1)!); else selectSessionTab(valid.closed.at(-1)!);
-    } else if (valid.open.length + fileTabs.open.length) {
+    } else if (valid.open.length + fileTabs.open.length + (valid.drafts?.length ?? 0)) {
       tabFocusPending.current = true;
+      const prompts = valid.drafts ?? [];
+      const scope = draftTabOf(snapshot, projectId);
+      // The prompt of the selected scope is in the ring once: in its own tab when it has one, in the transient one otherwise.
+      const own = scope ? prompts.findIndex(draft => draftKey(draft) === draftKey(scope)) : -1;
       const file = fileTabs.open.findIndex(tab => sameFileTab(tab, fileTabs.active));
       const session = valid.open.findIndex(tab => valid.active && tabKey(tab) === tabKey(valid.active));
-      const current: TabPosition = file >= 0 ? { kind: "file", index: file } : session >= 0 ? { kind: "session", index: session } : { kind: "draft" };
-      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1);
+      const current: TabPosition = file >= 0 ? { kind: "file", index: file } : session >= 0 ? { kind: "session", index: session }
+        : own >= 0 ? { kind: "prompt", index: own } : { kind: "draft" };
+      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1, prompts.length, own < 0);
       if (next.kind === "file") activateFile(fileTabs.open[next.index]);
-      else if (next.kind === "session") selectSessionTab(valid.open[next.index]);
+      // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
+      else if (next.kind === "session") selectSessionTab(valid.open[next.index], "preview");
+      else if (next.kind === "prompt") selectProject(prompts[next.index].projectId);
       else applyTabState({ ...valid, active: null });
     }
   }
@@ -2524,7 +2580,7 @@ function App() {
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={sessionBookmarkEntries} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={sessionBookmarkEntries} deleteAsks={confirms.sessionDelete}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
 
@@ -2855,6 +2911,8 @@ function App() {
           setCreationLocked(false);
           selectedScope.current = selection.projectId;
           setProjectId(selection.projectId);
+          // A session that was just created is one to work in: its tab is its own.
+          keptSession.current = selection.sessionId;
           setSessionId(selection.sessionId);
           setCreatingVisible(false);
           setCreatingTitle("");
@@ -2906,6 +2964,7 @@ function App() {
       return;
     }
     publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    keptSession.current = fork.id;
     revealSessionLatest.current(fork);
     focusPromptSoon();
     showToast({ intent: "success", icon: "tick", timeout: 8000, message: result.turnCount === 0 ? say("The fork “{title}” was created empty.", { title })
@@ -3244,7 +3303,7 @@ function App() {
           </>;
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           {!snapshot && railHead}
-          {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={selectProject} children={sessions}
+          {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}
             tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,
@@ -3350,7 +3409,8 @@ function App() {
                 }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-expanded={twist && !twist.collapsed} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
-                onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}>
+                onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}
+                onDoubleClick={() => keepSession(projectId, session)}>
                 <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
@@ -3391,7 +3451,13 @@ function App() {
           </div>
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
-          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId)} snapshot={snapshot}
+          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId, openingMode(sessionId))} snapshot={snapshot}
+            draftLabel={draft => { const project = draft.projectId === null ? null : snapshot?.projects.find(value => value.id === draft.projectId);
+              return project ? t("New session — {project}", { project: project.name }) : t("New chat"); }}
+            keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}
+            keepDraft={() => { const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, projectId) : null;
+              if (draft) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
+            selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft}
             newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
@@ -3426,7 +3492,7 @@ function App() {
                   onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
                 onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
-                active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab); }}
+                active={tab.sessionId === sessionId} notesToggle={notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab, "preview"); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
                   && admitted() && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
@@ -3443,7 +3509,7 @@ function App() {
             }}
             capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions}
             onSessionTabClick={focusPromptSoon}
-            select={selectSessionTab} close={tab => {
+            select={tab => selectSessionTab(tab, "preview")} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
               const next = closeSessionTab(tabs, tab);
               advanceBrowserRevision();

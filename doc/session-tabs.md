@@ -96,7 +96,8 @@ order are not implemented by this browser.
 
 ## Saved tabs
 
-Selecting a verified session in the sidebar opens/selects its tab. Tabs span
+Selecting a verified session in the sidebar opens/selects its tab: the transient tab
+for a session that has none (see below). Tabs span
 projects and explicit global sessions; selecting one restores its project scope.
 The title includes the scope and the tooltip includes its path. Archived project
 tabs remain subject to the existing read-only composer and recovery gates.
@@ -107,6 +108,56 @@ work. Closing the active tab selects the first remaining tab, following
 the TUI. Closing the last saved tab selects the nonclosable local prompt draft.
 The draft entry remains available alongside saved tabs; Ctrl+W on it does nothing.
 Reopen restores the most recently closed valid tab (window-local history).
+
+### The transient tab
+
+Going through sessions does not open a tab for each. One of the open tabs can be
+the **transient** one (`SessionTabs.preview`): the tab a session is looked at in,
+which the next session looked at takes, as the preview tab of a code editor does.
+Its title is in italics (`data-transient` on the label).
+
+- A session that is selected without a tab is opened in it (`openSessionTab(state,
+  tab, "preview")`, the mode of the selection effect and of `sessionTabPresentation`
+  in `main.tsx`): a row of the Explorer, `Alt+Up` / `Alt+Down`, the search, a
+  bookmark, a work item. The session that was there leaves, and is not listed among
+  the closed tabs: it was never kept.
+- A tab is **kept**, its own from then on (`pinSessionTab`, or `openSessionTab` in
+  its default `permanent` mode), by a double click on the row of its session, a
+  double click on its title, or the first thing typed in its prompt
+  (`draftIndicators`, which the window is told of without following the prompts).
+  A session the window creates (the prompt of a new session, the creation form, a
+  fork) is kept from the start (`keptSession`), and so are a session opened from
+  **Browse saved sessions** and a reopened tab.
+- Showing a tab again never changes what it is: neither a click on a tab nor the
+  tab keys keep the transient one, and looking at a session that was kept does not
+  make its tab transient again.
+- What becomes the transient tab takes the place of the one that leaves, in its
+  pane and at its position. `reconcileSessionTabModel` finds the one that leaves by
+  the `config: { preview: true }` of its node.
+- A press on a tab is captured by the dock, which may be dragging it
+  (`useSessionTabDrag`), so no `dblclick` names the tab: `SessionTabStrip` takes
+  two plain clicks of the same tab within half a second as one double click.
+
+### The prompt of a new session
+
+The row of a scope in the Explorer (a project, **Chats**) selects it and shows the
+prompt of a new session of it; it does not open or close the scope, which its
+chevron and the arrow keys do. A scope that becomes the selected one is opened
+only when a session of it is shown, so that the session is in view.
+
+- The prompt of the selected scope is in the transient tab (`session-draft`): the
+  session that was only looked at leaves it (`closePreviewTab`), and a session
+  looked at afterwards takes it back.
+- A double click on the row of the scope, or on the title of that tab, gives the
+  prompt a tab of its own (`SessionTabs.drafts`, node `draft:` followed by the JSON
+  of `[projectId, path]`), where the transient one was. Several scopes can have
+  theirs, 16 at most. The tab is closed like any other; what was typed stays with
+  its scope.
+- The composer of a new session belongs to the window and to the selected scope:
+  it is drawn in the tab of the prompt that is in front. The tab of another scope
+  that is visible in a split says what it is, and showing it selects its scope.
+- The tab keys go through these tabs too, after the sessions (`cycleTab`); the
+  prompt of the selected scope is in the ring once.
 
 `SessionTabStrip` is the FlexLayout dock of the content area: its model
 (`createSessionTabModel` in `sessionTabLayout.ts`) holds the tabs of sessions and
@@ -169,7 +220,10 @@ anew, because the model is kept in memory only. See "Spaces" in
 
 `sessionTabs.ts` owns pure bounded presentation state. Versioned local storage
 (`codealta.desktop.sessionTabs.v1`) contains only open identities and active
-identity, not providers, execution state or request authority. Limits are 32 open
+identity, with the transient tab (`preview`) and the scopes whose prompt has a tab
+of its own (`drafts`) when there are some, not providers, execution state or
+request authority. A stored state without them, or with one that is not
+understood, restores the tabs it has. Limits are 32 open
 tabs, 32 window-local closed entries, 65,536 UTF-16 code units of serialized text, 256-character IDs and
 4096-character paths. Opening beyond the limit evicts the oldest inactive
 presentation tab without deleting its draft/request. Storage is best-effort.
