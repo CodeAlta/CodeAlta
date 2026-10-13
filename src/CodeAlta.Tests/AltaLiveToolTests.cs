@@ -4138,6 +4138,87 @@ public sealed partial class AltaLiveToolTests
         CollectionAssert.Contains(disruptive, "session rewind");
     }
 
+    [TestMethod]
+    public async Task SessionTitle_ShowsNamesAndChoosesHowASessionIsTitled()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var session = await fixture.Host.RuntimeService.CreateProjectSessionAsync(fixture.Host.CurrentProject, fixture.Options, null, CancellationToken.None).ConfigureAwait(false);
+        await fixture.SendAsync(session.SessionId, "Fix the login error. Then add a test.").ConfigureAwait(false);
+        var agent = fixture.Agent(session.SessionId);
+
+        async Task<JsonElement> TitleAsync(AltaCallerIdentity caller, params string[] arguments)
+        {
+            var result = await fixture.Dispatcher.InvokeAsync(["session", "title", .. arguments], caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Transcript);
+            return BranchRecords(result, "alta.session.title").Single();
+        }
+
+        static void AssertTitle(JsonElement record, string title, string source, string mode, string from, bool changed)
+        {
+            Assert.AreEqual(title, record.GetProperty("title").GetString());
+            Assert.AreEqual(source, record.GetProperty("titleSource").GetString());
+            Assert.AreEqual(mode, record.GetProperty("titleMode").GetString());
+            Assert.AreEqual(from, record.GetProperty("titleModeFrom").GetString());
+            Assert.AreEqual(changed, record.GetProperty("changed").GetBoolean());
+        }
+
+        // Without an option the command only reads, and the session of the caller is the one it is about.
+        var shown = await TitleAsync(agent).ConfigureAwait(false);
+        Assert.AreEqual(session.SessionId, shown.GetProperty("sessionId").GetString());
+        AssertTitle(shown, "Fix the login error", "auto", AgentSessionTitles.NameOf(AgentSessionTitles.DefaultMode), "setting", changed: false);
+
+        // A name that is given stays, whatever the session says next.
+        AssertTitle(await TitleAsync(agent, "--set", " Login work ").ConfigureAwait(false), "Login work", "user", "model", "setting", changed: true);
+        await fixture.SendAsync(session.SessionId, "Go on.").ConfigureAwait(false);
+        AssertTitle(await TitleAsync(AltaCallerIdentity.Cli, session.SessionId).ConfigureAwait(false), "Login work", "user", "model", "setting", changed: false);
+
+        // A mode of its own hands the title back to CodeAlta, which follows the mode at once.
+        AssertTitle(await TitleAsync(AltaCallerIdentity.Cli, session.SessionId, "--mode", "last_message").ConfigureAwait(false), "answer", "auto", "last_message", "session", changed: true);
+        AssertTitle(await TitleAsync(agent, "--mode", "first_prompt").ConfigureAwait(false), "Fix the login error", "auto", "first_prompt", "session", changed: true);
+        // With a name in the same call, the name is the one somebody chose and only the mode is recorded.
+        AssertTitle(await TitleAsync(agent, "--set", "Named again", "--mode", "LAST_MESSAGE").ConfigureAwait(false), "Named again", "user", "last_message", "session", changed: true);
+        await fixture.SendAsync(session.SessionId, "Go on.").ConfigureAwait(false);
+        Assert.AreEqual("Named again", (await fixture.ListedAsync(session.SessionId).ConfigureAwait(false)).Title);
+
+        // `session info` says who chose the title, and the mode of a session that has one of its own.
+        var info = await fixture.Dispatcher.InvokeAsync(["session", "info", session.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var infoRecord = BranchRecords(info, "alta.session.info").Single();
+        Assert.AreEqual("user", infoRecord.GetProperty("titleSource").GetString());
+        Assert.AreEqual("last_message", infoRecord.GetProperty("titleMode").GetString());
+
+        // `default` follows the setting again, which the command never changes. A session titled by its model
+        // keeps its title until the model gives another.
+        AssertTitle(await TitleAsync(agent, "--mode", "default").ConfigureAwait(false), "Named again", "auto", "model", "setting", changed: true);
+        Assert.AreEqual(AgentSessionTitles.DefaultMode, fixture.Host.RuntimeService.GetSessionTitleMode());
+        Assert.IsFalse(File.Exists(fixture.Host.CatalogOptions.ConfigPath) && File.ReadAllText(fixture.Host.CatalogOptions.ConfigPath).Contains("[sessions]", StringComparison.Ordinal));
+
+        (string[] Args, int ExitCode, string Code)[] refused =
+        [
+            (["session", "title"], AltaExitCodes.Usage, "usage.missingSession"),
+            (["session", "title", session.SessionId, "--mode", "summary"], AltaExitCodes.Usage, "usage.invalidTitleMode"),
+            (["session", "title", session.SessionId, "--set", "two\tparts"], AltaExitCodes.Usage, "usage.invalidTitle"),
+            (["session", "title", session.SessionId, "--set", new string('x', 257)], AltaExitCodes.Usage, "usage.invalidTitle"),
+            (["session", "title", session.SessionId, "--set", "  "], AltaExitCodes.Usage, "usage.invalidTitle"),
+            (["session", "title", "no-such-session"], AltaExitCodes.NotFound, "session.notFound"),
+        ];
+        foreach (var (args, exitCode, code) in refused)
+        {
+            await fixture.AssertRefusedAsync(args, AltaCallerIdentity.Cli, exitCode, code).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual("Named again", (await fixture.ListedAsync(session.SessionId).ConfigureAwait(false)).Title, "A refused command changes nothing.");
+
+        var help = await fixture.Dispatcher.InvokeAsync(["session", "title", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.IsTrue(help.IsHelp);
+        StringAssert.Contains(help.Stdout, "alta session title --set \"Parser rewrite\"");
+        StringAssert.Contains(help.Stdout, "first_prompt");
+        var tools = await fixture.Dispatcher.InvokeAsync(["tool", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var paths = ReadJsonLines(tools.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.tool.paths");
+        AssertJsonArrayContains(paths.GetProperty("paths"), "session title");
+        CollectionAssert.Contains(paths.GetProperty("mutating").EnumerateArray().Select(static item => item.GetString()).ToArray(), "session title");
+    }
+
     private static List<JsonElement> BranchRecords(AltaCommandResult result, string type)
         => ReadJsonLines(result.Stdout).Where(line => line.GetProperty("type").GetString() == type).ToList();
 
