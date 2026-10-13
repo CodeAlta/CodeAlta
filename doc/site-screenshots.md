@@ -158,8 +158,8 @@ What the scenes with state of their own need:
   "..., no edits."`) so that a session of four turns is ready in a minute. `alta bookmark add --session <id> --turn <n>
   --role assistant --label "..."` marks a message. A system prompt that changes needs
   `alta session set_agent <id> --prompt-id plan` before the next prompt: `--prompt-id` on `send` does not change the
-  agent prompt of the session. The first rows of a session (the model, the system prompt) are above its first prompt,
-  behind **Load previous messages**, which the dressing hides.
+  agent prompt of the session. The first rows of a session (the model, the system prompt) are above its first prompt:
+  they are not loaded until the timeline is scrolled up, and the dressing hides the **Load all messages** bar above it.
 - **The Issues tab with Jira.** Add `[plugins.jira]` (`site`, `project`, `projects`) to `.alta/config.toml` of the
   project of the capture and put the file back with `git checkout` afterwards. The site is the one the Atlassian CLI
   is signed in to; a project is made with `acli jira project create --from-json` and an issue with `acli jira
@@ -188,7 +188,7 @@ What the scenes with state of their own need:
   as it comes instead of clicking it, and keep it for the session of the picture only, since a hidden test
   session can have one as well. More sub-agents are made with `alta session create --parent <id>`, which
   takes a parent that ran since the instance started: send it a one-word prompt first. The answers of the
-  sub-agents are then no longer at the end of the timeline: **Load previous messages** brings them back.
+  sub-agents are then no longer at the end of the timeline: going up in the timeline brings them back.
   `home`, `explorer` and the three `split` pictures have a session with sub-agents as their subject too, and
   are retaken with `sub-agents` when that part of the sidebar changes.
 - **Space activity.** The marks of a space are those of its sessions, so they need real ones. For a session that

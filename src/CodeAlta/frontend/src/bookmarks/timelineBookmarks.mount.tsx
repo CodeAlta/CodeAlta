@@ -108,7 +108,7 @@ function Pane() {
         onWheel={timeline.wheel} onKeyDown={timeline.keyDown} onPointerDown={timeline.pointerDown} onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd}>
         <TimelineBookmarksContext.Provider value={marks}>
           <History sessionId={sessionId} read={read as never} live={null} onNotesChange={noop} onSettled={onSettled}
-            onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} reveal={request} onReveal={onReveal} />
+            onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} olderRequest={timeline.olderRequestRef} reveal={request} onReveal={onReveal} />
         </TimelineBookmarksContext.Provider>
       </div>
       <BookmarkRail sessionId={sessionId} hub={hub} marks={marks} scroll={timeline.elementRef} onGo={go} step={step} />

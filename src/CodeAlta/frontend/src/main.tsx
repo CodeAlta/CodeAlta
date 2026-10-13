@@ -4324,7 +4324,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
         setMessageNotice(result.status === "unavailable" ? { key: "Retained history is not ready for message navigation." }
           : result.status === "boundary" ? action === "messageNext"
             ? { key: "Last retained message in this window. This may not be the newest persisted history; use Refresh newest history." }
-            : { key: "First retained message in this window. Older journal history may be available via Load older history." }
+            : { key: result.older ? "Loading previous messages…" : "First retained message in this window." }
           : { key: action === "messageFirst" ? "First retained message (not necessarily the first journal message): {label}" : "Retained message: {label}", parameters: result.label === undefined ? undefined : { label: result.label } });
       },
       latestReady: newest.available, latest: newest.latest, cancelLatest: newest.cancel,
@@ -4431,7 +4431,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
         <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
-          onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
+          onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} olderRequest={timeline.olderRequestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}

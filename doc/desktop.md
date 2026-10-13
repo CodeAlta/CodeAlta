@@ -622,8 +622,8 @@ failures can resume the existing live-revision refresh, with at most two retries
 revision. Explicitly older views and source inspection are not replaced by this recovery. The spinner
 uses independent runtime observations; if the live display channel fails, use **Reconnect live activity**
 when offered, not Send retry. A spinner alone does not prove that transcript updates are arriving. The first
-window is bounded to 1,000 events, 2 Mi text units or 32 automatic pages; **Load previous messages** and
-**Load all previous messages** extend it (see "Persisted event history").
+window is bounded to 1,000 events, 2 Mi text units or 32 automatic pages; going up in the timeline and
+**Load all messages** extend it (see "Persisted event history").
 Larger records produce an explicit error, not a silent skip.
 
 ### Session info
@@ -1445,8 +1445,8 @@ opens the full tables: sizes of the prompt, answer, reasoning and tool traffic, 
 the provider's usage figures, and one line per tool bucket. The provider's totals add up the requests
 of the turn: the session repeats the usage of its last request on later updates (its idle update, a
 compaction), and a request is counted once. The rows are not stored in the session;
-they are computed from its events each time, so earlier turns get theirs when **Load previous
-messages** brings them into view, and a failed turn has one too.
+they are computed from its events each time, so earlier turns get theirs when they are loaded, and a
+failed turn has one too.
 
 The page asks for these rows through the `sessionPluginEvents.read` RPC. The host derives them from
 the journal: the Statistics rows with a projection of its own, and the timeline cards of the other
@@ -1486,15 +1486,32 @@ button exist only in this application: CodeAlta TUI has neither.
 ### Persisted event history
 
 Selecting a session shows its latest turn: bounded pages of its persisted canonical events, up to 1,000
-events. One button above the first message brings in what came before, with a caret for its second
-action, like Send:
+events. What came before is read in two ways:
 
-- **Load previous messages**, the button itself, reads one chunk: whole turns, at least 300 records.
-- **Load all previous messages**, in the caret's menu, reads back to the start of the session, page after page. The timeline
-  takes what was read in small batches while a counter shows the records loaded; **Stop** keeps what
-  was read and ends at a whole turn. A session of tens of thousands of records takes about a minute.
+- **Going up.** When the reader goes up and the first loaded row is within a screen above the view (600 px
+  in a shorter view, `nearTimelineTop`), the timeline reads one chunk: at least 300 records, of which it
+  keeps the whole turns. The reader goes up with the wheel, `Arrow Up`, `Page Up`, `Home` or `Shift+Space`
+  (with the keyboard in the timeline, or, after a press in it, on nothing or on what holds it: the panel of a
+  tab is focusable and takes such a press, and the keys do not scroll the timeline then), a touch, the scrollbar, `Ctrl+F3`,
+  and `F3` on the first loaded message. One chunk is read at a time and each one needs a move up
+  (`olderHistoryStep`), so a timeline that nobody scrolls reads nothing more. A latest turn shorter than the
+  view has nothing to scroll: there the move up itself asks, and the view is not filled when the session
+  opens. The scrollbar asks when it is let go, because rows added under a held thumb would move the view.
+- **Load all messages**, the button above the first message, reads back to the start of the session, page
+  after page. The timeline takes what was read in small batches while a counter shows the records loaded;
+  **Stop** keeps what was read and ends at a whole turn. A session of tens of thousands of records takes
+  about a minute.
 
-Either way the reader stays on the messages in view, and nothing newer is dropped: the window grows (up
+A chunk that takes more than a moment to read shows **Loading previous messages…** in the place of the
+button, which moves nothing. A read that fails shows its error above the first message and is not tried
+again by itself. Going up again, a second later or more, reads the newest history again, which keeps the
+window; the move up after that reads on. The timeline of a tab in the background reads nothing.
+
+Either way the reader stays on the messages in view, and a reader at the end of the timeline stays there
+and goes on following it. The place of the rows in view is read at the last moment before the older rows
+are put in the page (`OlderRows` in `HistoryPanel.tsx`), not when their page arrives: the reader may still
+be scrolling, and the scroll of a wheel or of `Home` that is under way goes on to where it was going.
+Nothing newer is dropped: the window grows (up
 to 200,000 records or 128 Mi text units, after which it slides) and later refreshes keep it. Rows away
 from the view are not laid out until they are scrolled to. The chronological timeline folds duplicate stream completions and tool lifecycle/output
 rows for presentation; this does not change persisted records. Tool cards identify the tool and primary
@@ -1686,9 +1703,10 @@ In the focused session workspace, `F3`/`F4` move among **persisted user and assi
 messages in the currently retained window** (not live projection, tool, reasoning,
 unknown-kind or status cards); a live-only window does not enable these keys. `Ctrl+F3` moves
 to its first retained message, which may not be the journal's first message. These
-keys unfollow the timeline. They do not fetch
-older pages or infer that a running session has finished persisting events. Use
-**Load previous messages** or **Load all previous messages** to bring in older history. **Refresh newest history** and `Ctrl+F4`
+keys unfollow the timeline. They do not infer that a running session has finished
+persisting events. `Ctrl+F3`, and `F3` once no message is left before the first retained one,
+read the chunk of turns before it, as going up does (see "Persisted event history"): the
+next press goes on from there. **Load all messages** brings in the whole history. **Refresh newest history** and `Ctrl+F4`
 explicitly read the newest persisted window (up to 1,000 events), including when
 browsing an older page; only `Ctrl+F4` opts into follow after all matching pages
 have settled. A failed or superseded read cannot claim success or move to an older

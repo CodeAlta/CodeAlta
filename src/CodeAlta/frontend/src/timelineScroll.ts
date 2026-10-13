@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState,
   type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
-import type { NewestHistoryRequest, NewestHistoryResult } from "./HistoryPanel";
+import type { NewestHistoryRequest, NewestHistoryResult, OlderHistoryRequest } from "./HistoryPanel";
 import { historyMessage } from "./history";
 import { translate, type Locale, type MessageKey } from "./localization";
 
@@ -37,8 +37,30 @@ export function preservePrependScrollTop(previous: ScrollMetrics, nextScrollHeig
   return Math.max(0, previous.scrollTop + nextScrollHeight - previous.scrollHeight);
 }
 
+/**
+ * A reader who goes up has the turns before the loaded ones read once the first loaded row is within a
+ * screen above the view, and never less than this: the rows are there before the reader reaches them.
+ */
+export const olderHistoryDistance = 600;
+
+export function nearTimelineTop(metrics: Pick<ScrollMetrics, "scrollTop" | "clientHeight">): boolean {
+  return metrics.scrollTop <= Math.max(olderHistoryDistance, metrics.clientHeight);
+}
+
+/**
+ * Whether a scroll that took the view from `previous` to `current` is the reader going up. The browser moves the
+ * view up by itself only with a change of layout: rows above that change size, a view that grows at the end of
+ * the timeline. So a scroll up is the reader's when the content and the view kept their sizes, or when it
+ * follows a move up of the reader (`goingUp`), whose scrolls bring rows into the layout as they go.
+ */
+export function readerScrolledUp(previous: ScrollMetrics, current: ScrollMetrics, goingUp: boolean): boolean {
+  return current.scrollTop < previous.scrollTop
+    && (goingUp || current.scrollHeight === previous.scrollHeight && current.clientHeight === previous.clientHeight);
+}
+
 export type MessageNavigation = "messagePrevious" | "messageNext" | "messageFirst";
-export type MessageNavigationResult = Readonly<{ status: "moved" | "boundary" | "unavailable"; label?: string }>;
+/** `older`: there was no message to go to, and the turns before the loaded ones are being read. */
+export type MessageNavigationResult = Readonly<{ status: "moved" | "boundary" | "unavailable"; label?: string; older?: boolean }>;
 
 // App-owned, bounded in-memory preferences. A new mounted session owns its own selection;
 // restoring an old position must wait for its journal (or an explicit read error), not the loading skeleton.
@@ -115,8 +137,17 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   const layoutUntil = useRef(0);
   const scrollIntent = useRef<{ top: number; direction: -1 | 0 | 1; until: number } | null>(null);
   const scrollbarDrag = useRef<number | null>(null);
+  const scrollbarDragTop = useRef(0);
   const touchStart = useRef<{ id: number; y: number; code: HTMLElement | null } | null>(null);
   const prependMetrics = useRef<{ metrics: ScrollMetrics; anchor: HTMLElement | null; top: number } | null>(null);
+  // The history reads the turns before the loaded ones through this. Only a move up of the reader asks: the
+  // wheel, a key, a finger, the scrollbar let go, a scroll up, a message gone to. Until `goingUp`, the scrolls
+  // that follow such a move are part of it (the wheel and the keys scroll over a few frames). `lastScroll` is
+  // where the view was at the last scroll, or where this hook put it since, and the sizes it had.
+  const olderRequestRef = useRef<OlderHistoryRequest | null>(null);
+  const goingUp = useRef(0);
+  const lastScroll = useRef<ScrollMetrics | null>(null);
+  const pressedInside = useRef(false);
   const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
   const resetMessageNavigation = useCallback(() => { messageAnchor.current = null; }, []);
   const pauseIfUnfollowed = useCallback(() => {
@@ -135,16 +166,32 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
       else endScrollbarDrag(event.pointerId);
     };
     const end = (event: globalThis.PointerEvent) => endScrollbarDrag(event.pointerId);
-    const blur = () => { endScrollbarDrag(); touchStart.current = null; };
+    const blur = () => { endScrollbarDrag(undefined, false); touchStart.current = null; };
+    // After a press in the timeline that focuses nothing in it, the keys scroll it but are not sent to it: they
+    // are seen here, so that going up with nothing left to scroll still reads the turns before. The keyboard is
+    // then on nothing, or on what holds the timeline: the panel of its tab is focusable and takes such a press.
+    const press = (event: globalThis.PointerEvent) => {
+      pressedInside.current = event.target instanceof Node && !!elementRef.current?.contains(event.target);
+    };
+    const key = (event: globalThis.KeyboardEvent) => {
+      if (!pressedInside.current || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && !focused.contains(elementRef.current)) return;
+      if (["ArrowUp", "PageUp", "Home"].includes(event.key) || event.key === " " && event.shiftKey) moveUp();
+    };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", end);
     window.addEventListener("pointercancel", end);
     window.addEventListener("blur", blur);
+    window.addEventListener("pointerdown", press, true);
+    window.addEventListener("keydown", key);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
       window.removeEventListener("blur", blur);
+      window.removeEventListener("pointerdown", press, true);
+      window.removeEventListener("keydown", key);
       blur();
     };
   }, []);
@@ -182,7 +229,20 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     observedHeight.current = element.scrollHeight;
     restoreFrame.current = requestAnimationFrame(() => selection.finishRestore());
   }
+  // Reads the turns before the loaded ones when the view is near their top. Not while the scrollbar is held:
+  // rows added under a held thumb would move the view, so its release asks.
+  function askOlder(): boolean {
+    const element = elementRef.current;
+    return !!element && scrollbarDrag.current === null && nearTimelineTop(element) && (olderRequestRef.current?.() ?? false);
+  }
+  // Where this hook put the view: the scroll that reports it is not a move of the reader.
+  function placed(element: HTMLElement) {
+    lastScroll.current = { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
+  }
   function scroll(element: HTMLDivElement) {
+    const last = lastScroll.current;
+    placed(element);
+    if (last && readerScrolledUp(last, element, performance.now() <= goingUp.current)) askOlder();
     const intent = scrollIntent.current;
     const moved = !!intent && performance.now() <= intent.until && element.scrollTop !== intent.top &&
       (intent.direction === 0 || (element.scrollTop - intent.top) * intent.direction > 0);
@@ -207,23 +267,34 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const element = elementRef.current;
     if (element) scrollIntent.current = { top: element.scrollTop, direction, until: performance.now() + 500 };
   }
-  function endScrollbarDrag(id?: number) {
+  // The reader moves up. With nothing to scroll (a latest turn shorter than the view, or the view already at
+  // the top) no scroll follows, so the move itself asks for the turns before.
+  function moveUp() {
+    markScrollIntent(-1);
+    goingUp.current = performance.now() + 500;
+    askOlder();
+  }
+  function endScrollbarDrag(id?: number, released = true) {
     if (scrollbarDrag.current === null || id !== undefined && scrollbarDrag.current !== id) return;
     scrollbarDrag.current = null;
     scrollIntent.current = null;
+    // The thumb is let go where it was taken up to: the turns before are read now that nothing holds the view.
+    const element = elementRef.current;
+    if (released && element && element.scrollTop <= scrollbarDragTop.current) askOlder();
   }
   function wheel(event: WheelEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.ctrlKey || event.deltaY === 0) return;
     const target = event.target as Element;
     const code = target.closest<HTMLElement>("pre.timeline-code");
     if (code ? codeCanScroll(code, event.deltaY) : target.closest(".event-details pre")) return;
-    markScrollIntent(event.deltaY > 0 ? 1 : -1);
+    if (event.deltaY > 0) markScrollIntent(1);
+    else moveUp();
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey ||
       (event.target as Element).closest("input, select, textarea, [contenteditable], .event-details pre")) return;
     if (event.key === " " && (event.target as Element).closest("button, summary, a")) return;
-    if (["ArrowUp", "PageUp", "Home"].includes(event.key) || event.key === " " && event.shiftKey) markScrollIntent(-1);
+    if (["ArrowUp", "PageUp", "Home"].includes(event.key) || event.key === " " && event.shiftKey) moveUp();
     else if (["ArrowDown", "PageDown", "End"].includes(event.key) || event.key === " " && !event.shiftKey) markScrollIntent(1);
   }
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -237,6 +308,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (event.target === element && event.buttons & 1 &&
       event.clientX >= element.getBoundingClientRect().left + element.clientWidth) {
       scrollbarDrag.current = event.pointerId;
+      scrollbarDragTop.current = element.scrollTop;
       markScrollIntent(0); // Only the scrollbar gutter, not a detail or Wrap control.
     }
   }
@@ -248,7 +320,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const start = touchStart.current;
     if (event.pointerType === "touch" && start?.id === event.pointerId && Math.abs(event.clientY - start.y) > 3) {
       const delta = start.y - event.clientY;
-      if (!start.code || !codeCanScroll(start.code, delta)) markScrollIntent(delta > 0 ? 1 : -1);
+      if (!start.code || !codeCanScroll(start.code, delta)) { if (delta > 0) markScrollIntent(1); else moveUp(); }
       if (start.code) start.y = event.clientY;
     }
   }
@@ -264,6 +336,8 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
       .find(row => row.getBoundingClientRect().bottom > viewport.top) ?? null;
     prependMetrics.current = { metrics: { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight },
       anchor, top: anchor?.getBoundingClientRect().top ?? 0 };
+    // A reader at the end of the timeline stays there and goes on following: the older rows arrive above.
+    if (selection.following()) return;
     selection.pauseAt(element.scrollTop);
     setFollowing(false);
   }
@@ -272,10 +346,14 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const previous = prependMetrics.current;
     prependMetrics.current = null;
     if (!element || !previous) return;
-    element.scrollTop = previous.anchor?.isConnected && element.contains(previous.anchor)
+    const top = previous.anchor?.isConnected && element.contains(previous.anchor)
       ? element.scrollTop + previous.anchor.getBoundingClientRect().top - previous.top
       : preservePrependScrollTop(previous.metrics, element.scrollHeight);
-    selection.pauseAt(element.scrollTop);
+    // Away from its top the browser has already kept the view on its rows. Placing it again would end the
+    // scroll of a wheel or of a key that is still under way, short of where the reader was going.
+    if (Math.abs(top - element.scrollTop) >= 0.5) element.scrollTop = top;
+    placed(element);
+    if (!selection.following()) selection.pauseAt(element.scrollTop);
   }
   function jump() {
     const element = elementRef.current;
@@ -302,6 +380,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const row = /^\d+$/u.test(key) ? element?.querySelector<HTMLElement>(`[data-row-offset="${key}"], [data-prompt-offset="${key}"]`) : null;
     if (!element || !row) return false;
     element.scrollTop += row.getBoundingClientRect().top - element.getBoundingClientRect().top - 8;
+    placed(element);
     messageAnchor.current = null;
     selection.pauseAt(element.scrollTop);
     setFollowing(false);
@@ -324,6 +403,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (!element || !saved) return;
     if (saved.following) { jump(); return; }
     element.scrollTop = Math.min(saved.top, bottomScrollTop(element));
+    placed(element);
     selection.pauseAt(element.scrollTop);
     setFollowing(false);
   }
@@ -346,17 +426,21 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     if (index < 0 || index >= rows.length) {
       selection.pauseAt(element.scrollTop);
       setFollowing(false);
-      return { status: "boundary" };
+      // No message before the first loaded one: the turns before it are read, and the next press goes there.
+      return { status: "boundary", older: action === "messagePrevious" && askOlder() };
     }
     const row = rows[index];
     element.scrollTop += row.getBoundingClientRect().top - viewport.top;
+    placed(element);
     messageAnchor.current = { row, top: element.scrollTop };
     selection.pauseAt(element.scrollTop);
     setFollowing(false);
+    // The first loaded message is the top of what is loaded: going there reads the turns before it.
+    if (action === "messageFirst") askOlder();
     return { status: "moved", label: row.querySelector(".message-body")?.textContent?.trim().slice(0, 120) };
   }
   return { elementRef, following, settled, scroll, wheel, keyDown, pointerDown, pointerMove, pointerEnd,
-    jump, pause, beforeOlderPage, afterOlderPage,
+    jump, pause, beforeOlderPage, afterOlderPage, olderRequestRef,
     messageReady, navigateMessage, resetMessageNavigation, pauseIfUnfollowed, showRow, position, restorePosition };
 }
 

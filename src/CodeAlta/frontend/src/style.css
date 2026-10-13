@@ -392,11 +392,18 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .empty-history { padding: 60px 20px; color: var(--muted); text-align: center; }
 /* Reserve a two-line read-notice slot; longer notices still grow and wrap. */
 .history > .error-text { min-block-size: 2lh; }
-.load-more-group .load-more-options.bp6-button { min-width: 22px; padding: 0 3px; }
 /* A long timeline lays out and paints only the rows near the view; a row keeps the height it last had. */
 .messages > .timeline-single-row, .messages > .timeline-tool-group { content-visibility: auto; contain-intrinsic-size: auto 72px; }
-.load-more-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 9px auto 2px; }
+.load-more-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; min-height: 24px; margin: 9px auto 2px; }
 .load-more-progress { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+/* The button and the line of a read share one place, so nothing moves when the line comes and goes. A read
+   that ends at once shows nothing: the line takes the place of the button after a moment. */
+.load-more-slot { display: inline-grid; place-items: center; }
+.load-more-slot > * { grid-area: 1 / 1; }
+.load-more-reading { visibility: hidden; white-space: nowrap; animation: load-more-reading 0s .2s forwards; }
+.load-more-slot[data-reading="true"] > .load-more { animation: load-more-waiting 0s .2s forwards; }
+@keyframes load-more-reading { to { visibility: visible; } }
+@keyframes load-more-waiting { to { visibility: hidden; } }
 
 .notice { margin: 4px 14px 10px; padding: 8px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--muted); font-size: 11px; line-height: 1.4; }
 .error-text { color: var(--red); }

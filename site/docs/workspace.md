@@ -197,7 +197,7 @@ Highlighting also works without dimming: leave content opacity at 100% and adjus
 
 Use `F3` / `F4` to jump between previous and next user or assistant messages. Use `Ctrl+F3` to jump to the first message and `Ctrl+F4` to return to the bottom.
 
-The desktop timeline opens on the latest messages of a session. Use **Load previous messages** at the top to read earlier turns.
+In CodeAlta Desktop, the timeline opens on the latest messages of a session. Scroll up to read earlier turns: they load as you go, and the messages you are reading stay in place. To load the whole session at once, click **Load all messages** at the top of the timeline. **Stop** ends the loading and keeps what was loaded.
 
 ### Tool calls
 

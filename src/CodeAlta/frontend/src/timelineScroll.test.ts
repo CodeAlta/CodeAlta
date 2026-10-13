@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { bottomScrollTop, createTimelineScrollMemory, distanceFromBottom, preservePrependScrollTop, shouldFollowTimeline } from "./timelineScroll";
+import { bottomScrollTop, createTimelineScrollMemory, distanceFromBottom, nearTimelineTop, olderHistoryDistance, preservePrependScrollTop, readerScrolledUp, shouldFollowTimeline } from "./timelineScroll";
 
 test("timeline follows initial and near-bottom content but respects reading position", () => {
   assert.equal(bottomScrollTop({ scrollHeight: 1200, clientHeight: 400 }), 800);
@@ -11,6 +11,32 @@ test("timeline follows initial and near-bottom content but respects reading posi
 
 test("prepending older content preserves the visible anchor", () => {
   assert.equal(preservePrependScrollTop({ scrollTop: 240, scrollHeight: 1000, clientHeight: 500 }, 1350), 590);
+});
+
+test("the top of what is loaded is near within a screen of it, and within a fixed distance in a short view", () => {
+  // A screen above the view: the rows before are read before the reader reaches the first loaded one.
+  assert.equal(nearTimelineTop({ scrollTop: 0, clientHeight: 900 }), true);
+  assert.equal(nearTimelineTop({ scrollTop: 900, clientHeight: 900 }), true);
+  assert.equal(nearTimelineTop({ scrollTop: 901, clientHeight: 900 }), false);
+  // A short view keeps the same margin as a view of that height.
+  assert.equal(nearTimelineTop({ scrollTop: olderHistoryDistance, clientHeight: 200 }), true);
+  assert.equal(nearTimelineTop({ scrollTop: olderHistoryDistance + 1, clientHeight: 200 }), false);
+  // A latest turn shorter than the view has nothing to scroll: it is at its top.
+  assert.equal(nearTimelineTop({ scrollTop: 0, clientHeight: 0 }), true);
+});
+
+test("a scroll up is the reader's unless the layout moved the view", () => {
+  const before = { scrollTop: 500, scrollHeight: 2000, clientHeight: 400 };
+  assert.equal(readerScrolledUp(before, { ...before, scrollTop: 380 }, false), true);
+  assert.equal(readerScrolledUp(before, { ...before, scrollTop: 620 }, false), false);
+  assert.equal(readerScrolledUp(before, before, false), false);
+  // Rows above the view took another size, and the browser kept the reader on the same rows.
+  assert.equal(readerScrolledUp(before, { ...before, scrollTop: 460, scrollHeight: 1960 }, false), false);
+  // The view grew at the end of the timeline (the prompt got shorter): the content came down with it.
+  assert.equal(readerScrolledUp({ scrollTop: 1600, scrollHeight: 2000, clientHeight: 400 }, { scrollTop: 1500, scrollHeight: 2000, clientHeight: 500 }, false), false);
+  // The reader is going up: the scrolls of that move count while rows come into the layout.
+  assert.equal(readerScrolledUp(before, { ...before, scrollTop: 380, scrollHeight: 2100 }, true), true);
+  assert.equal(readerScrolledUp(before, { ...before, scrollTop: 620, scrollHeight: 2100 }, true), false);
 });
 
 test("switching sessions restores an unfollowed position only after history settles; other sessions follow independently", () => {

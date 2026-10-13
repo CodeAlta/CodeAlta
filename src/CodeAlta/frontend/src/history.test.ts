@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
-import { loadHistory, historyCanRetry, historyMessage, historySettled, maximumTimelineEntries, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
+import { loadHistory, historyCanRetry, historyMessage, historySettled, maximumTimelineEntries, mergeHistoryPage, olderHistoryStep, olderRetryMilliseconds, type HistoryState, type HistoryTimeline } from "./history";
 
 const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
 const request = { sessionId: "s", cursor: null };
@@ -437,4 +437,47 @@ test("a window cut at a turn keeps the preparation records written before the us
     record("200", "contentCompleted", "User", "r2")];
   const cut = mergeHistoryPage(undefined, { sessionId: "s", cursor: null }, { status: "ok", entries: foreign, next: null, tailOmitted: false, revision });
   assert.deepEqual(cut.entries.map(entry => entry.offset), ["200"]);
+});
+
+test("going up near the top reads the turns before a settled window once, and nothing while another read is at work", () => {
+  const next = { version: 2, sessionId: "s", length: "900", lastWriteUtcTicks: "7", offset: "300" };
+  const window: HistoryTimeline = { sessionId: "s", entries: [], next, tailOmitted: false, limitReached: false, newerOmitted: false, turnReached: true };
+  const ready: HistoryState = { kind: "ready", request, page };
+  const facts = { observing: true, state: ready, timeline: window, shown: true, busy: false, asked: false, retried: false, sinceFailure: 0 };
+  assert.equal(olderHistoryStep(facts), "older");
+  // One chunk for a window: the next one waits for the window that chunk makes.
+  assert.equal(olderHistoryStep({ ...facts, asked: true }), "none");
+  // A timeline behind another tab reads nothing, and a message being gone to reads its own chunks.
+  assert.equal(olderHistoryStep({ ...facts, observing: false }), "none");
+  assert.equal(olderHistoryStep({ ...facts, busy: true }), "none");
+  // A read in flight, a window that is not the one being read, pages still to merge: not yet.
+  assert.equal(olderHistoryStep({ ...facts, state: { kind: "loading", request } }), "none");
+  assert.equal(olderHistoryStep({ ...facts, state: undefined }), "none");
+  assert.equal(olderHistoryStep({ ...facts, shown: false }), "none");
+  assert.equal(olderHistoryStep({ ...facts, timeline: { ...window, turnReached: false } }), "none");
+  // The start of the journal is loaded, or nothing is: there is nothing before.
+  assert.equal(olderHistoryStep({ ...facts, timeline: { ...window, next: null } }), "none");
+  assert.equal(olderHistoryStep({ ...facts, timeline: undefined }), "none");
+  // A window at its largest size still goes back: it slides, as it does for a reader who asks for everything.
+  assert.equal(olderHistoryStep({ ...facts, timeline: { ...window, turnReached: false, limitReached: true, newerOmitted: true } }), "older");
+});
+
+test("a read that failed is not asked again by itself: going up later reads the newest history again, once", () => {
+  const next = { version: 2, sessionId: "s", length: "900", lastWriteUtcTicks: "7", offset: "300" };
+  const window: HistoryTimeline = { sessionId: "s", entries: [], next, tailOmitted: false, limitReached: false, newerOmitted: false, turnReached: true };
+  const failed = (code: string): HistoryState => ({ kind: "error", request, code });
+  const facts = { observing: true, state: failed("history_changed"), timeline: window, shown: true, busy: false, asked: false, retried: false,
+    sinceFailure: olderRetryMilliseconds };
+  assert.equal(olderHistoryStep(facts), "refresh");
+  assert.equal(olderHistoryStep({ ...facts, state: failed("read_failed") }), "refresh");
+  // Not in the same move up as the failure, and not twice for the same failure.
+  assert.equal(olderHistoryStep({ ...facts, sinceFailure: olderRetryMilliseconds - 1 }), "none");
+  assert.equal(olderHistoryStep({ ...facts, retried: true }), "none");
+  // A failure that reading again does not mend stays as it is shown.
+  for (const code of ["missing_session", "invalid_cursor", "corrupt_record", "record_too_large", "wire_limit"])
+    assert.equal(olderHistoryStep({ ...facts, state: failed(code) }), "none");
+  // A refresh would replace a window that slid away from the end of the journal.
+  assert.equal(olderHistoryStep({ ...facts, timeline: { ...window, newerOmitted: true } }), "none");
+  assert.equal(olderHistoryStep({ ...facts, observing: false }), "none");
+  assert.equal(olderHistoryStep({ ...facts, busy: true }), "none");
 });

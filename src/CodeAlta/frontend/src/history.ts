@@ -56,6 +56,33 @@ export function historyCanRetry(state: HistoryState | undefined): boolean {
   return state?.kind === "error" && (state.code === "history_changed" || state.code === "read_failed");
 }
 
+/** After a read that failed, a reader who goes up has the newest history read again once this long has passed. */
+export const olderRetryMilliseconds = 1000;
+
+/**
+ * What a reader who goes up near the top of the loaded window gets: the chunk of turns before it (`older`), or,
+ * after a read that failed for a passing reason, a new read of the newest history, which keeps the window and
+ * lets the next move up read on (`refresh`). One read at a time, and none by itself: a window is asked for its
+ * older turns once, a failure is tried again once and not at once, and nothing is read while another read is in
+ * flight, while the timeline is not shown, or while a message is being gone to (`busy`).
+ */
+export function olderHistoryStep(facts: Readonly<{
+  observing: boolean; state: HistoryState | undefined; timeline: HistoryTimeline | undefined;
+  /** The window shown is the one the current read produced. */
+  shown: boolean; busy: boolean;
+  /** The turns before this window were already asked for. */
+  asked: boolean;
+  /** This failure was already tried again, and the milliseconds since it happened. */
+  retried: boolean; sinceFailure: number;
+}>): "older" | "refresh" | "none" {
+  const { state, timeline } = facts;
+  if (!facts.observing || facts.busy || !timeline?.next) return "none";
+  // A window that slid away from the end of the journal would be replaced by a refresh: it is left as it is.
+  if (state?.kind === "error") return historyCanRetry(state) && !timeline.newerOmitted && !facts.retried
+    && facts.sinceFailure >= olderRetryMilliseconds ? "refresh" : "none";
+  return state?.kind === "ready" && facts.shown && !facts.asked && historySettled(state, timeline) ? "older" : "none";
+}
+
 const userPrompt = (entry: HistoryResponse["entries"][number]) => entry.kind?.toLowerCase() === "user"
   && (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta");
 // Offsets are canonical decimal strings: a longer one, or a greater one of equal length, is higher.

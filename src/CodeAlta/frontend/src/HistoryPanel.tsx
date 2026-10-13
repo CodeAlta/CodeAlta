@@ -1,11 +1,11 @@
 import { matchesOutgoingText } from "./outgoingEcho";
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { Button, ButtonGroup, Menu, MenuItem, PopoverNext } from "@blueprintjs/core";
+import { Component, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { Button } from "@blueprintjs/core";
 import { workspace, type HistoryRequest, type SessionDisplayView, type SessionPluginEvent } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
-import { historyCanRetry, historyMessage, historySettled, loadHistory, mergeHistoryPage, type HistoryState, type HistoryTimeline } from "./history";
+import { historyCanRetry, historyMessage, historySettled, loadHistory, mergeHistoryPage, olderHistoryStep, type HistoryState, type HistoryTimeline } from "./history";
 import { liveTextItem, liveToolItem } from "./liveTimeline";
 import { orderTimelineRows, reconcileTimeline, type ReconciledRow } from "./reconcileTimeline";
 import { groupTimelineTools } from "./toolGroups";
@@ -35,6 +35,11 @@ import { TimelineBookmarksContext } from "./bookmarks/timelineBookmarks";
 export type NewestHistoryResult = Readonly<{ sessionId: string; generation: number; revision: string | null;
   error: string | null }>;
 export type NewestHistoryRequest = () => number;
+/**
+ * Asked by the panel that scrolls the timeline when its reader goes up near the top of what is loaded: the
+ * chunk of turns before it is read, as far as the rules of `olderHistoryStep` allow. Says whether a read started.
+ */
+export type OlderHistoryRequest = () => boolean;
 
 // `olderFrom` is the first record of the window when older history was asked for; `known` is the settled
 // window a refresh of the newest history keeps and appends to. `all` reads older history to the start of
@@ -146,12 +151,28 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   </SystemPromptReaderContext.Provider>;
 });
 
+/**
+ * Tells the panel that scrolls the timeline when the rows of a window with older history are put in the page:
+ * `before` at the last moment before they are, `after` once they are there. The panel reads where the rows in
+ * view are and puts them back there. Read any earlier (when the page arrives, before it is rendered), the place
+ * would be the one of a reader who has scrolled since, and putting the rows back there would undo that scroll.
+ */
+class OlderRows extends Component<{ window: unknown; older: boolean; before: () => void; after: () => void }> {
+  getSnapshotBeforeUpdate(previous: Readonly<{ window: unknown }>): boolean {
+    if (previous.window === this.props.window || !this.props.older) return false;
+    this.props.before();
+    return true;
+  }
+  componentDidUpdate(_previous: unknown, _state: unknown, placed: boolean) { if (placed) this.props.after(); }
+  render() { return null; }
+}
+
 function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
   return cursor?.version === 2 ? JSON.stringify([cursor.length, cursor.lastWriteUtcTicks]) : null;
 }
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
-  newestRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, readPrompt, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
+  newestRequest, olderRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, readPrompt, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
   reveal = null, onReveal }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
@@ -161,6 +182,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   onNewerOmitted?: (value: boolean) => void;
   onNavigationReset?: (generation: number, explicitNewest: boolean) => void;
   newestRequest?: RefObject<NewestHistoryRequest | null>;
+  /** Filled with what reads the turns before the window when the reader goes up near its top. */
+  olderRequest?: RefObject<OlderHistoryRequest | null>;
   onNewestResult?: (result: NewestHistoryResult) => void;
   read: typeof workspace.historyTail;
   /** Reads the cards plugins derive from the finished turns of the loaded window, such as turn statistics. */
@@ -197,8 +220,10 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   const readingRevision = useRef<{ generation: number; revision: string | null } | null>(null);
   const merged = useRef<HistoryRequest | null>(null);
   const published = useRef(0);
-  const beforeOlder = useRef(onBeforeOlder);
-  beforeOlder.current = onBeforeOlder;
+  // What going up already asked for: the turns before a window once, a new read after a failure once.
+  const olderAsked = useRef<HistoryTimeline | undefined>(undefined);
+  const olderRetried = useRef<HistoryState | undefined>(undefined);
+  const failedAt = useRef(0);
   const request = target.request;
   const timeline = window?.timeline;
   function refreshNewest(keyboard: boolean): number {
@@ -236,16 +261,17 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
         const revision = revisionOf(value.page.next ?? value.request.cursor);
         const prior = readingRevision.current;
         if (value.request.cursor && prior?.generation === target.generation && prior.revision !== revision) {
+          failedAt.current = performance.now();
           setState({ kind: "error", request, code: "history_changed" });
           return;
         }
         readingRevision.current = { generation: target.generation, revision };
       }
+      if (value.kind === "error") failedAt.current = performance.now();
       setState(value);
       if (value.kind === "ready") {
         merged.current = value.request;
         // A read of everything is merged aside and shown every few pages: see the publication below.
-        if (target.explicitOlder && !target.all) beforeOlder.current();
         const update = (current: typeof window) => ({
           timeline: mergeHistoryPage(current?.timeline, value.request, value.page, target.explicitOlder, retainedStart.current,
             { known: target.known, olderFrom: target.olderFrom, all: target.all }),
@@ -324,21 +350,17 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
       historySettled(current, candidate.timeline) && window !== candidate) setWindow(candidate);
   }, [target, current, candidate, window]);
   // Everything is being loaded: the timeline takes what was read every few pages, and when the read ends
-  // (the start of the journal, the largest window, an error). Each time the reader stays on the rows in view.
+  // (the start of the journal, the largest window, an error). Each time the reader stays on the rows in view:
+  // see OlderRows.
   useLayoutEffect(() => {
     if (!target.all || candidate?.generation !== target.generation || window === candidate) return;
     const read = candidate.timeline;
     if (current?.kind === "error" || current?.kind === "ready" && (historySettled(current, read)
       || read.entries.length - (window?.timeline.entries.length ?? 0) >= publicationRecords && performance.now() - published.current >= publicationInterval)) {
       published.current = performance.now();
-      beforeOlder.current();
       setWindow(candidate);
     }
   }, [target, current, candidate, window]);
-  useLayoutEffect(() => {
-    if (target.explicitOlder && current?.kind === "ready" && window?.generation === target.generation &&
-      timeline?.sessionId === sessionId) onAfterOlder();
-  }, [target, current, window, timeline, sessionId, onAfterOlder]);
   useLayoutEffect(() => {
     if (historySettled(current, window?.generation === target.generation ? timeline : undefined)) onSettled();
   }, [current, window, timeline, target, onSettled]);
@@ -364,12 +386,15 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   // Stopping keeps what was read: it is shown, and the read ends as a chunk does, at a whole turn.
   function stopLoadingAll() {
     if (!target.all) return;
-    if (candidate?.generation === target.generation && window !== candidate) { beforeOlder.current(); setWindow(candidate); }
+    if (candidate?.generation === target.generation && window !== candidate) setWindow(candidate);
     setTarget({ ...target, all: false });
   }
-  const loadDisabled = current?.kind === "loading" || current?.kind === "error";
-  const loadingAll = !!target.all && current?.kind !== "error"
-    && !(window?.generation === target.generation && historySettled(current, timeline));
+  const olderSettled = window?.generation === target.generation && historySettled(current, timeline);
+  const loadingAll = !!target.all && current?.kind !== "error" && !olderSettled;
+  // A chunk of older turns is being read: the reader went up, or a message is being gone to.
+  const readingOlder = target.explicitOlder && !target.all && current?.kind !== "error" && !olderSettled;
+  // Reading everything can start while a chunk is read, and goes on from what that read has brought in.
+  const loadDisabled = current?.kind === "error" || current?.kind === "loading" && !readingOlder;
   // The rows of a long timeline are costly to build and to compare: they are rebuilt when the window or the
   // live view changes, and a row is rendered again only when its item did.
   const entries = timeline?.entries ?? noEntries;
@@ -402,6 +427,21 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     else if (step === "newest") refreshNewest(false);
     else end(step);
   }, [reveal, current, window, timeline, target, observing]);
+  // The reader goes up near the top of the window: the chunk of turns before it is read. Nothing is read
+  // without that move, so a timeline that nobody scrolls stays as it is.
+  function readOlder(): boolean {
+    const step = olderHistoryStep({ observing, state: current, timeline, shown: window?.generation === target.generation,
+      busy: !!reveal && revealed.current !== reveal, asked: olderAsked.current === timeline,
+      retried: olderRetried.current === current, sinceFailure: performance.now() - failedAt.current });
+    if (step === "older") { olderAsked.current = timeline; loadOlder(false); }
+    else if (step === "refresh") { olderRetried.current = current; refreshNewest(false); }
+    return step !== "none";
+  }
+  useLayoutEffect(() => {
+    if (!olderRequest) return;
+    olderRequest.current = readOlder;
+    return () => { if (olderRequest.current === readOlder) olderRequest.current = null; };
+  });
   const inspect = useRef(canInspect); inspect.current = canInspect;
   const inspectable = useCallback(() => inspect.current?.() ?? true, []);
   const openSource = useCallback((value: HistorySourceTarget) => {
@@ -410,6 +450,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   }, []);
   return <section className="conversation history" aria-label={t("Session timeline")}
     data-window-ready={current?.kind === "ready" && window?.generation === target.generation && historySettled(current, timeline)}>
+    {/* Older rows join the window: a chunk the reader went up for, a batch of everything, what a stopped read brought. */}
+    <OlderRows window={window} older={target.explicitOlder} before={onBeforeOlder} after={onAfterOlder} />
     {!timeline && (!current || current.kind === "loading") && <p role="status">{t("Loading the latest persisted history.")}</p>}
     {current?.kind === "error" && <p role="alert" className="error-text">{t(historyMessage(current.code))}</p>}
     {current?.kind === "error" && !!timeline?.entries.length && <p role="status">{t("Showing previously loaded history. Refresh to update.")}</p>}
@@ -418,18 +460,13 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
       <span className="load-more-progress" role="status"><ActivitySpinner size={14} />{t("Loading previous messages… {count} loaded",
         { count: (candidate?.generation === target.generation ? candidate.timeline : timeline).entries.length })}</span>
       <Button size="small" icon={<AppIcon name="stop" size={14} />} text={t("Stop")} onClick={stopLoadingAll} />
-    </> : <ButtonGroup className="load-more-group">
-      {/* One slot, like Send: the button loads a chunk, the caret offers the whole history as well. */}
-      <Button intent="primary" className="load-more" icon={<AppIcon name="history" size={14} />} text={t("Load previous messages")}
-        disabled={loadDisabled} onClick={() => loadOlder(false)} />
-      <PopoverNext placement="bottom-end" disabled={loadDisabled} content={<Menu aria-label={t("Load options")}>
-        <MenuItem icon={<AppIcon name="history" size={16} />} text={t("Load previous messages")} onClick={() => loadOlder(false)} />
-        <MenuItem icon={<AppIcon name="browse" size={16} />} text={t("Load all previous messages")} onClick={() => loadOlder(true)} />
-      </Menu>}>
-        <Button intent="primary" className="load-more-options" disabled={loadDisabled} aria-label={t("Load options")} title={t("Load options")}
-          icon={<AppIcon name="chevronDown" size={14} />} />
-      </PopoverNext>
-    </ButtonGroup>}</div>}
+    </> : <span className="load-more-slot" data-reading={readingOlder}>
+      {/* The turns before are read as the reader goes up; the button reads them all at once. A read that
+          lasts takes the place of the button, in the same slot. */}
+      <Button size="small" className="load-more" icon={<AppIcon name="history" size={14} />} text={t("Load all messages")}
+        disabled={loadDisabled} onClick={() => loadOlder(true)} />
+      {readingOlder && <span className="load-more-progress load-more-reading" role="status"><ActivitySpinner size={14} />{t("Loading previous messages…")}</span>}
+    </span>}</div>}
     <TimelineRows sessionId={sessionId} rows={reconciled} entries={entries} outgoing={outgoing} onAcknowledgeOutgoing={onAcknowledgeOutgoing}
       pluginEvents={pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted ? pluginCards.events : undefined}
       echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} revision={timeline?.revision ?? null} sources={sources}
