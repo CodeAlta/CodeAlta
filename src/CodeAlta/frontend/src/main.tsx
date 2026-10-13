@@ -86,6 +86,7 @@ import { createMutationCapability, createOwnedSubmissions, noOutgoing } from "./
 import { createSessionDisplayStore } from "./sessionDisplay";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createPermissionReviewer } from "./sessionPermissions";
+import { ownPermissionChoice } from "./CommandPermissionPanel";
 import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
 import { createAbortRunSubmissions } from "./sessionAbortRun";
@@ -194,7 +195,7 @@ import { SpaceActivityBar, SpaceSwitch } from "./spaces/SpaceViews";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
 import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers, spaceShows,
-  spaceStorageKey } from "./spaces/spaces";
+  spaceStorageKey, waitingSubSessions, type WaitingSubSession } from "./spaces/spaces";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -1189,6 +1190,8 @@ function App() {
   // The sessions that wait for the user (a question, a command to allow, a form): marked in the Explorer and on their
   // tab. One of the space that is shown is also said once, when it starts to wait while another session is on screen.
   const waitingSessions = useMemo(() => new Set(spacesState.sessions.filter(session => session.waiting).map(session => session.sessionId)), [spacesState.sessions]);
+  // The sessions under each session that wait for the user: shown above its composer.
+  const waitingBelow = useMemo(() => waitingSubSessions(spacesState.sessions), [spacesState.sessions]);
   const saidWaiting = useRef<ReadonlySet<string> | null>(null);
   useEffect(() => {
     const said = saidWaiting.current;
@@ -1196,7 +1199,8 @@ function App() {
     // What waited when the window started is not news.
     if (!said) return;
     for (const session of spacesState.sessions) {
-      if (!session.waiting || said.has(session.sessionId) || session.sessionId === sessionId
+      // The session on screen, or one under it, whose pane already shows it waits, is not said again.
+      if (!session.waiting || said.has(session.sessionId) || session.sessionId === sessionId || (sessionId !== null && session.ancestors.includes(sessionId))
         || !spaceShows(spacesState.spaces, spaceId, session.projectId)) continue;
       showToast({ intent: "warning", icon: "help", timeout: 12_000,
         message: translate(shownLocale.current, "{title} waits for you", { title: session.title || translate(shownLocale.current, "A session") }),
@@ -1804,7 +1808,8 @@ function App() {
         || modalDialogOpen() || document.querySelector(".project-editor[data-active='true'], .terminal-panel[data-active='true']")) return;
       const prompt = document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt");
       // A request that waits for the user's permission is what its session shows first: its first choice takes the focus.
-      const choice = prompt?.closest(".composer-region")?.querySelector<HTMLElement>(".command-permission-panel button[data-permission-choice]:not(:disabled)");
+      // A request of a session under it does not: the prompt keeps the keyboard.
+      const choice = ownPermissionChoice(prompt?.closest(".composer-region"));
       if (choice) choice.focus();
       else if (prompt) prompt.focus();
       else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
@@ -2672,7 +2677,7 @@ function App() {
   function sessionMarks(session: WorkspaceSession, scope: string | null) {
     return <>
       <SessionDraftStatus indicators={draftIndicators} sessionId={session.id} selectedId={sessionId} />
-      <SessionWaitingBadge waiting={waitingSessions.has(session.id)} />
+      <SessionWaitingBadge waiting={waitingSessions.has(session.id)} below={waitingBelow.get(session.id)?.length ?? 0} />
       {snapshot && <RunningSessionBadge controls={runtimeObservationControls()} tab={{ projectId: scope, sessionId: session.id, path: session.workspacePath }} />}
       <ReminderBadge count={activeReminders?.get(session.id) ?? 0} />
       {carriedBy(work, session.id).length > 0 && <span className="session-work-mark" role="img" aria-label={t("Carries out a work item")}
@@ -3764,7 +3769,7 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace session={row} canAdmit={admitted} rewinds={rewinds} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
+              <SessionWorkspace session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
@@ -3791,7 +3796,7 @@ function App() {
                 permissionReviewer={owners.permissionReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
                 selections={nextSendSelections} timelineCommand={timelineCommand} /></ProjectReferenceContext.Provider></SessionRetentionGate>;
             }}
-            capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions}
+            capture={captureTabLifetime} drafts={tabDrafts} observations={runtimeObservationControls()} waiting={waitingSessions} waitingBelow={waitingBelow}
             onSessionTabClick={focusPromptSoon}
             select={tab => selectSessionTab(tab, "preview")} close={tab => {
               if (!snapshot || snapshot !== currentSnapshot.current || !resolveSessionTab(snapshot, tab)) return;
@@ -4093,6 +4098,8 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
 }
 
 type ReferenceScope = NonNullable<ContextType<typeof ProjectReferenceContext>>;
+// A session under the one of a pane, waiting for a permission, has its own reviewer there: the pane's reviews its own.
+const createSubSessionReviewer = () => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve);
 function createSessionPaneOwners() {
   let reference: ReferenceScope | undefined;
   return {
@@ -4178,7 +4185,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions }: {
   canAdmit: () => boolean;
   /** The number of times the session was rewound: what was read of its journal before a rewind is not what it holds now. */
   rewinds?: number;
@@ -4188,6 +4195,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   bookmarks?: SessionBookmarkHost | null;
   /** Where the session comes from when it is a fork, shown above its timeline. */
   lineage?: ReactNode;
+  /** The sessions under this one that wait for the user. */
+  waitingSubSessions?: readonly WaitingSubSession[];
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
@@ -4443,7 +4452,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             const stillRunning = runningBackgroundTasks(background ?? []).length;
             setBackgroundRunning(stillRunning);
             onRunActivity?.(value, stillRunning);
-          }} toolOutputs={toolOutputs} sessionId={session.id} remoteControlRequest={remoteControlRequest} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
+          }} toolOutputs={toolOutputs} sessionId={session.id} remoteControlRequest={remoteControlRequest} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null}
+              waitingSubSessions={waitingSubSessions} createSubSessionReviewer={status.commandReviewEnabled ? createSubSessionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, createdAt: session.createdAt, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}

@@ -23,6 +23,8 @@ import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancel
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
+import { WaitingSubSessionsPanel } from "./WaitingSubSessionsPanel";
+import type { WaitingSubSession } from "./spaces/spaces";
 import { RemoteControlButton } from "./RemoteControlButton";
 import { entryRemoteControl, remoteControlView, sameRemoteControl, type RemoteControlOpenRequest, type RemoteControlView } from "./remoteControl";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
@@ -71,7 +73,9 @@ export function sendFailureMessage(status: string, reason?: string): string {
   }
 }
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null }: {
+const noWaitingSubSessions: readonly WaitingSubSession[] = [];
+
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null }: {
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
   canAdmit?: () => boolean;
   active?: boolean;
@@ -88,6 +92,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
+  /** The sessions under this one that wait for the user: named above the composer, their permissions answered there. */
+  waitingSubSessions?: readonly WaitingSubSession[];
+  /** Makes a reviewer for the permissions of a session under this one; null when the host reviews no command. */
+  createSubSessionReviewer?: (() => ReturnType<typeof createPermissionReviewer>) | null;
   steering: ReturnType<typeof createSteeringSubmissions>;
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
@@ -985,6 +993,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         if (!stageLatest.current(kind, value, [])) editLatest.current(latestText.current.trim() ? `${latestText.current}
 ${value}` : value);
       }} takeFocus={() => !latestText.current.trim() && !images.length} onAnswered={() => promptInput.current?.focus()} visible={active} />}
+    <WaitingSubSessionsPanel sessions={waitingSubSessions} epoch={epoch} createReviewer={createSubSessionReviewer}
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onAnswered={() => promptInput.current?.focus()} />
     <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>

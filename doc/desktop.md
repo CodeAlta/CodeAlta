@@ -2749,6 +2749,22 @@ row), with only the text that was sent:
 The card names the sending session by its title (`SessionReference`): a button that opens that session.
 A session the window does not list is named by the start of its id. **Details** gives the full id.
 
+A sub-session that waits for the user shows on every session above it. The space activity
+(`spaces.activity`) names, for each session that waits, the sessions above it, nearest first
+(`SpaceSessionActivity.Ancestors`): the host walks up the `ParentSessionId` of the sessions its runtime holds
+(`SessionRuntimeOverview.ParentSessionId`), at most 16 levels, and stops at a loop. The page groups them by
+ancestor (`waitingSubSessions` in `spaces/spaces.ts`), and the pane of each ancestor shows them above its
+composer (`WaitingSubSessionsPanel`): a line per sub-session with its `SessionReference`, and its pending
+command or file-change requests in a `CommandPermissionPanel` with a reviewer of its own (one reviewer reads
+one session at a time), labelled with its title, without the field that denies with what to do instead
+(that text goes to the composer of the session that asks). The answer goes by handle, as from the
+sub-session's own pane, whose card closes, and the focus goes back to the prompt of the pane it was given
+in. Showing the pane leaves the keyboard on its prompt: only the request of the pane's own session takes it
+(`ownPermissionChoice`), so that a key pressed on arriving there does not answer for a sub-session.
+Questions and forms are answered in the sub-session. The tab and
+the Explorer row of an ancestor that does not wait itself carry a lighter waiting mark (`SessionWaitingBadge`
+with `below`), and the "{title} waits for you" message is not shown for a session under the one on screen.
+
 ## Files
 
 ### Changes

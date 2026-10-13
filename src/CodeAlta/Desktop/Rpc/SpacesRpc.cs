@@ -17,6 +17,9 @@ internal sealed class SpacesService
     /// <summary>The most sessions one activity reading lists.</summary>
     internal const int MaximumActivitySessions = 128;
 
+    /// <summary>How many sessions above a waiting one its reading names.</summary>
+    internal const int MaximumAncestors = 16;
+
     private readonly SpaceCatalog? _catalog;
     private readonly DesktopSpaceView? _view;
     private readonly Func<IReadOnlyList<SessionRuntimeOverview>>? _runs;
@@ -136,15 +139,32 @@ internal sealed class SpacesService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false);
         var waiting = (await _waiting!().ConfigureAwait(false)).ToHashSet(StringComparer.Ordinal);
-        var sessions = _runs!()
+        var runs = _runs!();
+        var sessions = runs
             .Where(session => session.Running || session.BackgroundTasks > 0 || session.Failed || waiting.Contains(session.SessionId))
             // The ones that wait for the user first: a reading cut short keeps what matters most.
             .OrderByDescending(session => waiting.Contains(session.SessionId)).ThenByDescending(static session => session.Failed)
             .ThenBy(static session => session.SessionId, StringComparer.Ordinal)
             .ToArray();
+        // A session that waits names the sessions above it, so that the one that created it shows it waits too.
+        var parents = runs.Where(static session => session.ParentSessionId is not null)
+            .GroupBy(static session => session.SessionId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First().ParentSessionId!, StringComparer.OrdinalIgnoreCase);
         return new("ok", [.. sessions.Take(MaximumActivitySessions).Select(session => new SpaceSessionActivity(session.SessionId, session.ProjectId,
-            Cut(session.Title, 256), session.Running, Math.Min(session.BackgroundTasks, 99), session.Failed, waiting.Contains(session.SessionId)))],
+            Cut(session.Title, 256), session.Running, Math.Min(session.BackgroundTasks, 99), session.Failed, waiting.Contains(session.SessionId),
+            waiting.Contains(session.SessionId) ? Ancestors(session.SessionId, parents) : []))],
             sessions.Length > MaximumActivitySessions);
+    }
+
+    // The sessions above one, nearest first, as far as the runtime holds them: a chain that loops or goes deeper
+    // than any real one stops.
+    internal static IReadOnlyList<string> Ancestors(string sessionId, IReadOnlyDictionary<string, string> parents)
+    {
+        var ancestors = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { sessionId };
+        for (var current = sessionId; ancestors.Count < MaximumAncestors && parents.TryGetValue(current, out var parent) && seen.Add(parent); current = parent)
+            ancestors.Add(parent);
+        return ancestors;
     }
 
     /// <summary>The requests that reach this page from elsewhere, until the page goes away.</summary>
@@ -269,4 +289,9 @@ internal sealed record SpacesActivityResponse(string Status, IReadOnlyList<Space
 /// <param name="BackgroundTasks">How many tasks its provider goes on doing in the background.</param>
 /// <param name="Failed">Whether its last run ended with an error.</param>
 /// <param name="Waiting">Whether it waits for the user: a question, a command to review, a form to fill.</param>
-internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed, bool Waiting);
+/// <param name="Ancestors">
+/// For a session that waits, the sessions above it, nearest first: the one that created it, the one that created that
+/// one… Empty otherwise, and for a session no other session created.
+/// </param>
+internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed, bool Waiting,
+    IReadOnlyList<string> Ancestors);

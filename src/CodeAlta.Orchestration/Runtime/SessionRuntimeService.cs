@@ -2661,7 +2661,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         => [.. _entries.Values
             .Where(static entry => !entry.IsTerminated)
             .Select(entry => new SessionRuntimeOverview(entry.SessionId, entry.ProjectId, entry.Title,
-                entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null) + Jobs.CountRunning(entry.SessionId), entry.LastRunFailed))];
+                entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null) + Jobs.CountRunning(entry.SessionId), entry.LastRunFailed)
+            { ParentSessionId = entry.ParentSessionId })];
 
     /// <summary>
     /// Lists the sessions that are at work right now, each with the folder it works in: its worktree when it has

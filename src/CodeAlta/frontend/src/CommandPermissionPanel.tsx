@@ -9,12 +9,22 @@ const pendingReadInterval = 1_500;
 const armDelay = 400;
 
 /**
+ * The first choice of the request the session of a composer waits on, which takes the keyboard when the session is
+ * shown. The requests of the sessions under it, shown above the same composer, never do: a key pressed on arriving
+ * there must not answer for another session.
+ */
+export function ownPermissionChoice(region: ParentNode | null | undefined): HTMLElement | null {
+  const choices = region?.querySelectorAll<HTMLElement>(".command-permission-panel button[data-permission-choice]:not(:disabled)") ?? [];
+  return Array.from(choices).find(choice => !choice.closest(".waiting-sub-session")) ?? null;
+}
+
+/**
  * The requests of a session that wait for the user's permission, above its composer. It shows the first one with its
  * decisions while one waits, and a line while a decision is sent or reading them failed. It reads them by itself
  * while the session runs and none is shown, once more when the run ends with some shown, and after the answer to a
  * decision, which it acknowledges itself.
  */
-export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus, onAnswered, visible = true }: {
+export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus, onAnswered, visible = true, label }: {
   reviewer: ReturnType<typeof createPermissionReviewer>; epoch: string; sessionId: string;
   canReview: () => boolean;
   /** Whether the session has a run that may ask for permission. */
@@ -30,6 +40,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   onAnswered?: () => void;
   /** Whether the session is the one on screen: a request that waits takes the focus when its session is shown. */
   visible?: boolean;
+  /** The name of the card for assistive technology, when it shows the requests of another session than the pane's. */
+  label?: string;
 }) {
   const { t } = useShellLanguage();
   const [state, setState] = useState<PermissionReviewState>();
@@ -117,7 +129,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     {state?.kind === "error" && <p role="alert">{t("Command review unavailable ({code}).", { code: state.code })} {state.reloadRequired && t("Reload the window to review requests again. A decision already sent stays sent.")}</p>}
   </>;
   if (!entry) return state?.kind === "resolving" || state?.kind === "error"
-    ? <section className="command-permission-panel" aria-label={t("Pending command permissions")}>{outcome}</section> : null;
+    ? <section className="command-permission-panel" aria-label={label ?? t("Pending command permissions")}>{outcome}</section> : null;
   const live = (target: HTMLElement) => target.isConnected && !target.closest("[inert]") && canReview() && currentState.current === shown
     && armed === attempt && !!scope.current;
   function decide(target: HTMLElement, value: SessionPermissionCommand, decision: CommandDecision, text = "") {
@@ -161,7 +173,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     event.preventDefault();
     items[index < 0 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length].focus();
   }
-  return <section ref={card} className="command-permission-panel" aria-label={t("Pending command permissions")}>
+  return <section ref={card} className="command-permission-panel" aria-label={label ?? t("Pending command permissions")}>
     <h3 id={`${sessionId}-permission-question`}>{t(entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
     <p className="sr-only" role="status">{t("A request waits for your permission.")}</p>
     {entry.kind === "commandExecution"

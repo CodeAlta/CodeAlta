@@ -92,7 +92,7 @@ const noFiles = emptyFileTabs();
 
 // Each pane retains its own live factory payload. App owns session authority and drafts.
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
-export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, capture, children, renderSession, newSessionLabel,
+export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
   keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
@@ -107,6 +107,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   observations?: RuntimeObservationControls;
   /** The sessions that wait for the user: their tab says so. */
   waiting?: ReadonlySet<string>;
+  /** How many sessions under each session wait for the user. */
+  waitingBelow?: ReadonlyMap<string, readonly unknown[]>;
   capture: () => () => boolean; children: ReactNode;
   renderSession?: (tab: SessionTab, visible: boolean) => ReactNode;
   newSessionLabel?: string;
@@ -415,6 +417,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
         values.content = <span data-session-node={node.getId()} data-transient={isPreviewTab(state, tab) ? "true" : undefined}><SessionTabLabel label={label(tab ?? null)} path={tab?.path ?? null} drafts={drafts} sessionId={tab?.sessionId ?? null} /></span>;
         // A session that waits for the user says so before anything else: its run goes nowhere until it is answered.
         if (tab?.sessionId && waiting?.has(tab.sessionId)) values.leading = <SessionWaitingBadge waiting />;
+        // So does one whose sub-sessions wait: its work waits for theirs.
+        else if (tab?.sessionId && waitingBelow?.get(tab.sessionId)?.length) values.leading = <SessionWaitingBadge waiting={false} below={waitingBelow.get(tab.sessionId)!.length} />;
         else if (tab && observations) values.leading = <SessionTabActivity controls={observations} tab={tab} />;
       }}
       onRenderTabSet={(node, values) => values.buttons.push(<Button key="more" ref={markMountedTitleBar} variant="minimal" size="small" className="session-tab-more"
