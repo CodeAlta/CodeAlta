@@ -13,7 +13,7 @@ import { useShellLanguage } from "../shellLanguage";
 import { WorkStartButtons } from "../workItems/WorkItemCards";
 import { startRefusal } from "../workItems/startWorkItem";
 import type { WorkStart } from "../workItems/workItems";
-import { issueFilterLabel, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, signInCommand, sourceKinds,
+import { allPartsLabel, issueFilterLabel, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds,
   type IssueFilter, type IssueKind, type IssueListKey } from "./issues";
 
 /** The part of the host the tab uses; a test gives its own. */
@@ -26,8 +26,9 @@ type Detail = Readonly<{ key: string; loading: boolean; value: IssueReadResponse
 /**
  * The Issues tab: the issues and the pull requests of a project, from the service that hosts its repository
  * (GitHub, GitLab, Azure DevOps, Bitbucket) and from the trackers plugins add (Jira). One list at a time (open,
- * closed, merged, all) with what is typed as a filter; an item is read on the right, opened in a window or on the
- * web, and a session can be started on it.
+ * closed, merged, all) with what is typed as a filter, and one part of a tracker of several places (one Jira
+ * project of a project that names several) when the user chooses it; an item is read on the right, opened in a
+ * window or on the web, and a session can be started on it.
  */
 export function IssuesPanel({ api, epoch, projects, projectId, visible, preferredStart, onActivate, onOpenSession, onNotice }: {
   api: IssuesApi;
@@ -48,6 +49,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const [scope, setScope] = useState<string | null>(projectId ?? projects[0]?.id ?? null);
   const [sources, setSources] = useState<Sources | null>(null);
   const [service, setService] = useState<string | null>(null);
+  const [part, setPart] = useState<string | null>(null);
   const [kind, setKind] = useState<IssueKind>("issue");
   const [filter, setFilter] = useState<IssueFilter>("open");
   const [typed, setTyped] = useState("");
@@ -84,14 +86,16 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const shownKind = kinds.includes(kind) ? kind : kinds[0] ?? "issue";
   const filters = issueFilters(shownKind);
   const shownFilter = filters.includes(filter) ? filter : "open";
-  const wanted = useMemo<IssueListKey | null>(() => project && source ? { projectId: project.id, service: source.service, kind: shownKind, filter: shownFilter, query } : null,
-    [project?.id, source?.service, shownKind, shownFilter, query]);
+  const parts = source?.parts ?? [];
+  const listedPart = shownPart(source, part);
+  const wanted = useMemo<IssueListKey | null>(() => project && source ? { projectId: project.id, service: source.service, kind: shownKind, filter: shownFilter, query, part: listedPart } : null,
+    [project?.id, source?.service, shownKind, shownFilter, query, listedPart]);
 
   useEffect(() => {
     if (!available || !visible || !wanted) return;
     const controller = new AbortController();
     setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false });
-    void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit: 50 },
+    void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit: 50, part: wanted.part },
       { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: reply.status === "ok" ? reply.items : [], more: reply.more,
         problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn }); },
@@ -153,7 +157,13 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       {known.length > 1
         ? <SegmentedControl size="small" value={source?.service ?? ""} onValueChange={value => { setService(value); setSelected(null); }}
             options={known.map(candidate => ({ value: candidate.service, label: candidate.name, icon: serviceBrand(candidate.service) ? <BrandIcon name={serviceBrand(candidate.service)!} size={14} /> : undefined }))} />
-        : source && <span className="issues-source" title={source.location}>{serviceBrand(source.service) && <BrandIcon name={serviceBrand(source.service)!} size={15} />}<strong>{source.name}</strong><span>{source.location}</span></span>}
+        : source && <span className="issues-source" title={source.location}>{serviceBrand(source.service) && <BrandIcon name={serviceBrand(source.service)!} size={15} />}<strong>{source.name}</strong>
+            {parts.length === 0 && <span>{source.location}</span>}</span>}
+      {source && parts.length > 0 && <HTMLSelect className="issues-part" aria-label={t("{service} project", { service: source.name })} title={source.location} value={listedPart ?? ""}
+        onChange={event => { setPart(event.target.value || null); setSelected(null); }}>
+        <option value="">{t(allPartsLabel(source.service))}</option>
+        {parts.map(candidate => <option key={candidate} value={candidate}>{candidate}</option>)}
+      </HTMLSelect>}
       {kinds.length > 1 && <SegmentedControl size="small" value={shownKind} onValueChange={value => { setKind(value as IssueKind); setSelected(null); }}
         options={kinds.map(candidate => ({ value: candidate, label: t(kindLabel(candidate, source?.service, true)) }))} />}
       <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={typed} disabled={!source}

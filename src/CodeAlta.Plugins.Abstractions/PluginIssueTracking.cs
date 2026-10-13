@@ -110,7 +110,11 @@ public sealed record TrackedItemDetail(TrackedItem Item, string Body, IReadOnlyL
 /// <param name="Filter">Which of them.</param>
 /// <param name="Text">Words the items must match; null or empty for the most recently updated ones.</param>
 /// <param name="Limit">The most items to return.</param>
-public sealed record TrackedItemQuery(TrackedItemKind Kind, TrackedItemFilter Filter, string? Text, int Limit);
+public sealed record TrackedItemQuery(TrackedItemKind Kind, TrackedItemFilter Filter, string? Text, int Limit)
+{
+    /// <summary>Gets the part of the tracker to list, one of its <see cref="IIssueTracker.Parts"/>; null for all of them.</summary>
+    public string? Part { get; init; }
+}
 
 /// <summary>The answer of a tracker to a listing.</summary>
 /// <param name="Items">The items, the most recently updated first.</param>
@@ -143,6 +147,13 @@ public interface IIssueTracker
 
     /// <summary>Gets the https address of the tracker on the web, when it has one.</summary>
     string? WebUrl { get; }
+
+    /// <summary>
+    /// Gets the parts of a tracker that is of several places, each of which a listing can be limited to
+    /// (<see cref="TrackedItemQuery.Part"/>): the keys of the Jira projects of a project that names several.
+    /// Empty for a tracker of one place.
+    /// </summary>
+    IReadOnlyList<string> Parts => [];
 
     /// <summary>Gets the kinds of items the tracker has.</summary>
     IReadOnlyList<TrackedItemKind> Kinds { get; }

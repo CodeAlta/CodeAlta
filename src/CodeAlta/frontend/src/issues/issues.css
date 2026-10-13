@@ -10,6 +10,8 @@
 .issues-source > strong { font-weight: 600; }
 .issues-source > .brand-icon { align-self: center; }
 .issues-source > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-family: var(--bp-typography-family-mono); font-size: 12px; }
+/* The keys of Jira projects are short: the choice is as wide as what it says. */
+.issues-toolbar .bp6-html-select.issues-part select { min-width: 0; }
 .issues-notice { margin-top: 10px; }
 .issues-more { margin: 8px 0 0; color: var(--muted); font-size: 12px; text-align: center; }
 

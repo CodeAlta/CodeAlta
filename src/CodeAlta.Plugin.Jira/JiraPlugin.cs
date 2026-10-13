@@ -141,7 +141,7 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
 
         var other = settings.Projects[1];
         return $"This project keeps its issues in Jira on `{settings.Site}`, in several projects: {string.Join(", ", settings.Projects.Select(static project => $"`{project}`"))}. "
-               + "Read them with `alta issue list --tracker jira`, which lists the issues of all these projects together, and `alta issue show <KEY>-<n>`. "
+               + $"Read them with `alta issue list --tracker jira`, which lists the issues of all these projects together (`--part {other}` for one of them), and `alta issue show <KEY>-<n>`. "
                + "Change them with `alta jira` (`create`, `comment`, `transition`, `assign`), only when the user asks for it. "
                + $"A new issue goes to `{settings.Project}`; it goes to another of these projects only when the user names that project: `alta jira create --jira-project {other}`. "
                + $"The key of an issue starts with the key of its project: `{other}-12` is an issue of `{other}`. A number alone names an issue of `{settings.Project}`.";

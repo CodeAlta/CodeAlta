@@ -129,6 +129,18 @@ public sealed class DesktopPluginsTests
             var jira = await Run("issue", "list", "--tracker", "jira");
             StringAssert.Contains(jira.Text, "\"tracker\":\"jira\",\"kind\":\"issue\",\"id\":\"ALTA-12\"");
 
+            // A tracker of several places says its parts, and one of them can be listed alone.
+            StringAssert.Contains(trackers.Text, "\"kinds\":[\"issue\"],\"parts\":[\"ALTA\",\"PLAT\"]");
+            Assert.IsFalse(trackers.Text.Contains("\"kinds\":[\"issue\",\"pull_request\"],\"parts\"", StringComparison.Ordinal), "A tracker of one place has no parts.");
+            var part = await Run("issue", "list", "--tracker", "jira", "--part", "plat");
+            Assert.AreEqual(0, part.Code, part.Text);
+            StringAssert.Contains(part.Text, "\"title\":\"jira issue Open  in PLAT\"");
+            StringAssert.Contains(part.Text, "\"location\":\"ALTA\",\"part\":\"PLAT\"");
+            var unknown = await Run("issue", "list", "--tracker", "jira", "--part", "OTHER");
+            Assert.AreEqual(AltaExitCodes.Usage, unknown.Code);
+            StringAssert.Contains(unknown.Text, "--part is one of: ALTA, PLAT.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--tracker", "github", "--part", "ALTA")).Code, "GitHub is one place.");
+
             // A key names an item of the tracker that has such keys; a number, one of the first tracker.
             var keyed = await Run("issue", "show", "ALTA-12");
             StringAssert.Contains(keyed.Text, "\"tracker\":\"jira\"");
@@ -162,9 +174,10 @@ public sealed class DesktopPluginsTests
             public string Location => location;
             public string? WebUrl => url;
             public IReadOnlyList<TrackedItemKind> Kinds => kinds;
+            public IReadOnlyList<string> Parts => service == "jira" ? ["ALTA", "PLAT"] : [];
 
             public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
-                => ValueTask.FromResult(new TrackedItemPage([Item(query.Kind, $"{service} {(query.Kind == TrackedItemKind.PullRequest ? "pr" : "issue")} {query.Filter} {query.Text}")]));
+                => ValueTask.FromResult(new TrackedItemPage([Item(query.Kind, $"{service} {(query.Kind == TrackedItemKind.PullRequest ? "pr" : "issue")} {query.Filter} {query.Text}{(query.Part is null ? string.Empty : " in " + query.Part)}")]));
 
             public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
                 => ValueTask.FromResult(id == Id ? new TrackedItemDetail(Item(kind, "Read"), "Body of " + id, [new("ana", null, "Seen.")]) : null);

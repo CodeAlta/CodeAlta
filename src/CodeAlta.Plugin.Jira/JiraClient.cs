@@ -276,6 +276,9 @@ internal sealed class JiraTracker : IIssueTracker
     public string? WebUrl => _settings.IssuesUrl();
 
     /// <inheritdoc />
+    public IReadOnlyList<string> Parts => _settings.HasSeveralProjects ? _settings.Projects : [];
+
+    /// <inheritdoc />
     public IReadOnlyList<TrackedItemKind> Kinds => Issues;
 
     /// <summary>Writes the query of a listing of the issues of some projects.</summary>
@@ -310,7 +313,15 @@ internal sealed class JiraTracker : IIssueTracker
         var (problem, needsSignIn) = await _ready(cancellationToken).ConfigureAwait(false);
         if (problem is not null) return new([]) { Problem = problem, NeedsSignIn = needsSignIn };
         var limit = Math.Clamp(query.Limit, 1, 100);
-        var (found, hidden) = await _client.SearchAsync(_settings, _settings.Projects, projects => Query(projects, query.Filter, query.Text), limit + 1, cancellationToken).ConfigureAwait(false);
+        // One project of several is asked alone; a key the settings do not name is not asked at all.
+        IReadOnlyList<string> asked = _settings.Projects;
+        if (query.Part is { } part)
+        {
+            if (JiraSettings.NormalizeProject(part) is not { } project || !_settings.Has(project)) return new([]) { Problem = $"Jira: this project names no Jira project {part.Trim()}." };
+            asked = [project];
+        }
+
+        var (found, hidden) = await _client.SearchAsync(_settings, asked, projects => Query(projects, query.Filter, query.Text), limit + 1, cancellationToken).ConfigureAwait(false);
         if (found.Value is not { } items) return new([]) { Problem = found.Problem, NeedsSignIn = found.NeedsSignIn };
         return new(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit, Problem = Hidden(hidden) };
     }

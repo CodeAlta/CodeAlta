@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { IssueSource, WorkspaceProject } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
-import { issueFilters, issueIcon, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, signInCommand, sourceKinds } from "./issues";
+import { allPartsLabel, issueFilters, issueIcon, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds } from "./issues";
 import { IssuesPanel, type IssuesApi } from "./IssuesPanel";
 
 test("a pull request can be merged, an issue cannot: each kind has its own lists", () => {
@@ -13,7 +13,7 @@ test("a pull request can be merged, an issue cannot: each kind has its own lists
 });
 
 test("a tracker shows the kinds it has, named as its users name them", () => {
-  const source = (kinds: string[]): IssueSource => ({ service: "jira", name: "Jira", location: "ALTA", url: null, kinds });
+  const source = (kinds: string[]): IssueSource => ({ service: "jira", name: "Jira", location: "ALTA", url: null, kinds, parts: [] });
   assert.deepEqual(sourceKinds(source(["pull_request", "issue", "epic"])), ["issue", "pull_request"]);
   assert.deepEqual(sourceKinds(source(["issue"])), ["issue"]);
   assert.deepEqual(sourceKinds(null), []);
@@ -49,11 +49,23 @@ test("signing in is a command for the services that have one", () => {
 });
 
 test("an answer belongs to the list that asked for it", () => {
-  const key = { projectId: "p", service: "github", kind: "issue", filter: "open", query: "" } as const;
+  const key = { projectId: "p", service: "github", kind: "issue", filter: "open", query: "", part: null } as const;
   assert.equal(sameList(key, { ...key }), true);
   assert.equal(sameList(key, { ...key, query: "crash" }), false);
+  assert.equal(sameList(key, { ...key, part: "PLAT" }), false, "the list of one Jira project is not the list of all of them");
   assert.equal(sameList(key, { ...key, kind: "pull_request" }), false);
   assert.equal(sameList(null, key), false);
+});
+
+test("one part of a tracker is listed only while the tracker has it", () => {
+  const jira = { parts: ["ALTA", "PLAT"] };
+  assert.equal(shownPart(jira, "PLAT"), "PLAT");
+  assert.equal(shownPart(jira, null), null);
+  assert.equal(shownPart(jira, "GONE"), null, "a project that left the settings is not asked");
+  assert.equal(shownPart({ parts: [] }, "PLAT"), null, "a choice made for Jira says nothing of GitHub");
+  assert.equal(shownPart(null, "PLAT"), null);
+  assert.equal(allPartsLabel("jira"), "All projects");
+  assert.equal(allPartsLabel("another"), "All");
 });
 
 test("the tab says what it waits for, and that a window without a host has no issues", () => {

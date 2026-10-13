@@ -171,6 +171,7 @@ public sealed class JiraPluginTests
 
         var tracker = (await plugin.GetTrackersAsync(root.Path, default)).Single();
         Assert.AreEqual(("jira", "ALTA, PLAT, GONE, TEAM"), (tracker.Service, tracker.Location));
+        CollectionAssert.AreEqual(new[] { "ALTA", "PLAT", "GONE", "TEAM" }, tracker.Parts.ToArray(), "Each Jira project can be listed alone.");
         StringAssert.StartsWith(tracker.WebUrl, "https://example.atlassian.net/issues/?jql=project%20in%20");
 
         var page = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
@@ -182,6 +183,15 @@ public sealed class JiraPluginTests
         Assert.AreEqual(2, searches.Length);
         StringAssert.Contains(searches[0], "--jql project in (\"ALTA\", \"PLAT\", \"GONE\", \"TEAM\") AND statusCategory != Done ORDER BY updated DESC");
         StringAssert.Contains(searches[1], "--jql project in (\"ALTA\", \"PLAT\", \"TEAM\") AND statusCategory != Done ORDER BY updated DESC");
+
+        // One of the projects is asked alone, and a key the settings do not name is not asked.
+        cli.Runs.Clear();
+        var part = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, "7", 10) { Part = "plat" }, default);
+        Assert.IsNull(part.Problem);
+        StringAssert.Contains(cli.Runs.Single(), "--jql project = \"PLAT\" AND key = \"PLAT-7\" ORDER BY updated DESC");
+        cli.Runs.Clear();
+        var other = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10) { Part = "OTHER" }, default);
+        Assert.AreEqual((0, "Jira: this project names no Jira project OTHER.", 0), (other.Items.Count, other.Problem, cli.Runs.Count));
 
         // An issue of any project of the site is read by its key.
         cli.Answers["workitem view"] = _ => new(0, Issue, string.Empty);
@@ -201,6 +211,7 @@ public sealed class JiraPluginTests
         cli.Answers["workitem search"] = _ => new(1, string.Empty, "✗ Error: failed to parse JQL query: the value 'gone' does not exist for the field 'project'.");
         var single = await (await plugin.GetTrackersAsync(alone.Path, default)).Single().ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
         StringAssert.Contains(single.Problem, "the value 'gone' does not exist");
+        Assert.IsEmpty((await plugin.GetTrackersAsync(alone.Path, default)).Single().Parts, "One Jira project is not a choice.");
     }
 
     [TestMethod]
@@ -257,6 +268,7 @@ public sealed class JiraPluginTests
 
         var several = JiraPlugin.Guidance(new JiraSettings("example.atlassian.net", "ALTA") { Projects = ["ALTA", "PLAT", "TEAM"] });
         StringAssert.Contains(several, "in several projects: `ALTA`, `PLAT`, `TEAM`.");
+        StringAssert.Contains(several, "(`--part PLAT` for one of them)");
         StringAssert.Contains(several, "A new issue goes to `ALTA`; it goes to another of these projects only when the user names that project: `alta jira create --jira-project PLAT`.");
         StringAssert.Contains(several, "A number alone names an issue of `ALTA`.");
     }

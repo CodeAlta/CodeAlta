@@ -1003,16 +1003,19 @@ Jira project. `alta issues` is the same command.
 
 ```text
 alta issue trackers [--project <project>]
-alta issue list [--project <project>] [--tracker <service>] [--kind issue|pr] [--state open|closed|merged|all] [--text <words>] [--limit <n>]
+alta issue list [--project <project>] [--tracker <service>] [--kind issue|pr] [--state open|closed|merged|all] [--text <words>] [--part <part>] [--limit <n>]
 alta issue show <id> [--project <project>] [--tracker <service>] [--kind issue|pr]
 ```
 
 - `trackers` writes one `alta.issue.tracker` per tracker: its service (`github`, `gitlab`, `azure_devops`,
-  `bitbucket`, `jira`), what it is of, its address and the kinds it has.
+  `bitbucket`, `jira`), what it is of, its address and the kinds it has. A tracker of several places (the Jira
+  projects of a project that names several) also says its `parts`.
 - `list` asks the tracker named, or the first that has the kind, and writes one `alta.issue` per item (kind, id,
   title, url, state, the status, type and priority the tracker names, author, assignees, labels, dates, branches of
   a pull request), then `alta.issue.summary` with a `problem` when the tracker could not answer and `needsSignIn`
-  when signing in is what it takes. 30 items by default, 100 at most.
+  when signing in is what it takes. 30 items by default, 100 at most. `--part` lists one part of the tracker
+  alone, and the summary repeats it; a part the tracker does not have is a usage error (`usage.unknownPart`)
+  that names the parts.
 - `show` adds the description (64 KiB at most), the comments and a note that they are what other people wrote. A
   key such as `ALTA-12` is asked of every tracker of the project that has the kind; a number, of the first.
 - The commands only read. Changes are the business of the tool of the service: `gh`, `glab`, `az`, or `alta jira`.

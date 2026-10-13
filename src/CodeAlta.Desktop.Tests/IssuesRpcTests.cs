@@ -21,7 +21,8 @@ public sealed class IssuesRpcTests
         var reply = await fixture.Rpc.SourcesAsync(new(Epoch, fixture.Project.Id), default);
 
         Assert.AreEqual("ok", reply.Status);
-        Assert.AreEqual(new IssueSource("github", "GitHub", "o/r", "https://github.com/o/r", ["issue", "pull_request"]) with { Kinds = reply.Sources[0].Kinds }, reply.Sources[0]);
+        Assert.AreEqual(new IssueSource("github", "GitHub", "o/r", "https://github.com/o/r", ["issue", "pull_request"], []) with { Kinds = reply.Sources[0].Kinds, Parts = reply.Sources[0].Parts }, reply.Sources[0]);
+        Assert.IsEmpty(reply.Sources[0].Parts, "A tracker of one place has no parts.");
         CollectionAssert.AreEqual(new[] { "issue", "pull_request" }, reply.Sources[0].Kinds.ToArray());
         Assert.AreEqual(("jira", "Jira", "ALTA", (string?)null), (reply.Sources[1].Service, reply.Sources[1].Name, reply.Sources[1].Location, reply.Sources[1].Url), "An address that is not https is not sent.");
         CollectionAssert.AreEqual(new[] { "issue" }, reply.Sources[1].Kinds.ToArray());
@@ -129,6 +130,36 @@ public sealed class IssuesRpcTests
         CollectionAssert.AreEqual(new[] { "https://github.com/o/r/issues/12" }, fixture.Opened);
     }
 
+    [TestMethod]
+    public async Task ATrackerOfSeveralPlaces_OffersItsParts_AndAListingCanBeLimitedToOneOfThem()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var jira = new FakeTracker("jira", "Jira", "ALTA, PLAT") { Kinds = [TrackedItemKind.Issue], Parts = ["ALTA", "PLAT", "PLAT", "two\nlines", " padded "] };
+        fixture.Sources.Add(new FakeSource(_ => [jira]));
+
+        var sources = await fixture.Rpc.SourcesAsync(new(Epoch, fixture.Project.Id), default);
+        var source = sources.Sources.Single(static candidate => candidate.Service == "jira");
+        Assert.AreEqual("ALTA, PLAT", source.Location);
+        CollectionAssert.AreEqual(new[] { "ALTA", "PLAT" }, source.Parts.ToArray(), "A part is offered once, and only when it is a plain name.");
+        StringAssert.Contains(JsonSerializer.Serialize(sources, DesktopJsonContext.Default.IssueSourcesResponse), "\"parts\":[\"ALTA\",\"PLAT\"]");
+
+        Assert.AreEqual("ok", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "jira", "issue", "open", null, null, "PLAT"), default)).Status);
+        Assert.AreEqual("PLAT", jira.Asked!.Part);
+        Assert.AreEqual("ok", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "jira", "issue", "open", null, null), default)).Status);
+        Assert.IsNull(jira.Asked!.Part, "Without a part, all of them are listed.");
+
+        // Only a part the tracker gave is passed on to it.
+        jira.Asked = null;
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "jira", "issue", "open", null, null, "OTHER"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "jira", "issue", "open", null, null, "two\nlines"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, null, "ALTA"), default)).Status);
+        Assert.IsNull(jira.Asked);
+
+        // One part is not a choice.
+        jira.Parts = ["ALTA"];
+        Assert.IsEmpty((await fixture.Rpc.SourcesAsync(new(Epoch, fixture.Project.Id), default)).Sources.Single(static candidate => candidate.Service == "jira").Parts);
+    }
+
     private sealed class FakeSource(Func<string, IReadOnlyList<IIssueTracker>> trackers) : IIssueTrackerSource
     {
         public ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken) => ValueTask.FromResult(trackers(projectPath));
@@ -141,9 +172,10 @@ public sealed class IssuesRpcTests
         public string Location => location;
         public string? WebUrl { get; init; }
         public IReadOnlyList<TrackedItemKind> Kinds { get; init; } = [TrackedItemKind.Issue, TrackedItemKind.PullRequest];
+        public IReadOnlyList<string> Parts { get; set; } = [];
         public TrackedItemPage Page { get; set; } = new([]);
         public TrackedItemDetail? Detail { get; set; }
-        public TrackedItemQuery? Asked { get; private set; }
+        public TrackedItemQuery? Asked { get; set; }
         public bool Fails { get; set; }
 
         public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)

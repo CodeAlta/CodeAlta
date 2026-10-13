@@ -2222,6 +2222,7 @@ export const messages = dictionary({
   "Choose an item to read it.": ["Elige un elemento para leerlo.", "Choisissez un élément pour le lire.", "Wähle einen Eintrag, um ihn zu lesen.", "読む項目を選んでください。", "选择一项以阅读。"],
   "Comments": ["Comentarios", "Commentaires", "Kommentare", "コメント", "评论"],
   "Copy link": ["Copiar enlace", "Copier le lien", "Link kopieren", "リンクをコピー", "复制链接"],
+  "{service} project": ["Proyecto de {service}", "Projet {service}", "{service}-Projekt", "{service} のプロジェクト", "{service} 项目"],
   "Filter by words or number": ["Filtrar por palabras o número", "Filtrer par mots ou numéro", "Nach Wörtern oder Nummer filtern", "語句または番号で絞り込む", "按词语或编号筛选"],
   "Issues are unavailable in this window.": ["Las incidencias no están disponibles en esta ventana.", "Les tickets ne sont pas disponibles dans cette fenêtre.", "Issues sind in diesem Fenster nicht verfügbar.", "このウィンドウでは Issue を利用できません。", "此窗口中无法使用议题。"],
   "It could not be read.": ["No se pudo leer.", "Lecture impossible.", "Es konnte nicht gelesen werden.", "読み取れませんでした。", "无法读取。"],

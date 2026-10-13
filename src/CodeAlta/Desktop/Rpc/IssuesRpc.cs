@@ -33,6 +33,7 @@ internal sealed class IssuesService
     private const int MaximumName = 128;
     private const int MaximumUrl = 2048;
     private const int MaximumLabels = 24;
+    private const int MaximumParts = 32;
     private static readonly TimeSpan ListTimeout = TimeSpan.FromSeconds(40);
     private readonly Func<IReadOnlyList<IIssueTrackerSource>>? _sources;
     private readonly ProjectCatalog? _projects;
@@ -78,17 +79,19 @@ internal sealed class IssuesService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false, null, false);
         if (Kind(request.Kind) is not { } kind || Filter(request.Filter) is not { } filter || !GitIssuesService.SingleLine(request.Query ?? string.Empty, MaximumQuery)
-            || !Name(request.Service)) return new("invalid_request", [], false, null, false);
+            || !Name(request.Service) || request.Part is not null && !Name(request.Part)) return new("invalid_request", [], false, null, false);
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found", [], false, null, false);
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
             return new("no_tracker", [], false, null, false);
+        // A part is one the tracker gave: nothing else is passed on to it.
+        if (request.Part is not null && !tracker.Parts.Contains(request.Part, StringComparer.Ordinal)) return new("invalid_request", [], false, null, false);
 
         var limit = Math.Clamp(request.Limit ?? DefaultLimit, 1, MaximumLimit);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ListTimeout);
         try
         {
-            var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit), timeout.Token).ConfigureAwait(false);
+            var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit) { Part = request.Part }, timeout.Token).ConfigureAwait(false);
             return new("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, page.Problem is null ? null : GitIssuesService.Clean(page.Problem, MaximumTitle), page.NeedsSignIn);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -207,7 +210,10 @@ internal sealed class IssuesService
     {
         var name = GitIssuesService.Clean(tracker.DisplayName, MaximumName);
         var kinds = tracker.Kinds.Distinct().Select(static kind => kind == TrackedItemKind.PullRequest ? "pull_request" : "issue").ToArray();
-        return name.Length == 0 || kinds.Length == 0 ? null : new(tracker.Service, name, GitIssuesService.Clean(tracker.Location, MaximumTitle), Https(tracker.WebUrl), kinds);
+        // A part is offered as the tracker wrote it, since it is given back to it: one that is not a plain name is not offered.
+        var parts = tracker.Parts.Where(Name).Distinct(StringComparer.Ordinal).Take(MaximumParts).ToArray();
+        return name.Length == 0 || kinds.Length == 0 ? null
+            : new(tracker.Service, name, GitIssuesService.Clean(tracker.Location, MaximumTitle), Https(tracker.WebUrl), kinds, parts.Length > 1 ? parts : []);
     }
 
     private static IssueRow? Row(TrackedItem item)
@@ -323,7 +329,8 @@ internal sealed record IssueSourcesResponse(string Status, IReadOnlyList<IssueSo
 /// <param name="Location">The repository or the project the tracker is of.</param>
 /// <param name="Url">Its https address on the web, when it has one.</param>
 /// <param name="Kinds"><c>issue</c> and <c>pull_request</c>, as the tracker has them.</param>
-internal sealed record IssueSource(string Service, string Name, string Location, string? Url, IReadOnlyList<string> Kinds);
+/// <param name="Parts">The parts a listing can be limited to, for a tracker of several places (the Jira projects of a project); empty otherwise.</param>
+internal sealed record IssueSource(string Service, string Name, string Location, string? Url, IReadOnlyList<string> Kinds, IReadOnlyList<string> Parts);
 
 /// <summary>Asks for a listing.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
@@ -333,7 +340,8 @@ internal sealed record IssueSource(string Service, string Name, string Location,
 /// <param name="Filter"><c>open</c>, <c>closed</c>, <c>merged</c> or <c>all</c>.</param>
 /// <param name="Query">Words the items must match; null or empty for the most recently updated ones.</param>
 /// <param name="Limit">The most items; 50 when null, 100 at most.</param>
-internal sealed record IssueListRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Filter, string? Query, int? Limit);
+/// <param name="Part">One of the <see cref="IssueSource.Parts"/> of the tracker, to list it alone; null for all of them.</param>
+internal sealed record IssueListRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Filter, string? Query, int? Limit, string? Part = null);
 
 /// <summary>
 /// A listing. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>,

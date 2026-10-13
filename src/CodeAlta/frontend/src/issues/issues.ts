@@ -61,8 +61,21 @@ export function labelColors(color: string | null | undefined): { background: str
   return { background: `#${color}`, color: bright ? "#1b1f24" : "#ffffff" };
 }
 
+/**
+ * The part of a tracker a list is limited to: the one that was chosen, as long as the tracker has it, otherwise
+ * all of them. A choice made for one tracker says nothing of another.
+ */
+export function shownPart(source: Pick<IssueSource, "parts"> | null | undefined, chosen: string | null): string | null {
+  return chosen !== null && (source?.parts ?? []).includes(chosen) ? chosen : null;
+}
+
+/** What the parts of a tracker are, for the choice of all of them: the projects of Jira. */
+export function allPartsLabel(service: string | null | undefined): MessageKey {
+  return service === "jira" ? "All projects" : "All";
+}
+
 /** Whether a listing that was asked is still the one the page shows. */
-export type IssueListKey = Readonly<{ projectId: string; service: string; kind: IssueKind; filter: IssueFilter; query: string }>;
+export type IssueListKey = Readonly<{ projectId: string; service: string; kind: IssueKind; filter: IssueFilter; query: string; part: string | null }>;
 export function sameList(a: IssueListKey | null, b: IssueListKey | null): boolean {
-  return !!a && !!b && a.projectId === b.projectId && a.service === b.service && a.kind === b.kind && a.filter === b.filter && a.query === b.query;
+  return !!a && !!b && a.projectId === b.projectId && a.service === b.service && a.kind === b.kind && a.filter === b.filter && a.query === b.query && a.part === b.part;
 }

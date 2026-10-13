@@ -3705,7 +3705,9 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   does not see is named above the issues of the others.
 - **Trackers.** A tracker is an `IIssueTracker`: a service name (`github`, `gitlab`, `azure_devops`, `bitbucket`,
   `jira`), what it is of (`owner/repository`, or the keys of the Jira projects), the kinds of items it has, a listing and
-  the reading of one item. A plugin that knows trackers implements `IIssueTrackerSource`
+  the reading of one item. A tracker of several places gives its `Parts` (the keys of the Jira projects), and a
+  listing can ask for one of them (`TrackedItemQuery.Part`): the host offers the parts that are plain names, only
+  when there are several, and passes on to the tracker only a part it gave. A plugin that knows trackers implements `IIssueTrackerSource`
   (`GetTrackersAsync(projectPath)`); the host asks every active plugin that implements it, and a plugin that
   fails hides no other. The Git plugin gives the tracker of the hosted repository of the folder; the Jira plugin
   gives the Jira projects a project names in its configuration, as one tracker. With several trackers the tab shows a choice
@@ -3717,7 +3719,9 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   are matched). Bitbucket Cloud: issues and pull requests with its query language; a repository without an issue
   tracker says so. A refusal is a sentence the tab shows, with how to sign in when signing in is what is missing
   (a private repository answers "not found" to a visitor).
-- **Lists.** The toolbar has the project, the tracker, **Issues** or **Pull requests** (merge requests on GitLab,
+- **Lists.** The toolbar has the project, the tracker, the part of a tracker of several places (**All projects**
+  or one Jira project, for a project that names several; the choice is forgotten when the tracker no longer has
+  that part), **Issues** or **Pull requests** (merge requests on GitLab,
   work items on Azure DevOps), and a filter. **Open**, **Closed**, **Merged** (pull requests only) and **All**
   are tabs; a draft pull request is open. A listing holds 50 items, the most recently updated first, and says
   when more match. What is typed is asked 350 ms after the last key. A row has the state as an icon in the color

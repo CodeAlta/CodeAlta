@@ -42,6 +42,7 @@ projects = ["PLAT", "TEAM"]
 ```
 
 - The issues of all these projects are listed together, the most recently updated first. The key of an issue says which project it is in: `PLAT-7`.
+- In the Issues tab, the list beside **Jira** shows **All projects** or one of them.
 - A new issue goes to the project of `project`, here `ALTA`. An agent creates an issue in another one only when you name it, and never in a project that is not in the list.
 - Without `project`, the first key of `projects` is the one new issues go to.
 - All the projects are on the same site, and 20 at most are read.
