@@ -117,6 +117,52 @@ public sealed class SessionOwnedRunBindingTests
             (await f.Wait(f.Keep(f.Permissions.CreateSendDefaultPermissionHandler(SessionPermissionPolicy.Approve)(f.Request("bypassed", null), CancellationToken.None)))).Kind);
     });
 
+    [TestMethod]
+    public Task GrantWaiting_AllowsWhatTheNewPolicyGrants_OfItsSessionOnly_AndNeverAQuestionToTheUser() => Fixture.Run(async f =>
+    {
+        // Two sessions with a mode of their own, which asks first. The first has two commands, a file change and a
+        // question that wait for the user; the second has a command that waits.
+        f.Permissions.SessionPolicy = static _ => SessionPermissionPolicy.Review;
+        var run = f.NewSource();
+        var execution = await f.CreateExecution(SessionPermissionPolicy.Review, enableUserInput: true, "session");
+        Assert.IsTrue(await f.Wait(f.Permissions.BindOwnedRunAsync(execution, new("run"), run.Token).AsTask()));
+        var other = await f.CreateExecution(SessionPermissionPolicy.Review, enableUserInput: false, "other");
+        var callback = f.Permissions.CreateOwnedCommandHandler(execution);
+        var command = f.Keep(callback(f.Request("command", null), CancellationToken.None));
+        var change = f.Keep(callback(f.FileChange("change", "inert-directory"), CancellationToken.None));
+        var refused = f.Keep(callback(f.Request("refused", null), CancellationToken.None));
+        var foreign = f.Keep(f.Permissions.CreateOwnedCommandHandler(other)(f.Request("foreign", null) with { SessionId = "other" }, CancellationToken.None));
+        var question = f.Permissions.CreateOwnedUserInputHandler(execution)(
+            new AgentUserInputRequest(new("inert"), "session", DateTimeOffset.UtcNow, null, "question",
+                new AgentUserInputForm([new("Q", "Question", Options: [new("yes"), new("no")], AllowFreeform: false)])), CancellationToken.None);
+        var waiting = (await f.Wait(f.Permissions.ListOwnedCommandsAsync("session", CancellationToken.None).AsTask())).Entries;
+        Assert.HasCount(3, waiting);
+        var form = (await f.Wait(f.Permissions.ListOwnedUserInputsAsync("session", CancellationToken.None).AsTask())).Entries.Single();
+
+        // The user refuses one request before the mode changes: the change does not answer it a second time.
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(
+            waiting.Single(static entry => entry.Handle.Attempt.InteractionId == "refused").Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).AsTask()));
+
+        // Accept edits allows the file change that waits and no command; a mode that asks allows nothing.
+        Assert.AreEqual(1, await f.Wait(f.Permissions.GrantWaitingOwnedAsync("session", SessionPermissionPolicy.AcceptEdits).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Wait(change)).Kind);
+        Assert.AreEqual(0, await f.Wait(f.Permissions.GrantWaitingOwnedAsync("session", SessionPermissionPolicy.Review).AsTask()));
+        Assert.IsFalse(command.IsCompleted);
+
+        // Bypass allows the command that waits: not the one the user refused, not the request of the other session,
+        // and not the question, which only the user answers.
+        Assert.AreEqual(1, await f.Wait(f.Permissions.GrantWaitingOwnedAsync("session", SessionPermissionPolicy.Approve).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Wait(command)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Wait(refused)).Kind);
+        Assert.HasCount(1, (await f.Wait(f.Permissions.ListOwnedCommandsAsync("other", CancellationToken.None).AsTask())).Entries);
+        Assert.IsFalse(foreign.IsCompleted);
+        Assert.AreEqual(form, (await f.Wait(f.Permissions.ListOwnedUserInputsAsync("session", CancellationToken.None).AsTask())).Entries.Single());
+        Assert.IsFalse(question.IsCompleted);
+
+        Assert.IsTrue(await f.Wait(f.Permissions.CancelOwnedUserInputAsync(form.Handle, CancellationToken.None).AsTask()));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => question.WaitAsync(TimeSpan.FromSeconds(5)));
+    });
+
     private sealed class Fixture
     {
         private readonly object _gate = new();
@@ -129,6 +175,8 @@ public sealed class SessionOwnedRunBindingTests
         internal SessionPermissionService Permissions { get; }
         private readonly OwnedProviderEventForwarding.Attachment _attachment = new(new OwnedProviderEventForwarding(), 1,
             new("session", "inert-handle"), static () => Task.CompletedTask, static () => Task.CompletedTask);
+        private readonly OwnedProviderEventForwarding.Attachment _otherAttachment = new(new OwnedProviderEventForwarding(), 1,
+            new("other", "inert-handle"), static () => Task.CompletedTask, static () => Task.CompletedTask);
         internal Fixture() => Permissions = new SessionPermissionService(() => AutoApprove);
         internal Task Keep(Task task) { lock (_gate) _work.Add(task); return task; }
         internal Task<T> Keep<T>(Task<T> task) { Keep((Task)task); return task; }
@@ -146,6 +194,14 @@ public sealed class SessionOwnedRunBindingTests
             var execution = await Wait(Permissions.CreateOwnedExecutionAsync(Guid.NewGuid(), "session", CancellationToken.None, reviewCommands, false).AsTask());
             Assert.IsNotNull(execution);
             Assert.IsTrue(await Wait(Permissions.BindOwnedExecutionAsync(execution, Guid.NewGuid(), _attachment, new("inert")).AsTask()));
+            return execution;
+        }
+        // An execution of a session that has a mode of its own, on the attachment of that session.
+        internal async Task<SessionPermissionService.OwnedPermissionExecution> CreateExecution(SessionPermissionPolicy policy, bool enableUserInput, string sessionId)
+        {
+            var execution = await Wait(Permissions.CreateOwnedExecutionAsync(Guid.NewGuid(), sessionId, CancellationToken.None, policy, enableUserInput).AsTask());
+            Assert.IsNotNull(execution);
+            Assert.IsTrue(await Wait(Permissions.BindOwnedExecutionAsync(execution, Guid.NewGuid(), sessionId == "session" ? _attachment : _otherAttachment, new("inert")).AsTask()));
             return execution;
         }
         internal AgentCommandPermissionRequest Request(string interaction, string? run) => new(new("inert"), "session", DateTimeOffset.UtcNow,
@@ -185,6 +241,7 @@ public sealed class SessionOwnedRunBindingTests
                 await Task.WhenAll(lateTasks.Select(Join));
                 foreach (var source in sources) source.Dispose();
                 _attachment.Cancellation.Dispose();
+                _otherAttachment.Cancellation.Dispose();
             }
         }
         private async Task Join(Task task)

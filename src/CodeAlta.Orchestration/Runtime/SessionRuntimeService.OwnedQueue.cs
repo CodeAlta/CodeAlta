@@ -105,7 +105,8 @@ public sealed partial class SessionRuntimeService
                     item.Execution.Token.ThrowIfCancellationRequested();
                     QueueRunLifecycle? lifecycle = null;
                     var send = new AgentSendOptions { Input = AgentInput.Text(request.Text) };
-                    // The policy of the session, read once when its queued prompt starts, as a direct send reads it.
+                    // The policy of the session when its queued prompt starts decides whether it is reviewed, as for a
+                    // direct send; its requests then follow the mode the session has when they come.
                     SessionPermissionPolicy? policy = SessionPermissionModes ? GetPermissionPolicy(request.SessionId) : null;
                     if (policy is { } own ? own != SessionPermissionPolicy.Approve || enableUserInput : reviewPermissions || enableUserInput)
                     {

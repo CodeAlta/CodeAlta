@@ -859,8 +859,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 }
                 else
                 {
-                    // The policy of the session, read once now that it is prepared: the mode a send chooses is saved
-                    // by then. A session whose requests are all approved needs no execution, unless it asks questions.
+                    // The policy of the session now that it is prepared (the mode a send chooses is saved by then)
+                    // decides whether the send is reviewed. A session whose requests are all approved needs no execution,
+                    // unless it asks questions; either way its requests follow the mode the session has when they come.
                     SessionPermissionPolicy? policy = _runtime.SessionPermissionModes ? _runtime.GetPermissionPolicy(prepared.Session.SessionId) : null;
                     var reviewed = policy is { } own ? own != SessionPermissionPolicy.Approve || _enableUserInput : operation.ReviewPermissions || _enableUserInput;
                     if (reviewed)
@@ -880,7 +881,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                         {
                             Input = prepared.Input,
                             AskId = operation.AskSubmission?.AskId,
-                            // Without an owned execution, the default decision is still the one the send started with.
+                            // Without an owned execution, the session's default decision, which follows its mode.
                             OnPermissionRequest = operation.PermissionExecution is null ? _runtime.Permissions.CreateSendDefaultPermissionHandler(policy) : null,
                         };
                         operation.SendInvocation.Launch(() => operation.Send = _runtime.SendOwnedCommandAsync(prepared.Session, prepared.Options, sendOptions,

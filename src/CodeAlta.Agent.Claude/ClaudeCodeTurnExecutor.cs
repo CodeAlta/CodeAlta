@@ -14,6 +14,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderInitiatedTurns,
     IAgentProviderBackgroundTasks,
     IAgentProviderRemoteControl,
+    IAgentProviderPermissionMode,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -125,6 +126,10 @@ internal sealed class ClaudeCodeTurnExecutor :
     /// <inheritdoc />
     public Task<bool> StopBackgroundTaskAsync(string sessionId, string taskId, CancellationToken cancellationToken)
         => _sessions.TryGetValue(sessionId, out var session) ? session.StopBackgroundTaskAsync(taskId, cancellationToken) : Task.FromResult(false);
+
+    /// <inheritdoc />
+    public Task<bool> SetRunningPermissionModeAsync(string sessionId, string? permissionMode, CancellationToken cancellationToken)
+        => _sessions.TryGetValue(sessionId, out var session) ? session.SetRunningPermissionModeAsync(permissionMode, cancellationToken) : Task.FromResult(false);
 
     /// <inheritdoc />
     public async ValueTask DisposeProviderSessionAsync(string sessionId)

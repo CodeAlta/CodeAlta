@@ -1035,6 +1035,75 @@ public sealed class AgentRuntimeTests
             executor.Requests.Select(static request => request.PermissionMode).ToArray());
     }
 
+    [TestMethod]
+    public async Task PermissionModeAppliedNow_ReachesTheNextTurnsOfARun_AndItsProviderWithOrWithoutOne()
+    {
+        using var temp = TestTempDirectory.Create();
+        var executor = new LiveModeTurnExecutor();
+        var agentRuntime = CreateAgentRuntime(temp.Path, executor);
+        await using var session = await agentRuntime.CreateSessionAsync(
+                new AgentSessionCreateOptions
+                {
+                    ProviderKey = "openai",
+                    Model = "gpt-5.4",
+                    WorkingDirectory = "C:\\repo\\modes",
+                    PermissionMode = "acceptEdits",
+                    OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                })
+            .ConfigureAwait(false);
+        var modes = (IAgentPermissionModeProvider)session;
+        // Between runs, the provider is told at once: a turn it starts by itself follows the mode too.
+        Assert.IsTrue(await modes.ApplyPermissionModeNowAsync().ConfigureAwait(false));
+
+        // The mode changes and is applied while the first run goes on: its second turn requests it, and the
+        // provider of the run is told at once.
+        var applied = false;
+        executor.DuringFirstTurn = async () =>
+        {
+            modes.SetPermissionMode("dontAsk");
+            applied = await modes.ApplyPermissionModeNowAsync().ConfigureAwait(false);
+        };
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("one") }).ConfigureAwait(false);
+
+        Assert.IsTrue(applied);
+        CollectionAssert.AreEqual(new[] { "acceptEdits", "dontAsk" }, executor.Requests.Select(static request => request.PermissionMode).ToArray());
+        CollectionAssert.AreEqual(new[] { "acceptEdits", "dontAsk" }, executor.RunningModes.ToArray());
+    }
+
+    private sealed class LiveModeTurnExecutor : IModelProviderTurnExecutor, IAgentProviderPermissionMode
+    {
+        public List<AgentTurnRequest> Requests { get; } = [];
+
+        public List<string?> RunningModes { get; } = [];
+
+        public Func<Task>? DuringFirstTurn { get; set; }
+
+        public async Task<AgentTurnResponse> ExecuteTurnAsync(
+            AgentTurnRequest request,
+            Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            var first = Requests.Count == 1;
+            if (first && DuringFirstTurn is { } during)
+            {
+                await during().ConfigureAwait(false);
+            }
+
+            return new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text($"Turn #{Requests.Count}")]),
+                RequiresProviderFollowUp = first,
+            };
+        }
+
+        public Task<bool> SetRunningPermissionModeAsync(string sessionId, string? permissionMode, CancellationToken cancellationToken)
+        {
+            RunningModes.Add(permissionMode);
+            return Task.FromResult(true);
+        }
+    }
+
     private sealed class ModeRecordingTurnExecutor : IModelProviderTurnExecutor
     {
         public List<AgentTurnRequest> Requests { get; } = [];

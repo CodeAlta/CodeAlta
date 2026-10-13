@@ -13,6 +13,19 @@ internal sealed record SessionStopBackgroundTaskRequest(string ExpectedEpoch, st
 /// <summary>Whether the provider took the request: <c>ok</c>, <c>unavailable</c> (no such task runs), or why it was refused.</summary>
 internal sealed record SessionStopBackgroundTaskResult(string Status, string? Epoch, string SessionId);
 
+/// <summary>Asks to give a session a permission mode at once.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
+/// <param name="SessionId">The session.</param>
+/// <param name="PermissionMode">One of the modes its choices offer, or <c>provider</c> for the one its provider is configured with.</param>
+internal sealed record SessionPermissionModeRequest(string ExpectedEpoch, string SessionId, string PermissionMode);
+
+/// <summary>
+/// <c>ok</c> with the mode of the session after the request (null for the one of its provider); <c>invalid_mode</c>,
+/// <c>unavailable</c> (an unknown session, or one this window does not own), <c>busy</c> (its provider is being
+/// changed, or it is being deleted), <c>closed</c>, or why it was refused.
+/// </summary>
+internal sealed record SessionPermissionModeResult(string Status, string? Epoch, string SessionId, string? PermissionMode);
+
 /// <summary>Asks to turn the Remote Control of a session on or off.</summary>
 internal sealed record SessionRemoteControlRequest(string ExpectedEpoch, string SessionId, bool Enabled);
 

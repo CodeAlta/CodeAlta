@@ -767,8 +767,11 @@ Whether an owned send is reviewed follows from the permission mode of its sessio
 `CodeAltaHostOptions.SessionPermissionModes`): the mode chosen for the session, else the one its provider
 is configured with, else the policy of the host. `SessionPermissionModes.Policy` maps a mode to
 `Approve` (`bypassPermissions`), `AcceptEdits` (`acceptEdits`: file changes are granted, commands are
-reviewed) or `Review` (any other). The command owner reads it once per send, after preparation; the
-default handler reads it for a request outside an owned send, and has what it does not approve reviewed
+reviewed) or `Review` (any other). The command owner reads it once per send, after preparation, to decide
+whether the send is reviewed; each request of the send then follows the policy the session has when it
+comes, so a change of mode applies to a running send at once
+(`SessionRuntimeService.SetOwnedPermissionModeAsync` also allows the requests that wait and that the new
+mode grants). The default handler reads it for a request outside an owned send, and has what it does not approve reviewed
 on the live attachment of the session (`SessionReviewTarget`). "Permission modes" in `desktop.md` has the
 whole behavior.
 
