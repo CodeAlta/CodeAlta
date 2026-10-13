@@ -9,7 +9,7 @@ summary: A microphone button beside Send dictates into the prompt with a speech 
 
 Today a prompt can only be typed. After this work ([#117](https://github.com/CodeAlta/CodeAlta/issues/117)), a microphone button beside **Send** records the voice and writes what was said at the caret of the prompt. Nothing leaves the computer: the audio is transcribed by a local model, NVIDIA Parakeet TDT 0.6b v3 by default. Nothing is downloaded before the first click on the microphone, which asks first.
 
-CodeAlta Desktop only. Windows is verified here; macOS gets the changes it needs but can only be tested on a Mac; on Linux the button stays hidden until NeoAstra enables media capture in WebKitGTK.
+CodeAlta Desktop only. Windows is verified here; macOS gets the changes it needs but can only be tested on a Mac; Linux has what it needs since NeoAstra 1.4.0, but CodeAlta itself was not run with a microphone there.
 
 ## What the user sees
 
@@ -181,7 +181,7 @@ Each step is one commit on the branch of the worktree, with its tests.
 - The opt-in engine test reads its folder, WAV file, model and expected words from `CODEALTA_SPEECH_TEST_ROOT`, `_WAV`, `_MODEL` and `_WORDS`.
 - The page: a send, a read-only prompt, a hidden pane and Settings opening stop the dictation without the sentence still being spoken; a click, `F9` and `Escape` write it. The download toast does not say whether the engine or the model failed (the host state has one error code), and a toast the user closed is not reopened by progress. The worklet is emitted as `dist/pcm-worklet.js` by a small Vite plugin, like `splash.js`. The picture of the Speech page for the site waits for the developer instance.
 - Linux (WSL, Ubuntu): the speech tests of the branch pass there, and the real worker downloaded the linux-x64 engine and Moonshine tiny and gave the recorded sentence word for word.
-- NeoAstra 1.4.0 (released on GitHub on 2026-10-13; taken into this branch once nuget.org lists it): capture is on in every view of WebKitGTK and a microphone request carries the origin of the page on the three platforms, so the permission decision can require that origin everywhere. On macOS, WebKit gives a page `navigator.mediaDevices` only when the main bundle of the process has the usage description: whether the tool started by the script of `CodeAlta.app` counts as that bundle has to be seen on a Mac; without it the button is hidden.
+- NeoAstra 1.4.0 (released on 2026-10-13 and referenced by this branch): capture is on in every view of WebKitGTK and a microphone request carries the origin of the page on the three platforms, so the permission decision can require that origin everywhere. On macOS, WebKit gives a page `navigator.mediaDevices` only when the main bundle of the process has the usage description: whether the tool started by the script of `CodeAlta.app` counts as that bundle has to be seen on a Mac; without it the button is hidden.
 - NeoAstra: at the user's suggestion, a session of the NeoAstra project enables media capture in WebKitGTK and fills the origin and the user-initiated flag of a permission request, then releases a version. "Linux until NeoAstra enables it" in "Out of scope" ends with that version.
 
 ## How it is verified
@@ -217,7 +217,7 @@ Each step is one commit on the branch of the worktree, with its tests.
 
 ## Out of scope
 
-- The TUI, and Linux until NeoAstra enables `enable-media-stream` in WebKitGTK.
+- The TUI. Linux has what it needs since NeoAstra 1.4.0 (media capture in WebKitGTK), but CodeAlta itself was not run with a microphone there.
 - A category of its own on the Storage page: the models count under "Cache and logs" there and are deleted on the Speech page.
 - GPU providers, hotwords, a language choice for Whisper, push-to-talk, dictation in the expanded prompt editor and in the ask panel.
 - Reading answers aloud.

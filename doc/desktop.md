@@ -1382,7 +1382,8 @@ download. Its folder is `custom-<owner>-<name>-<hash of the address>`.
 
 **The microphone.** `DesktopApplication.DecidePermission` allows `Microphone` once, to a document of the
 application, while `[speech] enabled` is true, and denies every other permission; the setting is read at each
-request and nothing is kept in the profile of the view. The macOS bundle has `NSMicrophoneUsageDescription`.
+request and nothing is kept in the profile of the view. The origin is checked on every platform: since
+NeoAstra 1.4.0 the views of WebKitGTK give it too, and have media capture turned on. The macOS bundle has `NSMicrophoneUsageDescription`.
 The button is hidden when the service is not available (an instance on explicit roots stays off the network),
 when the engine has no package for the platform, when the feature is off and when the view has no
 `navigator.mediaDevices`.

@@ -84,6 +84,6 @@ The first time, the system may ask whether CodeAlta can use the microphone.
 
 - **Windows**: in **Settings > Privacy & security > Microphone**, **Let desktop apps access your microphone** must be on.
 - **macOS**: allow **CodeAlta** in **System Settings > Privacy & Security > Microphone**. Started from a terminal, CodeAlta uses the permission of that terminal.
-- **Linux**: speech to prompt is not available yet, and the microphone button is not shown.
+- **Linux**: the microphone comes through WebKitGTK, which needs an audio input of the system (PipeWire or PulseAudio). On a system where it has none, the microphone button is not shown.
 
 When speech to prompt is turned off, CodeAlta does not ask for the microphone and the button is not shown.

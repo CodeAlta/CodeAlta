@@ -122,8 +122,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     internal static NeoPermissionDecision DecidePermission(NeoPermissionRequest request, bool microphoneAllowed)
     {
         ArgumentNullException.ThrowIfNull(request);
-        // The view of Linux does not say who asks: it shows documents of the application only (DecideNavigation).
-        var own = request.Origin is null || request.Origin is { IsAbsoluteUri: true, Scheme: "app", Host: "codealta" };
+        // Every view says who asks (NeoAstra 1.4.0): a request without an origin is not one of the application.
+        var own = request.Origin is { IsAbsoluteUri: true, Scheme: "app", Host: "codealta" };
         return microphoneAllowed && own && request.Kind == NeoPermissionKind.Microphone ? NeoPermissionDecision.AllowOnce : NeoPermissionDecision.DenyOnce;
     }
 

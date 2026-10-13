@@ -166,7 +166,8 @@ public sealed class SpeechRpcTests
     {
         var page = new Uri("app://codealta/index.html");
         Assert.AreEqual(NeoPermissionDecision.AllowOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, page), microphoneAllowed: true));
-        Assert.AreEqual(NeoPermissionDecision.AllowOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, null), microphoneAllowed: true), "the Linux view does not say who asks");
+        Assert.AreEqual(NeoPermissionDecision.AllowOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, new Uri("app://codealta")), microphoneAllowed: true), "the origin of the page, as the views give it");
+        Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, null), microphoneAllowed: true), "a request that does not say who asks is refused");
         Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, page), microphoneAllowed: false));
         Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, new Uri("https://example.com/")), microphoneAllowed: true));
         Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, new Uri("app://other/index.html")), microphoneAllowed: true));
