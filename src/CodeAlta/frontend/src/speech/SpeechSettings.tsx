@@ -10,6 +10,8 @@ import { SettingsFileLocation } from "../SettingsFileLocation";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 import { storageSize } from "../storage/storage";
+import { microphoneAvailable } from "./capture";
+import { LevelBar, MicrophoneSelect } from "./MicrophoneChoice";
 import type { Speech } from "./speech";
 import { chosenModel, installProgress, installing, modelBytes, modelLanguages } from "./speechStore";
 
@@ -24,8 +26,13 @@ const shortcut = commandDefinitions.find(command => command.id === "dictate")?.k
  * Settings page of speech to prompt: whether it is on, the model that hears, and the models in the cache. A
  * change is saved at once. A download belongs to the application: the page shows it and can start or stop it.
  */
-export function SpeechSettings({ epoch, api, speech }: { epoch: string | null; api: SpeechSettingsApi; speech: Speech }) {
+export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
+  epoch: string | null; api: SpeechSettingsApi; speech: Speech;
+  /** How long the test of a microphone keeps it open, in milliseconds. */
+  testLimit?: number;
+}) {
   const { t, locale } = useShellLanguage();
+  const [microphone] = useState(microphoneAvailable);
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(options => api.read({ expectedEpoch: epoch }, options), `${epoch}`);
   // The buttons of the composers follow what this page was told, without another read.
   useEffect(() => { if (listing) speech.setListing(listing); }, [speech, listing]);
@@ -117,6 +124,7 @@ export function SpeechSettings({ epoch, api, speech }: { epoch: string | null; a
               <option value={custom}>{t("Custom…")}</option>
             </HTMLSelect>
           </Field>
+          {listing.enabled && microphone && <MicrophoneRow speech={speech} testLimit={testLimit} />}
           {shortcut && <Field label={t("Shortcut")}><KeyGesture gesture={shortcut} /></Field>}
         </Card>
         <Card className="speech-card speech-models" role="region" aria-labelledby="settings-speech-models-title">
@@ -135,6 +143,38 @@ export function SpeechSettings({ epoch, api, speech }: { epoch: string | null; a
         </Card>
       </div>}
   </SettingsPage>;
+}
+
+// Who asks for the level of a microphone from this page.
+const testSource = "settings";
+
+/**
+ * The microphone a dictation listens to, and a test of it: while the test is on, the chosen microphone is open
+ * and a bar shows what it hears, so the user sees which device hears them. A second click, leaving the page and
+ * the limit of time stop it.
+ */
+function MicrophoneRow({ speech, testLimit }: { speech: Speech; testLimit: number }) {
+  const { t } = useShellLanguage();
+  const device = useSyncExternalStore(speech.subscribe, () => speech.getState().microphone.device);
+  const testing = useSyncExternalStore(speech.subscribe, () => speech.getState().monitor?.key === testSource);
+  const silent = useSyncExternalStore(speech.subscribe, () => { const monitor = speech.getState().monitor; return monitor?.key === testSource && monitor.silent; });
+  // A browser names the devices only to a page that was given a microphone: one is opened for a moment to list them.
+  useEffect(() => { void speech.listDevices(true); return speech.watchDevices(); }, [speech]);
+  useEffect(() => () => speech.stopMonitor(testSource), [speech]);
+  useEffect(() => {
+    if (!testing) return;
+    const timer = setTimeout(() => speech.stopMonitor(testSource), testLimit);
+    return () => clearTimeout(timer);
+  }, [speech, testing, testLimit]);
+  return <Field label={t("Microphone")} htmlFor="settings-speech-microphone" notice={testing && <div className="settings-field-wide speech-test">
+    <LevelBar speech={speech} source={testSource} />
+    {silent && <p className="speech-silent" role="status">{t("No sound comes from this microphone.")}</p>}
+  </div>}>
+    <MicrophoneSelect speech={speech} id="settings-speech-microphone" value={device}
+      onChange={choice => { speech.setMicrophone(choice); if (testing) speech.startMonitor(testSource, choice); }} />
+    <Button text={t(testing ? "Stop" : "Test")} active={testing} aria-pressed={testing} data-speech-test
+      onClick={() => { if (testing) speech.stopMonitor(testSource); else speech.startMonitor(testSource, device); }} />
+  </Field>;
 }
 
 /** Where the chosen model stands, under its name: to download, being downloaded, or in the cache. */

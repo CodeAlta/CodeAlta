@@ -6,8 +6,11 @@ export const speechSampleRate = 16_000;
 /** The samples of one chunk: a tenth of a second. */
 export const chunkSamples = 1_600;
 
-/** One chunk of audio for the host, and how loud it is from 0 to 1. */
-export type AudioChunk = Readonly<{ base64: string; level: number }>;
+/**
+ * One chunk of audio for the host, how loud it is from 0 to 1 for a meter, and its loudest sample (of 1),
+ * which tells a microphone that gives nothing from the quiet of a room.
+ */
+export type AudioChunk = Readonly<{ base64: string; level: number; peak: number }>;
 
 /**
  * Changes the sample rate of a stream given block by block. Each sample it gives is the mean of the part of
@@ -92,8 +95,15 @@ export function voiceLevel(samples: Float32Array): number {
   return Math.min(1, Math.max(0, (20 * Math.log10(rms) - floor) / -floor));
 }
 
+/** The loudest sample of a chunk, as a part of the scale: 0 is digital silence. */
+export function peakLevel(samples: Float32Array): number {
+  let peak = 0;
+  for (let index = 0; index < samples.length; index++) { const value = Math.abs(samples[index]); if (value > peak) peak = value; }
+  return Math.min(1, peak);
+}
+
 /** Turns the blocks of a microphone, at its own rate, into the chunks the host takes. */
 export function createChunkEncoder(sourceRate: number): { push(input: Float32Array): AudioChunk[] } {
   const resampler = createResampler(sourceRate), chunker = createChunker();
-  return { push: input => chunker.push(resampler.push(input)).map(chunk => ({ base64: int16Base64(toInt16(chunk)), level: voiceLevel(chunk) })) };
+  return { push: input => chunker.push(resampler.push(input)).map(chunk => ({ base64: int16Base64(toInt16(chunk)), level: voiceLevel(chunk), peak: peakLevel(chunk) })) };
 }

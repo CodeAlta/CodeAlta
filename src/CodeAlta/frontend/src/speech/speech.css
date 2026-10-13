@@ -23,11 +23,19 @@
 .prompt-editor .speech-interim { color: var(--muted); font-style: italic; }
 .prompt-editor[data-interim][data-placeholder]::after { content: none; }
 
-/* The question of the first use, beside the button. */
-.confirm-form.speech-ask { width: min(360px, calc(100vw - 32px)); }
-.speech-ask .rename-actions { flex-wrap: wrap; align-items: center; margin-top: 2px; }
-.speech-ask .speech-ask-other.bp6-button { margin-right: auto; margin-left: -7px; color: var(--accent); }
+/* The setup of dictation, beside the button: the microphone with its level, then the model. */
+.confirm-form.speech-setup { width: min(360px, calc(100vw - 32px)); gap: 6px; }
+.speech-setup .speech-setup-label { margin-top: 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.speech-setup .bp6-html-select select { text-overflow: ellipsis; }
+.speech-setup .rename-actions { flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.speech-setup .speech-ask-other.bp6-button { margin-right: auto; margin-left: -7px; color: var(--accent); }
 .speech-ask-answers { display: inline-flex; gap: 6px; margin-left: auto; }
+
+/* The level of a microphone that is open to be heard: a bar that follows the voice. */
+.speech-level { display: block; height: 6px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--text) 14%, transparent); }
+.speech-level > span { display: block; height: 100%; border-radius: inherit; background: var(--green); transition: width .1s linear; }
+.confirm-form .speech-silent, .speech-silent { margin: 0; color: var(--yellow); font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .speech-level > span { transition: none; } }
 
 /* The notice of a download: one line and a bar. */
 .speech-install-notice { display: grid; gap: 7px; min-width: min(280px, 60vw); }
@@ -41,6 +49,7 @@
 .speech-settings .settings-field-control .bp6-html-select { max-width: min(100%, 420px); }
 .speech-settings .settings-field-control .bp6-html-select select { max-width: 100%; text-overflow: ellipsis; }
 .speech-model-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.speech-test { display: grid; gap: 5px; }
 .speech-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .speech-custom > .bp6-input-group { flex: 1 1 220px; min-width: 0; }
 .speech-address-error { flex: 1 1 100%; margin: 0; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }

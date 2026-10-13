@@ -5,8 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ToastProps } from "@blueprintjs/core";
 import { installText } from "./InstallNotice";
 import { createSpeech } from "./speech";
-import { createFixtureHost, createFixtureMicrophone } from "./speechFixture";
-import { followInstall } from "./useSpeechInstall";
+import { createFixtureHost, createFixtureMicrophone, createFixturePreferences } from "./speechFixture";
+import { silenceNotice } from "./speechStore";
+import { followInstall, noticeToast } from "./useSpeechInstall";
 
 const settle = async () => { for (let turn = 0; turn < 6; turn++) await new Promise<void>(resolve => setTimeout(resolve, 0)); };
 const wait = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds));
@@ -15,7 +16,7 @@ const said = (toast: ToastProps) => typeof toast.message === "string" ? toast.me
 
 function follow(options: Parameters<typeof createFixtureHost>[0] = {}) {
   const host = createFixtureHost(options), microphone = createFixtureMicrophone();
-  const speech = createSpeech({ api: host.api, capture: microphone.start, notify: () => { } });
+  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences: createFixturePreferences(), notify: () => { } });
   const shown: { toast: ToastProps; key?: string }[] = [], dismissed: string[] = [];
   let locale: "en" | "fr" = "en";
   const stop = followInstall(speech, () => locale, (toast, key) => { shown.push({ toast, key }); }, key => { dismissed.push(key); });
@@ -157,4 +158,20 @@ test("the end of a download from before the window was there is not announced, a
   running.speech.connect(running.host.epoch);
   await settle();
   assert.equal(running.shown.length, 1);
+});
+
+test("what the page tells of a dictation is a toast in the language of the window; one about the microphone offers to choose another", () => {
+  let asked = 0;
+  const failure = noticeToast({ message: "The microphone is not available. Check the privacy settings of the system.", intent: "danger" }, "en", () => { asked++; });
+  assert.deepEqual([failure.message, failure.intent, failure.action, failure.timeout], ["The microphone is not available. Check the privacy settings of the system.", "danger", undefined, 10_000]);
+  const silent = noticeToast(silenceNotice("Yeti Stereo Microphone", "session:1"), "en", () => { asked++; });
+  assert.deepEqual([silent.message, silent.intent, silent.action?.text], ["No sound comes from the microphone (Yeti Stereo Microphone). Choose another one in the Speech settings.", "warning", "Choose a microphone"]);
+  assert.ok(silent.timeout! > failure.timeout!, "it stays long enough to be answered");
+  (silent.action!.onClick as () => void)();
+  assert.equal(asked, 1);
+  // A microphone the browser did not name, and another language.
+  assert.equal(noticeToast(silenceNotice(null, "a"), "en", () => { }).message, "No sound comes from the microphone. Choose another one in the Speech settings.");
+  const french = noticeToast(silenceNotice("Yeti", "a"), "fr", () => { });
+  assert.deepEqual([french.message, french.action?.text], ["Aucun son ne vient du microphone (Yeti). Choisissez-en un autre dans les réglages de la voix.", "Choisir un microphone"]);
+  assert.equal(noticeToast({ message: "The chosen microphone is not connected. The microphone of the system is used.", intent: "warning" }, "en", () => { }).action, undefined);
 });

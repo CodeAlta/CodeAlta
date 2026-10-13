@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import type { ToastProps } from "@blueprintjs/core";
 import { dismissToast, showToast } from "../appToaster";
 import { translate, type Locale } from "../localization";
-import { startMicrophone, type StartCapture } from "./capture";
+import { settingsNavigation } from "../settingsNavigation";
+import { systemMicrophones } from "./capture";
 import { installToast } from "./InstallNotice";
-import { createSpeech, type Speech, type SpeechApi } from "./speech";
-import { installing, installNotice, type InstallNotice } from "./speechStore";
+import { createSpeech, type Speech, type SpeechApi, type SpeechDependencies } from "./speech";
+import { installing, installNotice, type InstallNotice, type SpeechNotice } from "./speechStore";
 
-const installKey = "speech-install", dictationKey = "speech-dictation";
+const installKey = "speech-install";
 // A download tells its progress many times a second: the notice is drawn a few times a second.
 const pace = 250;
 
@@ -15,13 +17,26 @@ const pace = 250;
  * the download of a model up to date, whatever page or tab is shown. Nothing it follows is state of `App`:
  * a level, a percentage or a word renders the control that shows it.
  */
-export function useSpeechInstall(api: SpeechApi, epoch: string | null, locale: Locale, capture: StartCapture = startMicrophone): Speech {
+export function useSpeechInstall(api: SpeechApi, epoch: string | null, locale: Locale,
+  options: Partial<Pick<SpeechDependencies, "microphones" | "preferences" | "silenceAfter" | "warnAfter">> = {}): Speech {
   const language = useRef(locale); language.current = locale;
-  const [speech] = useState(() => createSpeech({ api, capture,
-    notify: message => showToast({ message: translate(language.current, message), intent: "danger", icon: "error", timeout: 10_000 }, dictationKey) }));
+  const made = useRef<Speech | null>(null);
+  const [speech] = useState(() => createSpeech({ api, microphones: systemMicrophones, ...options,
+    notify: notice => showToast(noticeToast(notice, language.current, () => {
+      // The setup of the composer that dictated, beside its button; the settings when that composer is no longer there.
+      if (!made.current?.proposeSetup(notice.setup)) settingsNavigation.open("speech");
+    }), `speech:${notice.message}`) }));
+  made.current = speech;
   useEffect(() => followInstall(speech, () => language.current), [speech]);
   useEffect(() => speech.connect(epoch), [speech, epoch]);
   return speech;
+}
+
+/** The toast of what the page tells of a dictation or of its microphone; one that offers to choose a microphone stays longer. */
+export function noticeToast(notice: SpeechNotice, locale: Locale, onSetup: () => void): ToastProps {
+  return { message: translate(locale, notice.message, notice.parameters), intent: notice.intent, icon: notice.intent === "danger" ? "error" : "warning-sign",
+    timeout: notice.setup ? 20_000 : 10_000,
+    ...(notice.setup ? { action: { text: translate(locale, "Choose a microphone"), onClick: onSetup } } : {}) };
 }
 
 /** Shows the download as the state of `speech` tells it, until what it returns is called. */

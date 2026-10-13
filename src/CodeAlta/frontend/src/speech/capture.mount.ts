@@ -1,6 +1,7 @@
-// Test-owned mount of the production capture, for a browser started with a microphone of its own making
-// (`--use-fake-device-for-media-stream`): the real `getUserMedia`, audio context and worklet file, no real sound.
-import { microphoneAvailable, startMicrophone, type Capture } from "./capture";
+// Test-owned mount of the production capture, for a browser started with microphones of its own making
+// (`--use-fake-device-for-media-stream`): the real `getUserMedia`, device list, audio context and worklet file, no real sound.
+import { microphoneAvailable, systemMicrophones, type Capture, type CaptureReady } from "./capture";
+import type { InputDevice, MicrophoneChoice } from "./microphones";
 
 const streams: MediaStream[] = [], contexts: AudioContext[] = [];
 // What the capture opens is kept, to see that it closes it.
@@ -12,12 +13,17 @@ window.AudioContext = class extends Context { constructor(options?: AudioContext
 let capture: Capture | null = null;
 const fixture = {
   available: microphoneAvailable(), ready: 0, errors: [] as string[], constraints: [] as (MediaStreamConstraints | undefined)[],
-  chunks: [] as { bytes: number; level: number }[],
-  start() {
-    capture = startMicrophone({ onReady: () => { fixture.ready++; }, onError: failure => { fixture.errors.push(failure); },
-      onChunk: chunk => { fixture.chunks.push({ bytes: atob(chunk.base64).length, level: chunk.level }); } });
+  chunks: [] as { bytes: number; level: number; peak: number }[],
+  /** What each capture said it opened. */
+  opened: [] as CaptureReady[],
+  devices: undefined as readonly InputDevice[] | null | undefined, changes: 0,
+  start(device: MicrophoneChoice = null) {
+    capture = systemMicrophones.start({ onReady: ready => { fixture.ready++; fixture.opened.push(ready); }, onError: failure => { fixture.errors.push(failure); },
+      onChunk: chunk => { fixture.chunks.push({ bytes: atob(chunk.base64).length, level: chunk.level, peak: chunk.peak }); } }, device);
   },
   stop() { capture?.stop(); },
+  async list(probe: boolean) { fixture.devices = await systemMicrophones.list(probe); return fixture.devices; },
+  watch() { return systemMicrophones.watch(() => { fixture.changes++; }); },
   /** What is still open: tracks that are live, audio contexts that are not closed. */
   held: () => ({ tracks: streams.flatMap(stream => stream.getTracks()).filter(track => track.readyState !== "ended").length,
     contexts: contexts.filter(context => context.state !== "closed").length, rates: contexts.map(context => context.sampleRate) }),

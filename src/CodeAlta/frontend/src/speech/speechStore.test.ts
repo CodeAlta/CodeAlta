@@ -23,7 +23,7 @@ test("the button is absent where there is nothing to dictate with", () => {
 
 test("the button of a composer shows its own dictation, and the others stay as they are", () => {
   for (const status of ["starting", "recording", "finishing"] as const) {
-    const dictating = state({ dictation: { status, owner: "a", partial: "" } });
+    const dictating = state({ dictation: { status, owner: "a", partial: "", microphone: null } });
     assert.equal(micView(dictating, "a", true), status);
     assert.equal(micView(dictating, "b", true), "idle");
   }

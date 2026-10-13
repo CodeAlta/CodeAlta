@@ -1,8 +1,10 @@
 import { createContext } from "react";
 import type { speech, SpeechListingResponse, SpeechTranscript } from "#neoastra";
-import type { MessageKey } from "../localization";
-import type { Capture, CaptureFailure, StartCapture } from "./capture";
-import { createSpeechStore, dictationFailure, idleDictation, initialSpeechState, installView, withDictation, withInstall, type SpeechState } from "./speechStore";
+import type { Capture, CaptureFailure, CaptureReady, Microphones } from "./capture";
+import { dictationSilenceDelay, microphoneStorageKey, noSound, readMicrophone, resolveMicrophone, saveMicrophone, shortMicrophoneName, silenceDelay, silencePeak,
+  type MicrophoneChoice } from "./microphones";
+import { createSpeechStore, dictationFailure, idleDictation, installView, silenceNotice, withDictation, withInstall, withMonitor, withoutHost,
+  type SpeechNotice, type SpeechState } from "./speechStore";
 import { unwritten } from "./spokenText";
 
 /** The part of the host a window dictates with. */
@@ -20,9 +22,15 @@ export type DictationSink = Readonly<{
 
 export type SpeechDependencies = Readonly<{
   api: SpeechApi;
-  capture: StartCapture;
-  /** Tells the user what went wrong with a dictation. */
-  notify: (message: MessageKey) => void;
+  microphones: Microphones;
+  /** Tells the user what went wrong with a dictation, or with its microphone. */
+  notify: (notice: SpeechNotice) => void;
+  /** Where the choice of a microphone is kept; the storage of the page by default. */
+  preferences?: Readonly<{ read: () => string | null; write: (value: string) => void }>;
+  /** How long a microphone whose level is shown may give nothing before a line says so; three seconds by default. */
+  silenceAfter?: number;
+  /** How long a dictation may hear nothing at all before a notice says so; eight seconds by default. */
+  warnAfter?: number;
 }>;
 
 // One dictation, from the click that starts it until the host has given its last word. It outlives its place
@@ -39,19 +47,33 @@ type Running = {
   abandoned: boolean;
   ended: boolean;
   told: boolean;
+  /** The loudest sample heard, and the wait after which a microphone that gave nothing is said. */
+  loudest: number; silence: ReturnType<typeof setTimeout> | undefined;
 };
 
+// A microphone that is open for its level only.
+type Monitoring = { readonly key: string; capture: Capture | null; ended: boolean; loudest: number; silence: ReturnType<typeof setTimeout> | undefined };
+
+const pageStorage = { read: () => localStorage.getItem(microphoneStorageKey), write: (value: string) => localStorage.setItem(microphoneStorageKey, value) };
+
 /**
- * Speech to prompt of one window: what the host tells of the models and of a download, and the one dictation.
- * It is made once by the window and given to the composers through `SpeechContext`.
+ * Speech to prompt of one window: what the host tells of the models and of a download, the microphone the
+ * user chose, and the one dictation. It is made once by the window and given to the composers through `SpeechContext`.
  */
-export function createSpeech({ api, capture, notify }: SpeechDependencies) {
+export function createSpeech({ api, microphones, notify, preferences = pageStorage, silenceAfter = silenceDelay, warnAfter = dictationSilenceDelay }: SpeechDependencies) {
   const store = createSpeechStore();
+  store.update(state => ({ ...state, microphone: readMicrophone(preferences.read) }));
   const levels = new Set<(level: number, owner: string | null) => void>();
   const live = new Set<Running>();
+  // The composers whose microphone button is there now: a setup can be shown beside them.
+  const present = new Set<string>();
   let epoch: string | null = null;
   let current: Running | null = null;
+  let monitoring: Monitoring | null = null;
   let connection = 0;
+  // The chosen device that was said not to be connected: said once for it.
+  let toldMissing: string | null = null;
+  let watchers = 0, unwatch: (() => void) | null = null;
 
   const level = (value: number, owner: string | null) => { for (const listener of [...levels]) listener(value, owner); };
   const shown = (running: Running) => current === running;
@@ -59,7 +81,59 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
   function tell(running: Running, error: string | null) {
     if (running.told || running.abandoned) return;
     running.told = true;
-    notify(dictationFailure(error));
+    notify({ message: dictationFailure(error), intent: "danger" });
+  }
+
+  function keepMicrophone(device: MicrophoneChoice, confirmed: boolean) {
+    const before = store.getState().microphone;
+    if (before.confirmed === confirmed && before.device?.id === device?.id && before.device?.label === device?.label) return;
+    const microphone = { device, confirmed };
+    if (before.device?.id !== device?.id) toldMissing = null;
+    store.update(state => ({ ...state, microphone }));
+    saveMicrophone(preferences.write, microphone);
+  }
+
+  // The reading of the devices that is under way: asked twice at once (an effect that runs twice), it is one reading.
+  let reading: { probe: boolean; done: Promise<void> } | null = null;
+  /** Reads the audio inputs the browser lists. A device whose id changed since it was chosen is found by its label, and kept under its new id. */
+  function listDevices(probe: boolean): Promise<void> {
+    if (reading && (reading.probe || !probe)) return reading.done;
+    const mine = { probe, done: (async () => {
+      const devices = await microphones.list(probe).catch(() => null);
+      if (!devices) return;
+      store.update(state => ({ ...state, devices }));
+      const { device, confirmed } = store.getState().microphone;
+      const found = resolveMicrophone(devices, device);
+      if (device && found && found.id !== device.id) keepMicrophone({ id: found.id, label: device.label }, confirmed);
+    })() };
+    reading = mine;
+    void mine.done.finally(() => { if (reading === mine) reading = null; });
+    return mine.done;
+  }
+
+  // What a capture opened, for a dictation as for a level: the browser now names the devices.
+  function opened(ready: CaptureReady) {
+    const { device, confirmed } = store.getState().microphone;
+    if (ready.moved && device) keepMicrophone({ id: ready.moved.id, label: device.label }, confirmed);
+    if (ready.fallback && device && toldMissing !== device.id) {
+      toldMissing = device.id;
+      notify({ message: "The chosen microphone is not connected. The microphone of the system is used.", intent: "warning" });
+    }
+    void listDevices(false);
+  }
+
+  // The device to open for the choice of the user: under the id the browser lists it with now, when it does.
+  const chosenDevice = (choice: MicrophoneChoice) => choice ? resolveMicrophone(store.getState().devices ?? [], choice) ?? choice : null;
+
+  function stopMonitor(key?: string) {
+    const monitor = monitoring;
+    if (!monitor || key !== undefined && monitor.key !== key) return;
+    monitoring = null;
+    monitor.ended = true;
+    clearTimeout(monitor.silence);
+    monitor.capture?.stop(); monitor.capture = null;
+    level(0, monitor.key);
+    store.update(state => state.monitor ? { ...state, monitor: null } : state);
   }
 
   function write(running: Running, finalText: string) {
@@ -74,6 +148,7 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
     if (running.ended) return;
     running.ended = true;
     live.delete(running);
+    clearTimeout(running.silence);
     running.capture?.stop(); running.capture = null;
     running.listening.abort();
     const sink = running.sink;
@@ -92,6 +167,7 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
     if (cancel && !running.abandoned) { running.abandoned = true; running.sink?.interim(""); }
     if (running.ended || running.stopping) return;
     running.stopping = true;
+    clearTimeout(running.silence);
     running.capture?.stop(); running.capture = null;
     if (shown(running)) { level(0, running.owner); store.update(state => withDictation(state, { status: "finishing" })); }
     const id = running.id, at = epoch;
@@ -130,10 +206,12 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
   async function begin(owner: string, sink: DictationSink) {
     const at = epoch;
     if (!at) return;
+    // One use of the microphone at a time: a level that is shown gives it up.
+    stopMonitor();
     const running: Running = { owner, sink, listening: new AbortController(), id: null, capture: null, written: 0, sequence: 0,
-      stopping: false, abandoned: false, ended: false, told: false };
+      stopping: false, abandoned: false, ended: false, told: false, loudest: 0, silence: undefined };
     current = running; live.add(running);
-    store.update(state => ({ ...state, asking: null, dictation: { status: "starting", owner, partial: "" } }));
+    store.update(state => ({ ...state, asking: null, dictation: { status: "starting", owner, partial: "", microphone: null } }));
     let reply: { status: string; id: string | null };
     try { reply = await api.start({ expectedEpoch: at }, { timeoutMilliseconds: 20_000 }); }
     catch { reply = { status: "failed", id: null }; }
@@ -146,21 +224,34 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
     }
     if (!id) {
       end(running);
-      if (reply.status === "model_missing") store.update(state => ({ ...state, asking: owner }));
+      // The model, or its engine, is not there: the setup of the composer offers to download it.
+      if (reply.status === "model_missing") store.update(state => ({ ...state, asking: owner, missing: true }));
       else if (reply.status === "installing") store.update(state => ({ ...state, reveals: state.reveals + 1 }));
       // Turned off, or not of this window: the buttons follow what the host says now.
       else if (["disabled", "unsupported", "unavailable", "stale_epoch"].includes(reply.status)) void refresh();
-      else notify(dictationFailure("start"));
+      else notify({ message: dictationFailure("start"), intent: "danger" });
       return;
     }
     running.id = id;
     void follow(running, id, at);
     // The caret shows where the words will go.
     running.sink?.focus();
-    running.capture = capture({
-      onReady() { if (!running.stopping && !running.ended && shown(running)) store.update(state => withDictation(state, { status: "recording" })); },
+    running.capture = microphones.start({
+      onReady(ready) {
+        if (running.stopping || running.ended) return;
+        if (shown(running)) store.update(state => withDictation(state, { status: "recording", microphone: ready.label }));
+        opened(ready);
+        // A microphone that gives nothing at all (a virtual device with no source, one that is muted) is said once, and
+        // the dictation goes on. The wait is long: one with noise removal is silent too until somebody speaks.
+        running.silence = setTimeout(() => {
+          // The wait is over: the clock of the page need not say so again.
+          if (running.stopping || running.ended || !noSound([running.loudest], warnAfter, warnAfter)) return;
+          notify(silenceNotice(ready.label ? shortMicrophoneName(ready.label) : null, running.owner));
+        }, warnAfter);
+      },
       onChunk(chunk) {
         if (running.stopping || running.ended) return;
+        if (chunk.peak > running.loudest) running.loudest = chunk.peak;
         if (shown(running)) level(chunk.level, running.owner);
         // Not awaited: the host puts the chunks back in order. One it refuses is the last one sent.
         const refused = () => { if (!running.stopping && !running.ended) void finish(running, false); };
@@ -172,7 +263,7 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
         tell(running, failure === "microphone" ? "microphone" : "start");
         void finish(running, true);
       },
-    });
+    }, chosenDevice(store.getState().microphone.device));
     // A capture that failed at once has already ended the dictation.
     if (running.stopping || running.ended) { running.capture.stop(); running.capture = null; }
   }
@@ -193,16 +284,31 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
         const install = installView(item), before = store.getState().install;
         store.update(state => withInstall(state, install));
         // A model that has just been installed, or removed by a download that failed: the list is read again.
-        if (!first && before && before.state !== install.state && ["done", "failed", "canceled"].includes(install.state)) void refresh();
+        if (!first && before && before.state !== install.state && ["done", "failed", "canceled"].includes(install.state)) {
+          if (install.state === "done") store.update(state => state.missing ? { ...state, missing: false } : state);
+          void refresh();
+        }
         first = false;
       }
     } catch { /* The stream closed with the host: the download, if any, goes on there. */ }
   }
 
+  // Ends whatever dictation there is, keeping what it heard, before the microphone is given to something else.
+  const endDictations = () => { for (const running of [...live]) void finish(running, false); };
+
+  async function install(model: string | null): Promise<string> {
+    if (!epoch) return "unavailable";
+    let status = "failed";
+    try { status = (await api.install({ expectedEpoch: epoch, model }, { timeoutMilliseconds: 30_000 })).status; } catch { /* Told below. */ }
+    if (status === "busy") store.update(state => ({ ...state, reveals: state.reveals + 1 }));
+    else if (status !== "ok") notify({ message: status === "unsupported" ? "Speech to prompt is not available on this system." : "The speech model could not be installed.", intent: "danger" });
+    return status;
+  }
+
   return {
     getState: store.getState as () => SpeechState,
     subscribe: store.subscribe,
-    /** Follows the level of the voice, about ten times a second while a dictation records: not a state of React. */
+    /** Follows the level of a microphone, about ten times a second while it is open: not a state of React. `owner` is the composer that dictates, or who asked for the level. */
     subscribeLevel(listener: (level: number, owner: string | null) => void) { levels.add(listener); return () => { levels.delete(listener); }; },
 
     /**
@@ -213,7 +319,7 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
       const turn = ++connection;
       for (const running of [...live]) void finish(running, true);
       epoch = next;
-      store.update(() => initialSpeechState);
+      store.update(withoutHost);
       if (!next) return () => { };
       const abort = new AbortController();
       void refresh();
@@ -222,15 +328,19 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
         abort.abort();
         if (connection !== turn) return;
         for (const running of [...live]) void finish(running, true);
+        stopMonitor();
         epoch = null;
-        store.update(() => initialSpeechState);
+        store.update(withoutHost);
       };
     },
     refresh,
     /** Takes what a settings page was told by the host, so the buttons follow it at once. */
     setListing(listing: SpeechListingResponse) { if (epoch) store.update(state => ({ ...state, listing })); },
 
-    /** Starts a dictation into the prompt of a composer, or stops the one that composer has. */
+    /**
+     * The press of the microphone of a composer: it stops the dictation that composer has, starts one, or, until
+     * the user has said which microphone to use, shows the setup beside the button.
+     */
     toggle(owner: string, sink: DictationSink) {
       const running = current;
       if (running && !running.ended) {
@@ -238,6 +348,7 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
         // One dictation for the window: the other composer keeps what it heard.
         void finish(running, false);
       }
+      if (!store.getState().microphone.confirmed) { store.update(state => ({ ...state, asking: owner })); return; }
       void begin(owner, sink);
     },
     /** Stops the dictation of a composer and writes its last words. */
@@ -245,24 +356,90 @@ export function createSpeech({ api, capture, notify }: SpeechDependencies) {
     /** A composer can no longer take text (sent, hidden, read-only, gone): its dictation ends and writes nothing more. */
     abandon(owner: string) {
       for (const running of [...live]) if (running.owner === owner) void finish(running, true);
+      stopMonitor(owner);
       store.update(state => state.asking === owner ? { ...state, asking: null } : state);
     },
-    /** Closes the question of the first use. */
-    dismissAsk(owner: string) { store.update(state => state.asking === owner ? { ...state, asking: null } : state); },
+
+    /** The microphone button of a composer is there, until what this returns is called: its setup can be shown. */
+    attach(owner: string): () => void { present.add(owner); return () => { present.delete(owner); }; },
+    /** Shows the setup of a composer, when its button is there; false when there is none to show it beside. */
+    proposeSetup(owner: string | undefined): boolean {
+      if (!owner || !present.has(owner)) return false;
+      endDictations();
+      store.update(state => ({ ...state, asking: owner }));
+      return true;
+    },
+    /** Closes the setup of a composer and keeps nothing of it; the microphone it showed the level of is released at once. */
+    dismissAsk(owner: string) {
+      stopMonitor(owner);
+      store.update(state => state.asking === owner ? { ...state, asking: null } : state);
+    },
+    /** The answer of the setup: the microphone is kept, and the dictation starts with the same press. */
+    confirmAndStart(owner: string, device: MicrophoneChoice, sink: DictationSink) {
+      keepMicrophone(device, true);
+      store.update(state => state.asking === owner ? { ...state, asking: null } : state);
+      void begin(owner, sink);
+    },
+    /** The answer of the setup when the model is missing: the microphone is kept, and the download starts. */
+    confirmAndDownload(owner: string, device: MicrophoneChoice) {
+      keepMicrophone(device, true);
+      stopMonitor(owner);
+      store.update(state => state.asking === owner ? { ...state, asking: null } : state);
+      void install(null);
+    },
+
+    /** Keeps the microphone chosen in the settings: a choice made there needs no other question. */
+    setMicrophone(device: MicrophoneChoice) { keepMicrophone(device, true); },
+    /** Reads the audio inputs; with `probe`, a microphone is opened for a moment when the browser does not name them yet. */
+    listDevices,
+    /** Reads the audio inputs again when one comes or goes, until what this returns is called. */
+    watchDevices(): () => void {
+      if (watchers++ === 0) unwatch = microphones.watch(() => { void listDevices(true); });
+      let done = false;
+      return () => { if (done) return; done = true; if (--watchers === 0) { unwatch?.(); unwatch = null; } };
+    },
+    /**
+     * Opens a microphone only to show its level, for who asks (`key`: the composer of a setup, or the settings).
+     * A dictation and another level give the microphone up first: one use of it at a time.
+     */
+    startMonitor(key: string, device: MicrophoneChoice) {
+      stopMonitor();
+      endDictations();
+      const monitor: Monitoring = { key, capture: null, ended: false, loudest: 0, silence: undefined };
+      monitoring = monitor;
+      store.update(state => ({ ...state, monitor: { key, open: false, silent: false, label: null } }));
+      // Asked when the wait is over, and again at the first sound after it.
+      const judge = () => { if (!monitor.ended) store.update(state => withMonitor(state, { silent: noSound([monitor.loudest], silenceAfter, silenceAfter) })); };
+      monitor.capture = microphones.start({
+        onReady(ready) {
+          if (monitor.ended) return;
+          store.update(state => withMonitor(state, { open: true, label: ready.label }));
+          monitor.silence = setTimeout(judge, silenceAfter);
+          opened(ready);
+        },
+        onChunk(chunk) {
+          if (monitor.ended) return;
+          level(chunk.level, key);
+          if (chunk.peak > monitor.loudest) monitor.loudest = chunk.peak;
+          // The first sound takes back what was said of a microphone that gave none.
+          if (chunk.peak > silencePeak && store.getState().monitor?.silent) judge();
+        },
+        onError(failure: CaptureFailure) {
+          if (monitor.ended) return;
+          stopMonitor(key);
+          notify({ message: dictationFailure(failure === "microphone" ? "microphone" : "start"), intent: "danger" });
+        },
+      }, chosenDevice(device));
+      if (monitor.ended) { monitor.capture.stop(); monitor.capture = null; }
+    },
+    stopMonitor,
 
     /**
      * Starts the download of a model, the chosen one when none is named, and gives the status of the host, or
      * `failed`. The host owns the download and tells how it goes. A refusal is told here: another download that
      * runs is shown again, anything else is said.
      */
-    async install(model: string | null): Promise<string> {
-      if (!epoch) return "unavailable";
-      let status = "failed";
-      try { status = (await api.install({ expectedEpoch: epoch, model }, { timeoutMilliseconds: 30_000 })).status; } catch { /* Told below. */ }
-      if (status === "busy") store.update(state => ({ ...state, reveals: state.reveals + 1 }));
-      else if (status !== "ok") notify(status === "unsupported" ? "Speech to prompt is not available on this system." : "The speech model could not be installed.");
-      return status;
-    },
+    install,
     cancelInstall() {
       if (epoch) void api.cancelInstall({ expectedEpoch: epoch }, { timeoutMilliseconds: 30_000 }).catch(() => { /* The download ends with the host. */ });
     },

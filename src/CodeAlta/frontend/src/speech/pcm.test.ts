@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chunkSamples, createChunkEncoder, createChunker, createResampler, int16Base64, speechSampleRate, toInt16, voiceLevel } from "./pcm";
+import { chunkSamples, createChunkEncoder, createChunker, createResampler, int16Base64, peakLevel, speechSampleRate, toInt16, voiceLevel } from "./pcm";
 
 const sine = (rate: number, seconds: number, frequency: number, amplitude = .5) =>
   Float32Array.from({ length: Math.round(rate * seconds) }, (_, index) => amplitude * Math.sin(2 * Math.PI * frequency * index / rate));
@@ -101,4 +101,16 @@ test("the blocks of a microphone become chunks the host takes: 3 200 bytes of Ba
   const decoded = Buffer.from(chunks[0].base64, "base64");
   const peak = Math.max(...Array.from({ length: chunkSamples }, (_, index) => Math.abs(decoded.readInt16LE(index * 2))));
   assert.ok(peak > 15_500 && peak < 16_500, `peak ${peak}`);
+});
+
+test("the loudest sample of a chunk tells digital silence from the quiet of a room", () => {
+  assert.equal(peakLevel(new Float32Array(1_600)), 0);
+  assert.equal(peakLevel(new Float32Array(0)), 0);
+  assert.ok(Math.abs(peakLevel(Float32Array.from([0, -.25, .1])) - .25) < 1e-7);
+  assert.equal(peakLevel(Float32Array.from([0, 3, -7])), 1);
+  // The chunks of the host carry it: a microphone that gives nothing has a peak of exactly 0, a quiet one has not.
+  const silent = createChunkEncoder(48_000).push(new Float32Array(4_800));
+  assert.deepEqual(silent.map(chunk => [chunk.peak, chunk.level]), [[0, 0]]);
+  const quiet = createChunkEncoder(48_000).push(Float32Array.from({ length: 4_800 }, (_, index) => index % 2 ? 1e-4 : -1e-4));
+  assert.ok(quiet[0].peak > 1e-5 && quiet[0].level === 0, JSON.stringify(quiet[0].peak));
 });

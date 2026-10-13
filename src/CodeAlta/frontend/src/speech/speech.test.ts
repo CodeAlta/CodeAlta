@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { after } from "node:test";
 import { createSpeech, type DictationSink } from "./speech";
-import { createFixtureHost, createFixtureMicrophone } from "./speechFixture";
+import { createFixtureHost, createFixtureMicrophone, createFixturePreferences, fixtureDevices } from "./speechFixture";
+import { setupDownloads, type SpeechNotice } from "./speechStore";
 import { spokenInsertion } from "./spokenText";
 
 // Lets what waits on promises and streams run.
@@ -18,13 +19,22 @@ function prompt() {
   return { state, sink };
 }
 
-async function window(options: Parameters<typeof createFixtureHost>[0] = { installed: ["parakeet-tdt-0.6b-v3"] }) {
+// Every window of a test is left at the end of the file: a dictation that still records holds nothing back.
+const windows: (() => void)[] = [];
+after(() => { for (const leave of windows) leave(); });
+
+// A window whose user already said which microphone to use, unless `preference` says otherwise.
+async function window(options: Parameters<typeof createFixtureHost>[0] = { installed: ["parakeet-tdt-0.6b-v3"] },
+  more: { preference?: string | null; silenceAfter?: number; warnAfter?: number } = {}) {
   const host = createFixtureHost(options), microphone = createFixtureMicrophone();
-  const notices: string[] = [];
-  const speech = createSpeech({ api: host.api, capture: microphone.start, notify: message => notices.push(message) });
+  const preferences = "preference" in more ? createFixturePreferences(more.preference) : createFixturePreferences();
+  const notices: string[] = [], noticed: SpeechNotice[] = [];
+  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences, silenceAfter: more.silenceAfter, warnAfter: more.warnAfter,
+    notify: notice => { notices.push(notice.message); noticed.push(notice); } });
   const disconnect = speech.connect(host.epoch);
+  windows.push(disconnect);
   await settle();
-  return { host, microphone, speech, notices, disconnect, status: () => speech.getState().dictation.status };
+  return { host, microphone, speech, notices, noticed, preferences, disconnect, status: () => speech.getState().dictation.status };
 }
 
 test("a dictation: the words are written as they are finished, the others greyed, and nothing twice", async () => {
@@ -33,7 +43,7 @@ test("a dictation: the words are written as they are finished, the others greyed
   const levels: [number, string | null][] = [];
   speech.subscribeLevel((level, owner) => levels.push([level, owner]));
   speech.toggle("a", sink);
-  assert.deepEqual(speech.getState().dictation, { status: "starting", owner: "a", partial: "" });
+  assert.deepEqual(speech.getState().dictation, { status: "starting", owner: "a", partial: "", microphone: null });
   await settle();
   assert.equal(status(), "recording");
   assert.equal(microphone.open(), true);
@@ -188,7 +198,7 @@ test("one dictation for the window: another composer starts, and the first keeps
   await settle();
   host.state.dictations[0].finalText = "One. Two.";
   speech.toggle("b", second.sink);
-  assert.deepEqual(speech.getState().dictation, { status: "starting", owner: "b", partial: "" });
+  assert.deepEqual(speech.getState().dictation, { status: "starting", owner: "b", partial: "", microphone: null });
   await settle();
   assert.deepEqual(host.state.stops.map(request => [request.id, request.cancel]), [["dictation-1", false]]);
   assert.deepEqual([first.state.text, first.state.interim], ["One. Two.", ""]);
@@ -280,7 +290,7 @@ test("a dictation the host ends or refuses stops sending, and says what failed",
 
 test("the window follows one host: connecting twice leaves one stream, and leaving ends a dictation", async () => {
   const host = createFixtureHost({ installed: ["parakeet-tdt-0.6b-v3"] }), microphone = createFixtureMicrophone();
-  const speech = createSpeech({ api: host.api, capture: microphone.start, notify: () => { } });
+  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences: createFixturePreferences(), notify: () => { } });
   // An effect runs twice in development.
   speech.connect(host.epoch)();
   const disconnect = speech.connect(host.epoch);
@@ -318,15 +328,253 @@ test("the window follows one host: connecting twice leaves one stream, and leavi
 
 test("a window of another epoch is told so, and shows no button", async () => {
   const host = createFixtureHost({ epoch: "now" }), microphone = createFixtureMicrophone();
-  const speech = createSpeech({ api: host.api, capture: microphone.start, notify: () => { } });
+  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences: createFixturePreferences(), notify: () => { } });
   speech.connect("before");
   await settle();
   assert.equal(speech.getState().listing?.status, "stale_epoch");
   // A replayed end of a download from before the page was there.
   const replay = createFixtureHost();
   replay.state.install = { state: "done", modelId: "whisper-small", modelName: "Whisper small", receivedBytes: "40", totalBytes: "40", error: null };
-  const other = createSpeech({ api: replay.api, capture: microphone.start, notify: () => { } });
+  const other = createSpeech({ api: replay.api, microphones: microphone.microphones, preferences: createFixturePreferences(), notify: () => { } });
   other.connect(replay.epoch);
   await settle();
   assert.deepEqual([other.getState().install?.state, replay.state.reads], ["done", 1]);
+});
+
+const yeti = { id: "id-yeti", label: "Microphone (Yeti Stereo Microphone) (b58e:9e84)" };
+const wait = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds));
+
+test("the first press proposes the setup: nothing is recorded or kept before its answer", async () => {
+  const { host, microphone, speech, preferences, status } = await window(undefined, { preference: null });
+  const { state, sink } = prompt();
+  assert.deepEqual(speech.getState().microphone, { device: null, confirmed: false });
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([speech.getState().asking, status(), host.state.starts, microphone.state.captures.length], ["a", "idle", 0, 0]);
+  // Cancel keeps nothing: the next press proposes again.
+  speech.dismissAsk("a");
+  assert.deepEqual([speech.getState().asking, preferences.state.writes], [null, 0]);
+  speech.toggle("a", sink);
+  assert.equal(speech.getState().asking, "a");
+
+  // The answer keeps the microphone and starts the dictation on it, with the same press.
+  speech.confirmAndStart("a", yeti, sink);
+  await settle();
+  assert.deepEqual([speech.getState().asking, status(), microphone.heard(), host.state.starts], [null, "recording", "id-yeti", 1]);
+  assert.deepEqual(JSON.parse(preferences.state.value!), { device: yeti, confirmed: true });
+  assert.equal(speech.getState().dictation.microphone, yeti.label, "the button can name the microphone it hears");
+  speech.stop("a");
+  await settle();
+  // Later presses record directly, on the same device.
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([speech.getState().asking, status(), microphone.heard()], [null, "recording", "id-yeti"]);
+  assert.equal(state.focused > 0, true);
+});
+
+test("the setup offers to download a model that is missing, and keeps the microphone with that answer too", async () => {
+  const { host, microphone, speech, preferences } = await window({}, { preference: null });
+  const { sink } = prompt();
+  speech.toggle("a", sink);
+  assert.deepEqual([speech.getState().asking, setupDownloads(speech.getState())], ["a", true]);
+  speech.confirmAndDownload("a", yeti);
+  await settle();
+  assert.deepEqual([speech.getState().asking, host.state.installs, microphone.open()], [null, [null], false]);
+  assert.deepEqual(JSON.parse(preferences.state.value!), { device: yeti, confirmed: true });
+  // While the download runs there is nothing to download again; once it is there, the setup would start.
+  assert.equal(setupDownloads(speech.getState()), false);
+  host.installed("parakeet-tdt-0.6b-v3");
+  await settle();
+  assert.equal(setupDownloads(speech.getState()), false);
+  // The microphone was confirmed: the next press dictates.
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([speech.getState().asking, speech.getState().dictation.status, microphone.heard()], [null, "recording", "id-yeti"]);
+});
+
+test("a model the host says is missing shows the same setup to a user who already chose a microphone", async () => {
+  const { host, speech } = await window({ installed: ["parakeet-tdt-0.6b-v3"] });
+  const { sink } = prompt();
+  // The model is listed as installed, and its engine is not: the host knows.
+  host.state.startStatus = "model_missing";
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([speech.getState().asking, speech.getState().missing, setupDownloads(speech.getState())], ["a", true, true]);
+  speech.confirmAndDownload("a", null);
+  await settle();
+  host.state.startStatus = null;
+  host.installed("parakeet-tdt-0.6b-v3");
+  await settle();
+  assert.deepEqual([speech.getState().missing, setupDownloads(speech.getState())], [false, false]);
+});
+
+test("a microphone open for its level tells it, says when it gives nothing, and takes that back at the first sound", async () => {
+  const { microphone, speech, notices } = await window(undefined, { preference: null, silenceAfter: 300 });
+  const levels: [number, string | null][] = [];
+  speech.subscribeLevel((level, owner) => levels.push([level, owner]));
+  speech.startMonitor("a", yeti);
+  assert.deepEqual(speech.getState().monitor, { key: "a", open: false, silent: false, label: null });
+  await settle();
+  assert.deepEqual([microphone.heard(), speech.getState().monitor], ["id-yeti", { key: "a", open: true, silent: false, label: yeti.label }]);
+  microphone.silence(); microphone.silence();
+  assert.deepEqual(levels, [[0, "a"], [0, "a"]]);
+  await wait(400);
+  assert.equal(speech.getState().monitor?.silent, true, "about three seconds flat");
+  // A live hint, not a verdict.
+  microphone.speak({ level: .7 });
+  assert.deepEqual([speech.getState().monitor?.silent, levels.at(-1)], [false, [.7, "a"]]);
+  microphone.silence();
+  await wait(400);
+  assert.equal(speech.getState().monitor?.silent, false);
+  // Another device: the first is released, the level starts again.
+  speech.startMonitor("a", null);
+  await settle();
+  assert.deepEqual([microphone.state.captures.filter(capture => !capture.stopped).length, microphone.heard()], [1, ""]);
+  speech.stopMonitor("b");
+  assert.equal(microphone.open(), true, "only who asked stops it");
+  speech.stopMonitor("a");
+  assert.deepEqual([microphone.open(), speech.getState().monitor, levels.at(-1)], [false, null, [0, "a"]]);
+  // Nothing of a level is kept as a choice, and nothing is said.
+  assert.deepEqual([speech.getState().microphone, notices], [{ device: null, confirmed: false }, []]);
+  // A microphone that gave sound before the wait was over is never called silent.
+  speech.startMonitor("a", null);
+  await settle();
+  microphone.speak();
+  await wait(400);
+  assert.equal(speech.getState().monitor?.silent, false);
+  speech.dismissAsk("a");
+  assert.equal(microphone.open(), false, "closing the setup releases the microphone");
+});
+
+test("a level and a dictation never hold the microphone together", async () => {
+  const { host, microphone, speech, status } = await window();
+  const { state, sink } = prompt();
+  speech.startMonitor("settings", null);
+  await settle();
+  speech.toggle("a", sink);
+  assert.equal(speech.getState().monitor, null, "the dictation takes the microphone from the test");
+  await settle();
+  assert.deepEqual([status(), microphone.state.captures.filter(capture => !capture.stopped).length], ["recording", 1]);
+  host.hear("Said before the test.", "");
+  await settle();
+  // The test takes it back: the dictation ends and keeps what it heard.
+  speech.startMonitor("settings", null);
+  await settle();
+  assert.deepEqual([status(), state.text, host.state.stops.map(request => request.cancel), speech.getState().monitor?.key], ["idle", "Said before the test.", [false], "settings"]);
+  assert.equal(microphone.state.captures.filter(capture => !capture.stopped).length, 1);
+  // A microphone that cannot be opened for its level is said, and nothing stays open.
+  microphone.state.opening = "microphone";
+  speech.startMonitor("settings", null);
+  await settle();
+  assert.deepEqual([speech.getState().monitor, microphone.open()], [null, false]);
+});
+
+test("a dictation that hears nothing at all says so once, after a longer wait, and goes on", async () => {
+  const { microphone, speech, noticed, status } = await window(undefined, { warnAfter: 300 });
+  const { sink } = prompt();
+  speech.attach("a");
+  speech.toggle("a", sink);
+  await settle();
+  microphone.silence(); microphone.silence();
+  await wait(400);
+  assert.deepEqual(noticed, [{ message: "No sound comes from the microphone ({name}). Choose another one in the Speech settings.",
+    parameters: { name: "NVIDIA Broadcast" }, intent: "warning", setup: "a" }]);
+  assert.equal(status(), "recording", "the dictation is not stopped");
+  microphone.silence();
+  await wait(400);
+  assert.equal(noticed.length, 1, "once for a dictation");
+  // Its action shows the setup of that composer, which takes the microphone: the dictation ends.
+  assert.equal(speech.proposeSetup("a"), true);
+  await settle();
+  assert.deepEqual([speech.getState().asking, status()], ["a", "idle"]);
+  // A composer that is no longer there has no setup to show: the settings are opened instead.
+  assert.equal(speech.proposeSetup("gone"), false);
+  assert.equal(speech.proposeSetup(undefined), false);
+  speech.dismissAsk("a");
+
+  // Any sound before the wait is over, and nothing is said: a microphone with noise removal is silent until somebody speaks.
+  speech.toggle("a", sink);
+  await settle();
+  microphone.silence(); microphone.speak(); microphone.silence();
+  await wait(400);
+  assert.equal(noticed.length, 1);
+  speech.stop("a");
+  await settle();
+  // A dictation that ends before the wait says nothing either.
+  speech.toggle("a", sink);
+  await settle();
+  speech.stop("a");
+  await wait(400);
+  assert.equal(noticed.length, 1);
+});
+
+test("a chosen microphone that is not connected gives way to the one of the system, said once", async () => {
+  const { microphone, speech, notices, preferences } = await window(undefined, { preference: JSON.stringify({ device: yeti, confirmed: true }) });
+  const { sink } = prompt();
+  microphone.state.devices = fixtureDevices.filter(device => device.id !== "id-yeti");
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([speech.getState().dictation.status, speech.getState().dictation.microphone], ["recording", "Default - Microphone (NVIDIA Broadcast)"]);
+  assert.deepEqual(notices.splice(0), ["The chosen microphone is not connected. The microphone of the system is used."]);
+  speech.stop("a");
+  await settle();
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual(notices, [], "said once for that device");
+  speech.stop("a");
+  await settle();
+  // The choice is kept: the device may come back.
+  assert.deepEqual(JSON.parse(preferences.state.value!).device, yeti);
+  assert.deepEqual(speech.getState().devices?.map(device => device.id), ["default", "communications", "id-broadcast"]);
+
+  // It comes back under another id (a new run of the WebView): found by its label, and kept under the new id.
+  microphone.plug(fixtureDevices.map(device => device.id === "id-yeti" ? { ...device, id: "id-yeti-2" } : device));
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([speech.getState().dictation.microphone, notices], [yeti.label, []]);
+  assert.deepEqual(speech.getState().microphone.device, { id: "id-yeti-2", label: yeti.label });
+  speech.stop("a");
+  await settle();
+  speech.toggle("a", sink);
+  await settle();
+  assert.equal(microphone.heard(), "id-yeti-2", "opened under its new id at once");
+});
+
+test("the devices are read once for two askers, again when one comes or goes, and a choice in the settings needs no other question", async () => {
+  const { microphone, speech, preferences } = await window(undefined, { preference: null });
+  microphone.state.named = false;
+  // A browser names its devices only to a page that was given a microphone: without a probe nothing is listed.
+  await speech.listDevices(false);
+  assert.equal(speech.getState().devices, null);
+  await Promise.all([speech.listDevices(true), speech.listDevices(true)]);
+  assert.deepEqual(microphone.state.lists, [false, true], "an effect that runs twice reads once");
+  assert.equal(speech.getState().devices?.length, 4);
+  // Watched while a page shows them; two pages are one watch.
+  const first = speech.watchDevices(), second = speech.watchDevices();
+  assert.equal(microphone.watching(), 1);
+  microphone.plug(fixtureDevices.slice(0, 3));
+  await settle();
+  assert.equal(speech.getState().devices?.length, 3);
+  first(); first();
+  assert.equal(microphone.watching(), 1);
+  second();
+  assert.equal(microphone.watching(), 0);
+  // The settings: choosing there is saying which microphone to use.
+  speech.setMicrophone(yeti);
+  assert.deepEqual(speech.getState().microphone, { device: yeti, confirmed: true });
+  assert.deepEqual(JSON.parse(preferences.state.value!), { device: yeti, confirmed: true });
+  const writes = preferences.state.writes;
+  speech.setMicrophone({ ...yeti });
+  assert.equal(preferences.state.writes, writes, "the same choice is not written again");
+  speech.setMicrophone(null);
+  assert.deepEqual(speech.getState().microphone, { device: null, confirmed: true });
+});
+
+test("the choice of a microphone belongs to the page: it stays when the window follows another host", async () => {
+  const { host, speech, disconnect } = await window(undefined, { preference: JSON.stringify({ device: yeti, confirmed: true }) });
+  await speech.listDevices(true);
+  disconnect();
+  assert.deepEqual([speech.getState().listing, speech.getState().microphone.device, speech.getState().devices?.length], [null, yeti, 4]);
+  speech.connect(host.epoch)();
+  assert.deepEqual(speech.getState().microphone, { device: yeti, confirmed: true });
 });

@@ -30,7 +30,8 @@ type Page = Readonly<{
   problems: string[];
 }>;
 
-async function withPage(entry: string, fixture: string, body: (page: Page) => Promise<void>, flags: readonly string[] = []) {
+/** `prepare` is what the page keeps before it loads (the fixture reads it), as `[key, value]` pairs of its storage. */
+async function withPage(entry: string, fixture: string, body: (page: Page) => Promise<void>, flags: readonly string[] = [], prepare: readonly (readonly [string, string])[] = []) {
   const directory = await mkdtemp(join(tmpdir(), "codealta-speech-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
   try {
@@ -119,6 +120,7 @@ async function withPage(entry: string, fixture: string, body: (page: Page) => Pr
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1000, height: 900, deviceScaleFactor: 1, mobile: false });
     await command("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+    if (prepare.length) await command("Page.addScriptToEvaluateOnNewDocument", { source: prepare.map(([name, value]) => `localStorage.setItem(${JSON.stringify(name)}, ${JSON.stringify(value)});`).join("") });
     await command("Page.navigate", { url: pageUrl });
     await until(`window.${fixture}`, "the fixture");
     await body({ evaluate, command, until, click, key, shot, problems });
@@ -141,6 +143,11 @@ const text = (name = "a") => `${f}.composers.${name}.text`;
 const toast = "[...document.querySelectorAll('.bp6-toast')].map(e => e.querySelector('.bp6-toast-message').textContent)";
 const dictation = `${f}.speech.getState().dictation`;
 const model = "parakeet-tdt-0.6b-v3";
+// The setup of a composer: what the page keeps of the microphone, its list, and the bar of its level.
+const stored = "localStorage.getItem('codealta.desktop.speech.microphone.v1')";
+const choice = "document.querySelector('.speech-setup select')";
+const devices = `[...(${choice}?.options ?? [])].map(option => option.textContent)`;
+const bar = "document.querySelector('.speech-setup .speech-level > span')";
 
 test("the microphone of a composer dictates into its prompt, and stops with a click, F9's command, Escape, a send and a hidden pane", { skip: !edge, timeout: 120_000 }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, key, shot }) => {
@@ -150,36 +157,67 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     assert.equal(await evaluate(`${mic()}.closest('.composer-actions') !== null && (${mic()}.closest('.bp6-popover-target') ?? ${mic()}).nextElementSibling.matches('[data-send]')`), true,
       await evaluate<string>(`${mic()}.closest('.composer-toolbar').outerHTML.slice(0, 1500)`));
     const renders = await evaluate<number>(`${f}.renders`);
+    const pick = (id: string) => evaluate(`(() => { const e = ${choice}; e.value = ${JSON.stringify(id)}; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
 
-    // The first click asks: nothing is in the cache, and nothing is downloaded before the answer.
+    // The first press proposes the setup: nothing is recorded, kept or downloaded before its answer.
     await click('[data-composer="a"] .speech-button');
-    await until("document.querySelector('.speech-ask')", "the question of the first use");
-    assert.deepEqual(await evaluate(`[document.querySelector('.speech-ask strong').textContent, document.querySelector('.speech-ask .confirm-subject').textContent, document.querySelector('.speech-ask p').textContent, ${f}.host.state.installs.length, ${f}.microphone.state.captures.length]`),
-      ["Download the speech model?", "Parakeet TDT 0.6b v3", "670 MiB · 25 languages", 0, 0]);
-    await until("document.activeElement?.matches('[data-speech-download]')", "the focus on Download");
+    await until("document.querySelector('.speech-setup')", "the setup of the first press");
+    await until(`${f}.microphone.heard() === ''`, "the microphone of the system open for its level");
+    assert.deepEqual(await evaluate(`[document.querySelector('.speech-setup strong').textContent, document.querySelector('.speech-setup .confirm-subject').textContent, document.querySelector('.speech-setup p').textContent, ${f}.host.state.starts, ${f}.host.state.installs.length, ${stored}]`),
+      ["Set up dictation", "Parakeet TDT 0.6b v3", "670 MiB · 25 languages", 0, 0, null]);
+    // The microphone of the system, named, then each real device once: the entries Chromium repeats are not listed.
+    await until(`${devices}.length === 3`, "the devices named");
+    assert.deepEqual(await evaluate(`${devices}`), ["System default — Microphone (NVIDIA Broadcast)", "Microphone (NVIDIA Broadcast)", "Microphone (Yeti Stereo Microphone)"]);
+    assert.deepEqual(await evaluate(`[${choice}.value, document.querySelector('[data-speech-confirm]').textContent, document.querySelector('[data-speech-confirm]').dataset.speechConfirm]`), ["", "Download", "download"]);
+    await until("document.activeElement?.matches('[data-speech-confirm]')", "the focus on the answer");
     // Beside the button, not over it, and whole in the window (it grows into place for a moment).
-    await until(`(() => { const ask = document.querySelector('.speech-ask').getBoundingClientRect(), button = ${mic()}.getBoundingClientRect();
-      return (ask.bottom <= button.top + 1 || ask.top >= button.bottom - 1) && ask.right <= innerWidth && ask.left >= 0 && ask.top >= 0 && ask.width > 200; })()`, "the question beside the button");
-    await shot("ask-dark");
-    // Escape and Cancel leave everything as it is.
+    await until(`(() => { const ask = document.querySelector('.speech-setup').getBoundingClientRect(), button = ${mic()}.getBoundingClientRect();
+      return (ask.bottom <= button.top + 1 || ask.top >= button.bottom - 1) && ask.right <= innerWidth && ask.left >= 0 && ask.top >= 0 && ask.width > 200; })()`, "the setup beside the button");
+    // The bar follows the voice, without a render of the owner.
+    await evaluate(`${f}.microphone.speak({ level: .6 })`);
+    await until(`${bar}.style.width === '60%'`, "the level of the microphone");
+    await shot("setup-dark");
+    // A microphone that gives nothing is said after a moment, and no longer once it gives sound.
+    await evaluate(`${f}.speech.startMonitor('a', null)`);
+    await until(`${f}.microphone.open() && ${f}.speech.getState().monitor?.open`, "the microphone open again");
+    await evaluate(`${f}.microphone.silence()`);
+    await until("document.querySelector('.speech-setup .speech-silent')?.textContent === 'No sound comes from this microphone.'", "the line of a flat bar");
+    await shot("setup-silent-dark");
+    await evaluate(`${f}.microphone.speak({ level: .4 })`);
+    await until("!document.querySelector('.speech-setup .speech-silent')", "the line gone with the first sound");
+    // Another device: it is the one that is open now.
+    await pick("id-yeti");
+    await until(`${f}.microphone.heard() === 'id-yeti' && ${f}.microphone.state.captures.filter(capture => !capture.stopped).length === 1`, "the chosen device open, alone");
+    // Escape and Cancel keep nothing and release the microphone; the next press proposes again, from the start.
     await key("Escape", 27);
-    await until("!document.querySelector('.speech-ask')", "the question closed by Escape");
+    await until(`!document.querySelector('.speech-setup') && !${f}.microphone.open()`, "the setup closed by Escape, the microphone released");
+    assert.equal(await evaluate(stored), null);
     await click('[data-composer="a"] .speech-button');
-    await until("document.querySelector('.speech-ask')", "the question again");
-    await evaluate("[...document.querySelectorAll('.speech-ask button')].find(e => e.textContent === 'Cancel').click()");
-    await until("!document.querySelector('.speech-ask')", "the question closed by Cancel");
-    assert.equal(await evaluate(`${f}.host.state.installs.length`), 0);
+    await until(`document.querySelector('.speech-setup') && ${f}.microphone.heard() === ''`, "the setup again, on the microphone of the system");
+    await evaluate("[...document.querySelectorAll('.speech-setup button')].find(e => e.textContent === 'Cancel').click()");
+    await until(`!document.querySelector('.speech-setup') && !${f}.microphone.open()`, "the setup closed by Cancel, the microphone released");
+    // A click outside closes it too.
+    await click('[data-composer="a"] .speech-button');
+    await until(`document.querySelector('.speech-setup') && ${f}.microphone.open()`, "the setup again");
+    await click('[data-composer="b"] .composer-status-line');
+    await until(`!document.querySelector('.speech-setup') && !${f}.microphone.open()`, "the setup closed by a click outside, the microphone released");
+    assert.deepEqual(await evaluate(`[${f}.host.state.starts, ${f}.host.state.installs.length, ${stored}]`), [0, 0, null]);
     // The link goes to the Speech page of Settings.
     await click('[data-composer="a"] .speech-button');
     await until("document.querySelector('.speech-ask-other')", "the link to the settings");
     await evaluate("document.querySelector('.speech-ask-other').click()");
-    await until(`${f}.opened.length === 1 && !document.querySelector('.speech-ask')`, "the Speech settings asked for");
+    await until(`${f}.opened.length === 1 && !document.querySelector('.speech-setup') && !${f}.microphone.open()`, "the Speech settings asked for");
     assert.deepEqual(await evaluate(`${f}.opened`), ["speech"]);
 
-    // Download: the host owns it, a notice follows it, and the button says so.
+    // Download: the chosen microphone is kept, the host owns the download, a notice follows it, and the button says so.
     await click('[data-composer="a"] .speech-button');
-    await until("document.querySelector('[data-speech-download]')", "Download");
-    await evaluate("document.querySelector('[data-speech-download]').click()");
+    await until(`document.querySelector('[data-speech-confirm="download"]') && ${devices}.length === 3`, "Download");
+    await pick("id-yeti");
+    await until(`${f}.microphone.heard() === 'id-yeti'`, "the chosen device open");
+    const captures = await evaluate<number>(`${f}.microphone.state.captures.length`);
+    await evaluate("document.querySelector('[data-speech-confirm]').click()");
+    await until(`!document.querySelector('.speech-setup') && !${f}.microphone.open()`, "the setup closed, the microphone released");
+    assert.deepEqual(JSON.parse(await evaluate<string>(stored)), { device: { id: "id-yeti", label: "Microphone (Yeti Stereo Microphone) (b58e:9e84)" }, confirmed: true });
     await until(`${view()} === 'installing' && ${toast}.length === 1`, "the notice of the download");
     assert.deepEqual(await evaluate(`[${f}.host.state.installs, ${toast}, ${view("b")}, ${mic()}.title]`), [[null], ["Downloading Parakeet TDT 0.6b v3…"], "installing", "The speech model is being downloaded…"]);
     assert.equal(await evaluate("document.querySelector('.bp6-toast .bp6-progress-bar .bp6-progress-meter').style.width"), "", "no size yet: the bar does not measure");
@@ -196,7 +234,7 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     assert.equal(await evaluate(`${toast}.length`), 0, "a closed notice stays closed while the download goes on");
     await click('[data-composer="a"] .speech-button');
     await until(`${toast}.length === 1`, "the notice asked for again");
-    assert.equal(await evaluate(`${f}.microphone.state.captures.length`), 0);
+    assert.deepEqual(await evaluate(`[${f}.microphone.state.captures.length, !!document.querySelector('.speech-setup')]`), [captures, false], "the microphone is confirmed: no setup, and no microphone opened while the model downloads");
     await evaluate(`${f}.host.tell({ state: 'installing' })`);
     await until(`${toast}[0] === 'Installing Parakeet TDT 0.6b v3…'`, "the installation");
     await evaluate(`${f}.host.state.startStatus = null; ${f}.host.installed('${model}')`);
@@ -209,7 +247,9 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     await evaluate(`${f}.composers.a.changes.length = 0`);
     await click('[data-composer="a"] .speech-button');
     await until(`${view()} === 'recording'`, "the recording");
-    assert.deepEqual(await evaluate(`[${mic()}.title, ${mic()}.getAttribute('aria-pressed'), ${f}.microphone.open(), !!document.activeElement?.closest('#session-prompt')]`), ["Stop dictation (F9)", "true", true, true]);
+    // The button names the microphone it hears: the one that was chosen in the setup.
+    assert.deepEqual(await evaluate(`[${mic()}.title, ${mic()}.getAttribute('aria-pressed'), ${f}.microphone.heard(), !!document.activeElement?.closest('#session-prompt')]`),
+      ["Stop dictation (F9) — Yeti Stereo Microphone", "true", "id-yeti", true]);
     assert.equal(await evaluate(`getComputedStyle(${mic()}).color === getComputedStyle(document.documentElement).getPropertyValue('--red').trim() || getComputedStyle(${mic()}).color !== getComputedStyle(${mic("b")}).color`), true, "the button that records is not the color of the others");
     // The ring follows the voice, without a render.
     await evaluate(`${f}.microphone.speak({ level: .8 })`);
@@ -316,7 +356,7 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     await until(`${interim()}.includes('in the light theme')`, "the greyed text");
     await shot("recording-light");
     await evaluate(`${f}.setLocale('fr')`);
-    await until(`${mic()}.title === 'Arrêter la dictée (F9)'`, "the button in French");
+    await until(`${mic()}.title === 'Arrêter la dictée (F9) — Yeti Stereo Microphone'`, "the button in French");
     assert.equal(await evaluate(`${view()}`), "recording", "a change of language does not end the dictation");
     await evaluate(`${f}.speech.stop('a')`);
     await until(`${view()} === 'idle'`, "the dictation stopped");
@@ -333,6 +373,76 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     await new Promise(resolve => setTimeout(resolve, 200));
     assert.equal(await evaluate(`!!document.querySelector('.speech-button')`), false, "no button where the page has no microphone");
   });
+});
+
+test("the setup starts a dictation on the chosen microphone when the model is there, and a microphone that gives nothing is said once", { skip: !edge, timeout: 120_000 }, async () => {
+  await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click }) => {
+    const pick = (id: string) => evaluate(`(() => { const e = ${choice}; e.value = ${JSON.stringify(id)}; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    const silent = "'No sound comes from the microphone (NVIDIA Broadcast). Choose another one in the Speech settings.'";
+    await until(`${view()} === 'idle'`, "the microphone");
+    // The model is in the cache: the setup asks for the microphone only, and its answer starts the dictation.
+    await click('[data-composer="a"] .speech-button');
+    await until(`document.querySelector('[data-speech-confirm="start"]') && ${devices}.length === 3`, "the setup, ready to start");
+    assert.deepEqual(await evaluate(`[document.querySelector('[data-speech-confirm]').textContent, ${f}.host.state.starts, ${view()}]`), ["Start dictation", 0, "idle"]);
+    await pick("id-broadcast");
+    await until(`${f}.microphone.heard() === 'id-broadcast'`, "the chosen device open for its level");
+    await evaluate("document.querySelector('[data-speech-confirm]').click()");
+    await until(`${view()} === 'recording' && !document.querySelector('.speech-setup')`, "the dictation started by the same press");
+    assert.deepEqual(await evaluate(`[${f}.microphone.heard(), ${f}.microphone.state.captures.filter(capture => !capture.stopped).length, ${f}.host.state.starts, ${mic()}.title, JSON.parse(${stored}).confirmed]`),
+      ["id-broadcast", 1, 1, "Stop dictation (F9) — NVIDIA Broadcast", true]);
+
+    // This microphone gives exact silence: after a while it is said, once, and the dictation goes on.
+    await evaluate(`${f}.microphone.silence(); ${f}.microphone.silence()`);
+    await until(`${toast}.includes(${silent})`, "the notice of a microphone that gives nothing");
+    await evaluate(`${f}.microphone.silence()`);
+    await new Promise(resolve => setTimeout(resolve, 900));
+    assert.deepEqual(await evaluate(`[${toast}.filter(message => message === ${silent}).length, ${view()}, ${f}.microphone.open()]`), [1, "recording", true]);
+    // Its action shows the setup of the composer that dictates: the dictation ends, and the level of the microphone is shown.
+    await evaluate("[...document.querySelectorAll('.bp6-toast .bp6-button')].find(e => e.textContent === 'Choose a microphone').click()");
+    await until(`document.querySelector('.speech-setup') && ${view()} === 'idle'`, "the setup shown by the notice");
+    await until(`${f}.microphone.heard() === 'id-broadcast' && ${choice}.value === 'id-broadcast'`, "the kept microphone open for its level");
+    assert.deepEqual(await evaluate(`[${f}.host.state.stops.map(request => request.cancel), ${f}.opened]`), [[false], []]);
+    await pick("id-yeti");
+    await until(`${f}.microphone.heard() === 'id-yeti'`, "the other device open");
+    await evaluate("document.querySelector('[data-speech-confirm]').click()");
+    await until(`${view()} === 'recording' && ${f}.microphone.heard() === 'id-yeti'`, "the dictation on the other device");
+    // It gives sound: nothing is said of it.
+    await evaluate(`${f}.microphone.speak()`);
+    await new Promise(resolve => setTimeout(resolve, 900));
+    assert.equal(await evaluate(`${toast}.filter(message => message.startsWith('No sound')).length`), 0);
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'idle'`, "the dictation stopped");
+
+    // Later presses record directly, in any composer of the window.
+    await click('[data-composer="b"] .speech-button');
+    await until(`${view("b")} === 'recording'`, "a dictation without a setup");
+    assert.deepEqual(await evaluate(`[!!document.querySelector('.speech-setup'), ${f}.microphone.heard(), ${mic("b")}.title]`), [false, "id-yeti", "Stop dictation (F9) — Yeti Stereo Microphone"]);
+    await evaluate(`${f}.microphone.speak()`);
+    await click('[data-composer="b"] .speech-button');
+    await until(`${view("b")} === 'idle'`, "the dictation stopped");
+
+    // The chosen microphone is unplugged: the one of the system is used, and that is said once.
+    await evaluate(`${f}.microphone.plug(${f}.microphone.state.devices.filter(device => device.id !== 'id-yeti'))`);
+    const missing = "'The chosen microphone is not connected. The microphone of the system is used.'";
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'recording' && ${toast}.includes(${missing})`, "the dictation on the microphone of the system");
+    assert.equal(await evaluate(`${mic()}.title`), "Stop dictation (F9) — NVIDIA Broadcast");
+    await evaluate(`${f}.microphone.speak()`);
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'idle'`, "the dictation stopped");
+    assert.equal(await evaluate(`JSON.parse(${stored}).device.id`), "id-yeti", "the choice is kept: the device may come back");
+
+    // A notice whose composer is gone opens the Speech settings instead.
+    await click('[data-composer="b"] .speech-button');
+    await until(`${view("b")} === 'recording'`, "the recording");
+    await evaluate(`${f}.microphone.silence()`);
+    await until(`${toast}.filter(message => message === ${silent}).length === 1 && [...document.querySelectorAll('.bp6-toast .bp6-button')].some(e => e.textContent === 'Choose a microphone')`, "the notice again, for this dictation");
+    await evaluate(`${f}.setComposers(false)`);
+    await until("!document.querySelector('[data-composer]')", "the composers gone");
+    await evaluate("[...document.querySelectorAll('.bp6-toast .bp6-button')].find(e => e.textContent === 'Choose a microphone').click()");
+    await until(`${f}.opened.length === 1`, "the Speech settings asked for");
+    assert.deepEqual(await evaluate(`[${f}.opened, ${f}.microphone.open()]`), [["speech"], false]);
+  }, [], [["speechFixture.installed", model], ["speechFixture.warnAfter", "700"]]);
 });
 
 test("the Speech settings page turns it on and off, chooses and downloads a model, and removes one", { skip: !edge, timeout: 120_000 }, async () => {
@@ -354,6 +464,55 @@ test("the Speech settings page turns it on and off, chooses and downloads a mode
     assert.deepEqual(await evaluate(`[${page}.querySelector('.key-gesture').textContent, ${page}.querySelector('.speech-models .speech-hint').textContent, ${page}.querySelector('.settings-file-location code').textContent]`),
       ["F9", "No model is downloaded.", "C:\\Users\\alexandre.mutel.contoso\\.alta\\cache\\speech"]);
     assert.equal(await evaluate(fits), true);
+
+    // The microphone: the one of the system, named, then each real device. To name them the page opened one for a moment, and closed it.
+    const microphone = "document.querySelector('#settings-speech-microphone')", test = "document.querySelector('[data-speech-test]')";
+    const level = "document.querySelector('.speech-test .speech-level > span')";
+    const listen = (id: string) => evaluate(`(() => { const e = ${microphone}; e.value = ${JSON.stringify(id)}; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await until(`${microphone}?.options.length === 3`, "the microphones listed");
+    assert.deepEqual(await evaluate(`[[...${microphone}.options].map(option => option.textContent), ${microphone}.value, ${f}.microphone.state.lists.includes(true), ${f}.microphone.open(), ${test}.textContent, ${stored}]`),
+      [["System default — Microphone (NVIDIA Broadcast)", "Microphone (NVIDIA Broadcast)", "Microphone (Yeti Stereo Microphone)"], "", true, false, "Test", null]);
+    // A choice is kept by the page, and is what a dictation will open: choosing here needs no other question.
+    await listen("id-yeti");
+    await until(`${microphone}.value === 'id-yeti' && ${stored}`, "the microphone chosen");
+    assert.deepEqual(JSON.parse(await evaluate<string>(stored)), { device: { id: "id-yeti", label: "Microphone (Yeti Stereo Microphone) (b58e:9e84)" }, confirmed: true });
+    assert.equal(await evaluate(`${f}.microphone.open()`), false, "choosing opens no microphone");
+    // Test: the chosen microphone is open and a bar shows what it hears, until a second click.
+    await evaluate(`${test}.click()`);
+    await until(`${f}.microphone.heard() === 'id-yeti' && ${level}`, "the test of the chosen microphone");
+    assert.deepEqual(await evaluate(`[${test}.textContent, ${test}.getAttribute('aria-pressed')]`), ["Stop", "true"]);
+    await evaluate(`${f}.microphone.speak({ level: .75 })`);
+    await until(`${level}.style.width === '75%'`, "the level of the test");
+    await shot("settings-test-dark");
+    // Another device while it is on: the test goes on with it. One that gives nothing is said, until it gives sound.
+    await listen("id-broadcast");
+    await until(`${f}.microphone.heard() === 'id-broadcast' && ${f}.microphone.state.captures.filter(capture => !capture.stopped).length === 1`, "the test on the other device");
+    await evaluate(`${f}.microphone.silence()`);
+    await until("document.querySelector('.speech-test .speech-silent')?.textContent === 'No sound comes from this microphone.'", "the line of a microphone that gives nothing");
+    assert.equal(await evaluate(fits), true);
+    await evaluate(`${f}.microphone.speak()`);
+    await until("!document.querySelector('.speech-test .speech-silent')", "the line gone with the first sound");
+    await evaluate(`${test}.click()`);
+    await until(`!${f}.microphone.open() && !${level} && ${test}.textContent === 'Test'`, "the test stopped, the microphone released");
+    // Leaving the page stops it, and so does its limit of time.
+    await evaluate(`${test}.click()`);
+    await until(`${f}.microphone.open()`, "the test again");
+    await evaluate(`${f}.setSettings(false)`);
+    await until(`!${page} && !${f}.microphone.open()`, "the microphone released with the page");
+    await evaluate(`${f}.testLimit = 500; ${f}.setSettings(true)`);
+    await until(`${test} && ${microphone}?.value === 'id-broadcast'`, "the page again, with the kept microphone");
+    await evaluate(`${test}.click()`);
+    await until(`${f}.microphone.open()`, "the test again");
+    await until(`!${f}.microphone.open() && ${test}.textContent === 'Test'`, "the test stopped by its limit");
+    // A device that is unplugged while the page is open: the chosen one stays in the list, marked.
+    await listen("id-yeti");
+    await evaluate(`${f}.microphone.plug(${f}.microphone.state.devices.filter(device => device.id !== 'id-yeti'))`);
+    await until(`${microphone}.selectedOptions[0]?.textContent === 'Microphone (Yeti Stereo Microphone) (not connected)'`, "the chosen microphone marked as not connected");
+    assert.deepEqual(await evaluate(`[...${microphone}.options].map(option => option.value)`), ["", "id-broadcast", "id-yeti"]);
+    await evaluate(`${f}.microphone.plug([...${f}.microphone.state.devices, { id: 'id-yeti', label: 'Microphone (Yeti Stereo Microphone) (b58e:9e84)' }])`);
+    await until(`${microphone}.selectedOptions[0]?.textContent === 'Microphone (Yeti Stereo Microphone)'`, "the microphone back");
+    await listen("");
+    await until(`JSON.parse(${stored}).device === null`, "the microphone of the system chosen again");
 
     // Off and on again: saved at once, and the microphones of the composers follow without a read of their own.
     const reads = await evaluate<number>(`${state}.reads`);
@@ -482,6 +641,31 @@ test("the capture opens the microphone under the policy of the page, gives the c
     await until(`${c}.ready === 2`, "the microphone open again");
     await evaluate("window.dispatchEvent(new Event('pagehide'))");
     await until(`${c}.held().tracks === 0 && ${c}.held().contexts === 0`, "the microphone closed with the page");
+
+    // The devices are named once the page was given a microphone: the list is what the settings and the setup show.
+    const listed = await evaluate<{ id: string; label: string }[] | null>(`${c}.list(true)`);
+    assert.ok(listed && listed.length > 0 && listed.every(device => device.label !== ""), JSON.stringify(listed));
+    assert.deepEqual(await evaluate(`[${c}.held().tracks, ${c}.held().contexts]`), [0, 0], "listing leaves no microphone open");
+    const real = listed.filter(device => device.id !== "default" && device.id !== "communications" && device.id !== "");
+    assert.ok(real.length > 0, JSON.stringify(listed));
+    const chosen = real.at(-1)!;
+    // A chosen device is the one that is opened, and the capture tells its name.
+    await evaluate(`${c}.start(${JSON.stringify(chosen)})`);
+    await until(`${c}.ready === 3`, "the chosen device open");
+    assert.deepEqual(await evaluate(`[${c}.constraints.at(-1).audio.deviceId, ${c}.opened.at(-1)]`), [{ exact: chosen.id }, { label: chosen.label, fallback: false, moved: null }]);
+    await evaluate(`${c}.stop()`);
+    // Its id changed since it was chosen (another run of the WebView): it is found by its label, and opened alone.
+    await evaluate(`${c}.start(${JSON.stringify({ id: "an-id-of-another-run", label: chosen.label })})`);
+    await until(`${c}.ready === 4`, "the device found again by its label");
+    assert.deepEqual(await evaluate(`[${c}.opened.at(-1), ${c}.held().tracks, ${c}.held().contexts]`), [{ label: chosen.label, fallback: false, moved: chosen }, 1, 1]);
+    await evaluate(`${c}.stop()`);
+    // A device that is not there at all: the microphone of the system is opened in its place, and the capture says so.
+    await evaluate(`${c}.start({ id: 'unplugged', label: 'A microphone that was unplugged' })`);
+    await until(`${c}.ready === 5`, "the microphone of the system in place of the missing one");
+    assert.deepEqual(await evaluate(`[${c}.opened.at(-1).fallback, ${c}.opened.at(-1).moved, !!${c}.opened.at(-1).label, ${c}.held().tracks, ${c}.errors]`), [true, null, true, 1, []]);
+    await until(`${c}.chunks.at(-1)?.bytes === 3200`, "audio from the microphone of the system");
+    await evaluate(`${c}.stop()`);
+    await until(`${c}.held().tracks === 0 && ${c}.held().contexts === 0`, "everything closed");
 
     // No microphone at all: one failure, and nothing left open.
     await evaluate(`navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('refused', 'NotAllowedError'); }; ${c}.start()`);

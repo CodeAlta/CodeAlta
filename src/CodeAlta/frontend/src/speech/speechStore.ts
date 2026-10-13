@@ -1,5 +1,6 @@
 import type { SpeechInstallState, SpeechListingResponse, SpeechModelInfo } from "#neoastra";
 import type { MessageKey } from "../localization";
+import { defaultMicrophone, type InputDevice, type MicrophonePreference } from "./microphones";
 
 // What the window knows of speech to prompt: the settings and the models, the download of a model, and the
 // one dictation of the window. It changes often (a level, a percentage), so nothing of it is state of `App`:
@@ -16,7 +17,20 @@ export type InstallView = Readonly<{ state: InstallPhase; modelId: string | null
 /** The one dictation of the window: where it stands, and the composer it writes into. */
 export type DictationView = Readonly<{ status: DictationStatus; owner: string | null;
   /** What is being spoken: shown greyed at the caret, and not in the prompt yet. */
-  partial: string }>;
+  partial: string;
+  /** The label of the microphone that is heard, once the browser told it. */
+  microphone: string | null }>;
+
+/** A microphone that is open only to show its level: in the setup of a composer, or by the Test of the settings. */
+export type MonitorView = Readonly<{
+  /** Who asked: the composer of the setup, or the settings page. */
+  key: string;
+  /** The microphone is open and its level is told. */
+  open: boolean;
+  /** It has given no sound for a while. */
+  silent: boolean;
+  /** The label of the device that is heard. */
+  label: string | null }>;
 
 export type SpeechState = Readonly<{
   /** What the host last told of the settings and the models; null until it is read, and when it could not be. */
@@ -24,14 +38,27 @@ export type SpeechState = Readonly<{
   /** Null until the host has told where the download stands. */
   install: InstallView | null;
   dictation: DictationView;
-  /** The composer whose button asks whether to download the model. */
+  /** The composer whose button shows the setup: the microphone to use and, when it is missing, the model to download. */
   asking: string | null;
+  /** The host said that the chosen model, or its engine, is not there: the setup offers to download it. */
+  missing: boolean;
   /** Counts the times the progress of the download was asked for again, after its notice was closed. */
   reveals: number;
+  /** The microphone the user chose, and whether they said so: a preference of the window. */
+  microphone: MicrophonePreference;
+  /** The audio inputs as the browser last listed them with their names; null until it has. */
+  devices: readonly InputDevice[] | null;
+  monitor: MonitorView | null;
 }>;
 
-export const idleDictation: DictationView = Object.freeze({ status: "idle", owner: null, partial: "" });
-export const initialSpeechState: SpeechState = Object.freeze({ listing: null, install: null, dictation: idleDictation, asking: null, reveals: 0 });
+export const idleDictation: DictationView = Object.freeze({ status: "idle", owner: null, partial: "", microphone: null });
+export const initialSpeechState: SpeechState = Object.freeze({ listing: null, install: null, dictation: idleDictation, asking: null, missing: false, reveals: 0,
+  microphone: defaultMicrophone, devices: null, monitor: null });
+
+/** The state of a window that follows no host, or another one: what belongs to the page (its microphones) stays. */
+export function withoutHost(state: SpeechState): SpeechState {
+  return { ...initialSpeechState, microphone: state.microphone, devices: state.devices };
+}
 
 const phases: readonly string[] = ["idle", "downloading", "installing", "done", "failed", "canceled"];
 // An Int64 of the host is a string of digits.
@@ -150,7 +177,35 @@ export type SpeechStore = ReturnType<typeof createSpeechStore>;
 export function withDictation(state: SpeechState, change: Partial<DictationView>): SpeechState {
   const dictation = { ...state.dictation, ...change };
   return dictation.status === state.dictation.status && dictation.owner === state.dictation.owner && dictation.partial === state.dictation.partial
-    ? state : { ...state, dictation };
+    && dictation.microphone === state.dictation.microphone ? state : { ...state, dictation };
+}
+
+/** The state with other facts of the microphone that is open for its level; the same state when they are the ones it has. */
+export function withMonitor(state: SpeechState, change: Partial<MonitorView>): SpeechState {
+  if (!state.monitor) return state;
+  const monitor = { ...state.monitor, ...change };
+  return monitor.key === state.monitor.key && monitor.open === state.monitor.open && monitor.silent === state.monitor.silent && monitor.label === state.monitor.label
+    ? state : { ...state, monitor };
+}
+
+/** Whether the setup of a composer offers to download the model, or to start: the model is missing and no download of it runs. */
+export function setupDownloads(state: SpeechState): boolean {
+  const model = chosenModel(state.listing);
+  const running = installing(state.install) && state.install!.modelId === state.listing?.modelId;
+  return (state.missing || !model?.installed) && !running;
+}
+
+/** What the page tells the user of a dictation, in a toast. */
+export type SpeechNotice = Readonly<{
+  message: MessageKey; parameters?: Readonly<Record<string, string>>; intent: "danger" | "warning";
+  /** Offers to choose a microphone: in the setup of this composer when it is there, in the settings otherwise. */
+  setup?: string;
+}>;
+
+/** What to say of a microphone that gives no sound during a dictation, by the name of the device when it is known. */
+export function silenceNotice(name: string | null, owner: string): SpeechNotice {
+  return name ? { message: "No sound comes from the microphone ({name}). Choose another one in the Speech settings.", parameters: { name }, intent: "warning", setup: owner }
+    : { message: "No sound comes from the microphone. Choose another one in the Speech settings.", intent: "warning", setup: owner };
 }
 
 /** The state with what the host tells of the download; the same state when nothing of it changed. */

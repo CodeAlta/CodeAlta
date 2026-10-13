@@ -15,10 +15,15 @@ import { createFixtureHost, createFixtureMicrophone } from "./speechFixture";
 import { SpeechSettings } from "./SpeechSettings";
 import { useSpeechInstall } from "./useSpeechInstall";
 
-const host = createFixtureHost(), microphone = createFixtureMicrophone();
+// What a test asks of the page before it loads: a model that is already in the cache, and how long a dictation may
+// hear nothing before it is said (a test does not sit through eight seconds; the others never see the notice).
+const host = createFixtureHost({ installed: localStorage.getItem("speechFixture.installed")?.split(",") ?? [] }), microphone = createFixtureMicrophone();
+const warnAfter = Number(localStorage.getItem("speechFixture.warnAfter")) || 600_000;
 type ComposerState = { text: string; changes: string[]; sent: string[]; setDisabled: (value: boolean) => void; setVisible: (value: boolean) => void };
 const composers: Record<string, ComposerState> = {};
 const fixture = { host, microphone, composers, opened: [] as string[], renders: 0, speech: null as Speech | null,
+  /** How long the Test of the settings keeps the microphone open; the test of the limit shortens it before it opens the page. */
+  testLimit: 30_000,
   setLocale: (_value: Locale) => { }, setComposers: (_value: boolean) => { }, setSettings: (_value: boolean) => { }, setSize: (_value: { width: number; height: number }) => { } };
 Object.assign(window, { speechFixture: fixture });
 settingsNavigation.subscribe(page => fixture.opened.push(page));
@@ -47,7 +52,7 @@ function Fixture() {
   const [showComposers, setComposers] = useState(true);
   const [showSettings, setSettings] = useState(false);
   const [size, setSize] = useState({ width: 760, height: 620 });
-  const speech = useSpeechInstall(host.api, host.epoch, locale, microphone.start);
+  const speech = useSpeechInstall(host.api, host.epoch, locale, { microphones: microphone.microphones, silenceAfter: 300, warnAfter });
   fixture.renders++;
   Object.assign(fixture, { speech, setLocale, setComposers, setSettings, setSize });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
@@ -56,7 +61,7 @@ function Fixture() {
         {showComposers && <><Composer name="a" active speech={speech} /><Composer name="b" active={false} speech={speech} /></>}
       </div></div>
       {showSettings && <div className="settings-dialog-content" style={{ ...size, overflow: "auto" }}>
-        <SpeechSettings epoch={host.epoch} api={host.api} speech={speech} />
+        <SpeechSettings epoch={host.epoch} api={host.api} speech={speech} testLimit={fixture.testLimit} />
       </div>}
     </SpeechContext.Provider>
   </ShellLanguageContext.Provider>;
