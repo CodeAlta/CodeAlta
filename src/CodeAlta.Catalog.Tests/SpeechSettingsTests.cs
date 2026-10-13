@@ -69,6 +69,27 @@ public sealed class SpeechSettingsTests
     }
 
     [TestMethod]
+    public void SendMode_IsManualUnlessChosen_AndAnUnknownOneIsReported()
+    {
+        Assert.AreEqual(SpeechSettings.ManualSend, SpeechSettings.Default.Send);
+        Assert.AreEqual(SpeechSettings.ManualSend, new SpeechSettings(true, "whisper-small").Send);
+        WithStore((store, _) =>
+        {
+            var chosen = new SpeechSettings(true, SpeechSettings.DefaultModel, SpeechSettings.SendOnStop);
+            store.SaveGlobalSpeechSettings(chosen);
+            StringAssert.Contains(File.ReadAllText(store.ConfigPath), "send = \"on_stop\"");
+            Assert.DoesNotContain("model", File.ReadAllText(store.ConfigPath));
+            Assert.AreEqual(chosen, store.LoadGlobalSpeechSettings());
+            store.SaveGlobalSpeechSettings(SpeechSettings.Default);
+            Assert.DoesNotContain("[speech", File.ReadAllText(store.ConfigPath));
+
+            Assert.Throws<InvalidDataException>(() => store.SaveGlobalSpeechSettings(chosen with { Send = "after_silence" }));
+            File.WriteAllText(store.ConfigPath, "[speech]\nsend = 'always'\n");
+            Assert.Throws<InvalidDataException>(() => store.LoadGlobalSpeechSettings());
+        });
+    }
+
+    [TestMethod]
     public void InvalidModel_IsReportedAndNeverSaved()
     {
         WithStore((store, _) =>

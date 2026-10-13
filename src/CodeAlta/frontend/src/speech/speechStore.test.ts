@@ -7,7 +7,7 @@ import { fixtureModels } from "./speechFixture";
 import { locales, messages, translate } from "../localization";
 
 const listing = (change: Partial<SpeechListingResponse> = {}): SpeechListingResponse => ({ status: "ok", supported: true, enabled: true, model: "parakeet-tdt-0.6b-v3",
-  modelId: "parakeet-tdt-0.6b-v3", models: fixtureModels, rootPath: "/cache/speech", error: null, ...change });
+  modelId: "parakeet-tdt-0.6b-v3", models: fixtureModels, rootPath: "/cache/speech", send: "manual", error: null, ...change });
 const install = (change: Partial<InstallView> = {}): InstallView => ({ state: "idle", modelId: null, modelName: null, received: 0, total: 0, error: null, ...change });
 const state = (change: Partial<SpeechState> = {}): SpeechState => ({ ...initialSpeechState, listing: listing(), ...change });
 

@@ -6,6 +6,7 @@ import { dictationSilenceDelay, microphoneStorageKey, noSound, readMicrophone, r
 import { createSpeechStore, dictationFailure, idleDictation, installView, silenceNotice, withDictation, withInstall, withMonitor, withoutHost,
   type SpeechNotice, type SpeechState } from "./speechStore";
 import { unwritten } from "./spokenText";
+import { sendsOnStop, type StopReason } from "./stopping";
 
 /** The part of the host a window dictates with. */
 export type SpeechApi = Pick<typeof speech, "read" | "install" | "cancelInstall" | "watch" | "start" | "append" | "listen" | "stop">;
@@ -18,6 +19,8 @@ export type DictationSink = Readonly<{
   interim: (text: string) => void;
   /** Gives the keyboard to the prompt. */
   focus: () => void;
+  /** Sends the prompt as the Send button of the composer would; absent where the composer sends nothing by itself. */
+  send?: () => void;
 }>;
 
 export type SpeechDependencies = Readonly<{
@@ -49,6 +52,8 @@ type Running = {
   told: boolean;
   /** The loudest sample heard, and the wait after which a microphone that gave nothing is said. */
   loudest: number; silence: ReturnType<typeof setTimeout> | undefined;
+  /** The whole text it wrote: what decides whether there is enough to send. */
+  text: string;
 };
 
 // A microphone that is open for its level only.
@@ -141,6 +146,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     if (!piece || !running.sink || running.abandoned) return;
     // Counted before it is written: what the write causes (a change of the prompt, a send) never writes it again.
     running.written = finalText.length;
+    running.text = finalText;
     running.sink.write(piece);
   }
 
@@ -162,8 +168,11 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     if (running.id && !running.abandoned) sink?.focus();
   }
 
-  /** Ends a dictation with the host: its last words are written, unless `cancel` drops them. */
-  async function finish(running: Running, cancel: boolean) {
+  /**
+   * Ends a dictation with the host: its last words are written, unless `cancel` drops them. `reason` says what
+   * ended it: the prompt is then sent only when the user stopped it themselves, in the mode that sends.
+   */
+  async function finish(running: Running, cancel: boolean, reason: StopReason) {
     if (cancel && !running.abandoned) { running.abandoned = true; running.sink?.interim(""); }
     if (running.ended || running.stopping) return;
     running.stopping = true;
@@ -173,12 +182,18 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     const id = running.id, at = epoch;
     // Still starting: the answer of the host ends it.
     if (!id) return;
+    const sink = running.sink;
+    let whole = false;
     try {
       const reply = await api.stop({ expectedEpoch: at, id, cancel }, { timeoutMilliseconds: 30_000 });
       if (reply.status !== "unknown") write(running, reply.text);
       if (reply.status === "failed") tell(running, reply.error);
+      whole = reply.status === "ok";
     } catch { /* The host is gone: what was heard is what was written. */ }
+    const send = whole && !running.abandoned && sendsOnStop(store.getState().listing?.send, reason, running.text);
     end(running);
+    // After the last words are in the prompt and the button is back: the composer sends as its Send button would.
+    if (send) sink?.send?.();
   }
 
   function receive(running: Running, item: SpeechTranscript) {
@@ -200,7 +215,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
       }
     } catch { /* The stream closed. */ }
     // The host ended the dictation by itself, or the stream was lost: nothing more comes.
-    if (!running.ended && !running.stopping) void finish(running, false);
+    if (!running.ended && !running.stopping) void finish(running, false, "ended");
   }
 
   async function begin(owner: string, sink: DictationSink) {
@@ -209,7 +224,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     // One use of the microphone at a time: a level that is shown gives it up.
     stopMonitor();
     const running: Running = { owner, sink, listening: new AbortController(), id: null, capture: null, written: 0, sequence: 0,
-      stopping: false, abandoned: false, ended: false, told: false, loudest: 0, silence: undefined };
+      stopping: false, abandoned: false, ended: false, told: false, loudest: 0, silence: undefined, text: "" };
     current = running; live.add(running);
     store.update(state => ({ ...state, asking: null, dictation: { status: "starting", owner, partial: "", microphone: null } }));
     let reply: { status: string; id: string | null };
@@ -254,14 +269,14 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
         if (chunk.peak > running.loudest) running.loudest = chunk.peak;
         if (shown(running)) level(chunk.level, running.owner);
         // Not awaited: the host puts the chunks back in order. One it refuses is the last one sent.
-        const refused = () => { if (!running.stopping && !running.ended) void finish(running, false); };
+        const refused = () => { if (!running.stopping && !running.ended) void finish(running, false, "ended"); };
         api.append({ expectedEpoch: at, id, sequence: running.sequence++, base64: chunk.base64 }, { timeoutMilliseconds: 15_000 })
           .then(result => { if (result.status !== "ok") refused(); }, refused);
       },
       onError(failure: CaptureFailure) {
         if (running.ended) return;
         tell(running, failure === "microphone" ? "microphone" : "start");
-        void finish(running, true);
+        void finish(running, true, "ended");
       },
     }, chosenDevice(store.getState().microphone.device));
     // A capture that failed at once has already ended the dictation.
@@ -294,7 +309,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
   }
 
   // Ends whatever dictation there is, keeping what it heard, before the microphone is given to something else.
-  const endDictations = () => { for (const running of [...live]) void finish(running, false); };
+  const endDictations = () => { for (const running of [...live]) void finish(running, false, "taken"); };
 
   async function install(model: string | null): Promise<string> {
     if (!epoch) return "unavailable";
@@ -317,7 +332,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
      */
     connect(next: string | null): () => void {
       const turn = ++connection;
-      for (const running of [...live]) void finish(running, true);
+      for (const running of [...live]) void finish(running, true, "abandoned");
       epoch = next;
       store.update(withoutHost);
       if (!next) return () => { };
@@ -327,7 +342,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
       return () => {
         abort.abort();
         if (connection !== turn) return;
-        for (const running of [...live]) void finish(running, true);
+        for (const running of [...live]) void finish(running, true, "abandoned");
         stopMonitor();
         epoch = null;
         store.update(withoutHost);
@@ -344,18 +359,18 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     toggle(owner: string, sink: DictationSink) {
       const running = current;
       if (running && !running.ended) {
-        if (running.owner === owner) { void finish(running, false); return; }
+        if (running.owner === owner) { void finish(running, false, "button"); return; }
         // One dictation for the window: the other composer keeps what it heard.
-        void finish(running, false);
+        void finish(running, false, "taken");
       }
       if (!store.getState().microphone.confirmed) { store.update(state => ({ ...state, asking: owner })); return; }
       void begin(owner, sink);
     },
-    /** Stops the dictation of a composer and writes its last words. */
-    stop(owner: string) { if (current?.owner === owner) void finish(current, false); },
+    /** Stops the dictation of a composer and writes its last words, without sending anything: what Escape does. */
+    stop(owner: string) { if (current?.owner === owner) void finish(current, false, "escape"); },
     /** A composer can no longer take text (sent, hidden, read-only, gone): its dictation ends and writes nothing more. */
     abandon(owner: string) {
-      for (const running of [...live]) if (running.owner === owner) void finish(running, true);
+      for (const running of [...live]) if (running.owner === owner) void finish(running, true, "abandoned");
       stopMonitor(owner);
       store.update(state => state.asking === owner ? { ...state, asking: null } : state);
     },

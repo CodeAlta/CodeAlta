@@ -1,4 +1,5 @@
 import { useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import { Button, PopoverNext } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
@@ -13,6 +14,7 @@ import { LevelBar, MicrophoneSelect } from "./MicrophoneChoice";
 import { shortMicrophoneName, type MicrophoneChoice } from "./microphones";
 import { SpeechContext, type DictationSink, type Speech } from "./speech";
 import { chosenModel, micView, modelBytes, modelLanguages, setupDownloads, type MicView } from "./speechStore";
+import { sendMode } from "./stopping";
 
 const labels: Readonly<Record<Exclude<MicView, "hidden">, MessageKey>> = {
   idle: "Dictate the prompt (F9)", starting: "Starting the dictation…", recording: "Stop dictation (F9)",
@@ -34,12 +36,17 @@ export function MicButton(props: {
   /** The composer is shown; a dictation ends when its pane is hidden. */
   visible?: boolean;
   id?: string;
+  /**
+   * Sends the prompt as Enter does. Called after the last words of a dictation the user stopped are written,
+   * when the settings say that a dictation is sent; a composer that gives none never sends by itself.
+   */
+  onSend?: () => void;
 }) {
   const speech = useContext(SpeechContext);
   return speech ? <Microphone speech={speech} {...props} /> : null;
 }
 
-function Microphone({ speech, owner, input, disabled = false, visible = true, id }: Parameters<typeof MicButton>[0] & { speech: Speech }) {
+function Microphone({ speech, owner, input, disabled = false, visible = true, id, onSend }: Parameters<typeof MicButton>[0] & { speech: Speech }) {
   const { t } = useShellLanguage();
   const [microphone] = useState(microphoneAvailable);
   const view = useSyncExternalStore(speech.subscribe, () => micView(speech.getState(), owner, microphone));
@@ -47,11 +54,17 @@ function Microphone({ speech, owner, input, disabled = false, visible = true, id
   // The microphone a dictation of this composer hears, once the browser named it.
   const heard = useSyncExternalStore(speech.subscribe, () => { const dictation = speech.getState().dictation; return dictation.owner === owner ? dictation.microphone : null; });
   const button = useRef<HTMLButtonElement>(null);
+  // What sends the prompt, as the composer has it now: a dictation that sends reads it after its last words are written.
+  const send = useRef(onSend); send.current = onSend;
   const sink = useMemo<DictationSink>(() => ({
-    write: text => { input.current?.insertAtCaret(text); },
+    // Written as a key is typed: the composer has the text before anything that follows reads its prompt.
+    write: text => { flushSync(() => { input.current?.insertAtCaret(text); }); },
     interim: text => input.current?.setInterimText(text),
     focus: () => input.current?.focus(),
+    send: () => send.current?.(),
   }), [input]);
+  // What a click on the button does to the prompt when it stops a dictation.
+  const sends = useSyncExternalStore(speech.subscribe, () => sendMode(speech.getState().listing?.send) === "on_stop");
 
   // A prompt that takes no text, a pane that is hidden, a composer that goes: what was being said is dropped.
   const usable = !disabled && visible;
@@ -88,7 +101,11 @@ function Microphone({ speech, owner, input, disabled = false, visible = true, id
   }, [speech, owner, dictating]);
 
   if (view === "hidden") return null;
-  const label = recording && heard ? t("Stop dictation (F9) — {name}", { name: shortMicrophoneName(heard) }) : t(labels[view]);
+  // While it records the button says what a click does, and which microphone it hears.
+  const name = heard ? shortMicrophoneName(heard) : null;
+  const label = !recording ? t(labels[view])
+    : sends && onSend ? name ? t("Stop dictation and send (F9) — {name}", { name }) : t("Stop dictation and send (F9)")
+    : name ? t("Stop dictation (F9) — {name}", { name }) : t("Stop dictation (F9)");
   return <PopoverNext isOpen={asking} placement="top-end" popoverClassName="speech-setup-popover"
     content={<Setup speech={speech} owner={owner} sink={sink} />}
     onInteraction={next => { if (!next) speech.dismissAsk(owner); }}>

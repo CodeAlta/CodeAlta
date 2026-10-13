@@ -1124,7 +1124,7 @@ ${value}` : value);
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Stop the running turn")} />}
       <MicButton owner={speechOwner} input={promptInput} disabled={!!pending || invalidEpoch || expanded} visible={observing}
-        id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} />
+        id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => submit(composerBusy)} />
       <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
       <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={() => submit()} />
       </SendSplitButton>

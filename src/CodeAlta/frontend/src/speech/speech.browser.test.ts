@@ -445,6 +445,81 @@ test("the setup starts a dictation on the chosen microphone when the model is th
   }, [], [["speechFixture.installed", model], ["speechFixture.warnAfter", "700"]]);
 });
 
+test("the user chooses what a dictation they stop does to the prompt: keep it, or send it", { skip: !edge, timeout: 120_000 }, async () => {
+  await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, key }) => {
+    const state = `${f}.host.state`, mode = "document.querySelector('#settings-speech-send')";
+    const sent = `${f}.composers.a.sent`;
+    const choose = (value: string) => evaluate(`(() => { const e = ${mode}; e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    // A dictation of this composer whose host heard `words`: they come with the stop, as the last words do.
+    const dictate = async (words: string) => {
+      await click('[data-composer="a"] .speech-button');
+      await until(`${view()} === 'recording'`, "the recording");
+      await evaluate(`${f}.microphone.speak(); ${state}.dictations.at(-1).finalText = ${JSON.stringify(words)}`);
+    };
+    await evaluate(`${f}.setSettings(true)`);
+    await until(`${mode} && ${view()} === 'idle'`, "the page and the microphone");
+    // The mode: the prompt is kept unless the user says otherwise.
+    assert.deepEqual(await evaluate(`[${mode}.value, [...${mode}.options].map(option => option.textContent), ${mode}.closest('.settings-field').querySelector('label').textContent]`),
+      ["manual", ["Keep the prompt for me to send", "Send the prompt"], "When a dictation stops"]);
+    await dictate("Fix the parser and run the tests.");
+    assert.equal(await evaluate(`${mic()}.title`), "Stop dictation (F9) — NVIDIA Broadcast");
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'idle' && ${text()} === 'Fix the parser and run the tests.'`, "the dictation written");
+    assert.deepEqual(await evaluate(sent), [], "kept: nothing is sent");
+
+    // Send the prompt: saved with the settings, and the other saves keep it.
+    await choose("on_stop");
+    await until(`${state}.sends.length === 1 && ${mode}.value === 'on_stop'`, "the mode saved");
+    assert.deepEqual(await evaluate(`[${state}.sends, ${state}.send, ${state}.saves.at(-1)]`), [["on_stop"], "on_stop", { enabled: true, model }]);
+    await evaluate("document.querySelector('#settings-speech-enabled').click()");
+    await until(`${state}.saves.length === 2 && !document.querySelector('#settings-speech-enabled').checked`, "another setting saved");
+    await evaluate("document.querySelector('#settings-speech-enabled').click()");
+    await until(`${state}.saves.length === 3 && document.querySelector('#settings-speech-enabled').checked && ${view()} === 'idle'`, "and back");
+    assert.deepEqual(await evaluate(`[${state}.sends, ${mode}.value]`), [["on_stop"], "on_stop"]);
+
+    // The button stops, writes the last words and sends once, as Enter would: what was in the prompt goes with them.
+    await dictate("And commit the result.");
+    assert.equal(await evaluate(`${mic()}.title`), "Stop dictation and send (F9) — NVIDIA Broadcast");
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'idle' && ${sent}.length === 1`, "the prompt sent by the stop");
+    assert.deepEqual(await evaluate(`[${sent}, ${text()}]`), [["Fix the parser and run the tests. And commit the result."], ""]);
+    await until(`${shown()} === ''`, "the prompt empty after the send");
+    // Escape is the way to stop without sending: the words are written, and kept.
+    await dictate("Let me read this one again.");
+    await evaluate("document.querySelector('#session-prompt').focus()");
+    await key("Escape", 27);
+    await until(`${view()} === 'idle' && ${text()} === 'Let me read this one again.'`, "the dictation stopped by Escape");
+    assert.equal(await evaluate(`${sent}.length`), 1);
+    // The command of F9 is the button: it sends too.
+    await dictate("Let me read this one again. Now it can go.");
+    await evaluate("document.querySelector('#dictate-prompt').click()");
+    await until(`${view()} === 'idle' && ${sent}.length === 2`, "the prompt sent by the command");
+    assert.equal(await evaluate(`${sent}.at(-1).endsWith('Now it can go.')`), true);
+    // Two words are not sent: a slip of the button, or a word to correct.
+    await dictate("Not yet");
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'idle' && ${text()} === 'Not yet'`, "two words written");
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.equal(await evaluate(`${sent}.length`), 2);
+    // A stop the user did not ask for sends nothing: here another composer takes the dictation.
+    await dictate("Enough words to be sent, if the user had stopped.");
+    await click('[data-composer="b"] .speech-button');
+    await until(`${view("b")} === 'recording' && ${text()}.endsWith('had stopped.')`, "the dictation taken by another composer");
+    await evaluate(`${f}.composers.b.setVisible(false)`);
+    await until(`${dictation}.status === 'idle'`, "the other dictation ended with its pane");
+    assert.deepEqual(await evaluate(`[${sent}.length, ${f}.composers.b.sent]`), [2, []]);
+
+    // Back to keeping the prompt.
+    await choose("manual");
+    await until(`${state}.sends.length === 2 && ${mode}.value === 'manual'`, "the mode saved again");
+    await dictate("Kept again, whatever its length.");
+    assert.equal(await evaluate(`${mic()}.title`), "Stop dictation (F9) — NVIDIA Broadcast");
+    await click('[data-composer="a"] .speech-button');
+    await until(`${view()} === 'idle' && ${text()}.endsWith('whatever its length.')`, "the dictation written");
+    assert.equal(await evaluate(`${sent}.length`), 2);
+  }, [], [["speechFixture.installed", model], ["codealta.desktop.speech.microphone.v1", JSON.stringify({ device: null, confirmed: true })]]);
+});
+
 test("the Speech settings page turns it on and off, chooses and downloads a model, and removes one", { skip: !edge, timeout: 120_000 }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, shot }) => {
     const state = `${f}.host.state`, page = "document.querySelector('.speech-settings')";

@@ -691,9 +691,9 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalSpeechSettings(Speech.SpeechSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (Speech.SpeechSettings.GetModelError(settings.Model) is { } error) throw new InvalidDataException(error);
+        if ((Speech.SpeechSettings.GetModelError(settings.Model) ?? Speech.SpeechSettings.GetSendError(settings.Send)) is { } error) throw new InvalidDataException(error);
         var document = LoadGlobal();
-        document.Speech = new CodeAltaSpeechSettingsDocument { Enabled = settings.Enabled, Model = settings.Model };
+        document.Speech = new CodeAltaSpeechSettingsDocument { Enabled = settings.Enabled, Model = settings.Model, Send = settings.Send };
         SaveDocument(_options.ConfigPath, document);
     }
 
@@ -1273,7 +1273,8 @@ public sealed class CodeAltaConfigStore
             // Only the defaults are omitted: an invalid model survives, so that validation reports it.
             if (speech.Enabled == true) speech.Enabled = null;
             if (speech.Model == Speech.SpeechSettings.DefaultModel) speech.Model = null;
-            if (speech is { Enabled: null, Model: null }) document.Speech = null;
+            if (speech.Send == Speech.SpeechSettings.ManualSend) speech.Send = null;
+            if (speech is { Enabled: null, Model: null, Send: null }) document.Speech = null;
         }
 
         if (document.Skills is not null)

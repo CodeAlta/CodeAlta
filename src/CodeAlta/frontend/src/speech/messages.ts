@@ -7,6 +7,11 @@ export const speechMessages = {
   "Finishing the dictation…": ["Terminando el dictado…", "Fin de la dictée…", "Diktat wird beendet…", "音声入力を終了中…", "正在结束语音输入…"],
   "The speech model is being downloaded…": ["Se está descargando el modelo de voz…", "Le modèle vocal est en cours de téléchargement…", "Das Sprachmodell wird heruntergeladen…", "音声モデルをダウンロード中…", "正在下载语音模型…"],
   "Stop dictation (F9) — {name}": ["Detener el dictado (F9) — {name}", "Arrêter la dictée (F9) — {name}", "Diktat beenden (F9) — {name}", "音声入力を停止 (F9) — {name}", "停止语音输入 (F9) — {name}"],
+  "Stop dictation and send (F9)": ["Detener el dictado y enviar (F9)", "Arrêter la dictée et envoyer (F9)", "Diktat beenden und senden (F9)", "音声入力を停止して送信 (F9)", "停止语音输入并发送 (F9)"],
+  "Stop dictation and send (F9) — {name}": ["Detener el dictado y enviar (F9) — {name}", "Arrêter la dictée et envoyer (F9) — {name}", "Diktat beenden und senden (F9) — {name}", "音声入力を停止して送信 (F9) — {name}", "停止语音输入并发送 (F9) — {name}"],
+  "When a dictation stops": ["Cuando termina un dictado", "Quand une dictée s’arrête", "Wenn ein Diktat endet", "音声入力を停止したとき", "语音输入停止时"],
+  "Keep the prompt for me to send": ["Conservar el prompt para que yo lo envíe", "Garder le prompt pour que je l’envoie", "Prompt behalten, ich sende ihn selbst", "プロンプトを残して自分で送信する", "保留提示词，由我发送"],
+  "Send the prompt": ["Enviar el prompt", "Envoyer le prompt", "Prompt senden", "プロンプトを送信する", "发送提示词"],
   "Set up dictation": ["Configurar el dictado", "Configurer la dictée", "Diktat einrichten", "音声入力の設定", "设置语音输入"],
   "Start dictation": ["Iniciar el dictado", "Démarrer la dictée", "Diktat starten", "音声入力を開始", "开始语音输入"],
 

@@ -84,6 +84,13 @@ public sealed class CodeAltaSpeechSettingsDocument
     /// </summary>
     [JsonPropertyName("model")]
     public string? Model { get; set; }
+
+    /// <summary>
+    /// Gets or sets what is done with the prompt when a dictation stops: <c>manual</c> (it stays for the user to
+    /// send; when absent) or <c>on_stop</c> (it is sent).
+    /// </summary>
+    [JsonPropertyName("send")]
+    public string? Send { get; set; }
 }
 
 /// <summary>Represents the choices for sessions.</summary>

@@ -40,10 +40,14 @@ export const fixtureModels: readonly SpeechModelInfo[] = Object.freeze([
 const customAddress = /^https:\/\/huggingface\.co\/([\w.-]+)\/([\w.-]+)(\/tree\/[\w.-]+(\/.*)?)?$/;
 
 /** A host of speech to prompt in memory: settings, models, one download and dictations, each step by the test. */
-export function createFixtureHost(options: { epoch?: string; installed?: readonly string[]; enabled?: boolean; supported?: boolean } = {}) {
+export function createFixtureHost(options: { epoch?: string; installed?: readonly string[]; enabled?: boolean; supported?: boolean; send?: string } = {}) {
   const epoch = options.epoch ?? "fixture";
   const state = {
     status: "ok", supported: options.supported ?? true, enabled: options.enabled ?? true, model: "parakeet-tdt-0.6b-v3",
+    /** What happens to the prompt when a dictation stops: `manual` or `on_stop`. */
+    send: options.send ?? "manual",
+    /** The send modes that were saved; a save that keeps the mode (null) is not one of them. */
+    sends: [] as string[],
     models: fixtureModels.map(model => ({ ...model, installed: options.installed?.includes(model.id) ?? false })) as SpeechModelInfo[],
     /** What `start` answers when it is not `ok`; null starts a dictation when the chosen model is installed. */
     startStatus: null as string | null,
@@ -65,7 +69,7 @@ export function createFixtureHost(options: { epoch?: string; installed?: readonl
     const id = modelId(state.model);
     const models = state.models.some(model => model.id === id) ? state.models
       : [...state.models, { id, value: state.model, name: state.model.replace("https://huggingface.co/", ""), author: state.model.split("/")[3] ?? "", languages: "", license: "", bytes: "0", installed: false, preset: false }];
-    return { status, supported: state.supported, enabled: state.enabled, model: state.model, modelId: id, models, rootPath: "C:\\Users\\alexandre.mutel.contoso\\.alta\\cache\\speech", error };
+    return { status, supported: state.supported, enabled: state.enabled, model: state.model, modelId: id, models, rootPath: "C:\\Users\\alexandre.mutel.contoso\\.alta\\cache\\speech", send: state.send, error };
   };
   const refuse = (expected: string | null) => expected === epoch ? null : "stale_epoch";
   const held = <T>(value: T) => state.hold ? new Promise<T>(resolve => state.held.push(() => resolve(value))) : Promise.resolve(value);
@@ -75,12 +79,15 @@ export function createFixtureHost(options: { epoch?: string; installed?: readonl
   };
   const api = {
     read: async (request: { expectedEpoch: string | null }) => { state.reads++; return refuse(request.expectedEpoch) ? { ...listing(), status: "stale_epoch" } : listing(); },
-    saveSettings: async (request: { expectedEpoch: string | null; enabled: boolean; model: string | null }) => {
+    saveSettings: async (request: { expectedEpoch: string | null; enabled: boolean; model: string | null; send: string | null }) => {
       state.saves.push({ enabled: request.enabled, model: request.model });
+      if (request.send !== null && !["manual", "on_stop"].includes(request.send)) return listing("invalid_request", "The send mode is not known.");
       const model = request.model?.trim() ?? "";
       if (!state.models.some(value => value.preset && value.id === model) && !customAddress.test(model))
         return listing("invalid_request", "The model is not a preset or a Hugging Face repository address.");
       state.enabled = request.enabled; state.model = model;
+      // Null keeps the mode that is saved.
+      if (request.send !== null) { state.send = request.send; state.sends.push(request.send); }
       return listing();
     },
     install: async (request: { expectedEpoch: string | null; model: string | null }) => {

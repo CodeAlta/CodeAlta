@@ -578,3 +578,107 @@ test("the choice of a microphone belongs to the page: it stays when the window f
   speech.connect(host.epoch)();
   assert.deepEqual(speech.getState().microphone, { device: yeti, confirmed: true });
 });
+
+// A prompt whose composer sends: what it held each time it was asked to.
+function sendingPrompt() {
+  const { state, sink } = prompt();
+  const sent: string[] = [];
+  return { state, sent, sink: { ...sink, send: () => { sent.push(state.text); } } satisfies DictationSink };
+}
+
+test("in the mode that sends, the button stops, writes the last words and sends once; Escape stops without sending", async () => {
+  const { host, microphone, speech, status } = await window({ installed: ["parakeet-tdt-0.6b-v3"], send: "on_stop" });
+  const { state, sent, sink } = sendingPrompt();
+  speech.toggle("a", sink);
+  await settle();
+  microphone.speak();
+  host.hear("Fix the parser.", "and run");
+  await settle();
+  assert.deepEqual(sent, [], "nothing is sent while it records");
+  // The last words come with the stop: they are in the prompt before it is sent.
+  host.state.dictations[0].finalText = "Fix the parser. And run the tests.";
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([status(), state.text, sent], ["idle", "Fix the parser. And run the tests.", ["Fix the parser. And run the tests."]]);
+
+  // Escape: the words are written, and the prompt is kept.
+  speech.toggle("a", sink);
+  await settle();
+  host.state.dictations[1].finalText = "Something I want to read again first.";
+  speech.stop("a");
+  await settle();
+  assert.deepEqual([status(), state.text.endsWith("read again first."), sent.length], ["idle", true, 1]);
+
+  // Two words are a slip of the button, or a word to correct: they stay, unsent.
+  speech.toggle("a", sink);
+  await settle();
+  host.state.dictations[2].finalText = "Not yet";
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([state.text.endsWith("Not yet"), sent.length], [true, 1]);
+});
+
+test("a dictation the user did not stop never sends, whatever the mode", async () => {
+  const { host, microphone, speech, status } = await window({ installed: ["parakeet-tdt-0.6b-v3"], send: "on_stop" });
+  const first = sendingPrompt(), second = sendingPrompt();
+  const words = "Enough words to be sent by themselves.";
+  const start = async (target = first) => { speech.toggle(target === first ? "a" : "b", target.sink); await settle(); host.state.dictations.at(-1)!.finalText = words; host.hear(words, ""); await settle(); };
+  // Another composer takes the dictation.
+  await start();
+  speech.toggle("b", second.sink);
+  await settle();
+  assert.deepEqual([first.state.text, first.sent, status()], [words, [], "recording"]);
+  // Its composer can no longer take text: hidden, closed, read-only, Settings over it.
+  speech.abandon("b");
+  await settle();
+  // A test of the microphone takes it.
+  await start();
+  speech.startMonitor("settings", null);
+  await settle();
+  speech.stopMonitor("settings");
+  // The host ends it, and the microphone fails.
+  await start();
+  host.state.dictations.at(-1)!.stream.close();
+  await settle();
+  await start();
+  microphone.fail("microphone");
+  await settle();
+  // The stop itself fails.
+  await start();
+  host.state.stopReply = { status: "failed", text: words, error: "engine_failed" };
+  speech.toggle("a", first.sink);
+  await settle();
+  host.state.stopReply = null;
+  // The window stops following the host.
+  await start();
+  speech.connect(null);
+  await settle();
+  assert.deepEqual([first.sent, second.sent, status()], [[], [], "idle"]);
+});
+
+test("in the mode that keeps the prompt nothing is sent, and a composer that does not send is never asked to", async () => {
+  const { host, speech } = await window();
+  const { state, sent, sink } = sendingPrompt();
+  speech.toggle("a", sink);
+  await settle();
+  host.state.dictations[0].finalText = "Fix the parser and run the tests.";
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([state.text, sent], ["Fix the parser and run the tests.", []]);
+  // The mode changes in the settings: the next stop follows it.
+  host.state.send = "on_stop";
+  await speech.refresh();
+  const plain = prompt();
+  speech.toggle("b", plain.sink);
+  await settle();
+  host.state.dictations[1].finalText = "A composer with no send of its own.";
+  speech.toggle("b", plain.sink);
+  await settle();
+  assert.equal(plain.state.text, "A composer with no send of its own.");
+  speech.toggle("a", sink);
+  await settle();
+  host.state.dictations[2].finalText = "Now it is sent.";
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual(sent, ["Fix the parser and run the tests. Now it is sent."]);
+});

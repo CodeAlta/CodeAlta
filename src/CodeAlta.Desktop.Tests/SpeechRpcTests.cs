@@ -70,6 +70,15 @@ public sealed class SpeechRpcTests
         Assert.IsFalse(fixture.Service.IsMicrophoneAllowed(), "turned off, the page gets no microphone");
         Assert.AreEqual(new SpeechSettings(false, "whisper-small"), new CodeAltaConfigStore(fixture.Options).LoadGlobalSpeechSettings());
 
+        // The send mode is kept by a save that does not name it, and an unknown one is refused.
+        Assert.AreEqual(SpeechSettings.ManualSend, off.Send);
+        var sending = await fixture.Service.SaveSettingsAsync(new("host", false, "whisper-small") { Send = SpeechSettings.SendOnStop }, default);
+        Assert.AreEqual(("ok", SpeechSettings.SendOnStop), (sending.Status, sending.Send));
+        Assert.AreEqual(SpeechSettings.SendOnStop, (await fixture.Service.SaveSettingsAsync(new("host", false, "whisper-small"), default)).Send);
+        Assert.AreEqual(new SpeechSettings(false, "whisper-small", SpeechSettings.SendOnStop), new CodeAltaConfigStore(fixture.Options).LoadGlobalSpeechSettings());
+        var unknown = await fixture.Service.SaveSettingsAsync(new("host", false, "whisper-small") { Send = "after_silence" }, default);
+        Assert.AreEqual(("invalid_request", SpeechSettings.SendOnStop), (unknown.Status, unknown.Send));
+
         foreach (var invalid in new[] { "", "not-a-preset", "https://example.com/owner/model", "https://huggingface.co/owner" })
         {
             var refused = await fixture.Service.SaveSettingsAsync(new("host", true, invalid), default);

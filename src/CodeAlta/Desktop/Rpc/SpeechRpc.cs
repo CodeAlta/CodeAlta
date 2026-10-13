@@ -89,6 +89,8 @@ internal sealed class SpeechService
         var model = request.Model?.Trim() ?? "";
         if (SpeechSettings.GetModelError(model) is not null || SpeechModelSource.ModelIdOf(model) is not { } id)
             return await Task.Run(() => Listing("invalid_request", "The model is not a preset or a Hugging Face repository address."), cancellationToken).ConfigureAwait(false);
+        if (request.Send is not null && SpeechSettings.GetSendError(request.Send) is not null)
+            return await Task.Run(() => Listing("invalid_request", "The send mode is manual or on_stop."), cancellationToken).ConfigureAwait(false);
         await _settingsGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -96,7 +98,8 @@ internal sealed class SpeechService
             {
                 try
                 {
-                    _config!.SaveGlobalSpeechSettings(new(request.Enabled, model));
+                    // A request that does not name the send mode keeps the one that is saved.
+                    _config!.SaveGlobalSpeechSettings(new(request.Enabled, model, request.Send ?? ReadSettings()?.Send ?? SpeechSettings.ManualSend));
                     return true;
                 }
                 catch (Exception exception) when (IsConfigurationFailure(exception))
@@ -266,7 +269,7 @@ internal sealed class SpeechService
         var chosenId = SpeechModelSource.ModelIdOf(chosen);
         if (chosenId is not null && models.All(model => model.Id != chosenId) && SpeechModelSource.TryParse(chosen, out var repository))
             models.Add(new(chosenId, chosen, repository.Repository, repository.Repository.Split('/')[0], "", "", 0, false, false));
-        return new(status, _installer.IsSupported, settings?.Enabled ?? false, chosen, chosenId, models, _installer.Root, error);
+        return new(status, _installer.IsSupported, settings?.Enabled ?? false, chosen, chosenId, models, _installer.Root, error) { Send = settings?.Send ?? SpeechSettings.ManualSend };
     }
 
     private string? Refuse(string? epoch) => _config is null ? "unavailable" : epoch == _epoch ? null : "stale_epoch";
@@ -276,7 +279,11 @@ internal sealed class SpeechService
 }
 
 internal sealed record SpeechRequest(string? ExpectedEpoch);
-internal sealed record SpeechSaveRequest(string? ExpectedEpoch, bool Enabled, string? Model);
+internal sealed record SpeechSaveRequest(string? ExpectedEpoch, bool Enabled, string? Model)
+{
+    /// <summary>Gets what is done with the prompt when a dictation stops, <c>manual</c> or <c>on_stop</c>; null keeps what is saved.</summary>
+    public string? Send { get; init; }
+}
 /// <param name="ExpectedEpoch">The epoch of the host.</param>
 /// <param name="Model">For <c>install</c>, a preset id or an address, or null for the chosen model; for <c>delete</c>, the id of a model.</param>
 internal sealed record SpeechModelRequest(string? ExpectedEpoch, string? Model);
@@ -311,6 +318,9 @@ internal sealed record SpeechModelInfo(string Id, string Value, string Name, str
 internal sealed record SpeechListingResponse(string Status, bool Supported, bool Enabled, string Model, string? ModelId,
     IReadOnlyList<SpeechModelInfo> Models, string? RootPath, string? Error)
 {
+    /// <summary>Gets what is done with the prompt when a dictation stops: <c>manual</c> (it stays for the user to send) or <c>on_stop</c> (it is sent).</summary>
+    public string Send { get; init; } = SpeechSettings.ManualSend;
+
     internal static SpeechListingResponse Refused(string status) => new(status, false, false, SpeechSettings.DefaultModel, null, [], null, null);
 }
 

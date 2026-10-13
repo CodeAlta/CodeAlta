@@ -142,7 +142,7 @@ export const storage = Object.freeze({
   watchRetention: unavailable,
 });
 // A browser preview has no microphone permission, no model and no worker: speech to prompt does not exist there.
-const noSpeech = async () => ({ status: "unavailable", supported: false, enabled: false, model: "", modelId: null, models: [], rootPath: null, error: null });
+const noSpeech = async () => ({ status: "unavailable", supported: false, enabled: false, model: "", modelId: null, models: [], rootPath: null, send: "manual", error: null });
 export const speech = Object.freeze({
   read: noSpeech, saveSettings: noSpeech, delete: noSpeech,
   install: async () => ({ status: "unavailable" }), cancelInstall: async () => ({ status: "unavailable" }),

@@ -14,6 +14,7 @@ import { microphoneAvailable } from "./capture";
 import { LevelBar, MicrophoneSelect } from "./MicrophoneChoice";
 import type { Speech } from "./speech";
 import { chosenModel, installProgress, installing, modelBytes, modelLanguages } from "./speechStore";
+import { sendMode } from "./stopping";
 
 /** The part of the host the page reads and writes; the download itself goes through the window's `speech`. */
 export type SpeechSettingsApi = Pick<typeof speechService, "read" | "saveSettings" | "delete">;
@@ -58,8 +59,9 @@ export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
 
   const size = (model: SpeechModelInfo) => modelBytes(model) > 0 ? storageSize(modelBytes(model), locale) : "";
   const languages = (model: SpeechModelInfo) => { const key = modelLanguages(model); return key ? t(key) : ""; };
-  const save = (change: Partial<{ enabled: boolean; model: string }>, current: SpeechListingResponse) => mutate(async () => {
-    const reply = await api.saveSettings({ expectedEpoch: epoch, enabled: current.enabled, model: current.model, ...change }, { timeoutMilliseconds: 30_000 });
+  // What is not changed is sent as it is; a send mode of null keeps the one that is saved.
+  const save = (change: Partial<{ enabled: boolean; model: string; send: string }>, current: SpeechListingResponse) => mutate(async () => {
+    const reply = await api.saveSettings({ expectedEpoch: epoch, enabled: current.enabled, model: current.model, send: null, ...change }, { timeoutMilliseconds: 30_000 });
     return { status: reply.status === "invalid_request" ? "invalid" : reply.status, message: reply.error };
   }, "Saved.");
   // The address is checked by the host: what it refuses is said beside the field, and the field keeps what was typed.
@@ -68,7 +70,7 @@ export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
     if (!model || applying) return;
     setApplying(true); setNotice(null);
     try {
-      const reply = await api.saveSettings({ expectedEpoch: epoch, enabled: current.enabled, model }, { timeoutMilliseconds: 30_000 });
+      const reply = await api.saveSettings({ expectedEpoch: epoch, enabled: current.enabled, model, send: null }, { timeoutMilliseconds: 30_000 });
       if (!alive.current) return;
       if (reply.status === "invalid_request") { setAddressError(true); return; }
       const failure = settingsFailure(reply.status, reply.error);
@@ -125,6 +127,13 @@ export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
             </HTMLSelect>
           </Field>
           {listing.enabled && microphone && <MicrophoneRow speech={speech} testLimit={testLimit} />}
+          <Field label={t("When a dictation stops")} htmlFor="settings-speech-send">
+            <HTMLSelect id="settings-speech-send" value={sendMode(listing.send)} disabled={working}
+              onChange={event => { const send = event.currentTarget.value; if (send !== sendMode(listing.send)) void save({ send }, listing); }}>
+              <option value="manual">{t("Keep the prompt for me to send")}</option>
+              <option value="on_stop">{t("Send the prompt")}</option>
+            </HTMLSelect>
+          </Field>
           {shortcut && <Field label={t("Shortcut")}><KeyGesture gesture={shortcut} /></Field>}
         </Card>
         <Card className="speech-card speech-models" role="region" aria-labelledby="settings-speech-models-title">

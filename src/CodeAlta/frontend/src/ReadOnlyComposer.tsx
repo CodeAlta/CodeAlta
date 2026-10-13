@@ -100,7 +100,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         {localDraft?.surface && <Button variant="minimal" icon={<AppIcon name="compact" size={16} />} disabled
           aria-label={t("Compact the conversation (Ctrl+F11)")} title={t("Compact the conversation (Ctrl+F11)")} />}
         {localDraft && <MicButton owner={`draft:${sessionId}`} input={promptInput} disabled={expanded || localDraft.busy} visible={active}
-          id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} />}
+          id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => { if (!localDraft.disabled) localDraft.submit(); }} />}
         {localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}
   </ComposerSurface></>;
 }

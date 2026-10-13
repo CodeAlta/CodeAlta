@@ -39,7 +39,9 @@ function Composer({ name, active, speech }: { name: string; active: boolean; spe
   return <div className="composer-region" data-composer={name} hidden={!visible}>
     <ComposerSurface status="Prompt ready" editor={{ id: active ? "session-prompt" : `session-prompt-${name}`, ref: input, label: "Message", value: text, disabled,
       placeholder: "Ask CodeAlta to work on this project…", onChange: value => { state.changes.push(value); setText(value); } }}>
-      <MicButton owner={name} input={input} disabled={disabled} visible={visible} id={active ? "dictate-prompt" : `dictate-prompt-${name}`} />
+      {/* A dictation that sends asks the composer, which sends the text it holds then: its state, as the session composer does. */}
+      <MicButton owner={name} input={input} disabled={disabled} visible={visible} id={active ? "dictate-prompt" : `dictate-prompt-${name}`}
+        onSend={() => { state.sent.push(text); setText(""); }} />
       <Button intent="primary" icon={<AppIcon name="send" size={16} />} aria-label="Send" data-send={name}
         onClick={() => { speech.abandon(name); state.sent.push(text); setText(""); }} />
     </ComposerSurface>
