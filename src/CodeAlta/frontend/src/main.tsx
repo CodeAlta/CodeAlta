@@ -2114,6 +2114,8 @@ function App() {
       case "refreshStatuses": return owned && tabs.open.length > 0;
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
+      // The session of a project, as its menu moves it.
+      case "moveSession": return ownedSession && !!selectedProject && !selectedProject.archived && selectedSession?.projectId === selectedProject.id;
       default: return true;
     }
   }
@@ -2158,6 +2160,7 @@ function App() {
         if (showSpace(neighborSpace(spacesState.spaces, spaceId, command === "nextSpace" ? 1 : -1).id)) focusPromptSoon();
         break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
+      case "moveSession": if (selectedSession) beginSessionMove(selectedSession); break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
       case "toggleNavigator": toggleProjects(); break;
