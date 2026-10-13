@@ -636,8 +636,9 @@ differs from the one the running CLI has, the session sends `set_permission_mode
 `--permission-mode` only when that request fails. A mode chosen while the CLI runs, during a turn or between turns
 (a turn the CLI starts by itself, such as one for a background command, then follows it), is sent to it at
 once (`IAgentPermissionModeProvider.ApplyPermissionModeNowAsync`, `IAgentProviderPermissionMode`); a CLI that
-refuses it then is not restarted, since that would end the turn: it takes the mode at the next turn, and meanwhile
-the host answers what it asks by the new mode. A session that goes back to no mode returns the CLI to the
+refuses it then is not restarted, since that would end the turn, and neither is it before a later segment of the
+same turn (one that sends the CLI no new message, such as the one after a tool call): it takes the mode at the next
+turn, and meanwhile the host answers what it asks by the new mode. A session that goes back to no mode returns the CLI to the
 mode of the user's settings, learned from `initialize` (`current_permission_mode`), else restarts it. The
 orchestration keeps the session's mode in its saved local state (`permission_mode`, also in the SQLite cache),
 reads it at every attach and clears it on a provider switch.

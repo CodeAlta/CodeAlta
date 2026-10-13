@@ -359,6 +359,39 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task SegmentOfATurnThatRuns_DoesNotStartTheCliAgain_ForAModeItRefused()
+    {
+        // The turn of the CLI is read in two segments: a tool call, then the answer.
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Read", new JsonObject { ["file_path"] = "a.txt" })));
+            process.EmitToolResult("toolu_1", "content");
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("the answer")));
+            process.EmitResult("the answer", user);
+            return Task.CompletedTask;
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+        var call = first.AssistantMessage.Parts.OfType<AgentMessagePart.ToolCall>().Single();
+        var toolMessage = new AgentConversationMessage(
+            AgentConversationRole.Tool,
+            [new AgentMessagePart.ToolResult(call.CallId, new AgentToolResult(true, [new AgentToolResultItem.Text("content")]))]);
+        var process = cli.Last;
+
+        // Bypass is chosen meanwhile: the CLI, not launched in it, refuses it. The next segment of the same turn
+        // requests it, and reads the process that runs the turn instead of starting another one, which would end it.
+        Assert.IsFalse(await executor.SetRunningPermissionModeAsync("session-1", "bypassPermissions", CancellationToken.None));
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, toolMessage], first) with { PermissionMode = "bypassPermissions" });
+
+        Assert.AreEqual("the answer", second.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        Assert.AreEqual(1, cli.Processes.Count);
+        Assert.AreSame(process, cli.Last);
+        Assert.AreEqual(1, process.UserMessages.Count);
+    }
+
+    [TestMethod]
     public async Task ChangeOfPermissionMode_SwitchesTheRunningCliWithoutARestart()
     {
         var cli = new ClaudeCodeFakeCli { SettingsPermissionMode = "auto" };
