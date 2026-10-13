@@ -20,8 +20,6 @@ The sidebar keeps running sessions visible even when their tab is closed. Closin
 
 Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and send a prompt. CodeAlta stores provider-independent session journals under `~/.alta/sessions/yyyy/mm/dd/<session-id>.jsonl`.
 
-In Desktop, sending a prompt to start a new session gives it a short title from the opening task sentence. The title stays the same as the conversation continues and when you reopen it. Use **Rename** in the session's actions menu to change it.
-
 When reopening an existing session, CodeAlta restores local history before provider initialization has to finish. A ready compatible provider can resume or switch a CodeAlta-owned local session while it is idle; provider-native continuation state is reused only when it is safe.
 
 In CodeAlta Desktop, the links of a message work, yours and the agent's:
@@ -31,6 +29,36 @@ In CodeAlta Desktop, the links of a message work, yours and the agent's:
 - **A `file://` link to an HTML page or a PDF** opens with what your system shows it in, usually the browser.
 
 Click a link, or press Enter on a link that has the keyboard focus, which Tab moves to. Cmd-click on macOS, Ctrl-click on Windows and Linux, Shift-click and middle click work too. Agents are asked to write the files they name as such links. The same links work in the notes of a session, in issues and pull requests, in work items and in the Markdown preview of the code editor, where a relative path is read from the folder of the document.
+
+## Session titles
+
+A title you give stays. Give one when you create the session, or use **Rename** in the menu of the session. CodeAlta never replaces it.
+
+CodeAlta titles a session you did not name. The session first takes a short title from its first prompt. What happens next is your choice:
+
+| Choice | The title |
+| --- | --- |
+| **First prompt** | Stays the title of the first prompt. |
+| **Last message** | Follows the first line of the last answer. |
+| **Chosen by the model** | Is given by the model, which changes it when the subject of the session changes. This is the default. |
+
+In CodeAlta Desktop, choose it in **Settings > Sessions**. The choice is saved in `~/.alta/config.toml`:
+
+```toml
+[sessions]
+title = "first_prompt" # or "last_message", or "model"
+```
+
+A session takes the choice with its next prompt. A session you start in CodeAlta TUI is named from its first prompt and keeps that name.
+
+A session can also have a choice of its own. Ask the agent of the session to change it, or to name the session: it does so with the `alta session title` command.
+
+```text
+alta session title                          # the title, who chose it and how the session is titled
+alta session title --set "Parser rewrite"   # name the session
+alta session title --mode last_message      # the title of this session follows its last message
+alta session title --mode default           # this session follows your choice in Settings again
+```
 
 ## Move a session to another project
 
