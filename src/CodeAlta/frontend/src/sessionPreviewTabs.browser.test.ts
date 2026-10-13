@@ -90,3 +90,65 @@ test("sessions are looked at in one transient tab, kept by a double click, and a
     assert.deepEqual(exceptions, []);
   });
 });
+
+// What is typed in the prompt of a new session keeps its tab: the prompt of another scope, or a session, does not
+// take its place. An empty prompt leaves its place as before.
+test("a prompt of a new session that has a text keeps its tab when another prompt or a session takes its place", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+  await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, tabs, shown, press, session, scope, title, exceptions }) => {
+    const prompt = `[...document.querySelectorAll('#catalog-prompt')].find(node => node.getBoundingClientRect().width > 0)`;
+    const type = async (text: string) => {
+      await until(`!!${prompt}`, "the prompt of a new session");
+      await evaluate(`${prompt}.focus()`);
+      await command("Input.insertText", { text });
+    };
+    // An expression of the page: what the window keeps of the prompt of a scope.
+    const stored = (id: string | null) => `(localStorage.getItem(${JSON.stringify(`codealta.desktop.localPrompt.${JSON.stringify(id)}`)}) ?? '')`;
+
+    await until(`!!${session("two")} && ${session("one")}.getAttribute('aria-pressed')==='true'`, "the selected project with session one open");
+    await press(scope("other"));
+    await shown(["one - Project", "~New session — Other project*"], "the prompt of a project, in the transient tab");
+    // Nothing is typed: the prompt of another project takes its place.
+    await press(scope("project"));
+    await shown(["one - Project", "~New session — Project*"], "an empty prompt leaves its place");
+
+    // Something is typed: the tab is still the transient one while it is in front, and stays when another prompt is shown.
+    await press(scope("other"));
+    await shown(["one - Project", "~New session — Other project*"], "the prompt of the other project again");
+    await type("A draft for the other project");
+    await until(`${stored("other")}.includes('A draft for the other project')`, "the text is kept with its project");
+    await shown(["one - Project", "~New session — Other project*"], "typing changes no tab");
+    await press(scope("project"));
+    await shown(["one - Project", "New session — Other project", "~New session — Project*"], "the prompt that has a text keeps a tab of its own");
+    assert.equal(await evaluate(`getComputedStyle(${title("New session — Other project")}).fontStyle`), "normal");
+
+    // A session that is looked at leaves it too, and takes the place of the empty prompt only.
+    await press(session("two"));
+    await shown(["one - Project", "New session — Other project", "~two - Project*"], "a session looked at, beside the kept prompt");
+    // The chats have a prompt of their own: with a text, a session of a project keeps it open as well.
+    await press(scope(""));
+    await shown(["one - Project", "New session — Other project", "~New chat*"], "the prompt of the chats");
+    await type("A question for a chat");
+    await until(`${stored(null)}.includes('A question for a chat')`, "the text of the chats is kept");
+    await press(session("two"));
+    await shown(["one - Project", "New session — Other project", "New chat", "~two - Project*"], "both prompts are kept beside the session");
+
+    // The kept tab shows what was typed, in the prompt of its project.
+    await press(title("New session — Other project"));
+    await shown(["one - Project", "New session — Other project*", "New chat", "~two - Project"], "the kept prompt in front");
+    await until(`${scope("other")}.getAttribute('aria-pressed')==='true'`, "its project selected");
+    await until(`(${prompt}?.querySelector('.view-lines')?.textContent ?? '').replaceAll('\\u00a0', ' ').includes('A draft for the other project')`, "the text that was typed");
+
+    // It is closed like any tab; what was typed stays with its project.
+    await press(`${title("New session — Other project")}.closest('.flexlayout__tab_button').querySelector('.flexlayout__tab_button_trailing')`);
+    await until(`!${tabs}.some(name => name.includes('New session — Other project'))`, "the tab of the prompt closed");
+    assert.equal(await evaluate(`${stored("other")}.includes('A draft for the other project')`), true, "the text is not lost with the tab");
+    await shown(["one - Project*", "New chat", "~two - Project"], "a prompt that is closed stays closed, and a session is in front");
+
+    // The transient tab of a prompt that has a text is closed the same way: it does not come back as a tab of its own.
+    await press(scope("other"));
+    await shown(["one - Project", "New chat", "~New session — Other project*"], "the prompt of the project, with its text, in the transient tab");
+    await press(`${title("New session — Other project")}.closest('.flexlayout__tab_button').querySelector('.flexlayout__tab_button_trailing')`);
+    await shown(["one - Project*", "New chat"], "the transient prompt closed");
+    assert.deepEqual(exceptions, []);
+  });
+});

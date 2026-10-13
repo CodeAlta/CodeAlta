@@ -94,7 +94,7 @@ const noFiles = emptyFileTabs();
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
-  keep, draftLabel, selectDraft, closeDraft, keepDraft, closeTabs }: {
+  keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
    * The model of the dock, when its owner keeps one: a dock that is taken away and shown again (the tabs of a
@@ -129,6 +129,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   closeDraft?: (draft: DraftTab) => void;
   /** Gives the new-session prompt of the transient tab, whose title was double-clicked, a tab of its own. */
   keepDraft?: () => void;
+  /** The transient tab of the new-session prompt is being closed: what is typed in it does not keep it open. */
+  closePrompt?: () => void;
   /**
    * Closes several tabs of a pane at once, from the menu of a tab or of the pane. `from` is the tab the command was
    * asked from, which is shown when the tab in front is among those closed; null when every tab of the pane closes.
@@ -192,6 +194,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   function dispatch(action: Action, current = guard()) {
     if (action.type === Actions.DELETE_TAB && action.data.node === sessionDraftNodeId && !state.active && current()) {
       // Closing the transient prompt shows another tab: a session, else a prompt that has a tab of its own.
+      closePrompt?.();
       const tab = state.open.find(tab => snapshot && resolveSessionTab(snapshot, tab));
       if (tab) select(tab);
       else if (state.drafts?.length) selectDraft?.(state.drafts[0]);

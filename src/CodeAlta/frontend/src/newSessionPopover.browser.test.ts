@@ -359,6 +359,35 @@ test("a new session is created from a form beside the row of its project or of t
     assert.deepEqual(await creates(), [{ scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }]);
     assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Original local draft");
     assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored);
+    // The session took the place of the prompt it was started from: that prompt has no tab of its own.
+    const dockTabs = "[...document.querySelectorAll('.session-dock .flexlayout__tab_button')].map(button => button.textContent.trim())";
+    assert.equal((await evaluate(dockTabs) as string[]).some(name => name.startsWith("New session")), false, JSON.stringify(await evaluate(dockTabs)));
+
+    // Escape while a session is created from the prompt, with no window open: there is nothing to close, and the
+    // session that comes back is still the one that was asked for. It is opened and given the text.
+    // The host of the fixture starts again and names its next session as the one before: what the window kept of that one goes.
+    await evaluate("Object.keys(localStorage).filter(key => key.includes('created-1')).forEach(key => localStorage.removeItem(key))");
+    await command("Page.reload");
+    await start("the shell for a held draft");
+    await press(projectRow, 0.15);
+    await until(`document.querySelector(${JSON.stringify(projectRow)}).getAttribute("aria-pressed") === "true" && !!document.querySelector('#catalog-prompt textarea')`, "the prompt of a new session again");
+    await evaluate("document.querySelector('#catalog-prompt').focus()");
+    await command("Input.insertText", { text: "Held local draft" });
+    await until("!document.querySelector('button[aria-label=\"Start session\"]').disabled", "the held draft can be sent");
+    await evaluate("newSessionFixture.hold=true");
+    await evaluate("document.querySelector('button[aria-label=\"Start session\"]').click()");
+    await until("newSessionFixture.creates.length===1", "the creation was asked");
+    // A notice of the window would take the key to close itself: none is left, and the key has nothing but the window.
+    await evaluate("document.querySelectorAll('.bp6-toast button').forEach(button => button.click())");
+    await gone(".bp6-toast", "no notice is shown");
+    await evaluate("document.activeElement?.blur()");
+    await escape();
+    await evaluate("new Promise(resolve => setTimeout(resolve, 150))");
+    await evaluate("newSessionFixture.release(); newSessionFixture.hold=false");
+    await until("settingsShellFixture.sends.length===1", "the held draft is sent once its session exists");
+    assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Held local draft");
+    assert.equal(await evaluate("[...document.querySelectorAll('.notice')].some(node => node.textContent.includes('Creation may have completed'))"), false, "the creation is not said to be uncertain");
+    assert.equal(await evaluate("!!document.querySelector('.session-row[data-session-id=created-1] button[aria-pressed=true]')"), true, "the session is opened");
     assert.deepEqual(exceptions, []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.

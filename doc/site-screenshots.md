@@ -101,6 +101,11 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | `documentation`, `landing` | The shipped guide and the Welcome tab, in the dark theme with the Explorer hidden. Use public guide content and inspect all recent project/session labels before capture; do not create shared catalog entries just to dress the page. |
 | `canvases`, `canvas-board`, `canvas-agent` | The Canvases page with the two canvas samples; a session whose agent used `alta canvas` and `alta statistics`, alone, and with the Board tab of the `canvas-board` sample in a pane at its right. |
 | `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, without the two lines of folders at its top, made tall enough to show the buttons of every plugin (a crop of the Settings window). |
+| `bookmarks`, `bookmark-rail` | The Bookmarks tab beside two session tabs, with bookmarks of messages of three public projects and one bookmarked session; a session with a bookmarked message and the rail of marks at the right edge of its timeline. |
+| `fork-rewind`, `session-menu`, `new-session-popover` | The **Fork or rewind** window of a session of four turns, with the third turn selected (`/fork` from the search); a crop of the Explorer with the menu of a session (**Fork…**, **Move to project…**, the bookmark); the form of **+** on a project row over a session. |
+| `system-prompt`, `entry-appearance` | The window of a **System prompt changed** row of a session whose agent prompt went from Default to Plan (**Changes** tab); **Settings > Appearance > Entry appearance > Customize** on a type of entry, over the Settings window. |
+| `model-search`, `session-settings`, `tabs` | A crop of the picker of the prompt bar with the model list filtered by a word; **Settings > Sessions**; a crop of the tab strip with kept tabs and a tab with an italic title. |
+| `issues-jira` | The Issues tab of CodeAlta with **Jira** chosen, the list of its projects (**All projects**) and a Jira issue open, over three Jira projects of a test site. |
 
 Changes made for a capture are applied as patches and reversed after it. Record `git status`, `HEAD` and
 `git stash list` of each repository before, and compare after: they must be the same.
@@ -147,6 +152,26 @@ What the scenes with state of their own need:
   The default Notes chip now leaves room for the first message's timestamp; saved geometry is retained.
   The Plugins page names the folder of the plugins of the user, which has the name of the account:
   `.settings-file-locations` is hidden for `plugin-buttons-settings`.
+- **Scenes made of sessions (bookmarks, fork and rewind, system prompt).** Create real sessions of the developer
+  instance on public projects with `alta session create --project <folder> --title "<title>" --model-ref
+  codex:gpt-6.1-sol@low`, and queue short read-only prompts (`alta session send <id> --queue-if-busy --message
+  "..., no edits."`) so that a session of four turns is ready in a minute. `alta bookmark add --session <id> --turn <n>
+  --role assistant --label "..."` marks a message. A system prompt that changes needs
+  `alta session set_agent <id> --prompt-id plan` before the next prompt: `--prompt-id` on `send` does not change the
+  agent prompt of the session. The first rows of a session (the model, the system prompt) are above its first prompt,
+  behind **Load previous messages**, which the dressing hides.
+- **The Issues tab with Jira.** Add `[plugins.jira]` (`site`, `project`, `projects`) to `.alta/config.toml` of the
+  project of the capture and put the file back with `git checkout` afterwards. The site is the one the Atlassian CLI
+  is signed in to; a project is made with `acli jira project create --from-json` and an issue with `acli jira
+  workitem create`, and an issue made for a test is deleted with `acli jira workitem delete --key <key> --yes`.
+- **Pointer input.** `click_at` sends real input, so a control that shows on hover (the **+** and the **…** of a
+  row) is clicked in one `click_at` at its place, once the row is shown. The **work items** badge of a project row is
+  next to its name: click the row to its right. A tab click hands the keyboard to the prompt, so `Shift+F10` then
+  opens the menu of the editor, not the one of the tab.
+- **Notes and settings of the window.** The Notes chip is placed by `codealta.desktop.notes-window.v1` of the local
+  storage of the developer instance: remove the key and reload when an earlier test moved it over the first message.
+  The pages of Settings that name a file (`.settings-file-location`) are hidden, as the folders of the user have the
+  name of the account.
 - **Add provider.** The menu lists the built-in providers the profile does not have: take the picture on a
   profile of its own (`--catalog-root`, `--data-root` and the other roots of an isolated launch, with
   `--mcp-port`), with one provider that is disabled in its `config.toml`. `add-provider` is the crop of the
@@ -183,6 +208,9 @@ Save a capture as **lossless WebP** (`PIL`: `image.save(path, "WEBP", lossless=T
 
 The file is `site/img/alta-desktop-<scene>.webp`. A close-up is a crop of the capture, shown in a narrower
 figure.
+
+A picture of a page must be at least 200x100 pixels: the test of the shipped guide refuses a thinner crop (a strip of tabs
+takes the activity bar above it, for example).
 
 ## In a page
 

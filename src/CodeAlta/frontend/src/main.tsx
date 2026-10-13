@@ -170,6 +170,7 @@ import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persi
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
 import { AppearanceSettings, themeIcons } from "./AppearanceSettings";
+import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis";
 import { StorageSettings } from "./storage/StorageSettings";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
 import { storage } from "#neoastra";
@@ -220,6 +221,7 @@ import "@blueprintjs/core/lib/css/blueprint.css";
 import "flexlayout-react/style/light.css";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
+import "./timelineEmphasis/timelineEmphasis.css";
 import "./editor/editor.css";
 import "./explorer/explorer.css";
 import "./terminal/terminal.css";
@@ -1023,6 +1025,8 @@ function App() {
     if (next === valid) return;
     advanceBrowserRevision();
     tabFocusPending.current = true;
+    // A prompt that is closed stays closed, whatever is typed in it.
+    leftPrompt.current = null;
     const shown = !valid.active && !fileTabs.active && draftKey(draft) === draftKey({ projectId, path: draft.path });
     if (shown && next.open.length) applyTabState({ ...next, active: next.open[0] }); else setTabs(next);
   }
@@ -1041,6 +1045,7 @@ function App() {
     advanceBrowserRevision();
     closedTabKinds.current = [...closedTabKinds.current, ...valid.open.filter(tab => !next.open.includes(tab)).map(() => "session" as const)].slice(-64);
     tabFocusPending.current = true;
+    leftPrompt.current = null;
     for (const file of closed.files) closeFile(file);
     const key = (tab: SessionTab | null) => tab ? tabKey(tab) : null;
     if (show && "draft" in show) {
@@ -2147,6 +2152,20 @@ function App() {
       && generation === creationGeneration.current;
     return current() ? current : null;
   }, () => { localImageGeneration.current++; }, language.locale);
+  // What is typed in the prompt of a new session keeps its tab, as it does for a session that is looked at. When the
+  // prompt of another scope, or a session, takes the place of a prompt that has a text or pictures, that prompt gets
+  // a tab of its own, as a double click gives it. An empty prompt leaves its place, and so does the one a session
+  // was just started from. This runs after the effect that opens the tab of the selected session, and adds to it.
+  const promptTyped = !!(localDrafts.peek(draftScope)?.text ?? "").trim() || localImages.images.length > 0;
+  const leftPrompt = useRef<{ projectId: string | null; sessionId: string | null; typed: boolean } | null>(null);
+  useEffect(() => {
+    const before = leftPrompt.current;
+    leftPrompt.current = { projectId, sessionId, typed: promptTyped };
+    if (!before?.typed || before.sessionId !== null || before.projectId === projectId && sessionId === null) return;
+    if (!tabsReady || !snapshot || snapshot !== currentSnapshot.current) return;
+    const left = draftTabOf(snapshot, before.projectId);
+    if (left) writeTabs(current => openDraftTab(current, left));
+  });
 
   // Opens the search of the window: on everything, on a category, or on the sessions of one project.
   function openSearch(start: SearchStart = {}) {
@@ -2504,7 +2523,9 @@ function App() {
       if (creatingBusy && creatingVisible) return;
       if (dialog === "help") closeHelp();
       else if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
-      else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
+      // With no window open there is nothing to close: a session that is being created keeps its view, and its
+      // result is still the one that was asked for.
+      else { if (dialog) setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
     }
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     // An open ask has the place of the prompt: its questions take the focus.
@@ -3094,6 +3115,8 @@ function App() {
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
           creationHeld.current = false;
           setCreationLocked(false);
+          // The session takes the place of the prompt it was started from: that prompt keeps no tab of its own.
+          leftPrompt.current = null;
           selectedScope.current = selection.projectId;
           setProjectId(selection.projectId);
           // A session that was just created is one to work in: its tab is its own.
@@ -3718,7 +3741,7 @@ function App() {
             keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}
             keepDraft={() => { const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, projectId) : null;
               if (draft) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
-            selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft} closeTabs={closeTabs}
+            selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft} closePrompt={() => { leftPrompt.current = null; }} closeTabs={closeTabs}
             newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
@@ -4534,4 +4557,4 @@ function Root() {
 }
 
 // The window of a system prompt compares two prompts with the diff editor, which the application brings.
-createRoot(document.getElementById("root")!).render(<StrictMode><SystemPromptDiffContext.Provider value={SystemPromptDiff}><Root /></SystemPromptDiffContext.Provider></StrictMode>);
+createRoot(document.getElementById("root")!).render(<StrictMode><SystemPromptDiffContext.Provider value={SystemPromptDiff}><TimelineEmphasisProvider><Root /></TimelineEmphasisProvider></SystemPromptDiffContext.Provider></StrictMode>);

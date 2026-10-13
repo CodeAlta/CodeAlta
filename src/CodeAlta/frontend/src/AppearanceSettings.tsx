@@ -6,6 +6,7 @@ import { ChangesViewSetting } from "./changes/ChangesViewSetting";
 import { ColorSchemeSettings } from "./ColorSchemeSettings";
 import type { ProjectSort } from "./explorer/projectRail";
 import { SettingsField as Field } from "./SettingsField";
+import { TimelineEmphasisSetting } from "./timelineEmphasis/TimelineEmphasisSetting";
 import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
@@ -102,6 +103,7 @@ export function AppearanceSettings({ theme, setTheme, darker, setDarker, schemes
         <Button variant="minimal" size="small" disabled={sessionWidth === defaultSessionWidth} onClick={() => setSessionWidth(defaultSessionWidth)}>{t("Reset")}</Button>
       </div>
     </Field>}
+    <TimelineEmphasisSetting />
     <ChangesViewSetting />
     </Card>
   </>;

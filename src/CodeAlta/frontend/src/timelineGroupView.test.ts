@@ -17,7 +17,7 @@ const live = (text: string): SessionDisplayView => ({ sessionId: "session", revi
     isTruncated: false, startedWithDelta: true }], toolActivities: [], metadataTruncated: false,
   transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0" });
 
-const stable = { sessionId: "session", canInspect: () => true, onOpenSource: () => {}, onOpenTool: () => {} };
+const stable = { sessionId: "session", entryType: "status" as const, canInspect: () => true, onOpenSource: () => {}, onOpenTool: () => {} };
 const stableBranch = () => {};
 const revision = { sessionId: "session", length: "100", lastWriteUtcTicks: "5" } as NonNullable<TimelineGroupProps["revision"]>;
 function groups(entries: Entry[], view: SessionDisplayView | null, extra: Partial<TimelineGroupProps> = {}): TimelineGroupProps[] {
@@ -48,6 +48,8 @@ test("a group is rendered again when a row, its place in the journal or its imag
   // Another session, or another way to open a tool, is another group.
   assert.equal(sameTimelineGroup(tools, { ...tools, sessionId: "other" }), false);
   assert.equal(sameTimelineGroup(tools, { ...tools, onOpenTool: () => {} }), false);
+  // An answer becomes a step of its turn when more work follows it: it takes the setting of steps, so it is rendered again.
+  assert.equal(sameTimelineGroup(tools, { ...tools, entryType: "step" }), false);
   // A refresh of the history gives a new revision and a new map: the row is the same while its range is.
   const sources = (start: string, end: string) => new Map([["1", { start, end }]]) as unknown as TimelineGroupProps["sources"];
   const placed = { ...prompt, revision, sources: sources("1", "9") };
