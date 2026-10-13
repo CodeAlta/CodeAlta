@@ -41,10 +41,11 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 - Click a project to select it and write the prompt of a new session in it. This does not show or hide its sessions: its arrow does.
 - Click a session to look at it, and double-click it to keep its tab (see [Tabs you look at and tabs you keep](#tabs-you-look-at-and-tabs-you-keep)).
 - Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open. The last one opens a [terminal](#terminal-desktop).
-- The `…` button of a project or a session, or a right-click, opens its menu.
+- The `…` button of a project or a session, or a right-click (also `Ctrl`+click on macOS), opens its menu.
 - **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session.
 - **Move to project…** in the menu of a session, `/move_to_project` in the search, or dragging its row onto another project, moves the session to that project. See [Move a session to another project](sessions.md#move-a-session-to-another-project).
 - **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.
+- **Delete project…** in the menu of a project removes the project from CodeAlta and deletes its sessions, which cannot be restored. Its folder and its files are kept. A small question beside the row always asks first. Stop the sessions of the project that are running, or let them end, before you delete it.
 - A session that has [sub-agents](sessions.md#sub-agents) lists them under it, and has an arrow of its own to show or hide them.
 - A session with a bolt was started by an [automation](automations.md).
 - A session with a tree mark works in a [worktree](worktrees.md).
@@ -82,7 +83,7 @@ A session you create is kept from the start. Closing a tab never deletes a sessi
 
 ### Close several tabs at once
 
-Right-click a tab to open its menu:
+Right-click a tab to open its menu. From the keyboard, press `Shift+F10` (or the menu key) on the tab that has the keyboard:
 
 {.table}
 | Command | What it closes |
@@ -510,6 +511,13 @@ Open it with `Ctrl+G Ctrl+O` or `/models`. It shows provider/model metadata and 
 Open it with `Ctrl+G Ctrl+U` or the context indicator of the prompt bar. The popup explains the current context denominator, active usage, compaction pressure, recent operation usage, and provider-specific usage details when available.
 
 The last operation shows the tokens of the last request to the model as a bar in which each token is counted once: the input that came from the prompt cache, the input that was written to it, the rest of the input, the output and the reasoning. The whole input is given beside the title. For a Copilot session it also gives the cost of that request in AI credits. See [Prompt caching and the cost of a request](model-providers.md#prompt-caching-and-the-cost-of-a-request).
+
+In CodeAlta Desktop, **Current session** shows the same bar for the whole session: every request since the session started, with the time the provider spent on them and what they cost. A session that used several providers has one cost per unit, such as dollars and AI credits. A forked session counts from its fork: what came before belongs to the session it was forked from. The totals are read when you open the popup and when you press **Refresh usage**; **Copy as Markdown** includes them. A saved session shows them as soon as you open it, before you send anything.
+
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-current-session-costs.webp" alt="Context usage popup of CodeAlta Desktop with the Current session card under the last operation: a token bar, the duration and the cost of the whole session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Current session adds up the tokens, the duration and the cost of every request of the session.</figcaption>
+</figure>
 
 In CodeAlta Desktop, a session of Codex, Copilot or Claude Code also shows the **Subscription usage**: the limits of the plan, how much of each is used and when it starts over. See [Usage of a subscription](model-providers.md#usage-of-a-subscription).
 

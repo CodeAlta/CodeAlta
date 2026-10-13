@@ -195,11 +195,16 @@ exit/signal and last file probe. A successful launcher exit may precede readines
 spawn error fails the test. Keep fixture-owned process/profile cleanup; never hide failures with
 automatic relaunches or skips. A test that has to know its browser is gone before it removes the profile
 ends it with `endBrowser`, never with a command of one system (`taskkill` ends the whole tree on Windows,
-the process is killed elsewhere).
+the process is killed elsewhere). After readiness `waitForBrowserPort` keeps the stderr pipe drained but no
+longer lets it hold the test process: on macOS Edge's crash handler outlives the browser for minutes with the
+other end of that pipe, and a test file that had passed went on running until it was gone.
 
 The browser tests run on three systems with three fonts and their own gestures. Assert what the product
 promises (an order, "no overlap", "shorter than"), not a margin that one font gives, and name the system
 where a gesture differs: on macOS a Ctrl+click opens the context menu and gives the page no `click`.
+That holds for Chromium only. WebKit, which the desktop application runs in on macOS, still delivers the
+`click` of that press once the page has shown its own menu; `contextClickGuard.ts` stops it for the whole
+window, so a control handles `contextmenu` and `click` without knowing about the gesture.
 `npm run build` and `npm run build:demo` run Vite with `--logLevel warn`, retaining warnings and errors
 without the asset-size listing. NeoAstra invokes the same build script from the desktop `.csproj`.
 

@@ -13,13 +13,13 @@ function context(): ProjectRowContext {
 
 test("project menu permits read-only other rows but never retargets mutation", () => {
   const current = context();
-  assert.deepEqual(projectRowAccess(project, current), { open: true, details: true, rename: true, archive: true });
+  assert.deepEqual(projectRowAccess(project, current), { open: true, details: true, rename: true, archive: true, delete: true });
   for (const changed of [{ projectId: "other" }, { canMutate: false }, { hostAvailable: false }, { locked: true }]) {
-    assert.deepEqual(projectRowAccess(project, { ...current, ...changed }), { open: true, details: true, rename: false, archive: false });
+    assert.deepEqual(projectRowAccess(project, { ...current, ...changed }), { open: true, details: true, rename: false, archive: false, delete: false });
   }
   const archived = { ...project, archived: true };
   assert.deepEqual(projectRowAccess(archived, { ...current, snapshot: { ...current.snapshot!, projects: [archived] } }),
-    { open: true, details: true, rename: false, archive: true });
+    { open: true, details: true, rename: false, archive: true, delete: true });
 });
 
 test("missing, duplicate, changed and unready catalogs grant no project action", () => {

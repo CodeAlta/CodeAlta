@@ -7,8 +7,9 @@ import { useShellLanguage } from "./shellLanguage";
  * the row while it is asked; the row must be positioned so the popover's anchor covers it.
  * The button that does it has the focus, so Enter answers yes; Escape, Cancel or a click elsewhere leaves
  * everything as it is and gives the focus back to the row. A check box asks not to be asked the next time.
+ * A question that is always asked has no check box, and Cancel has the focus: Enter leaves everything as it is.
  */
-export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = "primary", onConfirm, onCancel, busy, error = null }: {
+export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = "primary", always = false, onConfirm, onCancel, busy, error = null }: {
   /** The question. */
   title: string;
   /** What it is about: the title of the session, the name of the project. */
@@ -17,6 +18,8 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   detail: string;
   confirmLabel: string;
   intent?: Intent;
+  /** The question is asked every time: what it does is too much to do without being asked. */
+  always?: boolean;
   /** The answer is yes; `remember` says the question is not to be asked again. */
   onConfirm: (remember: boolean) => void;
   onCancel: () => void;
@@ -29,22 +32,30 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   const id = useId();
   const anchor = useRef<HTMLSpanElement>(null);
   const confirm = useRef<HTMLButtonElement>(null);
+  const dismiss = useRef<HTMLButtonElement>(null);
   const [remember, setRemember] = useState(false);
-  useEffect(() => { const timer = setTimeout(() => confirm.current?.focus()); return () => clearTimeout(timer); }, []);
+  const form = useRef<HTMLDivElement>(null);
+  // The menu the question comes from closes after it is asked, and gives the focus back to its own button: the
+  // question takes it again.
+  useEffect(() => {
+    const focus = () => { if (!form.current?.contains(document.activeElement)) (always ? dismiss : confirm).current?.focus(); };
+    const timers = [0, 150, 400].map(delay => setTimeout(focus, delay));
+    return () => timers.forEach(clearTimeout);
+  }, []);
   function cancel() {
     const row = anchor.current?.closest(".session-row, .project-action-row")?.querySelector<HTMLElement>(":scope > button");
     onCancel();
     row?.focus();
   }
-  const question = <div className="confirm-form" role="alertdialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-detail`}
+  const question = <div ref={form} className="confirm-form" role="alertdialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-detail`}
     onKeyDown={event => { if (event.key === "Escape" && !busy) { event.preventDefault(); event.stopPropagation(); cancel(); } }}>
     <strong id={`${id}-title`}>{title}</strong>
     <span className="confirm-subject" title={subject}>{subject}</span>
     <p id={`${id}-detail`}>{detail}</p>
     {error && <p role="alert" className="confirm-error">{error}</p>}
-    <Checkbox checked={remember} disabled={busy} label={t("Do not ask again")} onChange={event => setRemember(event.currentTarget.checked)} />
+    {!always && <Checkbox checked={remember} disabled={busy} label={t("Do not ask again")} onChange={event => setRemember(event.currentTarget.checked)} />}
     <div className="rename-actions">
-      <Button variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={cancel} />
+      <Button ref={dismiss} variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={cancel} />
       <Button ref={confirm} intent={intent} size="small" text={confirmLabel} loading={busy} onClick={() => onConfirm(remember)} />
     </div>
   </div>;

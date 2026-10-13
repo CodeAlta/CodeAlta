@@ -10,7 +10,7 @@ export function projectRowAccess(project: WorkspaceProject, context: ProjectRowC
   const open = !!exact && exact.path === project.path && exact.name === project.name && exact.archived === project.archived;
   const mutate = open && context.projectId === project.id && context.hostAvailable && !!context.hostEpoch
     && context.canMutate && !context.locked;
-  return { open, details: open, rename: mutate && !project.archived, archive: mutate };
+  return { open, details: open, rename: mutate && !project.archived, archive: mutate, delete: mutate };
 }
 
 export function projectRowCurrent(project: WorkspaceProject, captured: ProjectRowContext, current: ProjectRowContext) {

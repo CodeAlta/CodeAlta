@@ -96,7 +96,7 @@ internal sealed partial class WorkspaceService
         lock (_sessionGate)
         {
             if (_sessionsClosed) return Reply("closed");
-            if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null) return Reply("busy");
+            if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceForkSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _branchWork = work = completion.Task;
             _ = ForkOwnedAsync(request, completion);
@@ -120,7 +120,7 @@ internal sealed partial class WorkspaceService
         lock (_sessionGate)
         {
             if (_sessionsClosed) return Reply("closed");
-            if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null) return Reply("busy");
+            if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceRewindSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _branchWork = work = completion.Task;
             _ = RewindOwnedAsync(request, completion);

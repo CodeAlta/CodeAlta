@@ -161,9 +161,13 @@ only when a session of it is shown, so that the session is in view.
 
 ### The menu of a tab
 
-The other button of the pointer on a tab, or the menu key, opens its menu
-(`tabMenu` in `SessionTabStrip.tsx`, from the `onContextMenu` of the dock, shown
-by `SessionTabMenu` at the pointer). It does not show the tab it is asked from.
+The other button of the pointer on a tab, or the menu key or Shift+F10 on the tab
+that has the keyboard, opens its menu (`tabMenu` in `SessionTabStrip.tsx`, shown
+by `SessionTabMenu` at the pointer, or under the tab for the keyboard). The pointer
+asks through the `onContextMenu` of the dock. The keys are read by the key handler
+of the strip (`isSessionContextKey`), as the rows of the Explorer do: only some
+systems turn them into a request for a context menu, and macOS never does. The
+menu does not show the tab it is asked from.
 
 - **Close** closes the tab, as its close button does and through the same action.
   **Close others**, **Close to the right** and **Close all** close tabs of the

@@ -40,6 +40,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _timelineHistory = store.ReadTimelinePageAsync;
         _historySource = store.ReadHistorySourceAsync;
         _historyRecord = store.ReadHistoryRecordAsync;
+        UsageUpdates = store.ReadUsageUpdatesAsync;
         var images = new PromptImageAttachmentStore(projects.Options);
         _promptImage = (sessionId, offset, index) => ReadPromptImageCoreAsync(store, images, sessionId, offset, index);
     }
@@ -89,6 +90,9 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _timelineHistory = timeline;
         _historySource = source;
     }
+
+    // Literal usage test seam; production always sets the shared cached store's reader in its constructor.
+    internal Func<string, CancellationToken, Task<IReadOnlyList<AgentSessionUsageUpdate>>>? UsageUpdates { get; init; }
 
     /// <summary>Reads complete notes through the same eight-actual-read admission and drain.</summary>
     /// <param name="sessionId">An explicit backend session identity.</param>
@@ -185,6 +189,28 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return Admit(() => (_historyRecord ?? throw new InvalidOperationException("Record reader not configured."))
             (sessionId, offset, CancellationToken.None), cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the usage of every request to the model that the journal of a session records, through the same
+    /// admitted/drained store owner.
+    /// </summary>
+    /// <param name="sessionId">Selected durable session identity.</param>
+    /// <param name="cancellationToken">
+    /// Cancels this wait and the read itself: unlike a bounded page, it reads the whole journal, which nothing has to
+    /// finish once its caller is gone.
+    /// </param>
+    /// <returns>The usage updates in journal order, up to the length the journal has when the read starts.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels.</exception>
+    /// <exception cref="AgentSessionHistoryException">The session is missing, or its journal or one of its usage records cannot be read.</exception>
+    public Task<IReadOnlyList<AgentSessionUsageUpdate>> ReadUsageUpdatesAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => (UsageUpdates ?? throw new InvalidOperationException("Usage reader not configured."))
+            (sessionId, cancellationToken), cancellationToken, cancellationToken);
     }
 
     /// <summary>Reads one image of a persisted user message or tool result through the same admitted/drained store owner.</summary>
@@ -286,6 +312,10 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     }
 
     private Task<T> Admit<T>(Func<Task<T>> read, CancellationToken cancellationToken)
+        => Admit(read, cancellationToken, CancellationToken.None);
+
+    // readCancellation is the token the actual read was given, when it was given one: the end it asks for is no failure.
+    private Task<T> Admit<T>(Func<Task<T>> read, CancellationToken cancellationToken, CancellationToken readCancellation)
     {
         ReadOperation operation;
         Task<T> work;
@@ -294,7 +324,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             ObjectDisposedException.ThrowIf(_closed, this);
             if (_active.Count == 8) throw new InvalidOperationException("Owned workspace read capacity reached.");
-            operation = new ReadOperation();
+            operation = new ReadOperation { ReadCancellation = readCancellation };
             _active.Add(operation);
             work = RunAsync(operation, read);
             operation.Work = work;
@@ -314,6 +344,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private async Task ObserveAsync(ReadOperation operation)
     {
         try { await operation.Work.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (operation.ReadCancellation.IsCancellationRequested) { }
         catch (Exception ex) { operation.Failure = ex; }
         finally { lock (_gate) _active.Remove(operation); }
     }
@@ -347,6 +378,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         internal Task Work = Task.CompletedTask;
         internal Task Observer = Task.CompletedTask;
         internal Exception? Failure;
+        internal CancellationToken ReadCancellation;
     }
 }
 

@@ -44,7 +44,7 @@ export async function readSessionInfoObservations(target: RuntimeTarget, readRun
     projectId: request.projectId, expectedProjectPath: request.projectPath };
   let raw: SessionUsageResponse;
   try { raw = await readUsage({ expectedHostEpoch: usageTarget.epoch, sessionId: usageTarget.sessionId, scope: usageTarget.scope,
-    projectId: usageTarget.projectId, expectedProjectPath: usageTarget.expectedProjectPath }, { signal, timeoutMilliseconds: 10000 }); }
+    projectId: usageTarget.projectId, expectedProjectPath: usageTarget.expectedProjectPath, includeCurrentSession: false, createdAt: request.createdAt }, { signal, timeoutMilliseconds: 10000 }); }
   catch { return valid() ? { runtime, identity, usage: [["Observation", "Error: usage read failed; no observation established."]] } : refused(); }
   if (!valid()) return refused();
   const usage = validateUsage(usageTarget, raw);

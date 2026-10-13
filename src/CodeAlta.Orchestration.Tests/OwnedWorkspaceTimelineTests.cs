@@ -89,6 +89,43 @@ public sealed class OwnedWorkspaceTimelineTests
         }
     }
 
+    [TestMethod]
+    public async Task UsageUpdates_ShareAdmission_AndTheirCallerCancelsTheReadItself()
+    {
+        var started = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var update = new AgentSessionUsageUpdate("run", new(InputTokens: 1));
+        var owner = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,
+            (_, _, _) => Task.FromResult(new AgentSessionHistoryPage([], null, false)))
+        {
+            UsageUpdates = async (id, token) =>
+            {
+                Assert.AreEqual("selected", id);
+                if (!token.CanBeCanceled) return [update];
+                started.TrySetResult(token);
+                // A whole journal is being read: only the cancellation of the caller ends it.
+                await Task.Delay(Timeout.Infinite, token);
+                return [];
+            },
+        };
+        Assert.ThrowsExactly<ArgumentException>(() => owner.ReadUsageUpdatesAsync(" ", default));
+        Assert.ThrowsExactly<OperationCanceledException>(() => owner.ReadUsageUpdatesAsync("selected", new CancellationToken(true)));
+        Assert.AreSame(update, (await owner.ReadUsageUpdatesAsync("selected", default)).Single());
+
+        using var caller = new CancellationTokenSource();
+        var reads = Enumerable.Range(0, 8).Select(_ => owner.ReadUsageUpdatesAsync("selected", caller.Token)).ToArray();
+        Assert.AreEqual(caller.Token, await started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadUsageUpdatesAsync("selected", default));
+        await caller.CancelAsync();
+        foreach (var read in reads) await Assert.ThrowsAsync<OperationCanceledException>(() => read);
+        // The reads ended as their caller asked: the drain joins them and reports no failure.
+        await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.ThrowsExactly<ObjectDisposedException>(() => owner.ReadUsageUpdatesAsync("selected", default));
+
+        var unconfigured = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,
+            (_, _, _) => Task.FromResult(new AgentSessionHistoryPage([], null, false)));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => unconfigured.ReadUsageUpdatesAsync("selected", default));
+    }
+
     private static async IAsyncEnumerable<AgentSessionMetadata> Empty([EnumeratorCancellation] CancellationToken token)
     { await Task.CompletedTask; token.ThrowIfCancellationRequested(); yield break; }
 }
