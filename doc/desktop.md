@@ -67,6 +67,15 @@ has not drawn yet, the part a resize uncovers: NeoAstra registers its window cla
 window color, white, so `DesktopWindowBackground` gives the class a brush of the theme's background
 when the window is created, and a new one when the page changes its theme.
 
+On Windows a window that is activated gives the keyboard to itself, and NeoAstra does not pass it on to
+the browser inside it: after a switch to another application and back, the prompt had no caret and
+nothing could be typed until the page was clicked. `DesktopWindowFocus` follows `NeoWindow.FocusChanged`:
+once Windows has given the keyboard to the window (the work is posted to the dispatcher, since the
+event comes first), and only while the window itself holds it, it calls
+`ICoreWebView2Controller::MoveFocus` with the programmatic reason on the controller NeoAstra lends
+(`NeoNativeHandleKind.WebView2Controller`). The browser then gives the focus back to what had it in the
+page. The same happens when the window is first shown.
+
 The view loads the documents of the application and no other: the start-up screen, then the
 application (`DesktopApplication.DecideNavigation`). Its history still holds the start-up screen, which
 nothing leaves, so the view has no history navigation (`NeoBrowserFeatures.HistoryNavigation` is off in
