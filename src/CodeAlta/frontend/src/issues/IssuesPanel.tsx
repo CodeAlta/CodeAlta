@@ -179,7 +179,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           {filters.map(candidate => <Tab key={candidate} id={candidate} disabled={false} title={<>{t(issueFilterLabel(candidate))}
             {candidate === shownFilter && shown && !shown.loading && <span className="work-count" data-zero={items.length === 0 || undefined}>{items.length}{shown.more ? "+" : ""}</span>}</>} />)}
         </Tabs>
-        {shown?.problem && <Callout intent={shown.needsSignIn ? "warning" : "danger"} compact role="alert" className="work-notice issues-notice">
+        {/* A list that came with a problem is incomplete, not missing: a Jira project the account does not see. */}
+        {shown?.problem && <Callout intent={shown.needsSignIn || items.length > 0 ? "warning" : "danger"} compact role="alert" className="work-notice issues-notice">
           {shown.problem}{shown.needsSignIn && command && <> {t("Run {command} in a terminal, then reload.", { command })}</>}</Callout>}
         <div className="work-body">
           <div className="work-list" role="listbox" aria-label={t(noun)}>

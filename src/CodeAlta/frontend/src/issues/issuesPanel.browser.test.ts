@@ -50,6 +50,7 @@ test("the issues of several Jira projects are listed together, and one project i
     await page.click('[aria-label="Reload"]');
     await page.until(`document.querySelector('.issues-notice')?.textContent.includes('GONE')`, "the project that is missing");
     assert.ok(await page.evaluate(`${rows}.length > 0`), "the others are still listed");
+    assert.equal(await page.evaluate(`document.querySelector('.issues-notice').classList.contains('bp6-intent-warning')`), true, "a list that is incomplete is a warning, not a failure");
 
     // A project with one Jira project has nothing to choose: the tab names the project, as before.
     await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "single"));
