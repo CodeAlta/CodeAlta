@@ -1321,6 +1321,72 @@ through the `get_usage` control request of its CLI. No model turn is sent, and t
 two CLIs are never read. The Providers page shows the answer in the **Usage** section of a saved
 provider (`ProviderUsagePanel`).
 
+### Speech to prompt
+
+The microphone button of the composer dictates into the prompt with a speech model that runs on the computer
+(issue #117). Three parts, each replaceable in tests:
+
+| Part | Where | What it owns |
+| --- | --- | --- |
+| The page | `frontend/src/speech/` | The microphone (`getUserMedia`, a worklet that gives 16 kHz 16-bit chunks of 100 ms), the button and its states, the text written in the prompt, the download notice, the settings page. |
+| The service | `Desktop/Rpc/SpeechRpc.cs` (`speech`) | The settings, the models of the cache, the download, and the dictation: `start`, `append`, `listen`, `stop`. |
+| The worker | `Desktop/Speech/SpeechWorker.cs`, started as `alta --speech-worker` | The recognizer and the voice detector of sherpa-onnx. |
+
+**Why a worker.** sherpa-onnx ends its process on a model it refuses, and a custom model is a user's choice:
+the engine must not be able to close CodeAlta. `SpeechWorkerClient` starts the worker at the first dictation,
+gives it the model (`Load`), and keeps it between dictations; it ends it after five minutes without one
+(`SpeechService.IdleTime`), when another model is chosen, when the feature is turned off, when the model is
+deleted and when the application closes. A worker that dies ends the dictation with `engine_failed` (or
+`load_failed` when the model never loaded) and the next dictation starts another. What the engine writes on its
+error stream goes to the application log (`CodeAlta.Desktop.Speech`).
+
+**Dictation.** `start` answers `model_missing` until the chosen model and the engine are in the cache: nothing
+is downloaded by a dictation. The page then sends chunks with `append`, numbered, because its calls run
+concurrently in the host: `SpeechDictation.Accept` gives them to the worker in order. The models are not
+streaming, so the worker follows sherpa-onnx's own pattern for live text (`SpeechDictationPipeline`): Silero
+VAD cuts the audio where the speaker pauses (0.4 s; an utterance that goes on is cut after 15 s); a finished
+utterance is decoded once and is final; the one being spoken is decoded again each time 0.2 s was added to it,
+and only when no more audio waits, so a slow computer shows the live text less often and never falls behind.
+`listen` streams snapshots, the whole final text and the live text, not deltas: the channel keeps the latest
+one (`MaximumUnacknowledgedChannelItems` is 2), and a snapshot the page did not get loses nothing. `stop`
+returns the whole final text. The page writes `finalText.slice(written)` at the caret
+(`PromptInput.insertAtCaret`, one undo step) and shows the live text as a Monaco decoration that is never part
+of the prompt.
+
+**Download.** `SpeechInstaller` owns one download at a time, for the application and not for a window:
+`watch` replays its state and closing the stream never stops it. What it installs, under
+`~/.alta/cache/speech` (shared by the normal and the developer instance):
+
+```text
+runtime/<sherpa-onnx version>/<rid>/   the native libraries, from org.k2fsa.sherpa.onnx.runtime.<rid> on nuget.org
+vad/silero_vad.onnx                    the voice detector
+models/<id>/                           the files of a model and model.json (source, commit, family, files)
+```
+
+A file is written as `<name>.part` in a `<folder>.partial` folder, resumed with an HTTP range where it stopped,
+checked (SHA-256, or the git blob SHA-1 for a file Hugging Face keeps in git) and only then given its name; the
+folder gets its name when its marker file (`model.json`, `engine.json`, `vad.json`) is written, so a folder
+under its name is complete. A `.lock` file in the `.partial` folder keeps two instances from writing the same
+files (`busy_elsewhere`). After the download, the model is loaded once in the worker (`Validate`): a model the
+engine refuses is reported then (`load_failed`); its files stay, and the Speech page can delete them.
+
+**Models.** `SpeechModelCatalog` has the presets, pinned by commit and hash. A custom model is a Hugging Face
+repository address: `SpeechModelSource` reads `api/models/<repository>` for the commit and
+`api/models/<repository>/tree/<commit>` for the files, recognizes the family from the file names (a transducer,
+Moonshine with two or four files, Whisper), prefers the `int8` files and refuses anything else before a
+download. Its folder is `custom-<owner>-<name>-<hash of the address>`.
+
+**The microphone.** `DesktopApplication.DecidePermission` allows `Microphone` once, to a document of the
+application, while `[speech] enabled` is true, and denies every other permission; the setting is read at each
+request and nothing is kept in the profile of the view. The macOS bundle has `NSMicrophoneUsageDescription`.
+The button is hidden when the service is not available (an instance on explicit roots stays off the network),
+when the engine has no package for the platform, when the feature is off and when the view has no
+`navigator.mediaDevices`.
+
+**The wrapper.** The C# wrapper of sherpa-onnx gives paths in the ANSI code page on Windows while the engine
+reads UTF-8, and keeps a null recognizer without a word. The worker therefore works in the folder of the model
+and gives the engine relative ASCII names, and `SherpaSpeechEngine` checks the handle of a first stream.
+
 ## Timeline
 
 ### Timeline cards

@@ -56,6 +56,10 @@
          the ASP.NET Core shared framework, which the .NET SDK a tool is installed with has. -->
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
+    <!-- Speech to prompt: the managed wrapper of sherpa-onnx only. Its native libraries (22 to 39 MB a runtime)
+         are not in the package of CodeAlta: they are downloaded with the first speech model, the same version
+         (Desktop/Speech/SpeechModelCatalog.cs), and only the speech worker process loads them. -->
+    <PackageReference Include="org.k2fsa.sherpa.onnx" ExcludeAssets="native" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
     <ProjectReference Include="../CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
     <ProjectReference Include="../CodeAlta.Agent/CodeAlta.Agent.csproj" />

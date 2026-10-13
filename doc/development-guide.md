@@ -167,6 +167,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `lent/`: the entries of the libraries lent to plugins and the `codealta` module (below).
 - `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
 - `bookmarks/`: the bookmarks (the link to the host, the tab that lists them, the marks of the rows of a timeline and the rail beside it, the requests that show a message of a timeline).
+- `speech/`: speech to prompt (the store of the dictation and of the download, the microphone capture and its worklet, the button of the composer, the download notice, the settings page).
 
 Rules for these sources:
 
@@ -382,6 +383,32 @@ flowchart LR
 - `SkillIgnoreSourceParser.Parse` is a separate opt-in, in-memory parse of one explicitly supplied complete ignore byte buffer and canonical relative base; cap original bytes, decoded lines/line lengths, base components and aggregate syntax before calling only XenoAtom's string/span Git-ignore parser. Refuse incomplete/unknown input rather than interpreting it as a known empty rule set; true completeness is caller evidence, never parser-proved EOF/provenance. Return fixed refusal codes without partial rules or arbitrary exception text; successful ordered rule syntax is not a match or visibility grant. Do not invoke public `IgnoreMatcher` (the Unix case-default probe can perform filesystem writes), walker, repository discovery, stream/reader overloads or legacy skill callers in this prerequisite. Future acquisition must independently bound Git config/global/info/ancestor/nested ignores and their omissions, case mode, parent-pruning and overlays before claiming effective inventory. See `catalog-and-config.md` for limits and supported encodings.
 - `SkillIgnoreSourceReader.ReadAsync` alone composes one explicitly supplied canonical boundary/file path with a *separately supplied* canonical relative parse base. Validate bounded containment, depth, all ancestor components and parse base before I/O; do not infer a filename or impose the candidate reader's `SKILL.md`/VCS exclusions (explicit `.git/info/exclude` is allowed). Refuse observed links/non-directories and read only 32 KiB original bytes plus one sentinel, requiring an observed EOF before calling the strict in-memory parser with `isComplete: true`. Missing/unreadable/oversized/malformed inputs produce fixed refusal codes, no partial rules, and no silent known-empty interpretation. Treat caller-supplied path/base association and point-in-time read as unverified: swaps/edits, blocking OS calls, mapped/remote mounts and separate Git/config/global/ancestor/nested inputs remain. No matcher, walker, automatic acquisition, legacy discovery, RPC/UI or effective visibility authority follows. See `catalog-and-config.md` for status/byte and non-atomic limits.
 - Treat logs, traces, journals, prompts, command output, provider payloads, and plugin diagnostics as potentially sensitive user data.
+
+## Native Engines And Worker Processes
+
+Speech to prompt runs sherpa-onnx, a native library that ends the process it runs in (`_Exit`) when it is given
+a model it does not understand. The rules it led to apply to any native engine of that kind:
+
+- **The engine runs in a worker process, never in the host.** The worker is the desktop executable started with
+  a hidden argument (`alta --speech-worker`, handled first in `Program.Main`): no window, no profile, frames on
+  its standard streams (`SpeechWorkerProtocol`). A worker that dies is an error of one operation; the host goes
+  on, and starts another worker the next time.
+- **Only the worker touches the types of the wrapper.** `SherpaSpeechEngine` is the one file that names
+  `SherpaOnnx`, behind `ISpeechEngine`; the host uses `SpeechWorkerClient`. The wrapper assembly is then never
+  loaded in the host, and tests run the real worker loop on a fake engine.
+- **The native libraries are not in the packages of CodeAlta.** `CodeAlta.csproj` references
+  `org.k2fsa.sherpa.onnx` with `ExcludeAssets="native"`, and no other project references it: the libraries are
+  downloaded with the first model into `~/.alta/cache/speech/runtime/<version>/<rid>`, from the
+  `org.k2fsa.sherpa.onnx.runtime.<rid>` packages of nuget.org, and the worker loads them with a
+  `NativeLibrary` resolver. Nothing of it reaches the TUI.
+- **Everything downloaded is pinned.** `SpeechModelCatalog` holds the commit and the hashes of each preset
+  model, and the SHA-256 of the engine package of each runtime. A file is given its name only after its check.
+- **The wrapper and the libraries are one version.** To move to another version of sherpa-onnx: change it in
+  `Directory.Packages.props` and in `SpeechModelCatalog.EngineVersion`, put the SHA-256 and the size of the six
+  `org.k2fsa.sherpa.onnx.runtime.<rid>` packages of that version in `SpeechModelCatalog`, compare the structures
+  of `scripts/dotnet/*.cs` of sherpa-onnx with those of the previous version, then run the engine test
+  (`SpeechEngineIntegrationTests`, with its environment variables) for one model of each family. A test checks
+  that the two version numbers match.
 
 ## Provider Defaults And Compatibility
 

@@ -194,6 +194,7 @@ internal static class DesktopIntegration
               <key>LSMinimumSystemVersion</key><string>11.0</string>
               <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
               <key>NSHighResolutionCapable</key><true/>
+              <key>NSMicrophoneUsageDescription</key><string>CodeAlta listens to the microphone to write what you say in the prompt. The audio stays on this computer.</string>
             </dict>
             </plist>
 

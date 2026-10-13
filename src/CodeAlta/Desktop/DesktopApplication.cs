@@ -113,6 +113,21 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     }
 
     /// <summary>
+    /// Allows the microphone, for this request only, to a document of the application while speech to prompt is
+    /// turned on, and denies every other permission. Nothing is kept in the profile of the view, so turning the
+    /// feature off is enough to close the microphone.
+    /// </summary>
+    /// <param name="request">The permission the view asks for.</param>
+    /// <param name="microphoneAllowed">Whether speech to prompt is turned on.</param>
+    internal static NeoPermissionDecision DecidePermission(NeoPermissionRequest request, bool microphoneAllowed)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        // The view of Linux does not say who asks: it shows documents of the application only (DecideNavigation).
+        var own = request.Origin is null || request.Origin is { IsAbsoluteUri: true, Scheme: "app", Host: "codealta" };
+        return microphoneAllowed && own && request.Kind == NeoPermissionKind.Microphone ? NeoPermissionDecision.AllowOnce : NeoPermissionDecision.DenyOnce;
+    }
+
+    /// <summary>
     /// The identity under which running instances are found: one per profile, so the developer instance and
     /// an instance on explicit roots are never mistaken for the normal one.
     /// </summary>
@@ -245,6 +260,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
         ProviderUsageService? providerUsage = null;
+        SpeechService? speech = null;
         McpServersService? mcpServers = null;
         PluginUiService? pluginCommands = null;
         DesktopCanvases? canvases = null;
@@ -410,6 +426,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
                 providerUsage?.Dispose();
+                if (speech is not null) await speech.CloseAsync(); // A download of a speech model stops, and the speech worker ends.
                 if (mcpServers is not null) await mcpServers.CloseAsync(); // So is a running MCP authorization.
                 if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
                 canvases?.Dispose(); // The tabs of plugins end with the application.
@@ -451,6 +468,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             };
             view.ProcessFailed += (_, _) => retention?.ProtectionRpc.InvalidatePage();
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
+            // The page records the microphone for speech to prompt, and only while that is turned on.
+            view.PermissionRequested = request => ValueTask.FromResult(DecidePermission(request, speech?.IsMicrophoneAllowed() == true));
             // The start-up screen first, then the window: it appears with the logo on its theme, never empty.
             // The browser draws into a shown window only, so the window is shown out of sight until the
             // document is there and has had a moment to be drawn. A view that does not report the document
@@ -664,6 +683,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProviderLoginService(providerLogin);
                     providerUsage = new ProviderUsageService(configStore, options.CatalogRoot!, epoch);
                     builder.AddProviderUsageService(providerUsage);
+                    // An instance on explicit roots is automation and stays off the network: it downloads no model.
+                    speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
+                    builder.AddSpeechService(speech);
                     mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);
                     builder.AddMcpServersService(mcpServers);
                     var agentPrompts = new AgentPromptsService(host.ProjectCatalog, epoch,
@@ -908,6 +930,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddStorageService(new StorageService());
             builder.AddProviderLoginService(new ProviderLoginService());
             builder.AddProviderUsageService(new ProviderUsageService());
+            builder.AddSpeechService(new SpeechService());
             builder.AddMcpServersService(new McpServersService());
             builder.AddAgentPromptsService(new AgentPromptsService());
             builder.AddSkillsService(new SkillsService());
