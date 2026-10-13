@@ -158,6 +158,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `explorer/`: the projects of the Explorer (what is open, the favorites, the rows and what they open).
 - `editor/`: the code editor of a project (the files, the search, the open files, their text and pictures).
 - `changes/`: the Changes tab, the git status of the composer and the diffs shown in the timeline.
+- `timelineEmphasis/`: per-type timeline appearance (the window's preferences, state-specific settings, production-component previews and styles).
 - `monaco/`: the Monaco setup shared by every editor of the page, the languages, and the text and diff editors.
 - `terminal/`: the terminals (the link to the host, the xterm.js view, the tab, the list of the Explorer, the options, the font).
 - `canvases/`: the tabs that plugins provide (the link to the host, the tab and its placeholder, the control of a plugin that does not run).

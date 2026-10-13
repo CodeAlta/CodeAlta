@@ -1,0 +1,78 @@
+/* Card paint and content opacity are independent. Attention entries keep their unmodified production styling.
+   Only direct content children receive opacity: never multiply a group's opacity by that of its tiles. */
+.messages.timeline-appearance-enabled {
+  --timeline-subtle-shadow: 0 3px 10px rgb(from var(--bp-palette-black, #000) r g b / .22), 0 1px 3px rgb(from var(--bp-palette-black, #000) r g b / .16);
+}
+/* A low-alpha shadow disappears on dark surfaces; keep elevation visible without adding an outline. */
+:root[data-theme="dark"] .messages.timeline-appearance-enabled {
+  --timeline-subtle-shadow: 0 4px 12px rgb(from var(--bp-palette-black, #000) r g b / .65), 0 1px 3px rgb(from var(--bp-palette-black, #000) r g b / .45);
+}
+.messages.timeline-appearance-enabled > .timeline-single-row:not([data-entry-type="attention"]) > .message,
+.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) {
+  --entry-active-opacity: var(--entry-opacity, 1);
+  --entry-active-tint: var(--entry-tint, 8%);
+  --entry-active-border: var(--entry-border, var(--line));
+  --entry-active-elevation: var(--entry-elevation, none);
+  --entry-active-layer: var(--entry-layer, auto);
+  z-index: var(--entry-active-layer, auto);
+  --entry-active-accent-opacity: var(--entry-accent-opacity, 1);
+  --entry-active-group-background: var(--entry-group-background);
+  --entry-accent-color: color-mix(in srgb, var(--card-color, var(--muted)) calc(var(--entry-active-accent-opacity) * 100%), transparent);
+  transition: background-color var(--timeline-appearance-duration, 120ms) ease-out, border-color var(--timeline-appearance-duration, 120ms) ease-out, box-shadow var(--timeline-appearance-duration, 120ms) ease-out;
+}
+.messages.timeline-appearance-enabled:not([data-preview-state="normal"]) > .timeline-single-row:not([data-entry-type="attention"]) > .message:is(:hover, :focus-visible, :has(:focus-visible)),
+.messages.timeline-appearance-enabled:not([data-preview-state="normal"]) > .timeline-tool-group:not([data-entry-type="attention"]):is(:hover, :focus-visible, :has(:focus-visible)),
+.messages.timeline-appearance-enabled[data-preview-state="hover"] > .timeline-single-row:not([data-entry-type="attention"]) > .message,
+.messages.timeline-appearance-enabled[data-preview-state="hover"] > .timeline-tool-group:not([data-entry-type="attention"]) {
+  --entry-active-opacity: var(--entry-hover-opacity, 1);
+  --entry-active-tint: var(--entry-hover-tint, 8%);
+  --entry-active-border: var(--entry-hover-border, var(--line));
+  --entry-active-elevation: var(--entry-hover-elevation, none);
+  --entry-active-layer: var(--entry-hover-layer, auto);
+  --entry-active-accent-opacity: var(--entry-hover-accent-opacity, 1);
+  --entry-active-group-background: var(--entry-hover-group-background);
+}
+.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) {
+  --entry-active-background: var(--entry-active-group-background);
+}
+.messages.timeline-appearance-enabled > .timeline-single-row:not([data-entry-type="attention"]) > .message > :is(.avatar, .message-body),
+.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) > .timeline-tool-group-heading,
+.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) > .message > :is(.avatar, .message-body) {
+  opacity: var(--entry-active-opacity, 1);
+  transition: opacity var(--timeline-appearance-duration, 120ms) ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .messages.timeline-appearance-enabled { --timeline-appearance-duration: 0ms; }
+}
+
+/* Master/detail avoids an eleven-type by ten-property grid. Narrow windows use a native type select. */
+.timeline-appearance-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; min-width: 0; }
+.timeline-appearance-types { display: flex; flex-direction: column; align-items: stretch; gap: 4px; border-right: 1px solid var(--line); padding-right: 12px; }
+.timeline-appearance-types .bp6-button { justify-content: flex-start; text-align: left; white-space: normal; }
+.timeline-appearance-types .bp6-button.bp6-active { box-shadow: inset 2px 0 var(--accent); background: var(--accent-soft); }
+.timeline-appearance-editor { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.timeline-appearance-editor h3, .timeline-appearance-editor p { margin: 0; }
+.timeline-appearance-editor h3 { font-size: 17px; }
+.timeline-appearance-editor .timeline-appearance-type-select { display: none; }
+.timeline-appearance-properties { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.timeline-appearance-property { width: 38%; }
+.timeline-appearance-properties th, .timeline-appearance-properties td { padding: 8px 4px; vertical-align: middle; text-align: left; overflow-wrap: anywhere; }
+.timeline-appearance-properties thead th { border-bottom: 1px solid var(--line); padding-bottom: 12px; font-weight: 600; }
+.timeline-appearance-properties thead th:first-child { font-size: 12px; color: var(--muted); font-weight: 400; }
+.timeline-appearance-properties tbody th { font-weight: 400; }
+.timeline-appearance-properties .bp6-html-select, .timeline-appearance-properties select { width: 100%; min-width: 0; }
+.timeline-appearance-preview { border-top: 1px solid var(--line); padding-top: 16px; }
+.timeline-appearance-preview-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.timeline-appearance-preview-column { min-width: 0; }
+.timeline-appearance-preview-column h4 { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.timeline-appearance-preview .messages { overflow: visible; min-width: 0; }
+.timeline-appearance-preview .message { min-width: 0; }
+.ide-shell .messages[data-preview-state="hover"] .message-actions > button { opacity: 1; }
+.ide-shell .messages[data-preview-state="normal"] .message-actions > button { opacity: 0; }
+.timeline-emphasis-dialog footer > span:first-child { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+@media (max-width: 760px) {
+  .timeline-appearance-layout { grid-template-columns: minmax(0, 1fr); }
+  .timeline-appearance-types { display: none; }
+  .timeline-appearance-editor .timeline-appearance-type-select { display: block; }
+  .timeline-appearance-preview-columns { grid-template-columns: minmax(0, 1fr); }
+}

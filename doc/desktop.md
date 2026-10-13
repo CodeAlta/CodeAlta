@@ -1966,8 +1966,9 @@ are unavailable. They govern manual actions, not automatic session retention.
 **Settings → Appearance** has three sections: **Theme and colors** (Dark, Light, or Auto, which follows
 the operating system; a darker dark theme; and the color-scheme editor), **Explorer** (project sorting,
 recent-session and sub-agent counts, and desktop project-rail collapse), and **Conversation and changes**
-(conversation width/reset and the one-file/all-changes view). The button before the window controls at the top right switches between the
-three themes; the percentage before it is the zoom of the window. The rail's Sort projects selector and
+(conversation width/reset, dimming of intermediate timeline entries and the one-file/all-changes view). The button
+before the window controls at the top right switches between the three themes; the percentage before it is the
+zoom of the window. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
 saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
 The user's own color schemes are files of the profile (see below).
@@ -1987,6 +1988,58 @@ these in memory (`DesktopShell.SetSessionWidthOf`, 256 sessions at most), lists 
 `desktopShell.preferences` and tells the pages with a `session-width` notice that names the session. Such a
 session has `--session-width` on its own workspace. Resizing it by its grips changes the user's setting and
 releases the session.
+
+**Entry appearance.** The timeline can give each type of entry its own content opacity and card paint
+(`timelineEmphasis/timelineEmphasis.ts`).
+`groupEntryTypes` reads the groups of `groupTimelineTools` in order and gives each a type: `prompt` (**You**) and
+`agentMessage` (a message of another agent, a background job result) start a turn; an assistant message is `answer`,
+or `step` when a later one of the same turn follows it, so the newest answer of a running turn stays an answer;
+`reasoning`, `tool` (a run of tool calls, a tool image), `file`, `plan`, `systemPrompt`, `status` (model, compaction,
+reconnection and other status rows) and `plugin` (plugin cards such as Turn statistics). Errors, warnings, permission
+requests, user-input requests, interactions, failed or canceled tool calls and failed, timed-out or canceled background
+jobs are `attention`: they have no setting and retain their original appearance. One such tool call protects its whole group.
+
+Settings → Appearance → Conversation and changes has the **Entry appearance** switch and a **Customize** button.
+Its `AppWindow` (`codealta.desktop.window.timelineAppearance.v1`) lists types on the left and the selected type's
+**Normal** and **Hover / keyboard focus** settings on the right. Narrow windows use a native type select.
+Content opacity ranges from 10% to 100% in steps of 5%; background tint from 0% to 30% in steps of 2%.
+The outer border can be hidden or visible, and elevation is none or a subtle outer shadow without an inset contour.
+The shadow is stronger on dark surfaces so elevation remains visible in both themes.
+Elevated cards paint above their neighbors; hovering or focusing them raises their paint layer without changing layout.
+Existing left accents remain present and can follow content opacity independently. Tool groups have no left accent
+and do not offer its dimming switch. Hover/focus opacity cannot be lower than resting opacity; the dropdown shows
+the effective value without overwriting a previously saved lower choice. **Reset type** restores
+the selected type; **Reset all** restores every type. Changes apply immediately.
+The feature is off by default. First activation and both Reset buttons use the same preset: `prompt`, `agentMessage`,
+`answer`, `file` and `plan` have 100% content opacity and visible borders; `step` and `tool` have 70% opacity and
+hover/focus-only borders; `reasoning`, `systemPrompt`, `status` and `plugin` have 50% opacity and no outer borders.
+Every type has 100% opacity on hover/focus, 8% tint and no elevation in either state; left accents follow content
+opacity. Restoring preferences never writes this preset automatically, and disabling/re-enabling retains saved
+customizations. Missing types take the complete preset; existing legacy dim choices retain their baseline paint.
+Existing type, status and Color Scheme colors are unchanged; there is no color picker.
+
+`.messages` carries window-wide appearance properties (`emphasisProperties`). The extracted `TimelineGroupView`
+in `TimelineEntryGroup.tsx` names its type in `data-entry-type` (part of `sameTimelineGroup`, since an answer becomes
+a step when more work follows it) and binds its properties with `entryEmphasisProperties`, without rerendering
+individual rows for a preference change. Single-row wrappers remain `display: contents`. Card roots carry paint;
+only their direct avatar and message-body children carry opacity. Tool groups apply opacity once to their heading
+and each tile's content, never to both group and tile shells. Borders retain their geometry when hidden.
+`:hover`, `:focus-visible` and descendant `:focus-visible` select the hover values. Incidental mouse focus does not
+keep buttons emphasized; focused editors retain the browser's visible-focus behavior. The 120 ms transitions are
+disabled by `prefers-reduced-motion`. The setting is WebView-local JSON
+(`codealta.desktop.timeline.emphasis.v1`; a missing or invalid value takes its default). `TimelineEmphasisProvider`
+owns one `createTimelineEmphasisStore` for the lifetime of the window; `useTimelineEmphasis` follows its stable snapshot
+with `useSyncExternalStore`. Storage is read once, and a failed write still applies to current and later-mounted timelines
+and settings until the window closes. Settings and Customize show an unsaved-preference notice until a change saves
+successfully; later-mounted settings retain the notice too. The optional `appearance` extension preserves legacy
+`dim`, `opacity` and `hoverOpacity` fields and reads missing paint settings without automatically rewriting storage.
+Live plans have the same `plan` type as persisted plans. Styles live in `timelineEmphasis/timelineEmphasis.css`,
+imported by `main.tsx`, with scheme-owned paint slots in `style.css`. The TUI has no counterpart.
+
+`TimelineAppearancePreview` uses the same `TimelineGroupView` and `TimelineMessage` components with fixed synthetic
+data for all eleven types. Normal and Hover previews use explicit state roots and the production appearance styles;
+pointer movement does not change the Normal preview. Content is inert, inspection is disabled, and host-action
+contexts are shadowed. Previews have no journal readers, provider activity, executable plugin content or real session references.
 
 The rows of the page follow the width of their card, not of the window: the Settings window has a size of
 its own. A control is beside the name of its row while there is room for both, and goes below it, over the

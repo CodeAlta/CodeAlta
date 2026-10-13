@@ -2,6 +2,7 @@ import type { HistoryTimeline } from "./history";
 import type { HistorySourceTarget } from "./HistorySource";
 import type { ReconciledRow } from "./reconcileTimeline";
 import type { TimelineImageReader, TimelineImageSource } from "./timelineImages";
+import type { TimelineEntryType } from "./timelineEmphasis/timelineEmphasis";
 import type { TimelineGroup } from "./toolGroups";
 import type { ToolOutputs } from "./toolOutput";
 import type { BranchMode } from "./sessionBranch/branchPoints";
@@ -11,6 +12,8 @@ export type HistorySources = ReadonlyMap<string, NonNullable<HistoryTimeline["so
 /** What one group of the timeline is rendered from: a row on its own, or a run of tool calls under one heading. */
 export type TimelineGroupProps = {
   sessionId: string; group: TimelineGroup;
+  /** What the group is to its reader: its type is dimmed when the user wants it. */
+  entryType: TimelineEntryType;
   revision: HistoryTimeline["revision"] | null; sources: HistorySources;
   /** The images of the prompts being sent, by the key of their row. */
   echoImages: ReadonlyMap<string, TimelineImageSource>;
@@ -43,6 +46,7 @@ function sameSource(before: ReturnType<typeof groupHistorySource>, after: Return
 export function sameTimelineGroup(previous: TimelineGroupProps, next: TimelineGroupProps): boolean {
   const before = previous.group, after = next.group;
   if (previous.sessionId !== next.sessionId || before.key !== after.key || before.tools !== after.tools || before.rows.length !== after.rows.length
+    || previous.entryType !== next.entryType
     || previous.readImages !== next.readImages || previous.toolOutputs !== next.toolOutputs || previous.canInspect !== next.canInspect
     || previous.onOpenSource !== next.onOpenSource || previous.onOpenTool !== next.onOpenTool || previous.onBranch !== next.onBranch) return false;
   // A window that grew has another set of prompts: a row is the same while it is still, or still not, one of them.
