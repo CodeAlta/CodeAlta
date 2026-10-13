@@ -165,7 +165,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// session, else of the mode its provider is configured with, else the one of the host.
     /// </summary>
     /// <param name="sessionId">The session. One that is not attached has the policy of the host.</param>
-    /// <returns>The policy, read now: a send keeps the one it started with.</returns>
+    /// <returns>The policy, read now: where sessions have a mode of their own, a send reads it again at each request.</returns>
     public SessionPermissionPolicy GetPermissionPolicy(string sessionId)
     {
         var reviewByDefault = !_autoApproveOwnedPermissions();

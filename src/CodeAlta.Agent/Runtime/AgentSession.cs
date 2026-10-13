@@ -1629,7 +1629,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             SystemMessage = systemMessage,
             DeveloperInstructions = developerInstructions,
             ReasoningEffort = _options.ReasoningEffort,
-            // A run keeps the mode it started with; what runs outside one takes the current mode.
+            // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
+            // runs outside one takes the current mode.
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
             Conversation = _toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo).ToArray(),
             Tools = tools,
