@@ -156,7 +156,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const operationFacts = operation ? [wholeInput && wholeInput.uncached !== wholeInput.total && t("{count} input tokens", { count: groupedTokens(wholeInput.total) }),
     operation.reasoningEffort && t("effort {effort}", { effort: operation.reasoningEffort }),
     operation.initiator && t("initiator {initiator}", { initiator: operation.initiator }),
-    operation.durationMs && Number.isFinite(Number(operation.durationMs)) && t("duration {duration} ms", { duration: String(Math.round(Number(operation.durationMs))) }),
+    operation.durationMs && formatDuration(Number(operation.durationMs)) && t("duration {duration}", { duration: formatDuration(Number(operation.durationMs)) }),
     operation.cost && t("cost {cost}", { cost: costText(operation) ?? operation.cost })].filter((value): value is string => !!value) : [];
   // What the turns of the session reported is shown while it is recent; otherwise the provider is asked.
   const live = useMemo(() => sessionLimits(limits), [limits]);

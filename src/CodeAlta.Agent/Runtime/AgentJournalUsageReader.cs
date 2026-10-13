@@ -28,12 +28,26 @@ internal static class AgentJournalUsageReader
     /// or is not one the serializer wrote (<c>corrupt_record</c>).
     /// </exception>
     /// <exception cref="OperationCanceledException">The scan is canceled.</exception>
-    internal static async Task<List<AgentSessionUsageUpdate>> ReadAsync(Stream stream, long length, CancellationToken cancellationToken)
+    internal static Task<List<AgentSessionUsageUpdate>> ReadAsync(Stream stream, long length, CancellationToken cancellationToken)
+        => ReadAsync(stream, length, null, cancellationToken);
+
+    /// <summary>Reads the usage that the journal records in <c>[0, length)</c> from a time on.</summary>
+    /// <param name="stream">The opened journal.</param>
+    /// <param name="length">The journal length to read up to.</param>
+    /// <param name="countedFrom">
+    /// The time from which the records of the journal are those of its session; null when they all are. The older
+    /// ones are those a fork or a rewind copied from its source: they are parsed like the others and not listed.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the scan.</param>
+    /// <returns>The usage records of the session that report an operation, in journal order.</returns>
+    /// <exception cref="AgentSessionHistoryException">As the scan of the whole journal.</exception>
+    /// <exception cref="OperationCanceledException">The scan is canceled.</exception>
+    internal static async Task<List<AgentSessionUsageUpdate>> ReadAsync(Stream stream, long length, DateTimeOffset? countedFrom, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stream);
         cancellationToken.ThrowIfCancellationRequested();
         var end = Math.Min(length, stream.Length);
-        var scan = new Scan();
+        var scan = new Scan(countedFrom);
         var buffer = ArrayPool<byte>.Shared.Rent(ReadBytes);
         try
         {
@@ -84,7 +98,7 @@ internal static class AgentJournalUsageReader
         Skipped,
     }
 
-    private sealed class Scan
+    private sealed class Scan(DateTimeOffset? countedFrom)
     {
         // The line that a read cuts: its start until its kind is known, then all of it for a usage record alone.
         private byte[] _line = new byte[AgentJournalRecordText.HeadBytes];
@@ -189,7 +203,7 @@ internal static class AgentJournalUsageReader
             }
 
             // A usage record without an operation only reports the context window or the rate limits.
-            if (update.Usage?.LastOperation is { } operation)
+            if (update.Usage?.LastOperation is { } operation && !(update.Timestamp < countedFrom))
             {
                 Found.Add(new(update.RunId?.Value, operation));
             }

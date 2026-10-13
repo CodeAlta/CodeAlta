@@ -184,7 +184,6 @@ export const messages = dictionary({
   "effort {effort}": ["esfuerzo {effort}", "effort {effort}", "Aufwand {effort}", "推論レベル {effort}", "推理强度 {effort}"],
   "initiator {initiator}": ["iniciador {initiator}", "initiateur {initiator}", "Auslöser {initiator}", "開始元 {initiator}", "发起方 {initiator}"],
   "duration {duration}": ["duración {duration}", "durée {duration}", "Dauer {duration}", "所要時間 {duration}", "耗时 {duration}"],
-  "duration {duration} ms": ["duración {duration} ms", "durée {duration} ms", "Dauer {duration} ms", "所要時間 {duration} ms", "耗时 {duration} 毫秒"],
   "cost {cost}": ["coste {cost}", "coût {cost}", "Kosten {cost}", "コスト {cost}", "费用 {cost}"],
   "Limits": ["Límites", "Limites", "Limits", "制限", "限制"],
   "Rate limits": ["Límites de uso", "Limites de débit", "Ratenlimits", "レート制限", "速率限制"],

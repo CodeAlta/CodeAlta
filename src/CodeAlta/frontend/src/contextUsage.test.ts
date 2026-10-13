@@ -58,6 +58,10 @@ test("a cost is shown with the unit the provider names, and as reported without 
   const operation = observation().lastOperation!;
   assert.equal(costText(operation), null);
   assert.equal(costText({ ...operation, cost: "0.01" }), "0.01");
+  // What the arithmetic of doubles leaves behind is not shown.
+  assert.equal(costText({ ...operation, cost: "0.021697300000000003" }), "0.021697");
+  assert.match(usageMarkdown({ provider: "claude-code", model: "claude-test", usage: null, messages: null, window: null,
+    operation: { ...operation, durationMs: "28895", cost: "0.021697300000000003" }, rateLimits: null, sessionTotal: null }), /duration 29 s · cost 0\.021697$/m);
   assert.equal(costText({ ...operation, cost: "0.0613625", costUnit: "AI credits" }), "0.0614 AI credits");
   assert.equal(costText({ ...operation, cost: "12", costUnit: "AI credits" }), "12 AI credits");
   assert.match(usageMarkdown({ provider: "copilot", model: "claude-test", usage: null, messages: null, window: null,

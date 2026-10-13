@@ -511,9 +511,9 @@ Open it with `Ctrl+G Ctrl+U` or the context indicator of the prompt bar. The pop
 
 The last operation shows the tokens of the last request to the model as a bar in which each token is counted once: the input that came from the prompt cache, the input that was written to it, the rest of the input, the output and the reasoning. The whole input is given beside the title. For a Copilot session it also gives the cost of that request in AI credits. See [Prompt caching and the cost of a request](model-providers.md#prompt-caching-and-the-cost-of-a-request).
 
-In CodeAlta Desktop, **Current session** shows the same bar for the whole session: every request since the session started, with the time the provider spent on them and what they cost. A session that used several providers has one cost per unit, such as dollars and AI credits. The totals are read when you open the popup and when you press **Refresh usage**; **Copy as Markdown** includes them. A saved session shows them as soon as you open it, before you send anything.
+In CodeAlta Desktop, **Current session** shows the same bar for the whole session: every request since the session started, with the time the provider spent on them and what they cost. A session that used several providers has one cost per unit, such as dollars and AI credits. A forked session counts from its fork: what came before belongs to the session it was forked from. The totals are read when you open the popup and when you press **Refresh usage**; **Copy as Markdown** includes them. A saved session shows them as soon as you open it, before you send anything.
 
-<figure class="alta-figure my-4" style="max-width: 44rem;">
+<figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-current-session-costs.webp" alt="Context usage popup of CodeAlta Desktop with the Current session card under the last operation: a token bar, the duration and the cost of the whole session" loading="lazy">
   <figcaption class="small text-secondary mt-2">Current session adds up the tokens, the duration and the cost of every request of the session.</figcaption>
 </figure>

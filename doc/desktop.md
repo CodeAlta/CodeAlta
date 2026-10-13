@@ -1210,7 +1210,8 @@ that cannot be parsed, or one larger than 8 MiB, fails the read: the totals are 
 the sum of a part. `SessionUsageSummaryReader` adds the operations: each request is split with
 `AgentInputTokenUsage.From`, the usage that the end of a run or a compaction repeats is not a
 request, and the cost and duration of a whole turn that a provider repeats within a run count once,
-as in the Statistics plugin.
+as in the Statistics plugin. The records a fork or a rewind copied from its source are left out, also
+as there: they are older than `AgentSessionForkOrigin.CountedFrom`.
 
 The window asks for the totals when it opens and on **Refresh usage**, once each (`createUsageReads`
 in `sessionUsage.ts`). The reads the meter makes by itself never ask for them: while the totals are

@@ -95,11 +95,14 @@ export function mergeUsageObservation(current: SessionUsageObservation | null, i
     rateLimits: limits, sessionTotal: incoming.sessionTotal ?? current.sessionTotal ?? null };
 }
 
-/** The cost of an operation with its unit when the provider names one ("0.0614 AI credits"), the reported number otherwise. */
+/**
+ * The cost of an operation with its unit when the provider names one ("0.0614 AI credits"), the number alone otherwise,
+ * without what the arithmetic of doubles leaves behind (0.021697300000000003 is shown as 0.021697).
+ */
 export function costText(operation: Pick<SessionUsageOperation, "cost" | "costUnit"> | null | undefined): string | null {
   if (!operation?.cost) return null;
-  if (!operation.costUnit) return operation.cost;
   const value = Number(operation.cost);
+  if (!operation.costUnit) return Number.isFinite(value) ? String(Number(value.toFixed(6))) : operation.cost;
   return `${Number.isFinite(value) ? String(Number(value.toFixed(4))) : operation.cost} ${operation.costUnit}`;
 }
 
@@ -199,8 +202,9 @@ export function usageMarkdown(input: {
       window?.maxOutputTokens && `max output ${groupedTokens(window.maxOutputTokens)} tokens`].filter(Boolean);
     if (envelope.length) lines.push(`- Indicative model limits: ${envelope.join("; ")}`);
     if (operation) {
+      const elapsed = operation.durationMs ? formatDuration(Number(operation.durationMs)) : "";
       const tokens = [operation.model, operation.reasoningEffort && `effort ${operation.reasoningEffort}`, operation.initiator && `initiator ${operation.initiator}`,
-        ...tokenParts(operation), operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
+        ...tokenParts(operation), elapsed && `duration ${elapsed}`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
       if (tokens.length) lines.push(`- ${operation.label ?? "Last operation"}: ${tokens.join(" · ")}`);
     }
   }

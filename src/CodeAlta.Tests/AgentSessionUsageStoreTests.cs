@@ -227,6 +227,30 @@ public sealed class AgentSessionUsageStoreTests
         Assert.AreEqual(1, stream.Reads, "The scan stops at the read after the cancellation, not at the end of the journal.");
     }
 
+    [TestMethod]
+    public async Task ReadUsageUpdates_LeavesOutWhatAForkCopiedFromItsSource()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path));
+        await CreateSessionAsync(store).ConfigureAwait(false);
+        var forkedAt = Start.AddHours(1);
+        var summary = await store.GetSessionSummaryAsync(Source).ConfigureAwait(false);
+        await store.UpsertSessionAsync(summary! with
+        {
+            ForkedFrom = new AgentSessionForkOrigin { SessionId = "source", RootSessionId = "source", ForkedAt = forkedAt, CountedFrom = forkedAt },
+        }).ConfigureAwait(false);
+        var own = new AgentOperationUsageSnapshot(InputTokens: 7, Cost: .5);
+        AgentSessionUpdateEvent At(DateTimeOffset time, AgentOperationUsageSnapshot operation)
+            => new(Provider, Source, time, new AgentRunId("run"), AgentSessionUpdateKind.UsageUpdated, null, Usage: new(LastOperation: operation));
+        // The usage of the source, copied with its turns, then the usage of the fork itself from the time it was made.
+        await AppendAsync(store, At(Start, new(InputTokens: 1000, Cost: 3)), At(forkedAt.AddTicks(-1), new(InputTokens: 2000)),
+            At(forkedAt, own), At(forkedAt.AddMinutes(5), own)).ConfigureAwait(false);
+
+        var updates = await store.ReadUsageUpdatesAsync(Source).ConfigureAwait(false);
+
+        CollectionAssert.AreEqual(new AgentSessionUsageUpdate[] { new("run", own), new("run", own) }, updates.ToArray());
+    }
+
     private static string JournalPath(string root) => new AgentRuntimePathLayout(root).GetSessionFilePath(Source, Start);
 
     private static AgentSessionUpdateEvent Usage(string? run, AgentOperationUsageSnapshot operation)
