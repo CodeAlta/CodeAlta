@@ -1,7 +1,7 @@
 // The part of the capture that runs on the audio thread. It only gathers what the microphone gives, a tenth
 // of a second at a time, and hands it to the page, which changes its rate and encodes it (pcm.ts).
-// This is a file of the build of its own, loaded from the origin of the application: the content security
-// policy of the page allows no script from a blob or from text. It imports nothing.
+// This is a file of the build of its own, which vite.config.ts copies beside the entry document as it is: the
+// content security policy of the page allows no script from a blob or from text. It imports nothing.
 class PcmCollector extends AudioWorkletProcessor {
   constructor() {
     super();

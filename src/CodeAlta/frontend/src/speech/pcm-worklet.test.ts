@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { createChunkEncoder } from "./pcm";
+import { workletFile, workletProcessor } from "./workletFile";
 
 const source = readFileSync(new URL("./pcm-worklet.js", import.meta.url), "utf8");
 
@@ -20,7 +21,9 @@ function worklet(sampleRate: number) {
 test("the worklet is one file that imports nothing: the build copies it as it is", () => {
   assert.doesNotMatch(source, /^\s*(import|export)\b/m);
   assert.doesNotMatch(source, /\b(require|importScripts)\s*\(/);
-  assert.equal(worklet(48_000).name, "codealta-pcm");
+  // The name the capture makes its node with.
+  assert.equal(worklet(48_000).name, workletProcessor);
+  assert.match(workletFile, /^[\w-]+\.js$/, "a file beside the entry document");
 });
 
 test("the worklet hands the page a tenth of a second at a time, and keeps what a block leaves over", () => {

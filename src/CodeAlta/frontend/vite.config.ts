@@ -6,6 +6,7 @@ import { blueprintPaletteVariables } from "./src/blueprintPalette";
 import { appModuleFile, appModules } from "./src/lent/appModules";
 import { importMapText, lentLibraries } from "./src/lent/libraries";
 import { splashDocument, splashMarkup, splashScript } from "./src/splashMarkup";
+import { workletFile } from "./src/speech/workletFile";
 
 // Blueprint's stylesheet reaches the bundle with its palette literals turned into palette variables, so a
 // color scheme (src/colorSchemes.ts) restyles every Blueprint component by redefining those variables.
@@ -42,6 +43,20 @@ const terminalFontLicense = (): Plugin => ({
       source: readFileSync(fileURLToPath(new URL("./src/terminal/fonts/LICENSE.txt", import.meta.url)), "utf8") });
   },
 });
+
+// The audio worklet of speech to prompt (src/speech/pcm-worklet.js) is a file of the build of its own, beside the entry
+// document: the page's content security policy allows a worklet from the origin only, and the capture asks for it by its name.
+const speechWorklet = (): Plugin => {
+  const source = () => readFileSync(fileURLToPath(new URL("./src/speech/pcm-worklet.js", import.meta.url)), "utf8");
+  return {
+    name: "codealta:speech-worklet",
+    generateBundle() { this.emitFile({ type: "asset", fileName: workletFile, source: source() }); },
+    // The development server has no bundle: it serves the same file at the same address.
+    configureServer(server) {
+      server.middlewares.use(`/${workletFile}`, (_request, response) => { response.setHeader("Content-Type", "text/javascript"); response.end(source()); });
+    },
+  };
+};
 
 // The libraries lent to plugins (src/lent) are entries of the build of their own, at fixed addresses (lib/<name>.js), that share
 // their code with the application's: a module of a plugin that imports them gets the instances the application runs. Their
@@ -81,7 +96,7 @@ export default defineConfig(({ mode }) => ({
     "import.meta.env.VITE_DEMO_MODE": JSON.stringify(mode === "demo" ? "true" : "false"),
   },
   base: "./",
-  plugins: [blueprintPalette(), react(), startupScreen(), terminalFontLicense(), lentModules()],
+  plugins: [blueprintPalette(), react(), startupScreen(), terminalFontLicense(), speechWorklet(), lentModules()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
   build: { sourcemap: false, assetsInlineLimit: 0 },
 }));

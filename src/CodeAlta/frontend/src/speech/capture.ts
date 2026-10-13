@@ -1,4 +1,5 @@
 import { createChunkEncoder, type AudioChunk } from "./pcm";
+import { workletFile, workletProcessor } from "./workletFile";
 
 // The microphone of the page. A dictation is given this through `StartCapture`, so a test gives it chunks of
 // its own: a headless browser has no microphone.
@@ -27,9 +28,9 @@ export type StartCapture = (handlers: CaptureHandlers) => Capture;
 export const microphoneAvailable = () => typeof navigator !== "undefined" && typeof navigator.mediaDevices?.getUserMedia === "function"
   && typeof AudioWorkletNode === "function";
 
-// The file of the worklet, as the build emits it beside the application. Asked for when a capture starts:
-// the modules of the page are also loaded where there is no address to resolve it against (the tests).
-const workletAddress = () => new URL("./pcm-worklet.js", import.meta.url).href;
+// The file of the worklet, which the build emits beside the entry document of the application: a script of
+// the origin, as the content security policy of the page requires (no blob, no inline text).
+const workletAddress = () => new URL(workletFile, document.baseURI).href;
 
 /** The microphone of the system, through `getUserMedia` and an audio worklet. */
 export const startMicrophone: StartCapture = handlers => {
@@ -74,7 +75,7 @@ export const startMicrophone: StartCapture = handlers => {
       if (stopped) { release(); return; }
       const encoder = createChunkEncoder(context.sampleRate);
       source = context.createMediaStreamSource(stream);
-      node = new AudioWorkletNode(context, "codealta-pcm", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+      node = new AudioWorkletNode(context, workletProcessor, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       node.port.onmessage = (event: MessageEvent<Float32Array>) => {
         if (stopped) return;
         for (const chunk of encoder.push(event.data)) handlers.onChunk(chunk);
