@@ -65,6 +65,25 @@ public sealed class CodeAltaConfigDocument
     /// <summary>Gets or sets the choices for sessions. Read from the user's file only.</summary>
     [JsonPropertyName("sessions")]
     public CodeAltaSessionSettingsDocument? Sessions { get; set; }
+
+    /// <summary>Gets or sets the choices for speech to prompt. Read from the user's file only.</summary>
+    [JsonPropertyName("speech")]
+    public CodeAltaSpeechSettingsDocument? Speech { get; set; }
+}
+
+/// <summary>Represents the choices for speech to prompt.</summary>
+public sealed class CodeAltaSpeechSettingsDocument
+{
+    /// <summary>Gets or sets whether the microphone of the prompt is offered; true when absent.</summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the id of a preset model or the address of a Hugging Face repository
+    /// (<see cref="CodeAlta.Catalog.Speech.SpeechSettings.DefaultModel"/> when absent).
+    /// </summary>
+    [JsonPropertyName("model")]
+    public string? Model { get; set; }
 }
 
 /// <summary>Represents the choices for sessions.</summary>

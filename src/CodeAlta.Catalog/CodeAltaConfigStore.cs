@@ -115,6 +115,13 @@ public sealed class CodeAltaConfigStore
     public CodeAltaConfigDocument LoadGlobal()
         => LoadDocument(_options.ConfigPath);
 
+    /// <summary>Reads the global choices for speech to prompt. A missing file gives the defaults.</summary>
+    /// <exception cref="InvalidDataException">The configuration or the model is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public Speech.SpeechSettings LoadGlobalSpeechSettings()
+        => Speech.SpeechSettings.Read(LoadGlobal().Speech);
+
     /// <summary>Reads global cleanup policy. Only an actually missing file uses the enabled defaults.</summary>
     /// <remarks>Unlike a File.Exists probe, an inaccessible file must not look like permission to delete.</remarks>
     /// <exception cref="InvalidDataException">The configuration or duration is invalid.</exception>
@@ -676,6 +683,20 @@ public sealed class CodeAltaConfigStore
         SaveDocument(_options.ConfigPath, document);
     }
 
+    /// <summary>Saves the global choices for speech to prompt. Defaults are not written.</summary>
+    /// <exception cref="ArgumentNullException">The settings are null.</exception>
+    /// <exception cref="InvalidDataException">The model or the existing configuration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public void SaveGlobalSpeechSettings(Speech.SpeechSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (Speech.SpeechSettings.GetModelError(settings.Model) is { } error) throw new InvalidDataException(error);
+        var document = LoadGlobal();
+        document.Speech = new CodeAltaSpeechSettingsDocument { Enabled = settings.Enabled, Model = settings.Model };
+        SaveDocument(_options.ConfigPath, document);
+    }
+
     /// <summary>
     /// Loads globally configured provider definitions.
     /// </summary>
@@ -889,6 +910,7 @@ public sealed class CodeAltaConfigStore
 
         NormalizeDocument(document);
         _ = Storage.StorageSettings.Read(document.Storage);
+        _ = Speech.SpeechSettings.Read(document.Speech);
         var definitions = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
             .Values
             .Select(CloneProviderDefinition)
@@ -1244,6 +1266,14 @@ public sealed class CodeAltaConfigStore
                 if (retention is { Enabled: null, Amount: null, Unit: null }) storage.SessionRetention = null;
             }
             if (storage is { ClearScratchpadOnStartup: null, SessionRetention: null }) document.Storage = null;
+        }
+
+        if (document.Speech is { } speech)
+        {
+            // Only the defaults are omitted: an invalid model survives, so that validation reports it.
+            if (speech.Enabled == true) speech.Enabled = null;
+            if (speech.Model == Speech.SpeechSettings.DefaultModel) speech.Model = null;
+            if (speech is { Enabled: null, Model: null }) document.Speech = null;
         }
 
         if (document.Skills is not null)
