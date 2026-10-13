@@ -32,6 +32,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
     private readonly OpenAICodexSubscriptionOptions _options;
     private readonly OpenAICodexSubscriptionAuthManager _authManager;
     private readonly string _sessionId;
+    private readonly string _cacheKey;
     private readonly string _userAgentApplicationId;
     private readonly TimeSpan _receiveIdleTimeout;
     private readonly SemaphoreSlim _streamSemaphore = new(initialCount: 1, maxCount: 1);
@@ -46,7 +47,8 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         OpenAICodexSubscriptionAuthManager authManager,
         string sessionId,
         string userAgentApplicationId,
-        TimeSpan receiveIdleTimeout)
+        TimeSpan receiveIdleTimeout,
+        string? cacheKey = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(authManager);
@@ -57,6 +59,7 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         _options = options;
         _authManager = authManager;
         _sessionId = sessionId.Trim();
+        _cacheKey = string.IsNullOrWhiteSpace(cacheKey) ? _sessionId : cacheKey.Trim();
         _userAgentApplicationId = userAgentApplicationId.Trim();
         _receiveIdleTimeout = receiveIdleTimeout;
     }
@@ -306,7 +309,8 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
         options.SetRequestHeader("Authorization", $"Bearer {accessToken}");
         options.SetRequestHeader("OpenAI-Beta", ResponsesWebSocketsBetaHeader);
         options.SetRequestHeader("originator", "codealta");
-        options.SetRequestHeader("session-id", _sessionId);
+        // As over HTTP: the affinity of the prompt cache comes from this header, the identity from the others.
+        options.SetRequestHeader("session-id", _cacheKey);
         options.SetRequestHeader("thread-id", _sessionId);
         options.SetRequestHeader("x-client-request-id", _sessionId);
         options.SetRequestHeader("User-Agent", _userAgentApplicationId);

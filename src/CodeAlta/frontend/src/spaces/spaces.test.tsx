@@ -13,7 +13,7 @@ const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem>
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `C:\\code\\${id}`, archived });
 const session = (id: string, scopeKind: string | null, projectId: string | null, workspacePath: string | null): WorkspaceSession => ({ id, title: id, workspacePath, providerKey: "codex",
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
-  messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false });
+  messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0 });
 const doing = (sessionId: string, projectId: string | null, changes: Partial<SpaceSessionActivity> = {}): SpaceSessionActivity =>
   ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ...changes });
 

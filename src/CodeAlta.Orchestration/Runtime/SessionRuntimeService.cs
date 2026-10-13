@@ -744,7 +744,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             session.MessageCount = messageCount;
         }
 
-        var parentSessionId = ResolveParentSessionId(localState.ParentSessionId, localState.CreatedBy?.SourceSessionId);
+        var parentSessionId = ResolveParentSessionId(localState.ParentSessionId, localState.CreatedBy?.SourceSessionId, session.ForkedFrom is not null);
         if (!string.IsNullOrWhiteSpace(parentSessionId))
         {
             session.ParentSessionId = parentSessionId;
@@ -809,6 +809,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(session.SessionId))
         {
             deleted = await _agentSessionCatalog.DeleteSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+            if (deleted) NotifySessionDeleted(session.SessionId);
         }
 
         session.Status = SessionViewStatus.Archived;
@@ -1362,7 +1363,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
         var providerProviderId = new ModelProviderId(options.ProviderId.Value);
         var developerInstructions = instructions.DeveloperInstructions;
-        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), options.AdditionalDeveloperInstructions);
+        // A session moved to another project is told so once, by the first attachment after the move.
+        var movedNotice = TakeMovedNotice(session.SessionId);
+        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), movedNotice),
+            options.AdditionalDeveloperInstructions);
         var tools = options.Tools;
 
         AgentSessionHandleId sessionHandleId;
@@ -1537,6 +1541,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             attachment)
         {
             WorktreeDirectory = worktree,
+            ForkedFrom = session.ForkedFrom,
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
         };
@@ -3612,6 +3617,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProjectRef = entry.ProjectId,
                 ParentSessionId = entry.ParentSessionId,
                 CreatedBy = entry.CreatedBy,
+                ForkedFrom = entry.ForkedFrom,
                 WorkingDirectory = entry.WorkingDirectory,
                 WorktreeDirectory = entry.WorktreeDirectory,
                 Title = sessionId,
@@ -3717,6 +3723,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     Summary = session.LatestSummary,
                     ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
                     CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId ?? session.ParentSessionId),
+                    ForkedFrom = session.ForkedFrom,
+                    RewindCount = session.RewindCount,
                     CreatedAt = session.CreatedAt,
                     UpdatedAt = DateTimeOffset.UtcNow,
                 },
@@ -3927,6 +3935,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProjectRef = session.ProjectRef,
             ParentSessionId = session.ParentSessionId,
             CreatedBy = session.CreatedBy,
+            ForkedFrom = session.ForkedFrom,
+            RewindCount = session.RewindCount,
             WorkingDirectory = session.WorkingDirectory,
             WorktreeDirectory = session.WorktreeDirectory,
             Title = session.Title,
@@ -3962,7 +3972,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         var normalizedCwd = NormalizePath(cwd);
-        var parentSessionId = ResolveParentSessionId(session.ParentSessionId, session.CreatedBySessionId);
+        var parentSessionId = ResolveParentSessionId(session.ParentSessionId, session.CreatedBySessionId, session.ForkedFrom is not null);
         if (string.Equals(normalizedCwd, NormalizePath(_catalogOptions.GlobalRoot), StringComparison.OrdinalIgnoreCase))
         {
             return new SessionViewDescriptor
@@ -3975,6 +3985,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 Title = BuildSessionTitle(session, UnnamedGlobalSessionTitle),
                 Status = SessionViewStatus.Active,
                 ParentSessionId = parentSessionId,
+                ForkedFrom = session.ForkedFrom,
+                RewindCount = session.RewindCount,
                 CreatedAt = session.CreatedAt,
                 UpdatedAt = session.UpdatedAt,
                 LastActiveAt = session.UpdatedAt,
@@ -4006,6 +4018,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Title = BuildSessionTitle(session, project.DisplayName),
             Status = SessionViewStatus.Active,
             ParentSessionId = parentSessionId,
+            ForkedFrom = session.ForkedFrom,
+            RewindCount = session.RewindCount,
             CreatedAt = session.CreatedAt,
             UpdatedAt = session.UpdatedAt,
             LastActiveAt = session.UpdatedAt,
@@ -4193,8 +4207,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static string? AgentSource(AltaActorProvenance? submittedBy)
         => string.Equals(submittedBy?.Kind, "agent", StringComparison.OrdinalIgnoreCase) ? NormalizeOptionalText(submittedBy!.SourceSessionId) : null;
 
-    private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId)
-        => NormalizeOptionalText(parentSessionId) ?? NormalizeOptionalText(createdBySessionId);
+    // A session an agent created without naming a parent is the sub-agent of that agent. Not a fork, nor the session
+    // that keeps what a rewind removed: whoever made it, it continues another session and reports to none, unless it
+    // was given a parent. Listed as a child of its creator, it would get the instructions of a sub-agent.
+    private static string? ResolveParentSessionId(string? parentSessionId, string? createdBySessionId, bool forked = false)
+        => NormalizeOptionalText(parentSessionId) ?? (forked ? null : NormalizeOptionalText(createdBySessionId));
 
     private static string NormalizePath(string path)
     {
@@ -4349,6 +4366,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         /// <summary>The git worktree this attachment runs in; null when it runs in <see cref="WorkingDirectory"/>.</summary>
         public string? WorktreeDirectory { get; init; }
 
+        /// <summary>Where the session comes from when it starts with the turns of another one.</summary>
+        public CodeAlta.Agent.Runtime.AgentSessionForkOrigin? ForkedFrom { get; init; }
+
         /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
         public long ProviderRegistrationVersion { get; init; }
 
@@ -4438,6 +4458,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProjectRef = ProjectId,
                 ParentSessionId = ParentSessionId,
                 CreatedBy = CreatedBy,
+                ForkedFrom = ForkedFrom,
                 WorkingDirectory = WorkingDirectory,
                 WorktreeDirectory = WorktreeDirectory,
                 Title = Title,

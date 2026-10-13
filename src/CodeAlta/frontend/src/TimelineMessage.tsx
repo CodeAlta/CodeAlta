@@ -16,6 +16,10 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { formatSize, toolState } from "./toolCall";
 import { useToolOutput, type ToolOutputs } from "./toolOutput";
 import { modalDialogOpen } from "./modalDialogs";
+import { SessionTabMenu } from "./SessionTabMenu";
+import { canBranchFrom, type BranchMode } from "./sessionBranch/branchPoints";
+import { canBookmark } from "./bookmarks/bookmarks";
+import { useRowBookmark } from "./bookmarks/timelineBookmarks";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -40,7 +44,9 @@ type TimelineMessageProps = { item: TimelineItem; canInspect?: () => boolean; to
   /** The key of the row, and what opens the window of a tool call: given the key and the button that asked. */
   rowKey?: string; onOpenTool?: (rowKey: string, origin: HTMLButtonElement) => void;
   /** The live output of the tool calls: the tile of a running call says what it writes. */
-  toolOutputs?: ToolOutputs };
+  toolOutputs?: ToolOutputs;
+  /** Opens the window of a fork or a rewind on this message, given its journal offset: only the prompt of a turn is given it. */
+  onBranch?: (promptOffset: string, mode: BranchMode) => void };
 
 // A long timeline is rendered again on every page of history and every live update: a row whose item,
 // source range and image reader are the same has nothing to redo.
@@ -52,13 +58,14 @@ function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps)
   return previous.item === next.item && previous.toolTile === next.toolTile && previous.canInspect === next.canInspect
     && previous.onOpenSource === next.onOpenSource && previous.imageSource?.key === next.imageSource?.key
     && previous.rowKey === next.rowKey && previous.onOpenTool === next.onOpenTool && previous.toolOutputs === next.toolOutputs
+    && previous.onBranch === next.onBranch
     && (before === after || !!before && !!after && before.start === after.start && before.end === after.end
       && before.revision.sessionId === after.revision.sessionId && before.revision.length === after.revision.length
       && before.revision.lastWriteUtcTicks === after.revision.lastWriteUtcTicks);
 }
 
 export const TimelineMessage = memo(function TimelineMessage({ item, canInspect, historySource, onOpenSource, toolTile = false, imageSource,
-  rowKey, onOpenTool, toolOutputs }: TimelineMessageProps) {
+  rowKey, onOpenTool, toolOutputs, onBranch }: TimelineMessageProps) {
   const { t, locale } = useShellLanguage();
   const job = item.jobResult;
   toolTile ||= !!job;
@@ -76,6 +83,15 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const live = useToolOutput(toolOutputs, item.toolCall?.activityId, toolTile && (state === "running" || state === "pending"));
   const timestamp = timelineTime(item.timestamp, locale);
   const toolTrigger = useRef<HTMLButtonElement>(null);
+  // A prompt the user wrote, kept in the journal, is where a session can be forked from or rewound to. Both
+  // open a window that says what they do: neither acts at once.
+  const branch = onBranch && canBranchFrom(item) ? (mode: BranchMode) => { if (!modalDialogOpen() && (canInspect?.() ?? true)) onBranch(item.key, mode); } : null;
+  // A message the journal holds whole can be bookmarked where the timeline keeps bookmarks: the row follows its own mark.
+  const bookmarkable = canBookmark(item);
+  const { marks, bookmarkId } = useRowBookmark(bookmarkable ? item.key : null);
+  const bookmark = marks && bookmarkable ? () => { if (!modalDialogOpen() && (canInspect?.() ?? true)) marks.toggle(item.key); } : null;
+  const article = useRef<HTMLElement>(null);
+  const [branchMenu, setBranchMenu] = useState<{ x: number; y: number } | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const [details, setDetails] = useState<{ item: TimelineItem; origin: HTMLButtonElement; current?: () => boolean } | null>(null);
   const latestItem = useRef(item); latestItem.current = item;
@@ -171,7 +187,16 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     if (callWindow) onOpenTool!(rowKey!, origin);
     else setDetails({ item, origin, current: canInspect });
   }
-  return <article className={`message timeline-message message-${job ? "job" : item.category}${compact ? " timeline-compact" : ""}`}
+  return <article ref={article} className={`message timeline-message message-${job ? "job" : item.category}${compact ? " timeline-compact" : ""}`}
+    data-prompt-offset={item.category === "user" && /^\d+$/u.test(item.key) ? item.key : undefined}
+    // The offset of a message the journal holds, by which the timeline goes to it; and whether it is bookmarked.
+    data-row-offset={bookmarkable ? item.key : undefined} data-bookmarked={bookmarkId ? "true" : undefined}
+    // The menu of the prompt, unless text is selected or the press is on a link or a field: those keep the menu of the system.
+    onContextMenu={branch ? event => {
+      if (event.defaultPrevented || window.getSelection()?.toString() || (event.target as HTMLElement).closest("a, input, textarea, dialog, .session-tab-popup")) return;
+      event.preventDefault();
+      setBranchMenu({ x: event.clientX, y: event.clientY });
+    } : undefined}
     onClick={event => {
       if (clickableTile && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
@@ -198,8 +223,15 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           {hasDetails && !callWindow && !job && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
             onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
             onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><AppIcon name="info" size={15} /></button>}
+          {branch && <button type="button" className="branch-from-message" aria-label={t("Fork from here")} title={t("Fork from here")} aria-haspopup="dialog"
+            onClick={() => branch("fork")}><AppIcon name="branch" size={15} /></button>}
+          {branch && <button type="button" className="branch-from-message" aria-label={t("Rewind to here")} title={t("Rewind to here")} aria-haspopup="dialog"
+            onClick={() => branch("rewind")}><AppIcon name="rewind" size={15} /></button>}
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
             aria-label={copyLabel} title={copyLabel}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>}
+          {/* The last of the actions: it stays drawn on a bookmarked message, beside the time. */}
+          {bookmark && <button type="button" className="bookmark-message" aria-pressed={!!bookmarkId} aria-label={t(bookmarkId ? "Remove bookmark" : "Bookmark this message")}
+            title={t(bookmarkId ? "Remove bookmark" : "Bookmark this message")} onClick={bookmark}><AppIcon name="bookmark" size={15} /></button>}
           <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>
         </span>
       </div>
@@ -235,6 +267,10 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}
+      {branch && branchMenu && article.current && <SessionTabMenu anchor={article.current} at={branchMenu} container={document.body}
+        title={t("Actions for this prompt")} current={() => canInspect?.() ?? true} onClose={() => setBranchMenu(null)}
+        items={[{ key: "fork", label: t("Fork from here"), icon: "branch", onSelect: () => branch("fork") },
+          { key: "rewind", label: t("Rewind to here"), icon: "rewind", onSelect: () => branch("rewind") }]} />}
     </div>
   </article>;
 }, sameMessage);

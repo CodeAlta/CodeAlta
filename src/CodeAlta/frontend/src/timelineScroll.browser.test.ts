@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
 
 const edge = browserExecutable;
 
@@ -89,10 +89,7 @@ test("mounted timeline follows the final page across later layout growth", { ski
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 999, method: "Browser.close" }));
     socket?.close();
-    if (browser?.pid) {
-      const killer = spawn("taskkill", ["/F", "/T", "/PID", String(browser.pid)], { stdio: "ignore", windowsHide: true });
-      await new Promise(resolve => killer.once("exit", resolve));
-    }
+    await endBrowser(browser);
     await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });

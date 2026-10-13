@@ -1,11 +1,53 @@
 import { existsSync } from "node:fs";
-import type { ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
+/** The variable that names the browser to drive, in the place of the Edge the system has. */
+export const browserVariable = "CODEALTA_TEST_BROWSER";
+
+/**
+ * Where Edge is looked for, in order. A path the variable gives is taken as it is: a browser that was asked for
+ * and is not there fails the tests at its start, it does not skip them.
+ */
+export function findBrowser(env: NodeJS.ProcessEnv, home: string, exists: (path: string) => boolean): string | undefined {
+  const named = env[browserVariable]?.trim();
+  if (named) return named;
+  return [
+    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    join(home, "Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+    "/usr/bin/microsoft-edge",
+    "/usr/bin/microsoft-edge-stable",
+    "/opt/microsoft/msedge/msedge",
+  ].find(exists);
+}
+
 /** The browser the `*.browser.test.ts` files drive, or undefined when there is none and they skip. */
-export const browserExecutable: string | undefined =
-  ["C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", "C:/Program Files/Microsoft/Edge/Application/msedge.exe"].find(existsSync);
+export const browserExecutable: string | undefined = findBrowser(process.env, homedir(), existsSync);
+
+/**
+ * Ends the browser a test started, and returns once it is gone. Edge's launcher can exit while the browser it
+ * started goes on, so a test asks the browser itself to close (`Browser.close`) before it calls this; what is
+ * left is ended here: the whole process tree on Windows, where a kill of the launcher leaves its children, and
+ * the process elsewhere.
+ */
+export async function endBrowser(browser: ChildProcess | undefined, timeoutMs = 5000): Promise<void> {
+  if (!browser?.pid) return;
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/F", "/T", "/PID", String(browser.pid)], { stdio: "ignore", windowsHide: true });
+    await new Promise(resolve => { killer.once("exit", resolve); killer.once("error", resolve); });
+    return;
+  }
+  if (browser.exitCode !== null || browser.signalCode !== null) return;
+  let timer: NodeJS.Timeout | undefined;
+  const gone = new Promise<void>(resolve => browser.once("exit", () => resolve()));
+  browser.kill("SIGKILL");
+  await Promise.race([gone, new Promise(resolve => { timer = setTimeout(resolve, timeoutMs); })]);
+  clearTimeout(timer);
+}
 
 /**
  * What every one of those files starts the browser with, before its own options, its `--user-data-dir` and its

@@ -16,7 +16,8 @@ internal sealed class CodexSubscriptionRequestContext
         string requestKind,
         DateTimeOffset startedAt,
         string? installationId,
-        CodexTurnState turnState)
+        CodexTurnState turnState,
+        string? cacheKey = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId.Value);
@@ -24,6 +25,7 @@ internal sealed class CodexSubscriptionRequestContext
         ArgumentNullException.ThrowIfNull(turnState);
 
         SessionId = sessionId.Trim();
+        CacheKey = string.IsNullOrWhiteSpace(cacheKey) ? SessionId : cacheKey.Trim();
         RunId = runId;
         RequestKind = requestKind.Trim();
         StartedAt = startedAt;
@@ -32,7 +34,9 @@ internal sealed class CodexSubscriptionRequestContext
         ClientMetadata = CreateClientMetadata();
         CompatibilityHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["session-id"] = SessionId,
+            // The service takes the affinity of its prompt cache from this header: a session that was forked names the
+            // session it comes from here, and itself in the thread and in the metadata of the turn.
+            ["session-id"] = CacheKey,
             ["thread-id"] = SessionId,
             ["x-client-request-id"] = SessionId,
             ["x-codex-turn-metadata"] = ClientMetadata["x-codex-turn-metadata"],
@@ -40,6 +44,8 @@ internal sealed class CodexSubscriptionRequestContext
     }
 
     public string SessionId { get; }
+
+    public string CacheKey { get; }
 
     public AgentRunId RunId { get; }
 

@@ -38,8 +38,12 @@ export type ProjectRowAuthority = {
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
   row: HTMLLIElement; details: boolean; opening: boolean };
 
-export function ProjectRowActions({ project, authority, favorite, children }: {
+/** How the row of a project shows that a session dragged over it would be dropped there. */
+export type ProjectRowDrop = Readonly<{ "data-over"?: string }>;
+
+export function ProjectRowActions({ project, authority, favorite, drop, children }: {
   project: WorkspaceProject; authority?: ProjectRowAuthority;
+  drop?: ProjectRowDrop;
   /** Whether the project is a favorite, and how that is changed. */
   favorite?: Readonly<{ value: boolean; set: (value: boolean) => void }>;
   children: ReactNode;
@@ -150,7 +154,7 @@ export function ProjectRowActions({ project, authority, favorite, children }: {
   const pluginEntries = usePluginMenuEntries("ProjectMenu", visible && !visible.details ? { projectId: visible.project.id, sessionId: null } : null);
   // Beside the actions of the project, what the plugins offer for it: a few lines, then the page of the canvases.
   const canvases = visible && authority?.canvases && !visible.project.archived ? authority.canvases.list() : null;
-  return <li ref={row} className="project-action-row" onContextMenu={event => {
+  return <li ref={row} className="project-action-row" {...drop} onContextMenu={event => {
     if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"], [role="menu"], dialog')) return;
     event.preventDefault(); open();
   }} onKeyDown={event => {

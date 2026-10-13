@@ -5,13 +5,13 @@ import type { MessageKey } from "./localization";
  * keyboard dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
  */
 export type CommandId =
-  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "newTerminal" | "automations" | "workItems" | "issues" | "canvases" | "worktrees" | "documentation" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
+  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "newTerminal" | "automations" | "workItems" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
-  | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest"
-  | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact"
+  | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
+  | "expandPrompt" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact" | "fork" | "rewind"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
-  | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace";
+  | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -47,6 +47,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "canvases", name: "canvases", label: "Canvases", description: "Open the canvases that plugins provide: boards, checklists, dashboards.", category: "General", search: "plugin tabs board checklist dashboard canvas" },
   { id: "worktrees", name: "worktree", label: "Worktrees", description: "See the worktrees of the project, and remove the ones that are no longer needed.", category: "General", search: "worktrees git checkout checkouts branch remove delete clean cleanup disk" },
   { id: "documentation", name: "documentation", label: "Documentation", description: "Open the user guide of CodeAlta.", category: "General", search: "docs doc guide help manual user guide readme how to" },
+  { id: "bookmarks", name: "bookmarks", label: "Bookmarks", description: "Open the bookmarks of every project.", category: "General", keys: ["Ctrl+G Ctrl+F"], search: "bookmark saved marked favorites starred pinned keep find again" },
   { id: "spaces", name: "spaces", label: "Spaces", description: "Create the spaces and choose the projects of each.", category: "General", search: "space group projects organize workspaces" },
   { id: "newSpace", name: "new_space", label: "New Space", description: "Create a space: a group of projects shown together.", category: "General", search: "space create group projects workspace" },
   { id: "newSession", name: "new_session", label: "New Session", description: "Start a new session in the selected project.", category: "General", search: "create session draft" },
@@ -76,6 +77,11 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "abort", name: "abort", label: "Abort", description: "Stop the running turn.", category: "Session", keys: ["F8"], search: "stop cancel" },
   { id: "clearQueue", name: "clear_queue", label: "Clear Queue", description: "Remove every queued prompt.", category: "Session", keys: ["F10"] },
   { id: "compact", name: "compact", label: "Compact", description: "Compact the conversation of the idle session.", category: "Session", keys: ["Ctrl+F11"] },
+  { id: "fork", name: "fork", label: "Fork Session", description: "Continue from a point of the session in a new session.", category: "Session", search: "branch duplicate copy clone" },
+  { id: "rewind", name: "rewind", label: "Rewind Session", description: "Take the session back to an earlier turn.", category: "Session", search: "undo roll back revert" },
+  { id: "bookmarkSession", name: "bookmark", label: "Bookmark Session", description: "Bookmark or remove the bookmark of this session.", category: "Session", search: "bookmark mark save favorite star pin keep" },
+  { id: "moveSession", name: "move_to_project", label: "Move to Project", description: "Move the selected session to another project.", category: "Session",
+    search: "move session project worktree attach transfer teleport" },
   { id: "closeTab", name: "close_tab", label: "Close Tab", description: "Close the current tab.", category: "Session", keys: ["Ctrl+W", "Ctrl+Shift+W"], search: "close" },
   { id: "reopenTab", name: "reopen_tab", label: "Reopen Tab", description: "Reopen the last closed tab.", category: "Session", keys: ["Ctrl+Shift+T"] },
   { id: "previousTab", name: "tab_left", label: "Tab Left", description: "Switch to the previous tab.", category: "Session", keys: ["Ctrl+Alt+Left", "Ctrl+PageUp"] },
@@ -88,6 +94,8 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "messageNext", name: "msg_next", label: "Next Message", description: "Scroll to the next message.", category: "Navigation", keys: ["F4"] },
   { id: "messageFirst", name: "msg_first", label: "First Message", description: "Scroll to the first message.", category: "Navigation", keys: ["Ctrl+F3"] },
   { id: "messageLatest", name: "msg_last", label: "Last Message", description: "Scroll to the latest message.", category: "Navigation", keys: ["Ctrl+F4"] },
+  { id: "bookmarkPrevious", name: "bookmark_prev", label: "Previous Bookmark", description: "Go to the previous bookmarked message of this session.", category: "Navigation", keys: ["Shift+F3"], search: "bookmark previous up" },
+  { id: "bookmarkNext", name: "bookmark_next", label: "Next Bookmark", description: "Go to the next bookmarked message of this session.", category: "Navigation", keys: ["Shift+F4"], search: "bookmark next down" },
   { id: "toggleNavigator", name: "toggle_navigator", label: "Toggle Navigator", description: "Collapse or expand the project explorer.", category: "Navigation", keys: ["Ctrl+G Ctrl+G"] },
   { id: "previousSession", name: "session_prev", label: "Previous Session", description: "Select the previous session of the project.", category: "Navigation", keys: ["Alt+Up"], outsideText: true },
   { id: "nextSession", name: "session_next", label: "Next Session", description: "Select the next session of the project.", category: "Navigation", keys: ["Alt+Down"], outsideText: true },

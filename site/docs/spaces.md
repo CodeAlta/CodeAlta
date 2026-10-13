@@ -50,7 +50,7 @@ Choose **New space…** in the space switch, or run `/new_space`.
 
 A space created from the title bar is shown at once.
 
-An empty space says **No project in this space yet.** Its **Add projects…** button opens **Settings > Spaces**.
+An empty space says **No project in this space yet.** Its **Add projects…** button opens the folder picker, just like `+` in the Projects sidebar. To manage spaces, use **Organize spaces…** in the space switch.
 
 ### Add a project folder to a space
 

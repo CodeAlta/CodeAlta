@@ -742,8 +742,12 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .session-title { flex: 1; font-weight: 400; }
 .ide-shell .session-meta { flex-shrink: 0; font-size: var(--bp-typography-size-body-small); }
 .ide-shell .session-meta > span:first-child { display: none; }
-.ide-shell .session-actions-trigger { width: 22px; height: 22px; flex-basis: 22px; opacity: 0; }
-.ide-shell .session-row:hover > .session-actions-trigger, .ide-shell .session-row:focus-within > .session-actions-trigger { opacity: 1; }
+/* The padding of a button of the list would leave the three dots a few pixels: the button has none and centers them. */
+.ide-shell .session-actions-trigger { width: 24px; height: 24px; flex-basis: 24px; padding: 0; justify-content: center; border-color: transparent; background: transparent; opacity: 0; }
+.ide-shell .session-actions-trigger > svg { flex: none; }
+.ide-shell .session-actions-trigger:hover:not(:disabled), .ide-shell .session-actions-trigger[aria-expanded="true"] { border-color: var(--line-strong); background: var(--panel-3); color: var(--text); }
+.ide-shell .session-row:hover > .session-actions-trigger, .ide-shell .session-row:focus-within > .session-actions-trigger,
+.ide-shell .session-row > .session-actions-trigger[aria-expanded="true"] { opacity: 1; }
 .ide-shell .session-tooltip { display: none; }
 .ide-shell .notes-pane { flex-shrink: 0; min-height: 80px; border-top: 1px solid var(--line); margin-top: auto; }
 .ide-shell .composer-toolbar { flex-wrap: wrap; gap: 4px; }
@@ -775,13 +779,15 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .message-error { --card-color: var(--red); }
 .ide-shell .message-status { --card-color: var(--green); }
 .ide-shell .message-plugin { --card-color: var(--bp-palette-gold-4); }
-.ide-shell .message-heading { min-height: 20px; gap: 8px; margin-bottom: 2px; font-size: 12px; }
+/* One line: in a narrow pane the time is cut short (its title has it whole) instead of going under the title,
+   where the Notes chip is. */
+.ide-shell .message-heading { min-height: 20px; flex-wrap: nowrap; gap: 8px; margin-bottom: 2px; font-size: 12px; }
 .ide-shell .message-heading strong { color: var(--card-color, var(--text)); }
 .ide-shell .message-heading > span:first-child { display: inline-flex; flex-shrink: 0; gap: 6px; max-width: 45%; overflow: hidden; white-space: nowrap; }
 .ide-shell .message-heading small { font-size: var(--bp-typography-size-body-small); }
-.ide-shell .message-actions { margin-left: auto; flex-shrink: 0; }
+.ide-shell .message-actions { margin-left: auto; }
 .ide-shell .message-actions time { font-size: var(--bp-typography-size-body-small); color: var(--muted); }
-.ide-shell .message-actions > button { opacity: 0; pointer-events: none; padding: 2px; width: 20px; height: 20px; border-radius: 4px; border: 0; background: var(--panel-2); color: var(--muted); }
+.ide-shell .message-actions > button { flex-shrink: 0; opacity: 0; pointer-events: none; padding: 2px; width: 20px; height: 20px; border-radius: 4px; border: 0; background: var(--panel-2); color: var(--muted); }
 .ide-shell .timeline-message:hover .message-actions > button, .ide-shell .timeline-message:focus-within .message-actions > button { opacity: 1; pointer-events: auto; }
 .ide-shell .timeline-compact { padding-block: 3px; }
 .timeline-single-row { display: contents; }
@@ -1003,6 +1009,17 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-selection-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .composer-selection-form .provider-chooser { display: flex; }
 .composer-selection-form .current-provider { flex: 1 1 auto; max-width: none; }
+/* The model of the next Send: a button as wide as its field, and a searchable list that shows the chosen number of models. */
+.composer-model-target { min-width: 0; }
+.composer-model-select .bp6-button-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-model-picker { display: grid; gap: 6px; padding: 8px; }
+.composer-model-picker .bp6-menu { min-width: 0; max-height: calc(var(--model-picker-rows, 10) * 30px); overflow-y: auto; padding: 0; }
+.composer-model-picker .bp6-menu-item > .bp6-text-overflow-ellipsis { flex: 1 1 auto; }
+.composer-model-picker .bp6-menu-item-label { max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.composer-model-picker p { margin: 4px 2px; color: var(--muted); }
+.model-picker-settings { flex: none; margin-bottom: 12px; }
+.model-picker-settings .settings-field { border-bottom: 1px solid var(--line); }
+.model-picker-rows .bp6-input { width: 58px; text-align: right; }
 .composer-reasoning-slider { padding: 2px 16px 0; }
 .composer-reasoning-slider .bp6-slider { min-width: 0; height: 36px; }
 .composer-reasoning-slider .bp6-slider-label { font-size: 11px; white-space: nowrap; }
@@ -1505,6 +1522,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .open-project-dialog .project-import { display: grid; justify-items: stretch; gap: 6px; margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); overflow: visible; }
 .open-project-dialog .project-import p { margin: 0; font-size: 12px; }
 .project-import-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.open-project-dialog .project-import-confirm { padding: 10px 14px; }
 .project-import-row .bp6-input-group { flex: 1; min-width: 0; }
 .project-import-row .bp6-input-group .bp6-icon { top: 50%; margin-block: 0; color: var(--muted); transform: translateY(-50%); }
 .project-import-confirm .bp6-control { flex: none; margin: 0; }
@@ -1529,7 +1547,9 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 /* Home, Documentation and theme take 28px each, plus their gaps; zoom adds 40px and another gap. Both reservations
    keep 12px before the controls so the last tab strip's buttons do not touch them. */
 .ide-shell:has(.window-zoom) { --window-actions-width: 142px; }
-.window-zoom.bp6-button { min-width: 40px; min-height: 28px; padding: 0 4px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+/* The padding leaves four characters ("100%") inside the 40px with the font of every system: a wider one would
+   move the button, and Home and Documentation with it, as the zoom changes. */
+.window-zoom.bp6-button { min-width: 40px; min-height: 28px; padding: 0 3px; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .window-zoom.bp6-button:hover, .bp6-popover-open > .window-zoom.bp6-button { color: var(--text); }
 .window-zoom-steps { display: inline-flex; align-items: center; gap: 1px; padding: 3px; }
 .window-zoom-value.bp6-button { min-width: 50px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
@@ -1569,6 +1589,10 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .ide-shell .flexlayout__tab_button_content { min-width: 0; overflow: hidden; }
 .ide-shell .flexlayout__tab_button_content > span { display: block; min-width: 0; }
 .session-tab-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The transient tab: what is looked at there leaves with the next thing looked at. Its title is in italics, as in a code editor. */
+.session-tabs [data-transient="true"] { font-style: italic; }
+/* The new-session prompt of a scope, in a tab of its own that is not the one written in: showing the tab selects its scope. */
+.session-draft-placeholder { display: grid; place-content: center; justify-items: center; gap: 10px; height: 100%; color: var(--muted); font-size: 14px; }
 .session-tab-dirty { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .ide-shell .flexlayout__tab_button_trailing { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--muted); }
 .ide-shell .flexlayout__tab_button_trailing:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }

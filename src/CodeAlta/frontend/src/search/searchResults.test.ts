@@ -6,7 +6,7 @@ import { categoryLimit, fieldsScore, flatResults, groupPreview, matchRanges, nex
 
 const project = (id: string, name: string, path = `C:\\code\\${name}`, archived = false): WorkspaceProject => ({ id, name, path, archived });
 const session = (id: string, projectId: string | null, title: string, updatedAt: string, parentSessionId: string | null = null): WorkspaceSession => ({
-  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, createdAt: null, id, title, fullTitle: title,
+  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, createdAt: null, id, title, fullTitle: title,
   fullTitleTruncated: false, parentSessionId, scopeKind: projectId === null ? "global" : "project", projectId, lineageIssue: null, workspacePath: null, providerKey: null, updatedAt });
 const snapshot = (projects: WorkspaceProject[], sessions: WorkspaceSession[] = []): WorkspaceSnapshot => ({
   configured: true, projects, sessions, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false });

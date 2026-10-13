@@ -31,6 +31,9 @@ test("single-stroke gestures follow the terminal key map and work inside the pro
     assert.equal(resolveCommandKey(key("F10"), false, focus).command, "clearQueue");
     assert.equal(resolveCommandKey(ctrl("F11"), false, focus).command, "compact");
     assert.equal(resolveCommandKey(key("F3"), false, focus).command, "messagePrevious");
+    // With Shift, the same keys go from one bookmarked message to the next.
+    assert.equal(resolveCommandKey(key("F3", { shiftKey: true }), false, focus).command, "bookmarkPrevious");
+    assert.equal(resolveCommandKey(key("F4", { shiftKey: true }), false, focus).command, "bookmarkNext");
     assert.equal(resolveCommandKey(ctrl("F4"), false, focus).command, "messageLatest");
     assert.equal(resolveCommandKey(key("F6"), false, focus).command, "expandPrompt");
     assert.equal(resolveCommandKey(key("F1"), false, focus).command, "help");
@@ -56,7 +59,7 @@ test("Ctrl+G starts a chord completed with or without Ctrl; an unknown second ke
   assert.deepEqual(resolveCommandKey(key("Control", { ctrlKey: true }), true, "prompt"), { command: null, chord: true, handled: false });
   const expected: [string, string][] = [["t", "sessionInfo"], ["d", "reminders"], ["u", "usage"], ["o", "models"], ["r", "providers"],
     ["h", "prompts"], ["k", "skills"], ["n", "plugins"], ["y", "mcp"], ["l", "logs"], ["a", "about"], ["w", "settings"],
-    ["s", "focusSidebar"], ["p", "focusPrompt"], ["g", "toggleNavigator"]];
+    ["s", "focusSidebar"], ["p", "focusPrompt"], ["g", "toggleNavigator"], ["f", "bookmarks"]];
   for (const [second, command] of expected) {
     assert.deepEqual(resolveCommandKey(ctrl(second), true, "prompt"), { command, chord: false, handled: true }, second);
     assert.deepEqual(resolveCommandKey(key(second), true, "none"), { command, chord: false, handled: true }, second);
@@ -116,6 +119,24 @@ test("command search ranks the slash name first, needs every word and hides inte
   assert.ok(names("remove checkouts").includes("worktree"));
   assert.deepEqual(names("zzz-nothing"), []);
   assert.ok(names("session").includes("session_info") && names("session").includes("new_session"));
+});
+
+test("a session is forked and rewound by commands of the session, found by what one comes to do", () => {
+  const label = (command: { label: string }) => command.label;
+  const description = (command: { description: string }) => command.description;
+  const names = (query: string) => searchCommands(query, label, description).map(command => command.name);
+  const fork = commandDefinitions.find(command => command.id === "fork")!, rewind = commandDefinitions.find(command => command.id === "rewind")!;
+  assert.deepEqual([fork.name, fork.category, rewind.name, rewind.category], ["fork", "Session", "rewind", "Session"]);
+  // Beside the compaction, the other command that changes what a session holds.
+  const order = commandDefinitions.map(command => command.id);
+  assert.deepEqual(order.slice(order.indexOf("compact"), order.indexOf("compact") + 3), ["compact", "fork", "rewind"]);
+  assert.equal(names("/fork")[0], "fork");
+  assert.equal(names("/rewind")[0], "rewind");
+  for (const word of ["branch", "duplicate", "copy", "clone"]) assert.ok(names(word).includes("fork"), word);
+  for (const word of ["undo", "roll back", "revert"]) assert.ok(names(word).includes("rewind"), word);
+  // Neither has a key: both open a window that says what they do before anything is done.
+  assert.equal(fork.keys, undefined);
+  assert.equal(rewind.keys, undefined);
 });
 
 test("zoom takes the keys of a browser, with or without Shift for the plus key", () => {

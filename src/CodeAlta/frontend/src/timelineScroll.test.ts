@@ -76,3 +76,23 @@ test("keyboard-positioned bottom stays unfollowed through repeated native scroll
   selection.jump({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 });
   assert.equal(selection.following(), true);
 });
+
+test("a session that was rewound starts at its end again: the position kept before is one of another conversation", () => {
+  const memory = createTimelineScrollMemory();
+  const before = memory.open("a", 0);
+  before.settle({ scrollTop: 0, scrollHeight: 1000, clientHeight: 300 });
+  before.finishRestore();
+  assert.equal(before.scroll({ scrollTop: 240, scrollHeight: 1000, clientHeight: 300 }), false);
+  // The same session, not rewound, is found where it was left.
+  assert.equal(memory.open("a", 0).following(), false);
+  const after = memory.open("a", 1);
+  assert.equal(after.following(), true);
+  assert.equal(after.settle({ scrollTop: 0, scrollHeight: 600, clientHeight: 300 }), 300);
+  after.finishRestore();
+  assert.equal(after.scroll({ scrollTop: 100, scrollHeight: 600, clientHeight: 300 }), false);
+  // What is kept from now on is the position of the rewound session.
+  const again = memory.open("a", 1);
+  assert.equal(again.following(), false);
+  assert.equal(again.settle({ scrollTop: 0, scrollHeight: 600, clientHeight: 300 }), 100);
+  assert.equal(memory.open("a", 2).following(), true);
+});

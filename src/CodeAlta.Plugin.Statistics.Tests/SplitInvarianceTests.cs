@@ -71,7 +71,7 @@ public sealed class SplitInvarianceTests
         return (whole.Batch.ToCanonicalText(), whole.Batch.ToCanonicalRunsText(), whole.Batch.Session, whole.Cursor.State.ToJson(), whole.Cursor.Offset);
     }
 
-    private static void AssertSplitsMatch(JournalBuilder journal, IEnumerable<int> splitPoints)
+    internal static void AssertSplitsMatch(JournalBuilder journal, IEnumerable<int> splitPoints)
     {
         var whole = Whole(journal);
         var all = journal.ToBytes();

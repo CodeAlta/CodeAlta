@@ -1,5 +1,6 @@
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { sessionsForProject } from "./workspace";
+import { lineageTitle, sessionLineage, type SessionLineage } from "./sessionBranch/lineage";
 
 export type SessionInfoView = Readonly<{
   id: string;
@@ -14,6 +15,8 @@ export type SessionInfoView = Readonly<{
   updatedAt: string | null;
   createdAt: string | null;
   canCopyId: boolean;
+  /** The session this one is a fork of, or the one whose rewind it keeps the turns of, named by the title it has now; null for any other session. */
+  lineage: SessionLineage | null;
 }>;
 
 function recordedDate(value: string): boolean {
@@ -31,7 +34,7 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
     && snapshot.sessions.some(value => value === session);
   if (!unique) return {
     id: session.id, title: "Unverified", titleTruncated: false, scope: "Unverified: ambiguous session identity",
-    scopeWarning: null, path: null, worktree: null, provider: null, updatedAt: null, createdAt: null, canCopyId: false,
+    scopeWarning: null, path: null, worktree: null, provider: null, updatedAt: null, createdAt: null, canCopyId: false, lineage: null,
   };
 
   const project = session.scopeKind === "project" && session.projectId && session.workspacePath
@@ -47,6 +50,7 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
   // The bounded display title is already in the header; do not surface longer summary/prompt-derived text here.
   const title = session.title;
   const date = session.updatedAt;
+  const lineage = sessionLineage(session);
   const updatedAt = typeof date === "string" && recordedDate(date) ? date : null;
   return {
     id: session.id, title: title?.trim() ? title : "Not recorded",
@@ -55,7 +59,7 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
     worktree: session.worktreePath?.trim() ? { path: session.worktreePath, missing: session.worktreeMissing === true } : null,
     provider: session.providerKey?.trim() ? session.providerKey : null,
     updatedAt, createdAt: typeof session.createdAt === "string" && recordedDate(session.createdAt) ? session.createdAt : null,
-    canCopyId: true,
+    canCopyId: true, lineage: lineage && { ...lineage, title: lineageTitle(lineage, snapshot.sessions).title },
   };
 }
 

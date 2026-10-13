@@ -84,7 +84,8 @@ const props = {
   runtimeReader: createRuntimeStateReader(async request => ({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId,
     entry: { attachmentGeneration: "12", activeRunId: run, isRetiring: false, isTerminated: false, backgroundTasks: background, queueDrainInProgress: draining,
       providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null, reasoningEffort: null, agentPromptId: null,
-      pendingAgentPromptId: null, activity: null },
+      // An idle attachment can have a next-turn prompt selection: normal Send consumes it.
+      pendingAgentPromptId: "default", activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
 };
 createRoot(document.getElementById("app")!).render(createElement("div", { id: "workspace-shell", className: "ide-shell" },

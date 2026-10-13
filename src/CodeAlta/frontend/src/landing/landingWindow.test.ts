@@ -8,7 +8,7 @@ import { landingProjects, landingSessions, landingStartupMilliseconds, opensLand
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `/code/${id}`, archived });
 const session = (id: string, over: Partial<WorkspaceSession> = {}): WorkspaceSession => ({
   id, title: `Session ${id}`, fullTitle: `Session ${id}`, fullTitleTruncated: false, automationId: null, createdAt: null, lineageIssue: null, messageCount: null, parentSessionId: null,
-  projectId: null, providerKey: null, scopeKind: "global", updatedAt: "2026-10-09T10:00:00Z", workspacePath: null, worktreeMissing: false, worktreeName: null, worktreePath: null, worktreeRoot: null, ...over,
+  projectId: null, providerKey: null, scopeKind: "global", updatedAt: "2026-10-09T10:00:00Z", workspacePath: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, worktreeName: null, worktreePath: null, worktreeRoot: null, ...over,
 });
 const snapshot = (projects: WorkspaceProject[], sessions: WorkspaceSession[]): WorkspaceSnapshot => ({ configured: true, displayTextTruncated: false, projects, projectsTruncated: false, sessions, sessionsTruncated: false });
 

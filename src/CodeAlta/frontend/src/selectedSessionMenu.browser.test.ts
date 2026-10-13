@@ -81,9 +81,11 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
       await evaluate(`${trigger(id)}.focus(); ${trigger(id)}.click()`);
       await until("!!document.querySelector('.session-tab-popup')", `the selected-scope menu of ${id}`);
     };
-    const pluginLine = async () => {
+    // A session of a project can move to another project; a chat has no project to leave.
+    const pluginLine = async (move = true) => {
       await until(`${entries}.some(item=>item.textContent.trim()==='Statistics of this session')`, "the plugin line under the production provider");
-      assert.deepEqual(await evaluate(`${entries}.map(item=>item.textContent.trim())`), ["Open session", "Rename…", "Delete…", "Open Board", "Statistics of this session"]);
+      assert.deepEqual(await evaluate(`${entries}.map(item=>item.textContent.trim())`),
+        ["Open session", "Rename…", "Fork…", ...(move ? ["Move to project…"] : []), "Delete…", "Open Board", "Statistics of this session"]);
       assert.equal(await evaluate("document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length"), 2, "canvas and plugin groups keep their dividers");
     };
     const assertReads = async (projectId: string | null, sessionId: string) => {
@@ -146,7 +148,7 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
     await until(`${row("chat-1")}.firstElementChild.getAttribute('aria-pressed')==='true'`, "the first chat is selected");
     const chatSelection = await evaluate(selection);
     await evaluate(`selectedMenuFixture.state.reads.length=0; ${row("chat-2")}.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))`);
-    await pluginLine(); await assertReads(null, "chat-2");
+    await pluginLine(false); await assertReads(null, "chat-2");
     assert.deepEqual(await evaluate(selection), chatSelection);
     await evaluate(`${entries}.at(-1).click()`);
     await until("selectedMenuFixture.state.invoked.length===2 && !document.querySelector('.session-tab-popup')", "the chat's plugin command ran");

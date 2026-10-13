@@ -5,6 +5,19 @@ namespace CodeAlta.Orchestration.Runtime;
 
 public sealed partial class SessionRuntimeService
 {
+    /// <summary>
+    /// Raised with the identifier of a session after it was deleted on purpose, by the user or by a command. It is
+    /// not raised for a session that automatic retention removed.
+    /// </summary>
+    public event Action<string>? SessionDeleted;
+
+    // What keeps something about a session (its bookmarks) drops it; a handler that fails does not undo the deletion.
+    private void NotifySessionDeleted(string sessionId)
+    {
+        try { SessionDeleted?.Invoke(sessionId); }
+        catch (Exception) { /* The session is deleted whatever a listener does. */ }
+    }
+
     // Shares the runtime identity gate with session/lineage admission.
     private readonly HashSet<string> _deletingProjectPaths = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _deletedProjectIds = new(StringComparer.OrdinalIgnoreCase);
@@ -37,11 +50,11 @@ public sealed partial class SessionRuntimeService
         => AdmitAsync(() => DeleteOwnedCatalogSessionBodyAsync(sessionId, projectId, workspacePath, confirmedTitle), CancellationToken.None);
 
     internal Task<string> DeleteOwnedCatalogProjectAsync(string projectId, string projectPath, string confirmedName, bool expectedArchived,
-        Func<string, bool> hasPendingAsk)
-        => AdmitAsync(() => DeleteOwnedCatalogProjectBodyAsync(projectId, projectPath, confirmedName, expectedArchived, hasPendingAsk), CancellationToken.None);
+        Func<string, bool> isBusy)
+        => AdmitAsync(() => DeleteOwnedCatalogProjectBodyAsync(projectId, projectPath, confirmedName, expectedArchived, isBusy), CancellationToken.None);
 
     private async Task<string> DeleteOwnedCatalogProjectBodyAsync(string projectId, string projectPath, string confirmedName, bool expectedArchived,
-        Func<string, bool> hasPendingAsk)
+        Func<string, bool> isBusy)
     {
         lock (_identityGate)
         {
@@ -77,7 +90,7 @@ public sealed partial class SessionRuntimeService
             }
             foreach (var session in sessions)
             {
-                if (hasPendingAsk(session.SessionId)) return "session_in_use";
+                if (isBusy(session.SessionId)) return "session_in_use";
                 var jobClaim = Jobs.TryReserveDeletion(session.SessionId);
                 if (jobClaim is null) return "session_in_use";
                 claims.Add(jobClaim);
@@ -207,7 +220,7 @@ public sealed partial class SessionRuntimeService
         }, CancellationToken.None).ConfigureAwait(false);
         if (preparation.Busy) return "session_in_use";
         if (preparation.Work is not null) await preparation.Work.ConfigureAwait(false);
-        return await actor.QueryAsync(async token =>
+        var outcome = await actor.QueryAsync(async token =>
         {
             if (_transitions.ContainsKey(sessionId) || _entries.ContainsKey(sessionId)) return "session_in_use";
             var checkedScope = await ValidateAsync(token).ConfigureAwait(false);
@@ -215,5 +228,7 @@ public sealed partial class SessionRuntimeService
             return await _agentSessionCatalog.DeleteSessionAsync(sessionId, token).ConfigureAwait(false)
                 ? "ok" : "delete_unconfirmed";
         }, CancellationToken.None).ConfigureAwait(false);
+        if (outcome == "ok") NotifySessionDeleted(sessionId);
+        return outcome;
     }
 }
