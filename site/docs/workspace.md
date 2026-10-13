@@ -41,6 +41,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 - Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open. The last one opens a [terminal](#terminal-desktop).
 - The `…` button of a project or a session, or a right-click, opens its menu.
 - **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session.
+- **Move to project…** in the menu of a session, `/move_to_project` in the search, or dragging its row onto another project, moves the session to that project. See [Move a session to another project](sessions.md#move-a-session-to-another-project).
 - **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.
 - A session that has [sub-agents](sessions.md#sub-agents) lists them under it, and has an arrow of its own to show or hide them.
 - A session with a bolt was started by an [automation](automations.md).
@@ -241,6 +242,9 @@ While it is on:
   (another model, effort or agent prompt for a send); the link on claude.ai normally stays the same. Closing
   CodeAlta ends it. If Claude Code stops by itself, the button turns red: the session is connected again with
   the next prompt you send here, or with **Try again** in its popover.
+- CodeAlta does not archive the session on claude.ai, so a page open there keeps working when Claude Code
+  starts again. After you turn Remote Control off, close CodeAlta or delete the session, it stays in your
+  claude.ai list as offline: archive it there when you no longer need it.
 
 Remote Control needs Claude Code signed in with your claude.ai account: it does not work with an API key.
 When CodeAlta starts again, Remote Control is off unless you turned on **Turn Remote Control back on when

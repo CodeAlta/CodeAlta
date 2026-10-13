@@ -433,6 +433,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         var asked = first.RemoteControlRequests.Single();
         Assert.AreEqual("My session", asked.GetProperty("name").GetString());
         Assert.IsFalse(asked.TryGetProperty("reattach_session_id", out _), "A first connection has no link to keep.");
+        Assert.IsTrue(asked.GetProperty("keep_session_on_exit").GetBoolean(), "A process that ends does not archive the claude.ai session.");
         Assert.AreEqual(0, first.UserMessages.Count);
 
         // A turn with another effort starts the CLI again: the new process is connected with the same link.
@@ -442,6 +443,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         Assert.AreEqual(2, cli.Processes.Count);
         Assert.IsTrue(first.IsDisposed);
         Assert.AreEqual("cse_1", cli.Last.RemoteControlRequests.Single().GetProperty("reattach_session_id").GetString());
+        Assert.IsTrue(cli.Last.RemoteControlRequests.Single().GetProperty("keep_session_on_exit").GetBoolean());
         Assert.AreEqual(new AgentRemoteControl(AgentRemoteControlStatus.Connected, "https://claude.ai/code/session_1"), executor.GetRemoteControl("session-1"));
     }
 
