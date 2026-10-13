@@ -1992,9 +1992,9 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .new-session-choices > .bp6-popover-target, .new-session-choices .project-context { max-width: 100%; }
 /* The two rows of chips start at the same place: the first one is drawn without its border until it is used. */
 .new-session-choices > .bp6-popover-target { margin-left: -6px; }
-/* The heading names the project: its chips say where the session works. */
+/* The heading names the project: its chips say where the session works, not what is changed there now. */
 .new-session-choices .project-context { flex-wrap: wrap; row-gap: 6px; }
-.new-session-choices .project-context-folder { display: none; }
+.new-session-choices .project-context-folder, .new-session-choices .project-context-changes { display: none; }
 .new-session-error { margin: 0; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
 .new-session-refresh { margin-right: auto; }
 /* The question asked beside a row before its session is deleted or its project archived. */
