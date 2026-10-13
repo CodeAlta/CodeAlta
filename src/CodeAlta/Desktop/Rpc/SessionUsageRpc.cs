@@ -17,7 +17,7 @@ internal sealed class SessionUsageService
     private readonly Func<string, DateTimeOffset, string, string?, string?, CancellationToken, Task<OwnedRuntimeObservation>>? _observe;
 
     internal SessionUsageService(SessionRuntimeService runtime, OwnedSessionWorkspace reads, string epoch)
-        : this(runtime.ReadOwnedUsageAsync, epoch, (id, token) => SessionUsageSummaryReader.ReadAsync(reads.ReadTimelinePageAsync, id, token), runtime.ObserveOwnedStateAsync) { }
+        : this(runtime.ReadOwnedUsageAsync, epoch, (id, token) => SessionUsageSummaryReader.ReadAsync(reads.ReadUsageUpdatesAsync, id, token), runtime.ObserveOwnedStateAsync) { }
 
     internal SessionUsageService(Func<string, string, string?, string?, CancellationToken, Task<OwnedUsageReadResult>> read, string epoch,
         Func<string, CancellationToken, Task<SessionUsageSummary?>>? summary = null,

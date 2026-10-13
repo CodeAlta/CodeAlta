@@ -41,6 +41,9 @@ internal enum AgentJournalRecordKind
 
     /// <summary>A compaction completed.</summary>
     CompactionCompleted,
+
+    /// <summary>The usage of a request to the model.</summary>
+    UsageUpdated,
 }
 
 /// <summary>
@@ -141,6 +144,11 @@ internal static class AgentJournalRecordText
             if (updateKind.SequenceEqual("Idle"u8))
             {
                 return AgentJournalRecordKind.Idle;
+            }
+
+            if (updateKind.SequenceEqual("UsageUpdated"u8))
+            {
+                return AgentJournalRecordKind.UsageUpdated;
             }
 
             return updateKind.SequenceEqual("CompactionCompleted"u8) ? AgentJournalRecordKind.CompactionCompleted : AgentJournalRecordKind.Other;
