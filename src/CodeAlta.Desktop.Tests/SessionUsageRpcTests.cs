@@ -90,6 +90,16 @@ public sealed class SessionUsageRpcTests
     }
 
     [TestMethod]
+    public async Task ProviderUsageUsesTheSerializedSourceNameAcceptedByTheFrontend()
+    {
+        var usage = new SessionRuntimeUsageObservation(1, null, null, AgentUsageScope.LastOperation, AgentUsageSource.ProviderUsage,
+            null, new(100, 20, null, null, null, null, null, null), false, false);
+        var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("ok", Guid.NewGuid(), "session", 1, usage, 0)), Epoch);
+        var response = await service.ReadAsync(new(Epoch, "session", "global", null, null), default);
+        Assert.AreEqual("LocalProviderUsage", response.Observation!.Source);
+    }
+
+    [TestMethod]
     public async Task NoObservationTransitionsAndFaultsNeverImplyZero()
     {
         var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("no_observation", Guid.NewGuid(), "session", 1, null, 0)), Epoch);

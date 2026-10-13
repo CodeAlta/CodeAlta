@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -12,17 +13,23 @@ internal sealed class SessionUsageService
     internal const int MaximumResponseBytes = 32 * 1024;
     private readonly Func<string, string, string?, string?, CancellationToken, Task<OwnedUsageReadResult>> _read;
     private readonly string _epoch;
+    private readonly Func<string, CancellationToken, Task<SessionUsageSummary?>>? _summary;
+    private readonly Func<string, DateTimeOffset, string, string?, string?, CancellationToken, Task<OwnedRuntimeObservation>>? _observe;
 
-    internal SessionUsageService(SessionRuntimeService runtime, string epoch)
-        : this(runtime.ReadOwnedUsageAsync, epoch) { }
+    internal SessionUsageService(SessionRuntimeService runtime, OwnedSessionWorkspace reads, string epoch)
+        : this(runtime.ReadOwnedUsageAsync, epoch, (id, token) => SessionUsageSummaryReader.ReadAsync(reads.ReadUsageUpdatesAsync, id, token), runtime.ObserveOwnedStateAsync) { }
 
-    internal SessionUsageService(Func<string, string, string?, string?, CancellationToken, Task<OwnedUsageReadResult>> read, string epoch)
+    internal SessionUsageService(Func<string, string, string?, string?, CancellationToken, Task<OwnedUsageReadResult>> read, string epoch,
+        Func<string, CancellationToken, Task<SessionUsageSummary?>>? summary = null,
+        Func<string, DateTimeOffset, string, string?, string?, CancellationToken, Task<OwnedRuntimeObservation>>? observe = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         if (!Guid.TryParseExact(epoch, "D", out var parsed) || parsed == Guid.Empty || parsed.ToString("D") != epoch)
             throw new ArgumentException("Canonical host epoch required.", nameof(epoch));
         _read = read;
         _epoch = epoch;
+        _summary = summary;
+        _observe = observe;
     }
 
     [NeoRpcMethod("read")]
@@ -40,6 +47,8 @@ internal sealed class SessionUsageService
             cancellationToken.ThrowIfCancellationRequested();
             if (state is null || state.SessionId != id || state.RuntimeInstanceId == Guid.Empty)
                 return Error("read_failed", id);
+            if (state.Status == "missing_session" && request.IncludeCurrentSession && _summary is not null && _observe is not null)
+                return await ReadSavedSessionAsync(request, state.RuntimeInstanceId, cancellationToken).ConfigureAwait(false);
             if (state.Status is not ("ok" or "no_observation"))
                 return AllowedFailure(state.Status) ? Error(state.Status, id) : Error("read_failed", id);
             if (state.AttachmentGeneration is not > 0 || state.OmittedUsageEvents < 0
@@ -60,7 +69,8 @@ internal sealed class SessionUsageService
                 return Error("read_failed", id);
             SessionUsageObservation? observation = usage is null ? null : new(
                 Decimal(usage.Sequence), usage.SourceUpdatedAt?.ToString("O", CultureInfo.InvariantCulture),
-                usage.EventTimestamp?.ToString("O", CultureInfo.InvariantCulture), usage.Scope.ToString(), usage.Source.ToString(),
+                usage.EventTimestamp?.ToString("O", CultureInfo.InvariantCulture), usage.Scope.ToString(),
+                usage.Source == AgentUsageSource.ProviderUsage ? "LocalProviderUsage" : usage.Source.ToString(),
                 usage.Window is { } w ? new SessionUsageWindow(NullableDecimal(w.CurrentTokens), NullableDecimal(w.TokenLimit), w.MessageCount,
                     w.Label, NullableDecimal(w.TotalContextEnvelope), NullableDecimal(w.MaxOutputTokens)) : null,
                 usage.LastOperation is { } o ? new SessionUsageOperation(NullableDecimal(o.InputTokens), NullableDecimal(o.OutputTokens),
@@ -73,6 +83,19 @@ internal sealed class SessionUsageService
                     Decimal(total.OutputTokens), Decimal(total.CachedInputTokens), Decimal(total.ReasoningTokens)) : null);
             var response = new SessionUsageResponse(state.Status, _epoch, id, state.RuntimeInstanceId.ToString("D"),
                 Decimal(state.AttachmentGeneration.Value), Decimal(state.OmittedUsageEvents), observation);
+            if (request.IncludeCurrentSession && _summary is not null)
+            {
+                SessionUsageSummary? summary = null;
+                try { summary = await _summary(id, cancellationToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                catch (Exception) { /* An unavailable journal must not erase the live observation or imply zero. */ }
+                var current = await _read(id, request.Scope, request.ProjectId, request.ExpectedProjectPath, cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (current.Status is not ("ok" or "no_observation") || current.SessionId != id
+                    || current.RuntimeInstanceId != state.RuntimeInstanceId || current.AttachmentGeneration != state.AttachmentGeneration)
+                    return Error("stale_attachment", id);
+                response = response with { CurrentSession = summary };
+            }
             return JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.SessionUsageResponse).Length <= MaximumResponseBytes
                 ? response : Error("wire_limit", id);
         }
@@ -81,11 +104,39 @@ internal sealed class SessionUsageService
         catch (Exception) { return Error("read_failed", id); }
     }
 
+    // The missing-actor branch calls this only after checking that both _observe and _summary are configured.
+    private async Task<SessionUsageResponse> ReadSavedSessionAsync(SessionUsageRequest request, Guid runtime, CancellationToken token)
+    {
+        var id = request.SessionId;
+        if (request.CreatedAt is not { Length: > 0 and <= 64 } || !DateTimeOffset.TryParse(request.CreatedAt,
+            CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var createdAt) || createdAt == default)
+            return Error("invalid_request", id);
+        var before = await _observe!(id, createdAt, request.Scope, request.ProjectId, request.ExpectedProjectPath, token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        if (before.Status != "ok") return Error(AllowedFailure(before.Status) ? before.Status : "read_failed", id);
+        if (before.State is not { Entry: null, CoordinatorTransitionInProgress: false } state
+            || state.SessionId != id || state.RuntimeInstanceId != runtime)
+            return Error("stale_attachment", id);
+        SessionUsageSummary? summary = null;
+        try { summary = await _summary!(id, token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception) { /* Unavailable history is unknown, never a zero total. */ }
+        var after = await _observe!(id, createdAt, request.Scope, request.ProjectId, request.ExpectedProjectPath, token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        if (after.Status != "ok") return Error(AllowedFailure(after.Status) ? after.Status : "read_failed", id);
+        if (after.State is not { Entry: null, CoordinatorTransitionInProgress: false } current
+            || current.SessionId != id || current.RuntimeInstanceId != runtime)
+            return Error("stale_attachment", id);
+        var response = new SessionUsageResponse("saved_session", _epoch, id, runtime.ToString("D"), null, null, null, summary);
+        return JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.SessionUsageResponse).Length <= MaximumResponseBytes
+            ? response : Error("wire_limit", id);
+    }
+
     private SessionUsageResponse Error(string status, string? id) => new(status, _epoch, id, null, null, null, null);
     private static bool AllowedFailure(string status) => status is "invalid_request" or "missing_session" or "scope_mismatch"
         or "transition" or "stale_attachment" or "metadata_missing" or "metadata_incomplete" or "metadata_invalid"
         or "metadata_mismatch" or "missing_project" or "ambiguous_project" or "incomplete_project"
-        or "invalid_project" or "archived_project" or "read_failed";
+        or "invalid_project" or "archived_project" or "read_failed" or "metadata_unavailable" or "project_unverified";
     private static SessionUsageRateWindow? RateWindow(SessionRuntimeUsageRateWindow? window) => window is { } value
         ? new(value.UsedPercent, value.ResetsAt?.ToString("O", CultureInfo.InvariantCulture), NullableDecimal(value.WindowDurationMinutes)) : null;
     private static bool ValidRate(SessionRuntimeUsageRateWindow? window) => window is not { } value
@@ -120,9 +171,9 @@ internal sealed class SessionUsageService
 }
 
 internal sealed record SessionUsageRequest(string ExpectedHostEpoch, string SessionId, string Scope,
-    string? ProjectId, string? ExpectedProjectPath);
+    string? ProjectId, string? ExpectedProjectPath, bool IncludeCurrentSession = false, string? CreatedAt = null);
 internal sealed record SessionUsageResponse(string Status, string HostEpoch, string? SessionId, string? RuntimeInstanceId,
-    string? AttachmentGeneration, string? OmittedUsageEvents, SessionUsageObservation? Observation);
+    string? AttachmentGeneration, string? OmittedUsageEvents, SessionUsageObservation? Observation, SessionUsageSummary? CurrentSession = null);
 internal sealed record SessionUsageObservation(string Sequence, string? SourceUpdatedAt, string? EventTimestamp,
     string Scope, string Source, SessionUsageWindow? Window, SessionUsageOperation? LastOperation,
     bool HadInvalidValues, bool HadOmittedData, SessionUsageRateLimits? RateLimits = null, SessionUsageTotals? SessionTotal = null);
@@ -134,3 +185,5 @@ internal sealed record SessionUsageOperation(string? InputTokens, string? Output
 internal sealed record SessionUsageRateLimits(string? Name, string? PlanType, SessionUsageRateWindow? Primary, SessionUsageRateWindow? Secondary);
 internal sealed record SessionUsageRateWindow(int? UsedPercent, string? ResetsAt, string? WindowDurationMinutes);
 internal sealed record SessionUsageTotals(string TotalTokens, string InputTokens, string OutputTokens, string CachedInputTokens, string ReasoningTokens);
+internal sealed record SessionUsageSummary(SessionUsageOperation Operation, SessionUsageCost[] Costs);
+internal sealed record SessionUsageCost(string Cost, string? CostUnit);

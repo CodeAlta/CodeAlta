@@ -12,7 +12,7 @@ const runtime = (): SessionRuntimeScopedResponse => ({ status: "ok", hostEpoch: 
     entry: { attachmentGeneration: "2", isTerminated: false, isRetiring: false, activeRunId: "run", backgroundTasks: [], queueDrainInProgress: false,
       providerId: "observed-provider", providerKey: "observed-key", modelId: "observed-model", reasoningEffort: "High", agentPromptId: "current", pendingAgentPromptId: "next", activity: null } } });
 const usage = (): SessionUsageResponse => ({ status: "ok", hostEpoch: epoch, sessionId: "saved", runtimeInstanceId: epoch,
-  attachmentGeneration: "2", omittedUsageEvents: "3", observation: { sequence: "4", scope: "LastOperation", source: "LocalProviderUsage",
+  attachmentGeneration: "2", omittedUsageEvents: "3", currentSession: null, observation: { sequence: "4", scope: "LastOperation", source: "LocalProviderUsage",
     sourceUpdatedAt: null, eventTimestamp: "2026-01-01T00:00:00Z", hadInvalidValues: true, hadOmittedData: true,
     window: { currentTokens: "0", tokenLimit: null, messageCount: 0, label: null, totalContextEnvelope: null, maxOutputTokens: null },
     lastOperation: null, rateLimits: null, sessionTotal: null } });

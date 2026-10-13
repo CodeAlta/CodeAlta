@@ -58,6 +58,10 @@ test("a cost is shown with the unit the provider names, and as reported without 
   const operation = observation().lastOperation!;
   assert.equal(costText(operation), null);
   assert.equal(costText({ ...operation, cost: "0.01" }), "0.01");
+  // What the arithmetic of doubles leaves behind is not shown.
+  assert.equal(costText({ ...operation, cost: "0.021697300000000003" }), "0.021697");
+  assert.match(usageMarkdown({ provider: "claude-code", model: "claude-test", usage: null, messages: null, window: null,
+    operation: { ...operation, durationMs: "28895", cost: "0.021697300000000003" }, rateLimits: null, sessionTotal: null }), /duration 29 s · cost 0\.021697$/m);
   assert.equal(costText({ ...operation, cost: "0.0613625", costUnit: "AI credits" }), "0.0614 AI credits");
   assert.equal(costText({ ...operation, cost: "12", costUnit: "AI credits" }), "12 AI credits");
   assert.match(usageMarkdown({ provider: "copilot", model: "claude-test", usage: null, messages: null, window: null,
@@ -150,4 +154,19 @@ test("rate windows and the Markdown copy carry only what was reported", () => {
     "- Session total: total 900 · input 500 · output 300 · cache 60 · reasoning 40"].join("\n"));
   assert.match(usageMarkdown({ provider: null, model: null, usage: null, messages: null, window: null, operation: null, rateLimits: null, sessionTotal: null }),
     /Waiting for usage data/);
+});
+
+test("current session uses the same disjoint breakdown and copies its totals as the last operation is copied", () => {
+  const total = { ...observation().lastOperation!, model: null, reasoningEffort: null, inputTokens: "1000", cachedInputTokens: "600", cacheWriteTokens: "100",
+    outputTokens: "200", reasoningTokens: "50", durationMs: "3725000.5" };
+  assert.deepEqual(operationSegments(total).map(segment => [segment.key, segment.tokens]),
+    [["uncachedInput", "300"], ["output", "150"], ["cacheWrite", "100"], ["cachedInput", "600"], ["reasoning", "50"]]);
+  const copy = (currentSession: Parameters<typeof usageMarkdown>[0]["currentSession"]) => usageMarkdown({ provider: "copilot", model: null, usage: null,
+    messages: null, window: null, operation: null, rateLimits: null, sessionTotal: null, currentSession });
+  // A cost has the unit its provider named, and none otherwise; the duration of a session is not a count of milliseconds.
+  assert.equal(copy({ operation: total, costs: [{ cost: "0.5", costUnit: "AI credits" }, { cost: "1.25", costUnit: null }] }),
+    ["# copilot context usage", "", "- Model: (default model)", "", "## Current session", "",
+      "- input 1,000 (cache 600 · cache write 100) · output 200 · reasoning 50 · duration 1 h 02 min · cost 0.5 AI credits · cost 1.25"].join("\n"));
+  assert.match(copy({ operation: { ...total, cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null, durationMs: "850" }, costs: [] }),
+    /## Current session\n\n- input 1,000 · output 200 · duration 850 ms$/);
 });
