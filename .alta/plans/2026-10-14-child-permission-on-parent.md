@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 ---
 
 # A sub-session that waits for you shows on its parent

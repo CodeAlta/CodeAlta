@@ -51,6 +51,13 @@ test("a request of a sub-session answered on the session above it reaches that s
       ["echo child", "echo grandchild"], "each card shows the request of its own session");
     assert.deepEqual(await evaluate(`[...document.querySelectorAll(".waiting-sub-session .command-permission-panel")].map(panel => panel.getAttribute("aria-label"))`),
       ["Pending permissions of Fix the parser", "Pending permissions of Run the tests"]);
+    // Showing the pane gives the keyboard to the choice of its own request only: Enter there must not answer for a sub-session.
+    assert.equal(await evaluate(`waitingSubSessions.ownChoice()`), null, "The requests of the sub-sessions do not take the keyboard");
+    assert.equal(await evaluate(`(() => {
+      const own = document.createElement("div"); own.className = "command-permission-panel";
+      own.innerHTML = '<button data-permission-choice id="own-choice"></button>';
+      document.querySelector(".composer-region").append(own);
+      const choice = waitingSubSessions.ownChoice()?.id; own.remove(); return choice; })()`), "own-choice", "The request of the pane's own session does");
 
     await evaluate(`${allow(0)}.focus(); ${allow(0)}.click()`);
     assert.equal(await until(`waitingSubSessions.decisions.length === 1 && !${card(0)}.querySelector(".command-permission-panel")`), true, "The answered request leaves its card");

@@ -9,6 +9,16 @@ const pendingReadInterval = 1_500;
 const armDelay = 400;
 
 /**
+ * The first choice of the request the session of a composer waits on, which takes the keyboard when the session is
+ * shown. The requests of the sessions under it, shown above the same composer, never do: a key pressed on arriving
+ * there must not answer for another session.
+ */
+export function ownPermissionChoice(region: ParentNode | null | undefined): HTMLElement | null {
+  const choices = region?.querySelectorAll<HTMLElement>(".command-permission-panel button[data-permission-choice]:not(:disabled)") ?? [];
+  return Array.from(choices).find(choice => !choice.closest(".waiting-sub-session")) ?? null;
+}
+
+/**
  * The requests of a session that wait for the user's permission, above its composer. It shows the first one with its
  * decisions while one waits, and a line while a decision is sent or reading them failed. It reads them by itself
  * while the session runs and none is shown, once more when the run ends with some shown, and after the answer to a

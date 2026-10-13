@@ -2756,7 +2756,9 @@ command or file-change requests in a `CommandPermissionPanel` with a reviewer of
 one session at a time), labelled with its title, without the field that denies with what to do instead
 (that text goes to the composer of the session that asks). The answer goes by handle, as from the
 sub-session's own pane, whose card closes, and the focus goes back to the prompt of the pane it was given
-in. Questions and forms are answered in the sub-session. The tab and
+in. Showing the pane leaves the keyboard on its prompt: only the request of the pane's own session takes it
+(`ownPermissionChoice`), so that a key pressed on arriving there does not answer for a sub-session.
+Questions and forms are answered in the sub-session. The tab and
 the Explorer row of an ancestor that does not wait itself carry a lighter waiting mark (`SessionWaitingBadge`
 with `below`), and the "{title} waits for you" message is not shown for a session under the one on screen.
 

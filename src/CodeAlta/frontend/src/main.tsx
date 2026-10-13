@@ -86,6 +86,7 @@ import { createMutationCapability, createOwnedSubmissions, noOutgoing } from "./
 import { createSessionDisplayStore } from "./sessionDisplay";
 import { createRuntimeStateReader } from "./runtimeState";
 import { createPermissionReviewer } from "./sessionPermissions";
+import { ownPermissionChoice } from "./CommandPermissionPanel";
 import { createSteeringSubmissions } from "./sessionSteering";
 import { createCompactionSubmissions } from "./sessionCompaction";
 import { createAbortRunSubmissions } from "./sessionAbortRun";
@@ -1807,7 +1808,8 @@ function App() {
         || modalDialogOpen() || document.querySelector(".project-editor[data-active='true'], .terminal-panel[data-active='true']")) return;
       const prompt = document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt");
       // A request that waits for the user's permission is what its session shows first: its first choice takes the focus.
-      const choice = prompt?.closest(".composer-region")?.querySelector<HTMLElement>(".command-permission-panel button[data-permission-choice]:not(:disabled)");
+      // A request of a session under it does not: the prompt keeps the keyboard.
+      const choice = ownPermissionChoice(prompt?.closest(".composer-region"));
       if (choice) choice.focus();
       else if (prompt) prompt.focus();
       else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();

@@ -805,8 +805,8 @@ that is, and the mark and the message tell you which one it is. Stopping the ses
 A sub-session that waits for you also shows on the session that created it, and on the ones above that: a
 line above the prompt names it, with a link that opens it, and its tab and Explorer row carry a lighter
 mark. When it waits to run a command or change files, its request is shown there too: **Allow once** and
-**Deny** answer it from the parent. A question or a form, or a denial with what to do instead, is answered
-in the sub-session itself.
+**Deny** answer it from the parent, with a click: the keyboard stays in the prompt of the parent. A question
+or a form, or a denial with what to do instead, is answered in the sub-session itself.
 
 A session in a mode that asks cannot do what would run a command without asking you: start a
 [background job](sessions.md#background-jobs), type in a terminal, give an automation a command to run, or

@@ -1,6 +1,7 @@
 // The sessions under a session that wait for a permission, above its prompt, as the pane of that session shows them.
 import { StrictMode, useRef } from "react";
 import { createRoot } from "react-dom/client";
+import { ownPermissionChoice } from "./CommandPermissionPanel";
 import { createPermissionReviewer } from "./sessionPermissions";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { ShellLanguageContext } from "./shellLanguage";
@@ -28,7 +29,8 @@ const resolve: Resolve = async request => {
   return { status: "resolved", hostEpoch: epoch, handle: request.handle };
 };
 const links: SessionLinks = { title: id => sessions.find(session => session.sessionId === id)?.title ?? null, open: () => { } };
-Object.assign(window, { waitingSubSessions: { reads, decisions } });
+// What takes the keyboard when the pane is shown: the choice of its own request, as the window asks for it.
+Object.assign(window, { waitingSubSessions: { reads, decisions, ownChoice: () => ownPermissionChoice(document.querySelector(".composer-region")) } });
 
 function Fixture() {
   const prompt = useRef<HTMLTextAreaElement>(null);
