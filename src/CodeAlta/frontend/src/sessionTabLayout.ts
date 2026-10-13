@@ -1,22 +1,35 @@
 import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action, type Node as LayoutNode } from "flexlayout-react";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { openSessionTab, reconcileSessionTabs, resolveSessionTab, selectedTab, sessionTabLimit, tabKey, type SessionTab, type SessionTabs } from "./sessionTabs";
+import { draftKey, draftTabLimit, draftTabOf, hasDraftTab, isPreviewTab, openSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, selectedTab, sessionTabLimit, tabKey,
+  type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs } from "./sessionTabs";
 import { emptyFileTabs, fileNodeId, fileTabLimit, isChangesTab, isTerminalTab, type FileTab, type FileTabs } from "./fileTabs";
 
 const panelId = "session-tabs-panel";
 // Presentation only: never persisted in the session list, recent history or draft owners.
 export const sessionDraftNodeId = "session-draft";
 export const sessionNodeId = (tab: SessionTab) => `session:${tabKey(tab)}`;
+/** The node of the new-session prompt of a scope that has a tab of its own. */
+export const draftNodeId = (draft: DraftTab) => `draft:${draftKey(draft)}`;
+
+/**
+ * The tabs as the dock shows them: the tabs of the window, and `scope`, the scope whose new-session prompt is the one
+ * shown when no session is. That prompt is in the tab of its own when its scope has one, in the transient one otherwise.
+ */
+export type SessionTabView = SessionTabs & Readonly<{ scope?: DraftTab | null }>;
+/** The node that shows the new-session prompt when no session is shown: the tab of the scope, or the transient one. */
+export const shownDraftNodeId = (state: SessionTabView) => state.scope && hasDraftTab(state, state.scope) ? draftNodeId(state.scope) : sessionDraftNodeId;
 
 // Project App's selection synchronously: its persistence effect can lag a render.
 // Never rebind an invalid formerly active identity to a reused session ID.
+// A selected session that has no tab yet is looked at: it takes the transient tab, unless it is opened to be kept.
 export function sessionTabPresentation(state: SessionTabs, snapshot: WorkspaceSnapshot | undefined,
-  projectId: string | null, sessionId: string | null): SessionTabs {
+  projectId: string | null, sessionId: string | null, mode: SessionTabMode = "preview"): SessionTabView {
   if (!snapshot) return { ...state, active: null };
   const valid = reconcileSessionTabs(state, snapshot);
-  if (state.active?.sessionId === sessionId && !resolveSessionTab(snapshot, state.active)) return { ...valid, active: null };
+  const scope = draftTabOf(snapshot, projectId);
+  if (state.active?.sessionId === sessionId && !resolveSessionTab(snapshot, state.active)) return { ...valid, active: null, scope };
   const selected = selectedTab(snapshot, projectId, sessionId);
-  return selected ? openSessionTab(valid, selected) : { ...valid, active: null };
+  return { ...(selected ? openSessionTab(valid, selected, mode) : { ...valid, active: null }), scope };
 }
 
 export function createSessionTabModel() {
@@ -44,12 +57,21 @@ const noFiles = emptyFileTabs();
 // the right. A terminal opens under it: in the pane that already holds one, or in a new pane at the bottom, a
 // third of the height. From there each is a tab like any other and can be moved or closed. The pane of the
 // terminals stays theirs: what is opened while the keyboard is in a terminal opens in a pane of the sessions.
-export function reconcileSessionTabModel(model: Model, state: SessionTabs, label: (tab: SessionTab | null) => string, files: FileTabs = noFiles,
-  fileLabel: (file: FileTab) => string = file => file.view) {
+//
+// One tab is transient: the session that is looked at, or the new-session prompt of the selected scope. What becomes
+// the transient tab takes the place of the one that leaves, in its pane and at its position, as the preview tab of a
+// code editor does; so does the prompt that is given a tab of its own. Nodes say whether they are transient in their
+// `config`, which is how the one that leaves is found.
+export function reconcileSessionTabModel(model: Model, state: SessionTabView, label: (tab: SessionTab | null) => string, files: FileTabs = noFiles,
+  fileLabel: (file: FileTab) => string = file => file.view, draftLabel: (draft: DraftTab) => string = () => label(null)) {
   const open = state.open.slice(0, sessionTabLimit);
   const openFiles = files.open.slice(0, fileTabLimit);
-  const ids = new Set([...open.map(sessionNodeId), ...openFiles.map(fileNodeId)]);
-  if (!state.active) ids.add(sessionDraftNodeId);
+  const drafts = (state.drafts ?? []).slice(0, draftTabLimit);
+  const ids = new Set([...open.map(sessionNodeId), ...openFiles.map(fileNodeId), ...drafts.map(draftNodeId)]);
+  const shownDraft = shownDraftNodeId(state);
+  // The transient prompt: no session is shown, and the prompt of the scope has no tab of its own.
+  const transientDraft = !state.active && shownDraft === sessionDraftNodeId;
+  if (transientDraft) ids.add(sessionDraftNodeId);
   const existing: TabNode[] = [];
   model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });
   const changeIds = new Set(openFiles.filter(isChangesTab).map(fileNodeId));
@@ -63,12 +85,35 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
     model.visitNodes(node => { if (node instanceof TabSetNode && !terminalsOnly(node)) other ??= node.getId(); });
     return other ?? active?.getId() ?? panelId;
   };
+  // Where the transient tab that leaves is: what takes its place is added there, once.
+  let left = existing.find(node => !ids.has(node.getId()) && node.getConfig()?.preview === true);
+  const place = () => {
+    const pane = left?.getParent();
+    const at = pane instanceof TabSetNode ? { pane: pane.getId(), index: pane.getChildren().indexOf(left!) } : { pane: home(), index: -1 };
+    left = undefined;
+    return at;
+  };
   for (const tab of open) {
     const id = sessionNodeId(tab);
     const name = label(tab);
+    const preview = isPreviewTab(state, tab);
     const node = model.getNodeById(id);
-    if (!node) model.doAction(Actions.addTab({ type: "tab", id, name, component: "session" }, home(), DockLocation.CENTER, -1, false));
-    else if (node instanceof TabNode && node.getName() !== name) model.doAction(Actions.renameTab(id, name));
+    if (!node) {
+      const at = preview ? place() : { pane: home(), index: -1 };
+      model.doAction(Actions.addTab({ type: "tab", id, name, component: "session", config: { preview } }, at.pane, DockLocation.CENTER, at.index, false));
+    } else if (node instanceof TabNode) {
+      if (node.getName() !== name) model.doAction(Actions.renameTab(id, name));
+      if ((node.getConfig()?.preview === true) !== preview) model.doAction(Actions.updateNodeAttributes(id, { config: { preview } }));
+    }
+  }
+  for (const draft of drafts) {
+    const id = draftNodeId(draft);
+    const name = draftLabel(draft);
+    const node = model.getNodeById(id);
+    if (node instanceof TabNode) { if (node.getName() !== name) model.doAction(Actions.renameTab(id, name)); continue; }
+    // The prompt that was in the transient tab keeps its place when it is given a tab of its own.
+    const at = !state.active && id === shownDraft ? place() : { pane: home(), index: -1 };
+    model.doAction(Actions.addTab({ type: "tab", id, name, component: "new-session", config: { preview: false } }, at.pane, DockLocation.CENTER, at.index, false));
   }
   for (const file of openFiles) {
     const id = fileNodeId(file);
@@ -94,14 +139,17 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
       model.doAction(Actions.adjustWeights(row.getId(), row.getChildren().map(child => child === pane ? 34 : 66)));
     }
   }
-  if (!state.active) {
+  if (transientDraft) {
     const name = label(null);
+    const closable = open.length + drafts.length > 0;
     const draft = model.getNodeById(sessionDraftNodeId);
-    if (!draft) model.doAction(Actions.addTab({ type: "tab", id: sessionDraftNodeId, name, component: "new-session",
-      enableDrag: false, enableClose: open.length > 0 }, home(), DockLocation.CENTER, -1, true));
-    else if (draft instanceof TabNode) {
+    if (!draft) {
+      const at = place();
+      model.doAction(Actions.addTab({ type: "tab", id: sessionDraftNodeId, name, component: "new-session", config: { preview: true },
+        enableDrag: false, enableClose: closable }, at.pane, DockLocation.CENTER, at.index, true));
+    } else if (draft instanceof TabNode) {
       if (draft.getName() !== name) model.doAction(Actions.renameTab(sessionDraftNodeId, name));
-      if (draft.isEnableClose() !== (open.length > 0)) model.doAction(Actions.updateNodeAttributes(sessionDraftNodeId, { enableClose: open.length > 0 }));
+      if (draft.isEnableClose() !== closable) model.doAction(Actions.updateNodeAttributes(sessionDraftNodeId, { enableClose: closable }));
     }
   }
   // Add the replacement before removing the last tab of a tabset: FlexLayout may
@@ -110,7 +158,7 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabs, label
     if (!ids.has(node.getId())) model.doAction(Actions.deleteTab(node.getId()));
   }
   const activeFile = files.active && openFiles.find(file => fileNodeId(file) === fileNodeId(files.active!));
-  const active = activeFile ? fileNodeId(activeFile) : state.active ? sessionNodeId(state.active) : sessionDraftNodeId;
+  const active = activeFile ? fileNodeId(activeFile) : state.active ? sessionNodeId(state.active) : shownDraft;
   const node = ids.has(active) ? model.getNodeById(active) : undefined;
   if (node instanceof TabNode && !node.isSelected()) model.doAction(Actions.selectTab(node.getId()));
   if (node instanceof TabNode && node.getParent() && model.getActiveTabset() !== node.getParent())
@@ -125,6 +173,15 @@ export function sessionTabAction(action: Action, state: SessionTabs, snapshot: W
   const matches = state.open.slice(0, sessionTabLimit).filter(tab => sessionNodeId(tab) === id);
   if (matches.length !== 1 || !resolveSessionTab(snapshot, matches[0])) return null;
   return { kind: action.type === Actions.SELECT_TAB ? "select" : "close", tab: matches[0] };
+}
+
+/** What an action of the dock asks of the new-session prompt of a scope that has a tab of its own. */
+export type DraftTabIntent = { kind: "select" | "close"; draft: DraftTab };
+export function draftTabAction(action: Action, state: SessionTabs, snapshot: WorkspaceSnapshot | undefined, current: () => boolean): DraftTabIntent | null {
+  if (!current() || !snapshot || (action.type !== Actions.SELECT_TAB && action.type !== Actions.DELETE_TAB)) return null;
+  const id = action.type === Actions.SELECT_TAB ? action.data.tabNode : action.data.node;
+  const matches = (state.drafts ?? []).slice(0, draftTabLimit).filter(draft => draftNodeId(draft) === id);
+  return matches.length === 1 && resolveDraftTab(snapshot, matches[0]) ? { kind: action.type === Actions.SELECT_TAB ? "select" : "close", draft: matches[0] } : null;
 }
 
 export type FileTabIntent = { kind: "select" | "close"; file: FileTab };
@@ -154,9 +211,11 @@ export function sessionLayoutActionAllowed(model: Model, action: Action, state: 
   if (!current() || !snapshot) return false;
   const valid = (node: TabNode) => node.getId() === sessionDraftNodeId && !state.active
     || !!fileTabAction(Actions.selectTab(node.getId()), files, current)
+    || !!draftTabAction(Actions.selectTab(node.getId()), state, snapshot, current)
     || !!sessionTabAction(Actions.selectTab(node.getId()), state, snapshot, current);
   if (action.type === Actions.SELECT_TAB) return action.data.tabNode === sessionDraftNodeId && !state.active
-    || !!fileTabAction(action, files, current) || !!sessionTabAction(action, state, snapshot, current);
+    || !!fileTabAction(action, files, current) || !!draftTabAction(action, state, snapshot, current)
+    || !!sessionTabAction(action, state, snapshot, current);
   if (action.type === Actions.ADJUST_WEIGHTS) return model.getNodeById(action.data.nodeId) instanceof RowNode;
   if (action.type === Actions.SET_ACTIVE_TABSET) {
     const node = model.getNodeById(action.data.tabsetNode);

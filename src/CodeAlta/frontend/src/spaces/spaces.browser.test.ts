@@ -159,6 +159,29 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await wait("!!document.querySelector('.project-editor')"), true);
     };
 
+    await t.test("Add projects in an empty space opens the folder picker, not Organize spaces", async () => {
+      await resetWork();
+      await evaluate("localStorage.setItem('settingsFixtureEmptySpace','true')");
+      await command("Page.reload");
+      assert.equal(await wait("!!document.querySelector('.space-empty button')"), true);
+      assert.equal(await shown(), "Work");
+
+      // Canceling the native picker leaves the empty space in place and opens no application dialog.
+      await evaluate("projectFocusFixture.pick={status:'canceled',path:null};document.querySelector('.space-empty button').click()");
+      assert.equal(await wait("projectFocusFixture.picks.length===1"), true);
+      assert.deepEqual(await evaluate("projectFocusFixture.picks[0]"), { title: "Add a project folder", initialDirectory: null });
+      assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+      assert.equal(await shown(), "Work");
+
+      // An existing project joins the shown space through the same path as the header's plus action.
+      await evaluate("projectFocusFixture.pick={status:'ok',path:'/fixture/other'};document.querySelector('.space-empty button').click()");
+      assert.equal(await wait("!document.querySelector('.space-empty') && !!document.querySelector('#project-list button[data-scope=other]')"), true);
+      assert.deepEqual(await evaluate("spacesFixture.assigned.at(-1)"), { expectedEpoch: "12345678-1234-1234-1234-123456789abc", projectId: "other", join: ["work"], leave: [] });
+      assert.equal(await shown(), "Work");
+      assert.equal(await evaluate("!!document.querySelector('dialog[open]')"), false);
+      assert.deepEqual(exceptions, []);
+    });
+
     await t.test("Show keeps a tab opened after the toast and does not restore a tab closed after it", async () => {
       await resetWork();
       await openSession("other-session");

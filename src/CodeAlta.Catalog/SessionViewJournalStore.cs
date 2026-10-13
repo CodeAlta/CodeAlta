@@ -80,6 +80,12 @@ public sealed partial class SessionViewJournalStore
     internal IAgentSessionProjectionCache ProjectionCache => _sessionCache;
 
     /// <summary>
+    /// Gets the application database that holds the list of sessions of this store: the one it was given, or the one
+    /// it opened for its state root.
+    /// </summary>
+    public IApplicationDatabase ApplicationDatabase => _sessionCache.Database;
+
+    /// <summary>
     /// Ensures a missing or empty session journal starts with a CodeAlta session header.
     /// </summary>
     /// <param name="session">Session descriptor.</param>

@@ -809,6 +809,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (!string.IsNullOrWhiteSpace(session.SessionId))
         {
             deleted = await _agentSessionCatalog.DeleteSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+            if (deleted) NotifySessionDeleted(session.SessionId);
         }
 
         session.Status = SessionViewStatus.Archived;
@@ -1360,7 +1361,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var agentPromptUsage = ResolveAgentPromptUsage(instructions.PromptBundle, project?.ProjectPath);
         var providerProviderId = new ModelProviderId(options.ProviderId.Value);
         var developerInstructions = instructions.DeveloperInstructions;
-        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), options.AdditionalDeveloperInstructions);
+        // A session moved to another project is told so once, by the first attachment after the move.
+        var movedNotice = TakeMovedNotice(session.SessionId);
+        var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), movedNotice),
+            options.AdditionalDeveloperInstructions);
         var tools = options.Tools;
 
         AgentSessionHandleId sessionHandleId;

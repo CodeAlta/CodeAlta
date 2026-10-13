@@ -868,7 +868,12 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         await _journalFile.ReplaceWithSnapshotsAsync(path, original.Revision, header, snapshots, token).ConfigureAwait(false);
     }
 
-    internal async Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, CancellationToken cancellationToken)
+    internal Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, CancellationToken cancellationToken)
+        => ReadTransferSnapshotAsync(sessionId, requireState: true, cancellationToken);
+
+    // A session that never ran has no provider state: a move takes it as one with nothing to continue, a provider
+    // transfer does not.
+    internal async Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, bool requireState, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         cancellationToken.ThrowIfCancellationRequested();
@@ -884,6 +889,9 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
                 throw new InvalidOperationException("The journal changed during transfer preparation.");
             var summary = projection.Summary;
             var state = projection.State;
+            if (!requireState && summary is not null && state is null)
+                state = new AgentSessionState { SessionId = summary.SessionId, ProviderKey = summary.ProviderKey,
+                    ProtocolFamily = summary.ProtocolFamily, UpdatedAt = summary.UpdatedAt };
             if (summary is null || state is null || summary.SessionId != sessionId || state.SessionId != sessionId
                 || !string.Equals(summary.ProviderKey, state.ProviderKey, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(summary.ProtocolFamily, state.ProtocolFamily, StringComparison.OrdinalIgnoreCase))

@@ -226,6 +226,8 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Context usage | `Ctrl+G Ctrl+U` |
 | Session info | `Ctrl+G Ctrl+T` |
 | Reminders | `Ctrl+G Ctrl+D` or `/reminder` |
+| Open the bookmarks (desktop) | `Ctrl+G Ctrl+F` or `/bookmarks` |
+| Previous / next bookmarked message (desktop) | `Shift+F3` / `Shift+F4` |
 | Send when idle / enqueue while busy | `Enter` |
 | Send now (steer while busy) | `Cmd+Enter` on macOS (Desktop); `Ctrl+Enter` on Windows/Linux (Desktop) or in TUI |
 | Abort the running turn | `F8` or `/abort` |

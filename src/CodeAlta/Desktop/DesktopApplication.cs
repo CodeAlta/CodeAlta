@@ -235,6 +235,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         SessionAsksService? asks = null;
         ReminderService? reminders = null;
         DesktopSessionRetention? retention = null;
+        DesktopBookmarks? bookmarkLife = null;
         Automations.AutomationService? automations = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
@@ -401,6 +402,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await workspacePrepared.Task;
                 if (mcp is not null) await mcp.DisposeAsync(); // No client starts a command on a host that is closing.
                 if (retention is not null) await retention.DisposeAsync(); // Join original archive/retirement work before releasing its owners.
+                bookmarkLife?.Dispose();
                 if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
                 if (automations is not null) await automations.DisposeAsync(); // Nothing more is started; sessions end with the host.
                 if (terminals is not null) await terminals.CloseAsync(); // The programs of the terminals end with the application.
@@ -558,6 +560,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
+                // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
+                // retention of sessions, which deletes nothing before the bookmarks were read.
+                var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
+                    new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore()));
+                bookmarkLife = new DesktopBookmarks(bookmarks, host.RetentionProtection, host.RuntimeService);
                 retention = new DesktopSessionRetention(host, epoch);
                 // The git worktrees sessions can work in: created with a session, listed and removed from the changes of a project.
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
@@ -609,7 +616,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
-                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView);
+                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks);
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
@@ -682,6 +689,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }, epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
+                    builder.AddBookmarksService(new BookmarksService(bookmarks,
+                        BookmarksService.Sessions(host.WorkspaceReads, host.SessionViewCatalog.JournalStore), epoch, host.RetentionProtection));
                     // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
                     // repository of a project, and plugins such as Jira for trackers that are elsewhere.
                     var pluginRuntime = host.PluginRuntime;
@@ -913,6 +922,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddWorkItemsService(new WorkItemsService());
+            builder.AddBookmarksService(new BookmarksService());
             builder.AddSessionRetentionProtectionService(new SessionRetentionProtectionService());
             builder.AddIssuesService(new IssuesService());
             builder.AddPullRequestPromptsService(new PullRequestPromptsService());

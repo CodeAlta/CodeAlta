@@ -185,6 +185,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreatePlanCommand(context.Invocation);
         }
 
+        // The bookmarks of sessions and of their messages, in a host that keeps them.
+        if (context.Invocation.Services.Get<CodeAlta.Catalog.Bookmarks.BookmarkService>() is not null)
+        {
+            yield return CreateBookmarkCommand(context.Invocation);
+        }
+
         // How the window looks: only a host with a window has the commands.
         if (context.Invocation.Services.Get<IAltaAppearance>() is not null)
         {
@@ -214,17 +220,19 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var automations = context.Services.Get<IAltaAutomations>() is not null;
         var workshop = context.Services.Get<AltaPluginWorkshop>();
         var workItems = context.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null;
+        var bookmarks = context.Services.Get<CodeAlta.Catalog.Bookmarks.BookmarkService>() is not null;
         var issues = context.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null;
         var appearance = context.Services.Get<IAltaAppearance>() is not null;
         var spaces = context.Services.Get<SpaceCatalog>() is not null;
         var canvases = context.Services.Get<IAltaCanvasView>() is not null;
         var documentation = context.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !issues && !appearance && !spaces && !canvases && !documentation && workshop is null) return Policies;
+        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !issues && !appearance && !spaces && !canvases && !documentation && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
         if (appearance) policies.AddRange(AppearancePolicies);
         if (workItems) policies.AddRange(WorkItemPolicies);
+        if (bookmarks) policies.AddRange(BookmarkPolicies);
         if (issues) policies.AddRange(IssuePolicies);
         if (workshop is not null) policies.AddRange(PluginWorkshopPolicies);
         if (workshop?.OpenEditor is not null) policies.Add(PluginOpenPolicy);

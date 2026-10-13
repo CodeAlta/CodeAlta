@@ -104,6 +104,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `issue` | List and read the issues and the pull requests of a project, from the trackers of its plugins (GitHub, GitLab, Azure DevOps, Bitbucket, Jira). `issues` is the same command. |
 | `jira` | Set up the Jira of a project and change its issues: status, login, create, comment, transition, assign (a plugin root). |
 | `plan` | List and show the plans of a project, set the status of one, remove one. |
+| `bookmark` | List and show the bookmarks of sessions and of their messages, add one, name one, remove one. |
 | `ui` | Give the calling session the tools that see and drive the window, or take them back. Only in CodeAlta Desktop (a plugin root, see below). |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
@@ -915,6 +916,64 @@ alta plan remove <plan-id> [--project <project>]
   updates that copy.
 - The ids are the names of the files without `.md`. Records are `alta.task`, `alta.task.created`,
   `alta.task.changed`, `alta.plan`, `alta.plan.changed` and `alta.plan.removed`.
+
+The list and show commands are read-only; the others are mutating.
+
+## Bookmark commands
+
+`alta bookmark` uses the bookmarks of the instance: the sessions, and the messages of sessions (a
+prompt of the user or a message of the assistant), that the user or an agent marked to find them
+again. They are registered when the host has a `BookmarkService` (CodeAlta Desktop, which shows
+them in its Bookmarks tab, and CodeAlta TUI). `BookmarkService` (`CodeAlta.Catalog/Bookmarks`) keeps
+them in the application database of the instance (`doc/catalog-and-config.md`), so the developer
+instance has its own.
+
+```text
+alta bookmark list [--session <session-id> | --project <project> | --all] [--limit <n>]
+alta bookmark show <bookmark-id>
+alta bookmark add [--session <session-id>] [--turn <number|run-id> [--role user|assistant] | --offset <n>] [--label <text>]
+alta bookmark rename <bookmark-id> --label <text>
+alta bookmark remove <bookmark-id>
+```
+
+- `list` returns the newest first, 50 unless `--limit` says otherwise: the bookmarks of the project
+  of the calling session, and all of them for a caller of no project or with `--all`. Each
+  `alta.bookmark` record has `id`, `kind` (`session` or `message`), `sessionId`, `sessionTitle`,
+  `sessionMissing`, `projectId` and `project` (the slug), and for a message `role`, `excerpt` (its
+  beginning on one line, 280 characters at most), `runId`, `contentId`, `offset` and `messageAt`;
+  `label` is the name the user gave it, `createdBy` the session whose agent added it. The title and
+  the project are those of the session as it is now, and the ones kept with the bookmark once the
+  session is gone. `alta.bookmark.summary` follows, with `truncated`.
+- `show` adds the text of the message, read from the journal of its session (16 384 characters at
+  most, `truncated` beyond), `status` (`ok`, `session_missing` or `gone`) and `found`.
+- `add` bookmarks the calling session, or the one `--session` names. The session commands print no
+  journal offset: a message is named by its turn, as `alta session turns` lists it. `--turn 3`
+  bookmarks the prompt of the third turn, `--turn 3 --role assistant` the last message of the
+  assistant in that turn, and the turn can be its `runId`. `--offset` takes the byte offset of a
+  record of the journal, for a caller that has one (the `offset` of a bookmark). What is not a
+  completed message of the user or of the assistant is refused with `bookmark.notBookmarkable`.
+  Adding what is bookmarked already answers with the bookmark there is and `created` false. Beyond
+  2 000 bookmarks the answer is `bookmark.limit`.
+- `rename` gives the bookmark a name of at most 200 characters on one line; an empty `--label`
+  removes it. `remove` deletes the bookmark, never the session.
+- Records are `alta.bookmark`, `alta.bookmark.added`, `alta.bookmark.changed` and
+  `alta.bookmark.removed`.
+
+**What names a message.** A bookmark of a message keeps the session, the run and the content
+identifier of the message, with its kind: that is its identity. The byte offset of its record is
+kept too, as where to look first, because it moves: a change of provider on an idle session and a
+rewind replace the first line of the journal, and every later record with it. `show` (and the
+`bookmarks.resolve` request of the page) read the record at the offset that is kept and compare the
+identifiers; when they differ, the turn of the run is found (`FileSystemAgentSessionStore.ReadTurnsAsync`)
+and its messages are looked at (`FindContentRecordAsync`), and the offset that is found is kept. A
+message whose turn a rewind removed is `gone`; the bookmark stays until the user removes it.
+
+**Sessions that go away.** A bookmark whose session no longer exists is listed with
+`sessionMissing`: nothing removes it by itself. When a session is deleted on purpose
+(`SessionRuntimeService.SessionDeleted`, raised by the deletion of the window and by the one of the
+terminal UI), its bookmarks are removed with it. In CodeAlta Desktop a bookmarked session, or a
+session that holds a bookmarked message, is not removed by the automatic cleanup of old sessions
+(`doc/session-retention-runtime.md`).
 
 The list and show commands are read-only; the others are mutating.
 

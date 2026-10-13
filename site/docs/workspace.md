@@ -38,9 +38,12 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or 
 
 - **Chats**, at the top, are the sessions that belong to no project.
 - Click the arrow of a project to show or hide its sessions. Several projects can stay open, and CodeAlta shows them the same way at the next start. **Collapse all** at the top closes them all.
+- Click a project to select it and write the prompt of a new session in it. This does not show or hide its sessions: its arrow does.
+- Click a session to look at it, and double-click it to keep its tab (see [Tabs you look at and tabs you keep](#tabs-you-look-at-and-tabs-you-keep)).
 - Point at a project to see its buttons. The star adds it to **Favorites**, at the top of the list. The next two open its [changes](#changes-desktop) and its [code editor](#code-editor), and stay visible while that tab is open. The last one opens a [terminal](#terminal-desktop).
 - The `…` button of a project or a session, or a right-click, opens its menu.
 - **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session.
+- **Move to project…** in the menu of a session, `/move_to_project` in the search, or dragging its row onto another project, moves the session to that project. See [Move a session to another project](sessions.md#move-a-session-to-another-project).
 - **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.
 - A session that has [sub-agents](sessions.md#sub-agents) lists them under it, and has an arrow of its own to show or hide them.
 - A session with a bolt was started by an [automation](automations.md).
@@ -62,6 +65,36 @@ Type a few words and press `Enter` to open what is selected. `Tab` switches betw
 {{ alta_shot "alta-desktop-search.webp" "alta-command-palette.png" "Search listing sessions, projects and files that match, or the command palette of the TUI" "One search for sessions, projects, files and commands in the desktop app. The TUI has a command palette." }}
 
 **Search sessions…** in the menu of a project searches the sessions of that project only.
+
+### Tabs you look at and tabs you keep
+
+In the desktop app, going through your sessions does not open a tab for each of them. A session you click in the sidebar opens in one tab whose title is in *italics*: the next session you click takes its place.
+
+{.table}
+| To | Do this |
+|---|---|
+| Look at a session | Click it. It opens in the tab with the italic title. |
+| Keep a session open | Double-click it in the sidebar, or double-click the title of its tab. Typing in its prompt keeps it too. |
+| Start a new session in a project | Click the project: its new-session prompt takes the tab with the italic title. |
+| Keep the prompt of a new session open | Double-click the project, or the title of that tab. Several projects can each keep theirs. |
+
+A session you create is kept from the start. Closing a tab never deletes a session.
+
+### Close several tabs at once
+
+Right-click a tab to open its menu:
+
+{.table}
+| Command | What it closes |
+|---|---|
+| **Close** | This tab. |
+| **Close others** | Every other tab of the same pane. |
+| **Close to the right** | The tabs after this one in the same pane. |
+| **Close all** | Every tab of the pane. |
+
+The menu of a tab with an italic title also has **Keep open**. The menu of a pane (`…`, at the end of its tabs) has **Close others** and **Close all**, counted from the tab in front.
+
+A code editor with unsaved changes stays open and asks what to do with them. **Reopen closed tab** in the menu of a pane, or `Ctrl+Shift+T`, brings the closed tabs back one at a time.
 
 ### Split panes (desktop)
 
@@ -177,7 +210,7 @@ An agent can change the width of its own session when you ask it to, for example
 
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
-In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
+In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. The model list has a search box: type a part of a name or of an id, move with the arrow keys and press `Enter`. It shows ten models at a time and scrolls for the others; **Settings > Models** changes that number. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
 
 <figure class="alta-figure my-4" style="max-width: 38rem;">
   <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
@@ -241,6 +274,9 @@ While it is on:
   (another model, effort or agent prompt for a send); the link on claude.ai normally stays the same. Closing
   CodeAlta ends it. If Claude Code stops by itself, the button turns red: the session is connected again with
   the next prompt you send here, or with **Try again** in its popover.
+- CodeAlta does not archive the session on claude.ai, so a page open there keeps working when Claude Code
+  starts again. After you turn Remote Control off, close CodeAlta or delete the session, it stays in your
+  claude.ai list as offline: archive it there when you no longer need it.
 
 Remote Control needs Claude Code signed in with your claude.ai account: it does not work with an API key.
 When CodeAlta starts again, Remote Control is off unless you turned on **Turn Remote Control back on when
@@ -525,7 +561,7 @@ Under **Automatic cleanup**, **Clear scratchpad on startup** is on by default. *
 sessions** is set to **After 3 months** by default. Enter a positive whole number or use the increment/decrement
 buttons or arrow keys, then choose days, weeks, months or years. Valid changes save on leaving
 the field, pressing Enter, stepping or choosing a unit; incomplete and invalid entries do not save.
-Choose **Never** to disable session retention without forgetting the saved duration.
+Choose **Never** to disable session retention without forgetting the saved duration. A session that has a [bookmark]({{site.basepath}}/docs/bookmarks/) is kept.
 
 Automatic session cleanup runs once at startup on supported local Windows storage, after open
 sessions and drafts have been restored and protected. Incomplete restoration or unsupported storage

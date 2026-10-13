@@ -18,6 +18,8 @@ import { useToolOutput, type ToolOutputs } from "./toolOutput";
 import { modalDialogOpen } from "./modalDialogs";
 import { SessionTabMenu } from "./SessionTabMenu";
 import { canBranchFrom, type BranchMode } from "./sessionBranch/branchPoints";
+import { canBookmark } from "./bookmarks/bookmarks";
+import { useRowBookmark } from "./bookmarks/timelineBookmarks";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -84,6 +86,10 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   // A prompt the user wrote, kept in the journal, is where a session can be forked from or rewound to. Both
   // open a window that says what they do: neither acts at once.
   const branch = onBranch && canBranchFrom(item) ? (mode: BranchMode) => { if (!modalDialogOpen() && (canInspect?.() ?? true)) onBranch(item.key, mode); } : null;
+  // A message the journal holds whole can be bookmarked where the timeline keeps bookmarks: the row follows its own mark.
+  const bookmarkable = canBookmark(item);
+  const { marks, bookmarkId } = useRowBookmark(bookmarkable ? item.key : null);
+  const bookmark = marks && bookmarkable ? () => { if (!modalDialogOpen() && (canInspect?.() ?? true)) marks.toggle(item.key); } : null;
   const article = useRef<HTMLElement>(null);
   const [branchMenu, setBranchMenu] = useState<{ x: number; y: number } | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -183,6 +189,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   }
   return <article ref={article} className={`message timeline-message message-${job ? "job" : item.category}${compact ? " timeline-compact" : ""}`}
     data-prompt-offset={item.category === "user" && /^\d+$/u.test(item.key) ? item.key : undefined}
+    // The offset of a message the journal holds, by which the timeline goes to it; and whether it is bookmarked.
+    data-row-offset={bookmarkable ? item.key : undefined} data-bookmarked={bookmarkId ? "true" : undefined}
     // The menu of the prompt, unless text is selected or the press is on a link or a field: those keep the menu of the system.
     onContextMenu={branch ? event => {
       if (event.defaultPrevented || window.getSelection()?.toString() || (event.target as HTMLElement).closest("a, input, textarea, dialog, .session-tab-popup")) return;
@@ -221,6 +229,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
             onClick={() => branch("rewind")}><AppIcon name="rewind" size={15} /></button>}
           {item.copyMarkdown && <button type="button" className={`copy-markdown copy-${copyState}`} onClick={() => void copy()}
             aria-label={copyLabel} title={copyLabel}><AppIcon name={copyState === "copied" ? "checked" : copyState === "failed" ? "error" : "copy"} size={15} /><span className="sr-only" aria-live="polite">{copyState === "idle" ? "" : copyLabel}</span></button>}
+          {/* The last of the actions: it stays drawn on a bookmarked message, beside the time. */}
+          {bookmark && <button type="button" className="bookmark-message" aria-pressed={!!bookmarkId} aria-label={t(bookmarkId ? "Remove bookmark" : "Bookmark this message")}
+            title={t(bookmarkId ? "Remove bookmark" : "Bookmark this message")} onClick={bookmark}><AppIcon name="bookmark" size={15} /></button>}
           <time title={timestamp.title} dateTime={timestamp.dateTime}>{timestamp.label}</time>
         </span>
       </div>
