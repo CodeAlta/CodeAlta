@@ -34,6 +34,8 @@ export type SpeechDependencies = Readonly<{
   silenceAfter?: number;
   /** How long a dictation may hear nothing at all before a notice says so; eight seconds by default. */
   warnAfter?: number;
+  /** How long a send waits for the last words of a dictation; ten seconds by default. */
+  sendWait?: number;
 }>;
 
 // One dictation, from the click that starts it until the host has given its last word. It outlives its place
@@ -54,6 +56,8 @@ type Running = {
   loudest: number; silence: ReturnType<typeof setTimeout> | undefined;
   /** The whole text it wrote: what decides whether there is enough to send. */
   text: string;
+  /** A send of its composer waits for its last words: told when it has ended. */
+  settled?: { readonly ended: Promise<void>; readonly resolve: () => void };
 };
 
 // A microphone that is open for its level only.
@@ -65,7 +69,7 @@ const pageStorage = { read: () => localStorage.getItem(microphoneStorageKey), wr
  * Speech to prompt of one window: what the host tells of the models and of a download, the microphone the
  * user chose, and the one dictation. It is made once by the window and given to the composers through `SpeechContext`.
  */
-export function createSpeech({ api, microphones, notify, preferences = pageStorage, silenceAfter = silenceDelay, warnAfter = dictationSilenceDelay }: SpeechDependencies) {
+export function createSpeech({ api, microphones, notify, preferences = pageStorage, silenceAfter = silenceDelay, warnAfter = dictationSilenceDelay, sendWait = 10_000 }: SpeechDependencies) {
   const store = createSpeechStore();
   store.update(state => ({ ...state, microphone: readMicrophone(preferences.read) }));
   const levels = new Set<(level: number, owner: string | null) => void>();
@@ -154,6 +158,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     if (running.ended) return;
     running.ended = true;
     live.delete(running);
+    running.settled?.resolve();
     clearTimeout(running.silence);
     running.capture?.stop(); running.capture = null;
     running.listening.abort();
@@ -190,7 +195,8 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
       if (reply.status === "failed") tell(running, reply.error);
       whole = reply.status === "ok";
     } catch { /* The host is gone: what was heard is what was written. */ }
-    const send = whole && !running.abandoned && sendsOnStop(store.getState().listing?.send, reason, running.text);
+    // A send that waits for these words is the composer's own: it is not sent a second time here.
+    const send = whole && !running.abandoned && !running.settled && sendsOnStop(store.getState().listing?.send, reason, running.text);
     end(running);
     // After the last words are in the prompt and the button is back: the composer sends as its Send button would.
     if (send) sink?.send?.();
@@ -365,6 +371,30 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
       }
       if (!store.getState().microphone.confirmed) { store.update(state => ({ ...state, asking: owner })); return; }
       void begin(owner, sink);
+    },
+    /**
+     * A send was asked of a composer. While it dictates, the dictation is stopped first and what this returns
+     * settles once its last words are in the prompt: the composer then sends what the prompt holds. It settles
+     * as well when the stop fails, and after ten seconds, from when nothing more is written. Null when the
+     * composer does not dictate: there is nothing to wait for.
+     */
+    finishForSend(owner: string): Promise<void> | null {
+      const running = [...live].find(candidate => candidate.owner === owner && !candidate.ended && !candidate.abandoned);
+      if (!running) return null;
+      if (!running.settled) {
+        let resolve = () => { };
+        running.settled = { ended: new Promise<void>(done => { resolve = done; }), resolve };
+      }
+      void finish(running, false, "send");
+      const settled = running.settled.ended;
+      return new Promise<void>(done => {
+        const late = setTimeout(() => {
+          // The host does not answer: the prompt goes as it is, and what comes after is not written into the next one.
+          if (!running.ended) { running.abandoned = true; running.sink?.interim(""); }
+          done();
+        }, sendWait);
+        void settled.then(() => { clearTimeout(late); done(); });
+      });
     },
     /** Stops the dictation of a composer and writes its last words, without sending anything: what Escape does. */
     stop(owner: string) { if (current?.owner === owner) void finish(current, false, "escape"); },

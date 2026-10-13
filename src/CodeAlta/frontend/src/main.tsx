@@ -3049,12 +3049,25 @@ function App() {
         onChange={next => change("reasoningEffort", next)} />} />;
   }
 
+  const draftSendWaits = useRef(false);
+  const createLatest = useRef<(fromDraft?: boolean) => Promise<void>>(async () => { });
+  createLatest.current = createSelectedSession;
   async function createSelectedSession(fromDraft = false) {
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
       || currentView.current !== "workspace" || modalDialogOpen() || !draftChoices.ready) return;
-    // What is sent is what the prompt holds: a dictation into it ends, and writes nothing after this.
-    speech.abandon(`draft:${draftScope}`);
+    // A send asked while the prompt is dictated waits for the last words: the dictation is stopped, they are written,
+    // and the session is then created with what the prompt holds.
+    if (fromDraft) {
+      const written = speech.finishForSend(`draft:${draftScope}`);
+      if (written) {
+        if (!draftSendWaits.current) {
+          draftSendWaits.current = true;
+          void written.then(() => { draftSendWaits.current = false; void createLatest.current(true); });
+        }
+        return;
+      }
+    }
     // The text as it is now, not as it was when App was last rendered.
     const typed = localDrafts.peek(draftScope) ?? localDraft;
     if (fromDraft && (!draftChoices.ready || sessionId !== null || (!typed.text.trim() && !localImages.images.length)

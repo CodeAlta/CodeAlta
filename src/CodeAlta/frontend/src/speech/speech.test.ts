@@ -25,11 +25,11 @@ after(() => { for (const leave of windows) leave(); });
 
 // A window whose user already said which microphone to use, unless `preference` says otherwise.
 async function window(options: Parameters<typeof createFixtureHost>[0] = { installed: ["parakeet-tdt-0.6b-v3"] },
-  more: { preference?: string | null; silenceAfter?: number; warnAfter?: number } = {}) {
+  more: { preference?: string | null; silenceAfter?: number; warnAfter?: number; sendWait?: number; idleAfter?: number } = {}) {
   const host = createFixtureHost(options), microphone = createFixtureMicrophone();
   const preferences = "preference" in more ? createFixturePreferences(more.preference) : createFixturePreferences();
   const notices: string[] = [], noticed: SpeechNotice[] = [];
-  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences, silenceAfter: more.silenceAfter, warnAfter: more.warnAfter,
+  const speech = createSpeech({ api: host.api, microphones: microphone.microphones, preferences, silenceAfter: more.silenceAfter, warnAfter: more.warnAfter, sendWait: more.sendWait,
     notify: notice => { notices.push(notice.message); noticed.push(notice); } });
   const disconnect = speech.connect(host.epoch);
   windows.push(disconnect);
@@ -681,4 +681,69 @@ test("in the mode that keeps the prompt nothing is sent, and a composer that doe
   speech.toggle("a", sink);
   await settle();
   assert.deepEqual(sent, ["Fix the parser and run the tests. Now it is sent."]);
+});
+
+test("a send asked while a composer dictates waits for the last words, in either mode, and is the composer's own send", async () => {
+  for (const send of ["manual", "on_stop"]) {
+    const { host, microphone, speech, status } = await window({ installed: ["parakeet-tdt-0.6b-v3"], send });
+    const { state, sent, sink } = sendingPrompt();
+    // Nothing is dictated: nothing to wait for.
+    assert.equal(speech.finishForSend("a"), null);
+    speech.toggle("a", sink);
+    await settle();
+    host.hear("Fix the parser.", "and run the");
+    await settle();
+    host.state.dictations[0].finalText = "Fix the parser. And run the tests.";
+    host.state.hold = true;
+    const written = speech.finishForSend("a");
+    assert.ok(written);
+    assert.deepEqual([status(), microphone.open(), state.text], ["finishing", false, "Fix the parser."]);
+    // A second send asked meanwhile waits for the same end, and another composer has nothing to wait for.
+    const again = speech.finishForSend("a");
+    assert.ok(again);
+    assert.equal(speech.finishForSend("b"), null);
+    let settled = 0;
+    void written.then(() => { settled++; });
+    void again.then(() => { settled++; });
+    await settle();
+    assert.equal(settled, 0);
+    host.state.hold = false; host.release();
+    await settle();
+    assert.deepEqual([settled, status(), state.text, host.state.stops.map(request => request.cancel)], [2, "idle", "Fix the parser. And run the tests.", [false]]);
+    assert.deepEqual(sent, [], `${send}: the composer sends, the dictation does not send a second time`);
+  }
+});
+
+test("a send does not wait for ever: it goes when the stop fails, and after the wait when the host does not answer", async () => {
+  const { host, speech, status } = await window(undefined, { sendWait: 250 });
+  const { state, sink } = prompt();
+  // The stop fails: what is in the prompt is sent.
+  speech.toggle("a", sink);
+  await settle();
+  host.hear("Heard before it failed.", "");
+  await settle();
+  host.state.stopReply = { status: "failed", text: "", error: "engine_failed" };
+  await speech.finishForSend("a");
+  assert.deepEqual([status(), state.text], ["idle", "Heard before it failed."]);
+  host.state.stopReply = null;
+  // The host does not answer: the send goes after the wait, and what comes later is not written into the next prompt.
+  speech.toggle("a", sink);
+  await settle();
+  host.state.dictations.at(-1)!.finalText = "Words that come too late.";
+  host.state.hold = true;
+  const started = Date.now();
+  await speech.finishForSend("a");
+  assert.ok(Date.now() - started >= 200, "it waited");
+  host.state.hold = false; host.release();
+  await settle();
+  assert.deepEqual([status(), state.text], ["idle", "Heard before it failed."]);
+  // A send asked while the dictation still starts ends it as soon as the host has answered.
+  host.state.hold = true;
+  speech.toggle("a", sink);
+  const early = speech.finishForSend("a");
+  assert.ok(early);
+  host.release(); await settle();
+  host.state.hold = false; host.release();
+  await early;
+  assert.equal(status(), "idle");
 });

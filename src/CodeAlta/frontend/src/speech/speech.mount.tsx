@@ -36,14 +36,23 @@ function Composer({ name, active, speech }: { name: string; active: boolean; spe
   const input = useRef<PromptInput>(null);
   const state = composers[name] ??= { text: "", changes: [], sent: [], setDisabled, setVisible };
   Object.assign(state, { text, setDisabled, setVisible });
+  // The send of the composer, as the session one does it: it sends the text of its state, and a send asked while it
+  // dictates waits for the last words, then sends what the prompt holds by then. One send waits at a time.
+  const send = () => { state.sent.push(text); setText(""); };
+  const latest = useRef(send); latest.current = send;
+  const waits = useRef(false);
+  const ask = () => {
+    const written = speech.finishForSend(name);
+    if (!written) { send(); return; }
+    if (!waits.current) { waits.current = true; void written.then(() => { waits.current = false; latest.current(); }); }
+  };
   return <div className="composer-region" data-composer={name} hidden={!visible}>
     <ComposerSurface status="Prompt ready" editor={{ id: active ? "session-prompt" : `session-prompt-${name}`, ref: input, label: "Message", value: text, disabled,
-      placeholder: "Ask CodeAlta to work on this project…", onChange: value => { state.changes.push(value); setText(value); } }}>
-      {/* A dictation that sends asks the composer, which sends the text it holds then: its state, as the session composer does. */}
-      <MicButton owner={name} input={input} disabled={disabled} visible={visible} id={active ? "dictate-prompt" : `dictate-prompt-${name}`}
-        onSend={() => { state.sent.push(text); setText(""); }} />
-      <Button intent="primary" icon={<AppIcon name="send" size={16} />} aria-label="Send" data-send={name}
-        onClick={() => { speech.abandon(name); state.sent.push(text); setText(""); }} />
+      placeholder: "Ask CodeAlta to work on this project…", onChange: value => { state.changes.push(value); setText(value); },
+      onKeyDown: event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); ask(); } } }}>
+      {/* A dictation that sends asks the composer, which sends the text it holds then. */}
+      <MicButton owner={name} input={input} disabled={disabled} visible={visible} id={active ? "dictate-prompt" : `dictate-prompt-${name}`} onSend={send} />
+      <Button intent="primary" icon={<AppIcon name="send" size={16} />} aria-label="Send" data-send={name} onClick={ask} />
     </ComposerSurface>
   </div>;
 }
@@ -54,7 +63,7 @@ function Fixture() {
   const [showComposers, setComposers] = useState(true);
   const [showSettings, setSettings] = useState(false);
   const [size, setSize] = useState({ width: 760, height: 620 });
-  const speech = useSpeechInstall(host.api, host.epoch, locale, { microphones: microphone.microphones, silenceAfter: 300, warnAfter });
+  const speech = useSpeechInstall(host.api, host.epoch, locale, { microphones: microphone.microphones, silenceAfter: 300, warnAfter, sendWait: 1_500 });
   fixture.renders++;
   Object.assign(fixture, { speech, setLocale, setComposers, setSettings, setSize });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>

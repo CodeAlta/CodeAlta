@@ -311,12 +311,40 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     assert.equal(await evaluate(`${text()}.includes('second')`), false);
     await shot("two-composers-dark");
 
-    // Sending ends the dictation: what was being said is not written into the prompt that left.
-    await evaluate(`${f}.host.state.dictations.at(-1).finalText = 'For the second. More that came late.'`);
+    // A send asked while it records finishes the sentence first: the last words are written, then the prompt is sent
+    // with them, once. A second send asked while it waits is the same send.
+    await evaluate(`${f}.host.state.hold = true; ${f}.host.state.dictations.at(-1).finalText = 'For the second. More that came late.'`);
     await evaluate("document.querySelector('[data-send=\"b\"]').click()");
-    await until(`${view("b")} === 'idle'`, "the dictation ended by the send");
-    assert.deepEqual(await evaluate(`[${f}.composers.b.sent, ${text("b")}, ${f}.host.state.stops.at(-1).cancel, ${f}.microphone.open()]`), [["For the second."], "", true, false]);
+    await until(`${view("b")} === 'finishing'`, "the dictation finishing for the send");
+    assert.deepEqual(await evaluate(`[${f}.composers.b.sent, ${f}.microphone.open()]`), [[], false], "nothing is sent before the last words, and the microphone is closed");
+    await evaluate("document.querySelector('[data-send=\"b\"]').click()");
+    await evaluate(`${f}.host.state.hold = false; ${f}.host.release()`);
+    await until(`${view("b")} === 'idle' && ${f}.composers.b.sent.length === 1`, "the prompt sent with its last words");
+    assert.deepEqual(await evaluate(`[${f}.composers.b.sent, ${text("b")}, ${f}.host.state.stops.at(-1).cancel]`), [["For the second. More that came late."], "", false]);
     await until(`${interim("b")} === '' && ${shown("b")} === ''`, "nothing left in the prompt that was sent");
+    // Enter does the same, from the prompt that is dictated.
+    await click('[data-composer="b"] .speech-button');
+    await until(`${view("b")} === 'recording'`, "the recording");
+    await evaluate(`${f}.microphone.speak(); ${f}.host.hear('Typed and', 'spoken'); ${f}.host.state.dictations.at(-1).finalText = 'Typed and spoken, then Enter.'`);
+    await until(`${text("b")} === 'Typed and'`, "the first words written");
+    await evaluate("document.querySelector('#session-prompt-b').focus()");
+    await until("document.activeElement?.closest('#session-prompt-b')", "the focus in the second prompt");
+    await key("Enter", 13);
+    await until(`${view("b")} === 'idle' && ${f}.composers.b.sent.length === 2`, "the prompt sent by Enter with its last words");
+    assert.deepEqual(await evaluate(`[${f}.composers.b.sent.at(-1), ${text("b")}, ${f}.host.state.stops.at(-1).cancel]`), ["Typed and spoken, then Enter.", "", false]);
+    // A host that does not answer the stop does not hold the send for ever: the prompt goes as it is.
+    await click('[data-composer="b"] .speech-button');
+    await until(`${view("b")} === 'recording'`, "the recording");
+    await evaluate(`${f}.host.hear('What is there.', ''); ${f}.host.state.dictations.at(-1).finalText = 'What is there. And what comes too late.'`);
+    await until(`${text("b")} === 'What is there.'`, "the words written");
+    await evaluate(`${f}.host.state.hold = true`);
+    await evaluate("document.querySelector('[data-send=\"b\"]').click()");
+    await until(`${f}.composers.b.sent.length === 3`, "the prompt sent after the wait");
+    assert.equal(await evaluate(`${f}.composers.b.sent.at(-1)`), "What is there.");
+    await evaluate(`${f}.host.state.hold = false; ${f}.host.release()`);
+    await until(`${view("b")} === 'idle'`, "the dictation ended");
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(await evaluate(`${text("b")}`), "", "what comes after the send is not written into the next prompt");
     // A prompt that takes no text, and a pane that is hidden.
     await click('[data-composer="b"] .speech-button');
     await until(`${view("b")} === 'recording'`, "the recording");

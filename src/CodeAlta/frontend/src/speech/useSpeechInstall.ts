@@ -18,7 +18,7 @@ const pace = 250;
  * a level, a percentage or a word renders the control that shows it.
  */
 export function useSpeechInstall(api: SpeechApi, epoch: string | null, locale: Locale,
-  options: Partial<Pick<SpeechDependencies, "microphones" | "preferences" | "silenceAfter" | "warnAfter">> = {}): Speech {
+  options: Partial<Omit<SpeechDependencies, "api" | "notify">> = {}): Speech {
   const language = useRef(locale); language.current = locale;
   const made = useRef<Speech | null>(null);
   const [speech] = useState(() => createSpeech({ api, microphones: systemMicrophones, ...options,

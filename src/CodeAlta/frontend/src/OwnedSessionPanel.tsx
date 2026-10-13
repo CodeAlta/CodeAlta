@@ -162,9 +162,24 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setDraft({ text: "", editGeneration: null });
   }
   const promptInput = useRef<PromptInput>(null);
-  // The dictation of the window, which this composer ends when its prompt leaves.
+  // The dictation of the window. A send asked while this composer dictates waits for the last words: the dictation
+  // is stopped, they are written in the prompt, and the send that was asked is then done by the composer as it is by
+  // then (the dictated text changed the prompt, and `inputRevision` with it).
   const speech = useContext(SpeechContext);
   const speechOwner = `session:${sessionId}`;
+  type SendActions = { submit: (queuePrompt?: boolean) => void; stagePrompt: (kind: "Queue" | "Steer") => boolean; steerFromComposer: () => void };
+  const sendActions = useRef<SendActions | null>(null);
+  const sendWaits = useRef(false);
+  function afterDictation(next: (actions: SendActions) => void): boolean {
+    const written = speech?.finishForSend(speechOwner);
+    if (!written) return false;
+    // One send at a time waits: a second one asked meanwhile is the same send.
+    if (!sendWaits.current) {
+      sendWaits.current = true;
+      void written.then(() => { sendWaits.current = false; if (sendActions.current) next(sendActions.current); });
+    }
+    return true;
+  }
   const referenceScope = useContext(ProjectReferenceContext);
   const [expanded, setExpanded] = useState(false);
   const [enqueue, setEnqueue] = useState(false);
@@ -461,7 +476,6 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
     if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
-    if (value === latestText.current) speech?.abandon(speechOwner);
     if (!queue.composer.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
     if (value === latestText.current) {
       inputRevision.current++; clearText();
@@ -581,8 +595,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   function submit(queuePrompt = enqueue) {
     if (!canAdmit()) return;
-    // What is sent is what the prompt holds: a dictation into it ends, and writes nothing after this.
-    speech?.abandon(speechOwner);
+    if (afterDictation(actions => actions.submit(queuePrompt))) return;
     const signal = scope.current?.signal;
     sendDiagnostics.info("composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
@@ -779,6 +792,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // An empty prompt steers with the first prompt of the queue, as the terminal UI does.
   function steerFromComposer() {
     if (pending || invalidEpoch) return;
+    if (afterDictation(actions => actions.steerFromComposer())) return;
     if (!latestText.current.trim() && !images.length) {
       const next = staged.find(item => item.kind === "Queue" && item.state === "waiting" && !queue.composer.isHeld(item));
       if (next && composerBusy) queue.composer.steerNow(next);
@@ -1003,6 +1017,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     }} />;
   stageLatest.current = stagePrompt;
   editLatest.current = editText;
+  sendActions.current = { submit, stagePrompt, steerFromComposer };
   return <>
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy}
@@ -1104,7 +1119,7 @@ ${value}` : value);
         aria-label={t("Steer the running turn")}
         title={t("Steer the running turn with this prompt")}>
         <AppIcon name="steer" size={16} /></Button>}
-      {composerBusy && <Button variant="minimal" onClick={() => stagePrompt("Queue")}
+      {composerBusy && <Button variant="minimal" onClick={() => { if (!afterDictation(actions => { actions.stagePrompt("Queue"); })) stagePrompt("Queue"); }}
         disabled={invalidEpoch || !!pending || !text.trim() && images.length === 0}
         aria-label={t("Enqueue for the next turn")}
         title={t("Enqueue this prompt for the next turn ({shortcut})", { shortcut: "Enter" })}>
