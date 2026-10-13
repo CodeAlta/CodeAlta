@@ -1358,6 +1358,55 @@ Where the data comes from:
   units, until the call ends. The page opens one channel per running call that a tile or a window shows
   and closes it with them. When the call ends, the window shows the output of its record.
 
+### System prompts
+
+The record of a system prompt has one thin row: **System prompt recorded** for the first prompt of a
+session, **System prompt changed** for a prompt that replaced another, then the agent prompt by its name,
+the size of the prompt in tokens (`11.2k tokens`) and, for a change, the lines it added and removed
+(`+12 −3`). A warning mark, with its reason as a tooltip, is shown only when the prompt was not sent to the
+provider or was adapted for it. The row holds no text of the prompt and has no **Details** or **Copy**
+button: a press anywhere on it, or `Enter` on its title, opens the window of the prompt, and the keyboard
+is back on the row when the window closes.
+
+The window is titled **System prompt** with its state (**Recorded** or **Changed**). Under the title, one
+line of facts: the agent prompt and the path of its file (with a copy button), the size in tokens (total,
+system message, developer instructions), the time, the first characters of the hash (its copy button
+copies the whole hash), and **Sent as written**, or a warning when the prompt was not sent or was adapted.
+The header is drawn at once from the row; the texts are read from the host, with a quiet **Loading…**
+meanwhile, and a read that fails says so in one line.
+
+- **Changes**, for a prompt that replaced another: the prompt before on the left and this one on the
+  right, as Markdown, in the diff editor of the Changes tab. Each side is the whole prompt, the system
+  message then the developer instructions, each under an underlined title. The header of the view has the
+  lines added and removed, the parts that changed, the position among the changes with **Previous change**
+  and **Next change** (`Alt+↑`, `Alt+↓`), **Side by side** or **Inline**, **Hide unchanged lines** and
+  **Wrap lines**. It is the view the window opens on.
+- **Prompt**: the system message and the developer instructions, one under the other, each under its title
+  with its size, rendered as Markdown (**Read**) or shown as their text (**Source**). The button at the
+  right copies the whole prompt as Markdown. The first prompt of a session has only this view, without
+  tabs.
+
+How the two views are shown (columns, wrapping, hidden lines, **Read** or **Source**) is kept for the next
+window (`codealta.desktop.system-prompt.look.v1`).
+
+Where the data comes from:
+
+- **The row.** The history entry of a prompt record has no text. It carries `prompt`
+  (`HistoryPromptSummary`): whether the prompt replaced one, its hash, the path of the agent prompt, the
+  token counts, whether it was applied and whether the mapping was lossy, and the lines added and removed
+  when the prompt it replaced is in the same page of history, where both texts are at hand. Otherwise the
+  row asks for the two numbers once it is shown (`toolCalls.readPrompt` with `part: "change"`), one row at
+  a time, and the page keeps the answers (up to 512).
+- **The record.** `toolCalls.readPrompt(expectedEpoch, sessionId, offset)` gives the record at the journal
+  offset of its row, whole, with the prompt it replaced: the system prompt record before it, found by one
+  pass over the journal up to the offset that looks at the start of each line and never loads the other
+  records, whatever their size (`FileSystemAgentSessionStore.ReadSystemPromptAsync`). The first prompt of
+  a session has none. Each text is a part of at most 256 Ki UTF-16 units with its whole length; the page
+  continues a longer one with `part` (`system` or `developer`) and `position` at the offset of its own
+  record, up to 4 Mi units. An offset that starts no prompt record is refused (`missing_record`). The
+  counts are those of a line diff of the two prompts, left unknown when the two are larger than 2 Mi units
+  together. The page keeps the last 12 records it read.
+
 A **Compaction completed** row's **Details** shows what the terminal shows for a local compaction:
 context before and after with the ratio and the target, the messages summarized and kept, the
 summarizer's calls and budgets, what fed it (messages, tool calls and outputs, reasoning, files) and

@@ -111,6 +111,8 @@ internal sealed partial class WorkspaceService
         // Full response accounting: worst-case JSON UTF-16 escaping, fixed per-row/property overhead,
         // and 8 KiB reserved for response/cursor/RPC envelope. Never drop rows then advance their cursor.
         var remaining = 700 * 1024 - 8192 - sourceReserve;
+        // The prompt a later prompt record of the page replaced: a page is a run of consecutive records.
+        AgentSystemPromptEvent? previousPrompt = null;
         foreach (var entry in page.Entries)
         {
             var value = entry.Event;
@@ -120,6 +122,8 @@ internal sealed partial class WorkspaceService
             var omitted = false;
             HistoryImage[]? images = null;
             var imageCost = 0;
+            HistoryPromptSummary? promptSummary = null;
+            var promptCost = 0;
             switch (value)
             {
                 case AgentContentDeltaEvent delta:
@@ -148,8 +152,10 @@ internal sealed partial class WorkspaceService
                     break;
                 case AgentRawEvent: type = "raw"; omitted = true; break;
                 case AgentSystemPromptEvent prompt:
-                    type = "system_prompt"; kind = prompt.Reason; name = prompt.AgentPromptUsage?.DisplayName ?? prompt.AgentPromptId;
-                    text = FormatPrompt(prompt); details = Json(prompt.Manifest);
+                    // The row says what the record is; its texts are read whole by its window (toolCalls.readPrompt).
+                    type = "system_prompt"; kind = prompt.Reason; name = SystemPromptProjection.Name(prompt);
+                    promptSummary = ProjectPrompt(prompt, previousPrompt, out promptCost);
+                    previousPrompt = prompt;
                     break;
                 case AgentSessionUpdateEvent update:
                     type = "sessionUpdate"; kind = update.Kind.ToString(); text = FormatSessionUpdate(update);
@@ -206,7 +212,7 @@ internal sealed partial class WorkspaceService
             name = Preview(name, 256, ref shortened);
             var rowsRemaining = page.Entries.Count - rows.Count;
             var rowBudget = remaining / rowsRemaining;
-            var detailsBudget = Math.Max(0, rowBudget - 1024 - identityCost - imageCost - 6 * (name?.Length ?? 0));
+            var detailsBudget = Math.Max(0, rowBudget - 1024 - identityCost - imageCost - promptCost - 6 * (name?.Length ?? 0));
             var fileCost = 0;
             var toolCost = 0;
             var tool = value is AgentActivityEvent activityValue && activityValue.Kind != AgentActivityKind.FileChange
@@ -221,12 +227,12 @@ internal sealed partial class WorkspaceService
             details = Preview(details, Math.Min(8 * 1024, detailsBudget / 18), ref detailsShortened);
             var textBudget = Math.Max(0, detailsBudget - 6 * (details?.Length ?? 0));
             text = Preview(text, Math.Min(32 * 1024, textBudget / 6), ref shortened);
-            var cost = 1024 + identityCost + imageCost + fileCost + toolCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0));
+            var cost = 1024 + identityCost + imageCost + promptCost + fileCost + toolCost + 6 * ((text?.Length ?? 0) + (name?.Length ?? 0) + (details?.Length ?? 0));
             if (cost > remaining) return Failure("wire_limit");
             remaining -= cost;
             rows.Add(new(entry.Offset.ToString(CultureInfo.InvariantCulture), type, provider, value.SessionId, run,
                 value.Timestamp, kind, phase, contentId, activityId, parentId, interactionId, name, text, details,
-                shortened, detailsShortened, omitted, files, tool, images, source));
+                shortened, detailsShortened, omitted, files, tool, images, source, promptSummary));
         }
         HistoryCursor? next = null;
         if (page.Next is { } cursor)
@@ -252,31 +258,18 @@ internal sealed partial class WorkspaceService
 
     private static string? Json(JsonElement? value) => value?.GetRawText();
 
-    private static string FormatPrompt(AgentSystemPromptEvent prompt)
+    // What the row of a prompt record says. The lines it changed are counted when the prompt it replaced is in
+    // the same page; otherwise the row asks for them by itself, which costs a pass over the journal.
+    private static HistoryPromptSummary ProjectPrompt(AgentSystemPromptEvent prompt, AgentSystemPromptEvent? previous, out int cost)
     {
-        var text = new StringBuilder();
-        text.Append("**Reason:** ").AppendLine(prompt.Reason);
-        text.Append("\n**Effective hash:** `").Append(prompt.EffectivePromptHash).AppendLine("`");
-        if (prompt.AgentPromptUsage is { } usage)
-        {
-            text.Append("\n**Agent prompt:** ").Append(usage.DisplayName ?? usage.PromptName);
-            if (!string.IsNullOrWhiteSpace(usage.SourcePath)) text.Append(" (`").Append(usage.SourcePath).Append("`)");
-            text.AppendLine();
-        }
-        else if (!string.IsNullOrWhiteSpace(prompt.AgentPromptId)) text.Append("\n**Agent prompt:** ").AppendLine(prompt.AgentPromptId);
-        text.Append("\n**Provider mapping:** ").Append(prompt.ProviderPayloadSummary.ChannelMapping)
-            .Append(prompt.ProviderPayloadSummary.AppliedToProvider ? " · applied" : " · not applied")
-            .AppendLine(prompt.ProviderPayloadSummary.Lossy ? " · lossy" : "");
-        text.Append("\n**Approximate tokens:** ").Append(prompt.Statistics.TotalApproxTokens)
-            .Append(" total (").Append(prompt.Statistics.SystemApproxTokens).Append(" system, ")
-            .Append(prompt.Statistics.DeveloperApproxTokens).AppendLine(" developer)");
-        text.Append("\n**Change:** ").AppendLine(prompt.Change.Kind);
-        AppendList(text, "Added", prompt.Change.AddedParts);
-        AppendList(text, "Changed", prompt.Change.ChangedParts);
-        AppendList(text, "Removed", prompt.Change.RemovedParts);
-        AppendSection(text, "System message", prompt.SystemMessage);
-        AppendSection(text, "Developer instructions", prompt.DeveloperInstructions);
-        return text.ToString().TrimEnd();
+        var changed = SystemPromptProjection.IsChange(prompt);
+        var change = changed && previous is not null ? SystemPromptProjection.Change(previous, prompt) : null;
+        var cut = false;
+        var hash = Preview(prompt.EffectivePromptHash, 256, ref cut) ?? string.Empty;
+        var path = Preview(prompt.AgentPromptUsage?.SourcePath, 1024, ref cut);
+        cost = 512 + 6 * (hash.Length + (path?.Length ?? 0));
+        return new(changed, hash, path, prompt.Statistics.TotalApproxTokens, prompt.Statistics.SystemApproxTokens, prompt.Statistics.DeveloperApproxTokens,
+            prompt.ProviderPayloadSummary.AppliedToProvider, prompt.ProviderPayloadSummary.Lossy, change?.Added, change?.Removed);
     }
 
     private static string FormatSessionUpdate(AgentSessionUpdateEvent update)
@@ -361,11 +354,6 @@ internal sealed partial class WorkspaceService
         text.Append("\n### ").AppendLine(heading).AppendLine().AppendLine(value);
     }
 
-    private static void AppendList(StringBuilder text, string label, IReadOnlyList<string> values)
-    {
-        if (values.Count > 0) text.Append("\n**").Append(label).Append(":** ").AppendLine(string.Join(", ", values));
-    }
-
     private static void AppendMetric(StringBuilder text, string label, long? value)
     {
         if (value is not null) text.Append("\n**").Append(label).Append(":** ").AppendLine(value.Value.ToString(CultureInfo.InvariantCulture));
@@ -380,4 +368,19 @@ internal sealed record HistoryResponse(string Status, HistoryEntry[] Entries, Hi
 internal sealed record HistoryEntry(string Offset, string EventType, string ProviderId, string SessionId, string? RunId,
     DateTimeOffset Timestamp, string? Kind, string? Phase, string? ContentId, string? ActivityId, string? ParentActivityId,
     string? InteractionId, string? Name, string? Text, string? Details, bool TextTruncated, bool DetailsTruncated, bool BodyOmitted,
-    HistoryFileSet? Files = null, HistoryToolSummary? Tool = null, HistoryImage[]? Images = null, string? SourceSessionId = null);
+    HistoryFileSet? Files = null, HistoryToolSummary? Tool = null, HistoryImage[]? Images = null, string? SourceSessionId = null,
+    HistoryPromptSummary? Prompt = null);
+
+/// <summary>What the row of a system prompt record says; the texts of the prompt are read by its window.</summary>
+/// <param name="Changed">Whether the prompt replaced an earlier one of its session.</param>
+/// <param name="Hash">The hash of the prompt.</param>
+/// <param name="SourcePath">The file of the agent prompt, when the record names one.</param>
+/// <param name="TotalTokens">The approximate size of the prompt, in tokens.</param>
+/// <param name="SystemTokens">The approximate size of the system message, in tokens.</param>
+/// <param name="DeveloperTokens">The approximate size of the developer instructions, in tokens.</param>
+/// <param name="Applied">Whether the prompt was sent to the provider.</param>
+/// <param name="Lossy">Whether the provider could not take the prompt as it is written.</param>
+/// <param name="Added">The lines the prompt added to the one it replaced, when that one is in the same page.</param>
+/// <param name="Removed">The lines the prompt removed from the one it replaced, when that one is in the same page.</param>
+internal sealed record HistoryPromptSummary(bool Changed, string Hash, string? SourcePath, int TotalTokens, int SystemTokens, int DeveloperTokens,
+    bool Applied, bool Lossy, int? Added, int? Removed);

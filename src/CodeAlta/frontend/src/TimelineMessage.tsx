@@ -20,6 +20,9 @@ import { SessionTabMenu } from "./SessionTabMenu";
 import { canBranchFrom, type BranchMode } from "./sessionBranch/branchPoints";
 import { canBookmark } from "./bookmarks/bookmarks";
 import { useRowBookmark } from "./bookmarks/timelineBookmarks";
+import { SystemPromptReaderContext } from "./SystemPromptDialog";
+import { promptProblem, promptTokens } from "./systemPrompt";
+import { usePromptChange } from "./systemPromptReader";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -69,7 +72,13 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const { t, locale } = useShellLanguage();
   const job = item.jobResult;
   toolTile ||= !!job;
-  const clickableTile = item.category === "tool" || !!job;
+  // The row of a system prompt is one line that opens its window, wherever it is pressed.
+  const prompt = item.prompt;
+  const clickableTile = item.category === "tool" || !!job || !!prompt;
+  // What a prompt changed is in its row: from the history page, or asked once the row is shown.
+  const promptChange = usePromptChange(useContext(SystemPromptReaderContext), prompt && /^\d+$/u.test(item.key) ? item.key : null,
+    prompt?.change ?? null, !!prompt?.changed);
+  const promptWarning = prompt ? promptProblem(prompt) : null;
   // The links of the text of a message are followed while the row is the one that is shown: a relative path
   // starts from the folder its session works in.
   const openLink = useContext(MessageLinksContext);
@@ -165,7 +174,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       setCopyState("idle");
     }, 1600);
   }
-  const hasDetails = !!(body || item.detailMarkdown || item.details || item.metadata.length || item.detailSections?.length);
+  const hasDetails = !!(body || item.detailMarkdown || item.details || item.metadata.length || item.detailSections?.length || prompt);
   const compact = !!job || ["status", "reasoning", "tool", "file", "prompt", "plugin"].includes(item.category);
   const excerpt = (item.summary || body || item.detailMarkdown || "").split(/\r?\n\s*\r?\n/)[0];
   const codePreview = clickableTile && item.summaryIsCode
@@ -176,7 +185,10 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
   const title = item.category === "file" ? t("Modified files") : item.category === "image" ? t("Image read") : item.category === "user" ? t(item.delegated ? "Agent message" : item.jobResult ? "Background job" : "You") : item.category === "plan" ? t("Plan")
     : item.category === "assistant" ? t("Assistant") : item.category === "notes" ? t("Notes") : item.category === "error" ? t("Error")
-    : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning") : item.title;
+    : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning")
+    : prompt ? t(prompt.changed ? "System prompt changed" : "System prompt recorded") : item.title;
+  // The agent prompt by its name, then the size of the prompt.
+  const promptFacts = prompt ? [prompt.name, prompt.tokens > 0 ? t("{count} tokens", { count: promptTokens(prompt.tokens) }) : null].filter(Boolean).join(" · ") : null;
   const copyLabel = copyState === "copied" ? t("Copied") : copyState === "failed" ? t("Copy failed") : t("Copy {title} as Markdown", { title });
   // A tool call has its own window, which the timeline holds: it follows the call while it runs. A row that is
   // no call (an output whose call is not in the window) keeps the details of its record.
@@ -212,15 +224,19 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           onKeyDown={event => { if (event.key === "Enter" || event.key === " " && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
           onKeyUp={event => { if (event.key === "Enter" && !event.defaultPrevented && !event.repeat && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) openDetails(event.currentTarget); }}
           onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}>{state === "running" || background === "running"
-            ? <ActivitySpinner size={10} className="tool-state-spinner" /> : !job && <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
-          : item.category !== "reasoning" && <strong>{title}</strong>}{!toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}
+            ? <ActivitySpinner size={10} className="tool-state-spinner" /> : !job && !prompt && <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
+          : item.category !== "reasoning" && <strong>{title}</strong>}{prompt ? promptFacts && <small>{promptFacts}</small>
+          : !toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}
           {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}</span>
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null, whenShown: true }} /></div>
           : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>
           : item.summary ? excerpt : <MarkdownContent source={excerpt} onOpenLink={null} />}</div>}
         {!toolTile && item.toolChanges && <span className="file-counts tool-changes" title={t("Lines added and removed by this call")}><b>+{item.toolChanges.added}</b> <em>−{item.toolChanges.removed}</em></span>}
+        {promptChange && <span className="file-counts prompt-changes" title={t("Lines added and removed")}><b>+{promptChange.added}</b> <em>−{promptChange.removed}</em></span>}
+        {promptWarning && <span className="prompt-warning" role="img" aria-label={t(promptWarning === "lossy" ? "The provider could not take this prompt as it is written." : "This prompt was not sent to the provider.")}
+          title={t(promptWarning === "lossy" ? "The provider could not take this prompt as it is written." : "This prompt was not sent to the provider.")}><AppIcon name="warning" size={13} /></span>}
         <span className="message-actions">
-          {hasDetails && !callWindow && !job && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
+          {hasDetails && !callWindow && !job && !prompt && <button type="button" className="timeline-detail-trigger" aria-label={t("Details")} title={t("Details")} aria-haspopup="dialog"
             onKeyDown={event => { if ((event.key === "Enter" || event.key === " ") && (event.repeat || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault(); }}
             onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}><AppIcon name="info" size={15} /></button>}
           {branch && <button type="button" className="branch-from-message" aria-label={t("Fork from here")} title={t("Fork from here")} aria-haspopup="dialog"

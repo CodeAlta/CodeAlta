@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { HistoryResponse } from "#neoastra";
 import { buildTimelineItems, formatDetails, latestNotes, writeMarkdown } from "./timeline";
+import { changedParts, promptDocument, promptProblem, promptTokens, shortHash } from "./systemPrompt";
 
 type Entry = HistoryResponse["entries"][number];
 
@@ -177,7 +178,7 @@ function entry(overrides: Partial<Entry>): Entry {
   return {
     offset: "1", eventType: "contentCompleted", providerId: "provider", sessionId: "session", runId: "run",
     timestamp: "2026-09-22T10:00:00Z", kind: "Assistant", phase: null, contentId: "content", activityId: null,
-    parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, text: "Hello", details: null,
+    parentActivityId: null, interactionId: null, sourceSessionId: null, prompt: null, name: null, text: "Hello", details: null,
     tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides,
   };
 }
@@ -281,19 +282,43 @@ test("journal identities containing separators cannot alias another provider/run
   assert.deepEqual(output.map(row => row.key), ["5", "6"]);
 });
 
-test("timeline keeps prompt drill-down content but leaves usage in the status surface", () => {
+test("the row of a system prompt says what it is in one line, and leaves usage in the status surface", () => {
+  const facts = { changed: false, hash: "sha256:4ADDDDB50A0D", sourcePath: "prompts/default.prompt.md", totalTokens: 11239, systemTokens: 1564, developerTokens: 9675,
+    applied: true, lossy: false, added: null, removed: null };
   const items = buildTimelineItems([
-    entry({ offset: "1", eventType: "system_prompt", kind: "session_start", name: "Default",
-      text: "**Reason:** session_start\n\n**Provider mapping:** native · applied\n\n**Approximate tokens:** 14 total (3 system, 11 developer)\n\n**Change:** initial\n\n### System message\n\nLong prompt" }),
+    entry({ offset: "1", eventType: "system_prompt", kind: "session_start", name: "Default", text: null, prompt: facts }),
     entry({ offset: "2", eventType: "sessionUpdate", kind: "UsageUpdated",
       text: "Usage refreshed\n\n**Context:** 6,400 / 128,000 tokens (5%)\n\n**Model:** model-1\n\n**Input tokens:** 100\n\n**Output tokens:** 25\n\n**Cost:** 0.01" }),
+    entry({ offset: "3", eventType: "system_prompt", kind: "changed", name: "Reviewer", text: null,
+      prompt: { ...facts, changed: true, totalTokens: 950, applied: false, lossy: true, added: 12, removed: 3 } }),
+    // A prompt whose replaced one is not in the page: the row asks for the size of its change.
+    entry({ offset: "4", eventType: "system_prompt", kind: "changed", name: null, text: null, prompt: { ...facts, changed: true, sourcePath: null, totalTokens: 0 } }),
+    entry({ offset: "5", eventType: "system_prompt", kind: "changed", name: " ", text: null }),
   ]);
-  assert.equal(items[0].title, "System prompt recorded");
-  assert.equal(items[0].subtitle, "Default · 14 tokens · Session start");
-  assert.equal(items[0].summary, "Provider mapping: native · applied");
-  assert.equal(items[0].markdown, null);
-  assert.match(items[0].detailMarkdown!, /Long prompt/);
-  assert.equal(items.length, 1);
+  assert.equal(items.length, 4);
+  assert.deepEqual(items.map(item => [item.category, item.title, item.subtitle]), [
+    ["prompt", "System prompt recorded", "Default · 11.2k tokens"], ["prompt", "System prompt changed", "Reviewer · 950 tokens"],
+    ["prompt", "System prompt changed", null], ["prompt", "System prompt changed", null]]);
+  assert.deepEqual(items[0].prompt, { changed: false, name: "Default", sourcePath: "prompts/default.prompt.md", hash: "sha256:4ADDDDB50A0D",
+    tokens: 11239, systemTokens: 1564, developerTokens: 9675, applied: true, lossy: false, change: null });
+  assert.deepEqual([items[1].prompt!.change, promptProblem(items[1].prompt!), promptProblem({ applied: true, lossy: true }), promptProblem(items[0].prompt!)],
+    [{ added: 12, removed: 3 }, "notApplied", "lossy", null]);
+  assert.deepEqual([items[2].prompt!.change, items[2].prompt!.name, items[2].prompt!.sourcePath], [null, null, null]);
+  // An entry without the facts of the host still says whether the prompt is the first of its session.
+  assert.deepEqual([items[3].prompt!.changed, items[3].prompt!.tokens, items[3].prompt!.applied, items[3].prompt!.name], [true, 0, true, null]);
+  // The row has no text: nothing of the prompt is in it, and there is nothing cut to copy.
+  for (const item of items) assert.deepEqual([item.markdown, item.summary, item.detailMarkdown, item.details, item.copyMarkdown], [null, null, null, null, null]);
+});
+
+test("a prompt is one Markdown text with a title for each part, built the same way for the two sides of a comparison", () => {
+  const titles = { system: "System message", developer: "Developer instructions" };
+  assert.equal(promptDocument("\r\nYou are an agent.\r\n## Rules\r\n", "# Agent Prompt\n\nDo the work.\n\n", titles),
+    "System message\n==============\n\nYou are an agent.\n## Rules\n\nDeveloper instructions\n======================\n\n# Agent Prompt\n\nDo the work.\n");
+  assert.equal(promptDocument(null, "", { system: "系统", developer: "D" }), "系统\n===\n\n\n\nD\n===\n\n\n");
+  assert.deepEqual(changedParts({ system: "A\r\n", developer: "B" }, { system: "\nA", developer: "B2" }), { system: false, developer: true });
+  assert.deepEqual(changedParts({ system: null, developer: null }, { system: "A", developer: " " }), { system: true, developer: false });
+  assert.deepEqual([shortHash("4ADDDDB50A0D2AE2"), shortHash("sha256:abcdef0123456789"), shortHash(""), promptTokens(11239), promptTokens(999), promptTokens(-4)],
+    ["4addddb5", "abcdef01", "", "11.2k", "999", "0"]);
 });
 
 test("complete aggregate diff projects file rows and validated supplied hunk counts", () => {

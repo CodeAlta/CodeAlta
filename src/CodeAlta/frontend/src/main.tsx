@@ -37,6 +37,9 @@ import { MarkdownLinkScopeContext } from "./MarkdownContent";
 import { readTimeline } from "./readTimeline";
 import { createTimelineImageCache } from "./timelineImages";
 import { createToolCallCache } from "./toolCallReader";
+import { createSystemPromptCache } from "./systemPromptReader";
+import { SystemPromptDiffContext } from "./SystemPromptDialog";
+import { SystemPromptDiff } from "./SystemPromptDiff";
 import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
@@ -624,7 +627,8 @@ function App() {
     return () => { lifetime.abort(); unsubscribe(); };
   }, []);
   const [timelineImages] = useState(() => createTimelineImageCache(promptImages.read));
-  const [toolRecords] = useState(() => ({ records: createToolCallCache(toolCalls.read), outputs: createToolOutputStore(toolCalls.observe) }));
+  const [toolRecords] = useState(() => ({ records: createToolCallCache(toolCalls.read), outputs: createToolOutputStore(toolCalls.observe),
+    prompts: createSystemPromptCache(toolCalls.readPrompt) }));
   const reminderCapability = useRef<ReturnType<typeof createMutationCapability> | undefined>(undefined);
   const [reminderActions] = useState(() => createReminderActions(reminder.create, reminder.delete, (target, reply) => {
     const capability = reminderCapability.current;
@@ -4195,7 +4199,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   mutation: { epoch: string; capability: ReturnType<typeof createMutationCapability> } | undefined;
   submissions: ReturnType<typeof createOwnedSubmissions>;
   timelineImages: ReturnType<typeof createTimelineImageCache>;
-  toolRecords: { records: ReturnType<typeof createToolCallCache>; outputs: ReturnType<typeof createToolOutputStore> };
+  toolRecords: { records: ReturnType<typeof createToolCallCache>; outputs: ReturnType<typeof createToolOutputStore>;
+    prompts: ReturnType<typeof createSystemPromptCache> };
   steering: ReturnType<typeof createSteeringSubmissions>;
   compaction: ReturnType<typeof createCompactionSubmissions>;
   abortRuns: ReturnType<typeof createAbortRunSubmissions>;
@@ -4308,6 +4313,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     [timelineImages, pluginEpoch, session.id, rewinds]);
   const readTool = useMemo(() => pluginEpoch === null ? undefined : toolRecords.records.reader(pluginEpoch, session.id, rewinds),
     [toolRecords, pluginEpoch, session.id, rewinds]);
+  const readPrompt = useMemo(() => pluginEpoch === null ? undefined : toolRecords.prompts.reader(pluginEpoch, session.id, rewinds),
+    [toolRecords, pluginEpoch, session.id, rewinds]);
   // The window of a fork or a rewind of this session: a command, a prompt of the timeline or the menu of its row
   // asks for it, and the pane that has the session shows it.
   const branchRequest = useSyncExternalStore(branch ? branch.requests.subscribe : noSubscription, () => branch?.requests.forSession(session.id) ?? null);
@@ -4374,7 +4381,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
         <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} onNewestResult={newest.onResult}
-          read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} toolOutputs={toolOutputs}
+          read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
           live={ownedSession ? live?.snapshot?.session ?? null : null} /></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
@@ -4526,4 +4533,5 @@ function Root() {
   return !purpose ? null : purpose.recovery ? <ConfigRecoveryScreen developer={purpose.developer} /> : <App />;
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode><Root /></StrictMode>);
+// The window of a system prompt compares two prompts with the diff editor, which the application brings.
+createRoot(document.getElementById("root")!).render(<StrictMode><SystemPromptDiffContext.Provider value={SystemPromptDiff}><Root /></SystemPromptDiffContext.Provider></StrictMode>);

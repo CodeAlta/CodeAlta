@@ -8,14 +8,16 @@ import { useShellLanguage } from "./shellLanguage";
 import { CodePreview } from "./CodePreview";
 import { DiffPreview } from "./changes/DiffPreview";
 import { isDialogBackdrop } from "./dialogBackdrop";
+import { SystemPromptDialog } from "./SystemPromptDialog";
 
 type TimelineDetailsProps = { item: TimelineItem; current: () => boolean; onClose: () => void };
 
 // Immutable supplied presentation only: opening this dialog grants no RPC or mutation authority. The links of
 // its texts are followed by the opener of the window, as those of a message are. A command that the fragment of a
 // plugin card runs closes the dialog: what a command shows (a tab, a dialog of its own) would be behind it.
+// A system prompt has a window of its own, which reads the prompt whole.
 export function TimelineDetails(props: TimelineDetailsProps) {
-  return props.item.jobResult ? <BackgroundJobDialog {...props} /> : <MessageDetails {...props} />;
+  return props.item.jobResult ? <BackgroundJobDialog {...props} /> : props.item.prompt ? <SystemPromptDialog {...props} /> : <MessageDetails {...props} />;
 }
 
 function MessageDetails({ item, current, onClose }: TimelineDetailsProps) {

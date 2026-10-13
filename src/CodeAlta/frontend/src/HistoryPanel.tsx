@@ -18,6 +18,8 @@ import type { OutgoingMessage } from "./sessionOperations";
 import { inlineImageSource, type TimelineImageReader, type TimelineImageSource } from "./timelineImages";
 import { ToolCallDialog } from "./ToolCallDialog";
 import type { ToolCallReader } from "./toolCallReader";
+import { SystemPromptReaderContext } from "./SystemPromptDialog";
+import type { SystemPromptReader } from "./systemPromptReader";
 import type { ToolOutputs } from "./toolOutput";
 import type { TimelineItem } from "./timeline";
 import { modalDialogOpen } from "./modalDialogs";
@@ -72,7 +74,7 @@ const TimelineGroupView = memo(function TimelineGroupView(props: TimelineGroupPr
  * when its own item changed.
  */
 const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outgoing, onAcknowledgeOutgoing, pluginEvents, echoes: showEchoes, empty,
-  revision, sources, readImages, readTool, toolOutputs, canInspect, onOpenSource, promptKeys, onBranch }: {
+  revision, sources, readImages, readTool, readPrompt, toolOutputs, canInspect, onOpenSource, promptKeys, onBranch }: {
   sessionId: string; rows: readonly ReconciledRow[]; entries: HistoryTimeline["entries"];
   outgoing: readonly OutgoingMessage[]; onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
   pluginEvents?: readonly SessionPluginEvent[];
@@ -84,6 +86,8 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   readImages?: TimelineImageReader; canInspect: () => boolean; onOpenSource: (target: HistorySourceTarget) => void;
   /** Reads the whole record of a tool call, and follows what a running one writes. */
   readTool?: ToolCallReader; toolOutputs?: ToolOutputs;
+  /** Reads the system prompts of the session: the rows of its prompt records and their window use it. */
+  readPrompt?: SystemPromptReader;
   /** The prompts that start a turn, by journal offset, and what opens the window of a fork or a rewind on one of them. */
   promptKeys?: ReadonlySet<string>; onBranch?: (promptOffset: string, mode: BranchMode) => void;
 }) {
@@ -144,7 +148,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   // A row that left the window (older history slid away) keeps its details open on what it last was.
   const shownTool = openTool?.sessionId === sessionId ? openedItem.current : null;
   const toolImages = shownTool?.toolCall?.images?.length && shownTool.toolCall.outputOffset ? readImages?.(shownTool.toolCall.outputOffset) : undefined;
-  return <>
+  return <SystemPromptReaderContext.Provider value={readPrompt ?? null}>
     {items.length === 0 && empty && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className="messages">
       {groups.map(group => <TimelineGroupView key={`${sessionId}:${group.key}`} sessionId={sessionId} group={group} revision={revision} sources={sources}
@@ -152,7 +156,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
         promptKeys={promptKeys} onBranch={onBranch} />)}
     </div>
     {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
-  </>;
+  </SystemPromptReaderContext.Provider>;
 });
 
 function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
@@ -160,7 +164,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 }
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
-  newestRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
+  newestRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, readPrompt, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
   reveal = null, onReveal }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
@@ -178,6 +182,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   readImages?: TimelineImageReader;
   /** Reads the whole record of a tool call of this session. */
   readTool?: ToolCallReader;
+  /** Reads the system prompts of this session, whole, with the prompt each one replaced. */
+  readPrompt?: SystemPromptReader;
   /** Follows what the running tool calls of this session write. */
   toolOutputs?: ToolOutputs;
   canInspect?: () => boolean;
@@ -440,7 +446,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     <TimelineRows sessionId={sessionId} rows={reconciled} entries={entries} outgoing={outgoing} onAcknowledgeOutgoing={onAcknowledgeOutgoing}
       pluginEvents={pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted ? pluginCards.events : undefined}
       echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} revision={timeline?.revision ?? null} sources={sources}
-      readImages={readImages} readTool={readTool} toolOutputs={toolOutputs} canInspect={inspectable} onOpenSource={openSource}
+      readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs} canInspect={inspectable} onOpenSource={openSource}
       promptKeys={promptKeys} onBranch={onBranch} />
     {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}
       canInspect={() => sourceTarget.current() && (canInspect?.() ?? true)

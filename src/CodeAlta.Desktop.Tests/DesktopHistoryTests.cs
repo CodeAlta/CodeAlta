@@ -371,9 +371,10 @@ public sealed class DesktopHistoryTests
         var response = WorkspaceService.ProjectHistory(new(events.Select((value, index) => new AgentSessionHistoryEntry(index, value)).ToArray(), null, false));
 
         Assert.AreEqual("Default", response.Entries[0].Name);
-        StringAssert.Contains(response.Entries[0].Text, "Developer text");
-        StringAssert.Contains(response.Entries[0].Text, "Approximate tokens");
-        StringAssert.Contains(response.Entries[0].Details, "tools");
+        // The row of a prompt says what it is; its texts are read by its window, and its manifest is not sent.
+        Assert.AreEqual(new HistoryPromptSummary(false, "sha256:abc", ".alta/prompts/agents/default.prompt.md", 7, 3, 4, true, false, null, null), response.Entries[0].Prompt);
+        Assert.IsNull(response.Entries[0].Text);
+        Assert.IsNull(response.Entries[0].Details);
         StringAssert.Contains(response.Entries[1].Text, "- [x] Inspect");
         StringAssert.Contains(response.Entries[1].Text, "in progress");
         StringAssert.Contains(response.Entries[2].Text, "6400 / 128000 tokens");

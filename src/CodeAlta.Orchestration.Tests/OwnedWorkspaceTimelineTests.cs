@@ -126,6 +126,44 @@ public sealed class OwnedWorkspaceTimelineTests
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => unconfigured.ReadUsageUpdatesAsync("selected", default));
     }
 
+    [TestMethod]
+    public async Task SystemPrompts_ShareAdmission_AndTheirCallerCancelsTheReadItself()
+    {
+        var started = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var prompt = new AgentSystemPromptEvent(new("provider"), "selected", DateTimeOffset.UnixEpoch, null, "session_start", "hash", null, "System", "Developer",
+            new("native-system-and-developer", true, false), null, new(1, 2, 3, 6, 9), new("initial", [], [], []));
+        var record = new AgentSystemPromptRecord(prompt, null, null);
+        var owner = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,
+            (_, _, _) => Task.FromResult(new AgentSessionHistoryPage([], null, false)))
+        {
+            SystemPrompts = async (id, offset, token) =>
+            {
+                Assert.AreEqual(("selected", 40L), (id, offset));
+                if (!token.CanBeCanceled) return record;
+                started.TrySetResult(token);
+                // The journal is being read up to the record: only the cancellation of the caller ends it.
+                await Task.Delay(Timeout.Infinite, token);
+                return record;
+            },
+        };
+        Assert.ThrowsExactly<ArgumentException>(() => owner.ReadSystemPromptAsync(" ", 40, default));
+        Assert.ThrowsExactly<OperationCanceledException>(() => owner.ReadSystemPromptAsync("selected", 40, new CancellationToken(true)));
+        Assert.AreSame(record, await owner.ReadSystemPromptAsync("selected", 40, default));
+
+        using var caller = new CancellationTokenSource();
+        var reads = Enumerable.Range(0, 8).Select(_ => owner.ReadSystemPromptAsync("selected", 40, caller.Token)).ToArray();
+        Assert.AreEqual(caller.Token, await started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadSystemPromptAsync("selected", 40, default));
+        await caller.CancelAsync();
+        foreach (var read in reads) await Assert.ThrowsAsync<OperationCanceledException>(() => read);
+        await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.ThrowsExactly<ObjectDisposedException>(() => owner.ReadSystemPromptAsync("selected", 40, default));
+
+        var unconfigured = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,
+            (_, _, _) => Task.FromResult(new AgentSessionHistoryPage([], null, false)));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => unconfigured.ReadSystemPromptAsync("selected", 40, default));
+    }
+
     private static async IAsyncEnumerable<AgentSessionMetadata> Empty([EnumeratorCancellation] CancellationToken token)
     { await Task.CompletedTask; token.ThrowIfCancellationRequested(); yield break; }
 }

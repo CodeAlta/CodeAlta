@@ -5,6 +5,7 @@ import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { fileChangesMarkdown, projectFileChanges, type FileChanges } from "./fileChanges";
 import { projectTimelineImages, type TimelineImage } from "./timelineImages";
+import { promptRow, promptTokens, type PromptRow } from "./systemPrompt";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
 
@@ -57,6 +58,8 @@ export type TimelineItem = Readonly<{
   jobResult?: JobResult;
   /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
   providerPrompt?: boolean;
+  /** What a system prompt record says: its row is one line, and its texts are read by its window. */
+  prompt?: PromptRow;
 }>;
 
 /**
@@ -202,6 +205,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   // The end of a background job is a prompt of the host: it is shown as what it is, without its envelope.
   const job = !fromAgent || delegated ? null : parseJobResult(entry.text);
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
+  let prompt: PromptRow | undefined;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
     if (normalizedKind === "user") {
@@ -238,12 +242,11 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     detailsLabel = normalizedKind === "filechange" ? "File change record details" : tool.detailsLabel;
   } else if (entry.eventType === "system_prompt") {
     category = "prompt"; icon = "prompt";
-    title = promptTitle(entry.text);
-    subtitle = promptSubtitle(entry.text, entry.name, kind);
-    detailMarkdown = entry.text;
-    markdown = null;
-    summary = promptSummary(entry.text);
-    detailsLabel = "Prompt details";
+    prompt = promptRow(entry);
+    title = prompt.changed ? "System prompt changed" : "System prompt recorded";
+    subtitle = [prompt.name, prompt.tokens > 0 ? `${promptTokens(prompt.tokens)} tokens` : null].filter(Boolean).join(" · ") || null;
+    // The row has no text of its own: the prompt is read whole by its window.
+    markdown = null; details = null;
   } else if (entry.eventType === "planSnapshot") {
     category = "plan"; icon = "plan"; title = "Plan"; subtitle = friendly(kind);
   } else if (entry.eventType === "notes") {
@@ -333,6 +336,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     jobResult: job ?? undefined,
     providerPrompt: category === "user" && entry.contentId?.startsWith("provider:") ? true : undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
+    prompt,
   };
 }
 
@@ -358,21 +362,6 @@ function toolPresentation(entry: HistoryEntry, details: JsonObject | null) {
 
 function firstUsefulLine(value: string | null): string | null {
   return value?.replaceAll("\r\n", "\n").split("\n").map(line => line.trim()).find(Boolean) ?? null;
-}
-
-function promptTitle(text: string | null): string {
-  const initial = /\*\*Change:\*\*\s*initial/i.test(text ?? "") || /\*\*Reason:\*\*\s*session[_ ]start/i.test(text ?? "");
-  return initial ? "System prompt recorded" : "System prompt changed";
-}
-
-function promptSubtitle(text: string | null, name: string | null, kind: string): string | null {
-  const total = capture(text, /\*\*Approximate tokens:\*\*\s*([\d,]+)\s+total/i);
-  return [name, total ? `${total} tokens` : null, friendly(kind)].filter(Boolean).join(" · ") || null;
-}
-
-function promptSummary(text: string | null): string | null {
-  const mapping = capture(text, /\*\*Provider mapping:\*\*\s*([^\n]+)/i);
-  return mapping ? `Provider mapping: ${mapping}` : null;
 }
 
 function usageHeadline(text: string | null): string {

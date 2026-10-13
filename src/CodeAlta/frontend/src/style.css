@@ -2313,6 +2313,51 @@ dialog.tool-call-dialog .app-window-body .tool-record > h4 { margin: 0 0 4px; co
 .tool-image figcaption { margin-top: 4px; color: var(--muted); font-size: 11.5px; }
 .tool-image-missing { display: inline-flex; align-items: center; gap: 6px; padding: 18px; color: var(--muted); font-size: 12px; }
 .tool-paths { margin: 0; padding-left: 18px; font: 12px/1.6 var(--bp-typography-family-mono); overflow-wrap: anywhere; }
+/* The row of a system prompt: one line that opens its window wherever it is pressed. */
+.ide-shell .message-prompt { --card-color: var(--accent); cursor: pointer; transition: background-color 120ms; }
+.ide-shell .message-prompt:hover:not(:has(dialog[open])) { background: color-mix(in srgb, var(--card-color) 15%, var(--panel)); }
+.ide-shell .message-prompt .tool-tile-title { font: inherit; }
+.ide-shell .message-prompt .message-heading > span:first-child { flex-shrink: 1; min-width: 0; max-width: none; }
+.ide-shell .message-prompt .message-heading small { overflow: hidden; text-overflow: ellipsis; }
+.ide-shell .message-prompt .prompt-changes { font: 11.5px/16px var(--bp-typography-family-mono); }
+.prompt-warning { display: inline-flex; flex: none; color: var(--yellow); }
+
+/* The window of a system prompt: a line of facts, then what changed and the prompt as it was sent. */
+dialog.system-prompt-dialog { cursor: auto; }
+dialog.system-prompt-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 8px; padding: 10px 14px 12px; overflow: hidden; }
+dialog.system-prompt-dialog:has(> .app-window) > .app-window > .app-window-body > :is(.tool-tabs, .prompt-view) { flex-shrink: 1; }
+.prompt-title-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.prompt-facts .prompt-agent > strong { color: var(--text); font-weight: 600; }
+/* The path takes what the other facts leave of the line, and loses its start when that is too little. */
+.prompt-facts .prompt-source { flex: 1 1 120px; }
+.prompt-facts .prompt-size > small { opacity: .8; }
+.prompt-facts .prompt-hash > code { padding: 0; border: 0; background: transparent; color: inherit; font: 11.5px/16px var(--bp-typography-family-mono); }
+.prompt-facts .tool-copy.bp6-button { min-width: 20px; min-height: 20px; }
+.prompt-facts .prompt-problem.bp6-tag { cursor: help; }
+.tool-panel.prompt-view { gap: 8px; overflow: hidden; }
+.prompt-loading { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 120px; color: var(--muted); font-size: 12.5px; }
+.prompt-failed { padding: 28px 0; text-align: center; }
+.prompt-toolbar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 26px; }
+/* The two parts of the prompt, one under the other: the title of the part being read stays at the top. */
+.prompt-parts { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.prompt-parts:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.prompt-part > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 10px; padding: 7px 18px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.prompt-part + .prompt-part > header { border-top: 1px solid var(--line); }
+dialog.system-prompt-dialog .app-window-body .prompt-part > header > h3 { margin: 0; color: var(--text); }
+.prompt-part > header > small { color: var(--muted); font-size: 11.5px; }
+.prompt-part > .markdown-content { max-width: 900px; padding: 4px 22px 20px; font-size: 13.5px; }
+/* The headings of the prompt are those of its text, not the labels of a window. */
+dialog.system-prompt-dialog .app-window-body .markdown-content h3 { margin: 18px 0 8px; color: var(--text); font-size: 14px; letter-spacing: 0; text-transform: none; }
+dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0; padding: 12px 22px 20px; border: 0; border-radius: 0; background: transparent; overflow: visible; font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.prompt-part > :is(.tool-empty, .tool-partial) { padding: 12px 22px; }
+.prompt-diff { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
+.prompt-diff-header { background: var(--panel-2); }
+.prompt-diff-summary { display: inline-flex; align-items: baseline; gap: 10px; min-width: 0; overflow: hidden; }
+.prompt-diff-summary .file-counts { flex: none; font: 12px/16px var(--bp-typography-family-mono); }
+.prompt-diff-summary .file-counts b { color: var(--green); font-weight: normal; }
+.prompt-diff-summary .file-counts em { color: var(--red); font-style: normal; }
+.prompt-diff-parts { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+
 /* A running call on its tile: the dots turn where the dot of its state is. */
 .tool-state-spinner { vertical-align: 0; margin-inline-end: 1px; }
 .ide-shell .tool-exit-code { color: var(--red); white-space: nowrap; }

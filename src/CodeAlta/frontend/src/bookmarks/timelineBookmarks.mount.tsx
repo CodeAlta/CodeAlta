@@ -17,7 +17,7 @@ for (let turn = 1; turn <= turns; turn++) for (let index = 0; index < perTurn; i
   const user = index === 0;
   journal.push({ offset: String(1000 + journal.length * 100), eventType: "contentCompleted", providerId: "provider", sessionId, runId: `run-${turn}`,
     timestamp: new Date(Date.UTC(2026, 9, 1, 8, turn, index)).toISOString(), kind: user ? "User" : "Assistant", phase: null,
-    contentId: user ? `user:${turn}` : `msg:${turn}:${index}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
+    contentId: user ? `user:${turn}` : `msg:${turn}:${index}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, prompt: null, name: null,
     text: user ? `Prompt of turn ${turn}` : `**Answer ${index}** of turn ${turn}.\n\nIt says something about step ${index}.`, details: null, textTruncated: false,
     tool: null, files: null, images: null, detailsTruncated: false, bodyOmitted: false });
 }

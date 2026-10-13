@@ -41,6 +41,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _historySource = store.ReadHistorySourceAsync;
         _historyRecord = store.ReadHistoryRecordAsync;
         UsageUpdates = store.ReadUsageUpdatesAsync;
+        SystemPrompts = store.ReadSystemPromptAsync;
         var images = new PromptImageAttachmentStore(projects.Options);
         _promptImage = (sessionId, offset, index) => ReadPromptImageCoreAsync(store, images, sessionId, offset, index);
     }
@@ -211,6 +212,32 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return Admit(() => (UsageUpdates ?? throw new InvalidOperationException("Usage reader not configured."))
             (sessionId, cancellationToken), cancellationToken, cancellationToken);
+    }
+
+    // Literal prompt test seam; production always sets the shared cached store's reader in its constructor.
+    internal Func<string, long, CancellationToken, Task<AgentSystemPromptRecord>>? SystemPrompts { get; init; }
+
+    /// <summary>
+    /// Reads the system prompt record that starts at a journal offset, with the one it replaced, through the same
+    /// admitted/drained store owner.
+    /// </summary>
+    /// <param name="sessionId">Selected durable session identity.</param>
+    /// <param name="offset">Starting byte offset of the record, as a history page reported it.</param>
+    /// <param name="cancellationToken">
+    /// Cancels this wait and the read itself: finding the record before reads the journal up to the offset, which
+    /// nothing has to finish once its caller is gone.
+    /// </param>
+    /// <returns>The record and, unless it is the first prompt of the session, the prompt record before it.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
+    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels.</exception>
+    /// <exception cref="AgentSessionHistoryException">The session is missing, the offset starts no system prompt record, or the record is too large or not readable.</exception>
+    public Task<AgentSystemPromptRecord> ReadSystemPromptAsync(string sessionId, long offset, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => (SystemPrompts ?? throw new InvalidOperationException("System prompt reader not configured."))
+            (sessionId, offset, cancellationToken), cancellationToken, cancellationToken);
     }
 
     /// <summary>Reads one image of a persisted user message or tool result through the same admitted/drained store owner.</summary>

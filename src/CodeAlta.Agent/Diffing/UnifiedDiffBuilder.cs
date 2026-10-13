@@ -66,6 +66,28 @@ public static class UnifiedDiffBuilder
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Counts the lines a change adds and removes: the <c>+</c> and <c>-</c> lines of its unified diff.
+    /// </summary>
+    /// <param name="oldText">The original text.</param>
+    /// <param name="newText">The updated text.</param>
+    /// <returns>The added and the removed lines. Two lines that differ only by their line end are the same line.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="oldText" /> or <paramref name="newText" /> is <see langword="null" />.</exception>
+    public static (int Added, int Removed) CountChangedLines(string oldText, string newText)
+    {
+        ArgumentNullException.ThrowIfNull(oldText);
+        ArgumentNullException.ThrowIfNull(newText);
+        var added = 0;
+        var removed = 0;
+        foreach (var block in Differ.Instance.CreateDiffs(oldText, newText, ignoreWhiteSpace: false, ignoreCase: false, LineChunker.Instance).DiffBlocks)
+        {
+            added += block.InsertCountB;
+            removed += block.DeleteCountA;
+        }
+
+        return (added, removed);
+    }
+
     private static IReadOnlyList<DiffEdit> BuildDiffPlexEdits(DiffResult diffResult)
     {
         var edits = new List<DiffEdit>();

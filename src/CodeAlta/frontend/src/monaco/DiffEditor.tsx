@@ -36,6 +36,7 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
   const reported = useRef<DiffEditorChanges>({ count: -1, current: -1 });
   // The first comparison of the document is done: until then the editor holds both texts whole, whatever the diff will fold.
   const compared = useRef(false);
+  const rewrapLeft = useRef<(() => void) | null>(null);
 
   useLayoutEffect(() => {
     const node = host.current!, embedded = !!latest.current.onContentHeight;
@@ -57,6 +58,15 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
       reported.current = { count: changes.length, current };
       latest.current.onChanges?.(reported.current);
     };
+    // While the diff is in one column (the choice of the user, or a window too narrow for two) Monaco stops
+    // wrapping the left side, which is hidden then, and does not wrap it again when the diff has two columns
+    // again: the left side is given back the wrapping of the diff.
+    const rewrap = () => {
+      const left = instance.getOriginalEditor();
+      if (node.querySelector(".monaco-diff-editor")?.classList.contains("side-by-side") && left.getRawOptions().wordWrapOverride2 === "off")
+        left.updateOptions({ wordWrapOverride2: "inherit" });
+    };
+    rewrapLeft.current = rewrap;
     const unfollowTheme = followShellTheme();
     // Both sides are as tall as each other side by side; in one column the new text holds the removed lines too.
     const sized = () => {
@@ -64,10 +74,12 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
     };
     const updated = instance.onDidUpdateDiff(() => { report(); compared.current = true; sized(); });
     const moved = instance.getModifiedEditor().onDidChangeCursorPosition(report);
+    // The left side takes its place when the diff goes from one column to two.
+    const widened = instance.getOriginalEditor().onDidLayoutChange(rewrap);
     const sizes = embedded ? [instance.getOriginalEditor().onDidContentSizeChange(sized), instance.getModifiedEditor().onDidContentSizeChange(sized)] : [];
     return () => {
       if (handle) handle.current = null;
-      unfollowTheme(); updated.dispose(); moved.dispose(); sizes.forEach(size => size.dispose());
+      unfollowTheme(); updated.dispose(); moved.dispose(); widened.dispose(); sizes.forEach(size => size.dispose());
       const model = instance.getModel();
       instance.dispose(); model?.original.dispose(); model?.modified.dispose(); editor.current = null;
     };
@@ -109,6 +121,7 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
     editor.current?.updateOptions({ renderSideBySide: sideBySide, ignoreTrimWhitespace: ignoreWhitespace, wordWrap: wrap ? "on" : "off",
       diffWordWrap: wrap ? "on" : "off",
       hideUnchangedRegions: { enabled: collapseUnchanged, contextLineCount: 3, minimumLineCount: 4, revealLineCount: 20 } });
+    rewrapLeft.current?.();
   }, [sideBySide, wrap, ignoreWhitespace, collapseUnchanged]);
 
   return <div ref={host} className={`diff-editor ${Classes.MONOSPACE_TEXT}`} role="group" aria-label={label} />;

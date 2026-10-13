@@ -44,6 +44,9 @@ internal enum AgentJournalRecordKind
 
     /// <summary>The usage of a request to the model.</summary>
     UsageUpdated,
+
+    /// <summary>The system prompt applied to a turn (<c>system_prompt</c>).</summary>
+    SystemPrompt,
 }
 
 /// <summary>
@@ -152,6 +155,11 @@ internal static class AgentJournalRecordText
             }
 
             return updateKind.SequenceEqual("CompactionCompleted"u8) ? AgentJournalRecordKind.CompactionCompleted : AgentJournalRecordKind.Other;
+        }
+
+        if (type.SequenceEqual("system_prompt"u8))
+        {
+            return AgentJournalRecordKind.SystemPrompt;
         }
 
         return type.SequenceEqual("error"u8) ? AgentJournalRecordKind.Error : AgentJournalRecordKind.Other;

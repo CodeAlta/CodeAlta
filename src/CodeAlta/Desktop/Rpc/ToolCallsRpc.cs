@@ -18,9 +18,10 @@ namespace CodeAlta.Desktop.Rpc;
 /// and optionally the offset of the output record that the timeline attached to the call. Texts are served in
 /// parts of at most <see cref="ChunkCharacters"/> UTF-16 code units; a longer one is continued by position.
 /// Reading is not tied to a project: the calls of an archived project's sessions are served like any other.
+/// The system prompt records of a session are served the same way (<c>readPrompt</c>).
 /// </remarks>
 [NeoRpcService("toolCalls", Version = 1)]
-internal sealed class ToolCallsService
+internal sealed partial class ToolCallsService
 {
     /// <summary>Longest part of a text served by one read, in UTF-16 code units.</summary>
     internal const int ChunkCharacters = 256 * 1024;
@@ -54,6 +55,7 @@ internal sealed class ToolCallsService
     internal ToolCallsService(OwnedSessionWorkspace reads, RuntimeToolOutputProjection output, string epoch)
         : this((reads ?? throw new ArgumentNullException(nameof(reads))).ReadHistoryRecordAsync, output, epoch)
     {
+        Prompts = reads.ReadSystemPromptAsync;
     }
 
     /// <summary>Creates the service over a literal record read.</summary>
@@ -170,11 +172,14 @@ internal sealed class ToolCallsService
         }
     }
 
-    private async Task<AgentEvent?> ReadRecordAsync(string sessionId, long offset, CancellationToken cancellationToken)
+    private Task<AgentEvent?> ReadRecordAsync(string sessionId, long offset, CancellationToken cancellationToken)
+        => AdmitAsync(() => _read!(sessionId, offset, cancellationToken), cancellationToken);
+
+    private static async Task<T> AdmitAsync<T>(Func<Task<T>> read, CancellationToken cancellationToken)
     {
-        Task<AgentEvent?> reading;
+        Task<T> reading;
         // Only the synchronous shared gate refusal is capacity; an admitted read reports its failure when awaited.
-        try { reading = _read!(sessionId, offset, cancellationToken); }
+        try { reading = read(); }
         catch (ObjectDisposedException) { throw new ToolCallRefusal("closed"); }
         catch (InvalidOperationException) { throw new ToolCallRefusal("capacity"); }
         try { return await reading.ConfigureAwait(false); }

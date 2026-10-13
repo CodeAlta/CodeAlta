@@ -30,7 +30,7 @@ const items = workItems([{ projectId: "fixture", truncated: false, plans: [], ta
 const busy = new Set<string>();
 const entry: HistoryEntry = { offset: "1", eventType: "contentCompleted", kind: "User", phase: null,
   sessionId: "fixture", providerId: "fixture", runId: "run", contentId: "body", activityId: null,
-  parentActivityId: null, interactionId: null, sourceSessionId: null, name: null, timestamp: "2026-10-10T12:00:00Z",
+  parentActivityId: null, interactionId: null, sourceSessionId: null, prompt: null, name: null, timestamp: "2026-10-10T12:00:00Z",
   tool: null, files: null, images: null, text: "Please keep both the notes and the proposed task readable.",
   details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false };
 const message = buildTimelineItems([entry])[0];

@@ -185,6 +185,12 @@ The line under the title says how long the call took, the exit code of a command
 
 In the TUI, a tile opens a dialog with the details of the call and its output.
 
+### System prompts
+
+The timeline has one line for the system prompt of a session, and another each time it changes. The line names the agent prompt, the size of the prompt in tokens and, for a change, the lines added and removed.
+
+In CodeAlta Desktop, click the line to open the prompt. **Changes** compares it with the prompt before, side by side or in one column, and **Prompt** shows the system message and the developer instructions as they were sent, with a button to copy them as Markdown.
+
 ## Prompt editor and prompt queue
 
 {{ alta_shot "alta-desktop-prompt.webp" "alta-prompt.png" "Inline prompt editor with model controls, context usage and send actions" "The inline prompt editor keeps model controls, context usage, queue state, and send actions close to your draft." }}

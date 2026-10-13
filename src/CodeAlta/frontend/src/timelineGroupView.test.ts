@@ -8,7 +8,7 @@ import { sameTimelineGroup, type TimelineGroupProps } from "./timelineGroupView"
 type Entry = HistoryResponse["entries"][number];
 const entry = (offset: string, overrides: Partial<Entry> = {}): Entry => ({ offset, eventType: "contentCompleted", providerId: "provider",
   sessionId: "session", runId: "run", timestamp: `2026-10-08T00:00:${offset.padStart(2, "0")}Z`, kind: "Assistant", phase: null,
-  contentId: `content-${offset}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, name: null,
+  contentId: `content-${offset}`, activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, prompt: null, name: null,
   tool: null, files: null, images: null, text: `message ${offset}`, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides });
 const call = (offset: string, id: string): Entry => entry(offset, { eventType: "activity", kind: "ToolCall", activityId: id, contentId: null, name: "shell_command", phase: "Completed", text: null });
 const live = (text: string): SessionDisplayView => ({ sessionId: "session", revision: "1", lifecycle: null, queuedPromptCount: null,
