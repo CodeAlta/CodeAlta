@@ -554,9 +554,10 @@ actual portal DOM mount, including late-mounted panes. Session tab dragging uses
 and public FlexLayout move actions, avoiding native HTML5 drag/drop handling. A highlighted target
 previews the split/merge/insertion, and Escape or loss of capture cancels. The tab menu's **Split right** and
 **Split below** actions provide a keyboard alternative when a pane contains multiple tabs. A tab has a menu of
-its own, opened with the other button of the pointer: **Close**, **Close others**, **Close to the right** and
-**Close all** for the tabs of its pane, **Keep open** for the transient tab, and the two splits; the menu of a
-pane has **Close others** and **Close all** as well. See "The menu of a tab" in [session tabs](session-tabs.md).
+its own, opened with the other button of the pointer, the menu key or Shift+F10: **Close**, **Close others**,
+**Close to the right** and **Close all** for the tabs of its pane, **Keep open** for the transient tab, and the
+two splits; the menu of a pane has **Close others** and **Close all** as well. See "The menu of a tab" in
+[session tabs](session-tabs.md).
 
 Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.

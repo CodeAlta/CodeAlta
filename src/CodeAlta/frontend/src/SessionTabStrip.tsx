@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Actions, DockLocation, Layout, TabNode, TabSetNode, type Action, type Model } from "flexlayout-react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
@@ -18,6 +18,7 @@ import { useSessionTabDrag } from "./useSessionTabDrag";
 import { plainTitle } from "./sessionTitle";
 import { useDraftIndicator, type DraftIndicators } from "./SessionDraftBadge";
 import { dockTab, dockTabs, tabsToClose, type DockTab, type DockTabs, type TabCloseCommand } from "./sessionTabClosing";
+import { isSessionContextKey } from "./sessionRowActions";
 
 export type SessionTabDrafts = Readonly<{ indicators: DraftIndicators; selectedId: string | null }>;
 
@@ -292,7 +293,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
   }
   // The menu of a tab, asked for with the other button of the pointer or the menu key: closing it, the others of its
   // pane, the ones after it or all of them; keeping the transient tab; moving the tab to a pane of its own.
-  function tabMenu(node: TabNode, event: ReactMouseEvent<HTMLElement>) {
+  function tabMenu(node: TabNode, anchor: HTMLElement, pointer: Readonly<{ x: number; y: number }> | null) {
     const current = guard();
     const pane = node.getParent();
     if (!current() || !(pane instanceof TabSetNode)) return;
@@ -300,9 +301,9 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     const shown = dockTab(id, state, files);
     const transient = id === sessionDraftNodeId ? !state.active : !!shown && "session" in shown && isPreviewTab(state, shown.session);
     // The menu key asks at the tab itself: it has no place of the pointer.
-    const box = event.currentTarget.getBoundingClientRect();
-    const at = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : { x: box.left, y: box.bottom };
-    setMenu({ anchor: event.currentTarget, at, title: node.getName(), current, items: [
+    const box = anchor.getBoundingClientRect();
+    const at = pointer && (pointer.x || pointer.y) ? pointer : { x: box.left, y: box.bottom };
+    setMenu({ anchor, at, title: node.getName(), current, items: [
       { key: "close", label: t("Close"), icon: "close", disabled: !node.isEnableClose(), onSelect: () => apply(Actions.deleteTab(id), current) },
       closeEntry(pane, node, "others", t("Close others"), current),
       closeEntry(pane, node, "right", t("Close to the right"), current),
@@ -347,8 +348,15 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     // Do not intercept the editor inside a factory; only the tab/menu chrome.
     const target = event.target as HTMLElement;
     if (!target.closest('[role="tablist"], [role="menu"], .session-tab-more')) return;
+    const tab = target.closest<HTMLElement>('[role="tab"]');
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat) {
       event.preventDefault(); event.stopPropagation();
+    } else if (tab && isSessionContextKey(event.key, event.shiftKey, false, false)) {
+      // The menu key and Shift+F10 are read here: only some systems turn them into a request for a context menu,
+      // and macOS never does.
+      const node = model.getNodeById(tab.querySelector<HTMLElement>("[data-session-node]")?.dataset.sessionNode ?? "");
+      event.preventDefault(); event.stopPropagation();
+      if (node instanceof TabNode) tabMenu(node, tab, null);
     } else if (event.key === "Enter" && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey
       && target.closest('[role="tab"]') && (returnToSession(target) || !state.active)) {
       event.preventDefault(); event.stopPropagation();
@@ -360,7 +368,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       onAction={action => dispatch(action)} onModelChange={(_model, action) => changed(action)}
       onContextMenu={(node, event) => {
         event.preventDefault();
-        if (node instanceof TabNode) tabMenu(node, event as ReactMouseEvent<HTMLElement>);
+        if (node instanceof TabNode) tabMenu(node, event.currentTarget as HTMLElement, { x: event.clientX, y: event.clientY });
       }}
       onAuxMouseClick={(node, event) => {
         // A middle click closes the tab, as its close button does.

@@ -82,7 +82,7 @@ A session you create is kept from the start. Closing a tab never deletes a sessi
 
 ### Close several tabs at once
 
-Right-click a tab to open its menu:
+Right-click a tab to open its menu. From the keyboard, press `Shift+F10` (or the menu key) on the tab that has the keyboard:
 
 {.table}
 | Command | What it closes |

@@ -42,16 +42,20 @@ test("the menu of a tab and the menu of its pane close the other tabs, the ones 
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, ...edge, button: type === "mouseMoved" ? "none" : "left", clickCount: 1 });
     await until(`!document.querySelector('.session-tab-popup')`, "the menu closed by a press on its tab");
     await shown(["one - Project", "two - Project*"], "the same tabs");
-    // The menu key asks for the menu of the tab that has the keyboard; Escape closes it and gives the keyboard back.
+    // The menu key and Shift+F10 ask for the menu of the tab that has the keyboard, on every system (macOS turns neither
+    // into a request for a context menu: the tabs read the keys); Escape closes it and gives the keyboard back.
     const focused = `document.activeElement === ${title("one - Project")}.closest('[role="tab"]')`;
     await evaluate(`${title("one - Project")}.closest('[role="tab"]').focus()`);
     assert.equal(await evaluate(focused), true, "a tab takes the keyboard");
-    for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "ContextMenu", code: "ContextMenu", windowsVirtualKeyCode: 93 });
-    await until(`document.querySelector('.session-tab-popup [role="menu"]')?.getAttribute('aria-label') === 'one - Project'`, "the menu of the tab that has the keyboard");
-    assert.deepEqual(await evaluate(entries), ["Close", "Close others", "Close to the right", "Close all", "Split right", "Split below"]);
-    for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-    await until(`!document.querySelector('.session-tab-popup') && ${focused}`, "the menu closed by Escape, the keyboard back on its tab");
-    await shown(["one - Project", "two - Project*"], "the same tabs");
+    for (const [what, key] of [["the menu key", { key: "ContextMenu", code: "ContextMenu", windowsVirtualKeyCode: 93 }],
+      ["Shift+F10", { key: "F10", code: "F10", windowsVirtualKeyCode: 121, modifiers: 8 }]] as const) {
+      for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, ...key });
+      await until(`document.querySelector('.session-tab-popup [role="menu"]')?.getAttribute('aria-label') === 'one - Project'`, `the menu of the tab that has the keyboard, asked with ${what}`);
+      assert.deepEqual(await evaluate(entries), ["Close", "Close others", "Close to the right", "Close all", "Split right", "Split below"], what);
+      for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await until(`!document.querySelector('.session-tab-popup') && ${focused}`, `the menu of ${what} closed by Escape, the keyboard back on its tab`);
+      await shown(["one - Project", "two - Project*"], "the same tabs");
+    }
 
     // The transient tab is kept from its menu: the prompt of a new session, and a session that is looked at.
     await keep(["chat-1"]);
