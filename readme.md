@@ -35,6 +35,7 @@ CodeAlta Desktop brings together:
 - **Sessions & delegation**: run agents in split panes; resume, queue, steer and delegate work.
   In Desktop, `Enter` sends when idle and enqueues while busy; `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now (steers a busy turn).
 - **Fork & rewind**: branch a session from any turn and keep the original, or roll it back to an earlier prompt.
+- **Speech to prompt**: [dictate a prompt](https://codealta.github.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
 - **Session titles**: a title you give stays; other sessions are titled from the first prompt, the last message or by the model, as you choose.

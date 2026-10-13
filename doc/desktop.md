@@ -1351,7 +1351,11 @@ and only when no more audio waits, so a slow computer shows the live text less o
 one (`MaximumUnacknowledgedChannelItems` is 2), and a snapshot the page did not get loses nothing. `stop`
 returns the whole final text. The page writes `finalText.slice(written)` at the caret
 (`PromptInput.insertAtCaret`, one undo step) and shows the live text as a Monaco decoration that is never part
-of the prompt.
+of the prompt. One dictation runs in the window (`speech/speech.ts`, its state in `speech/speechStore.ts`). A
+click on the button, `F9` (`/dictate`), `Escape` in that composer and a dictation started in another composer
+stop it with what was being spoken; a send, a prompt that becomes read-only, a pane that is hidden or closed
+and Settings opening stop it with `cancel`, so nothing is written into a prompt that has left. While the model
+loads the button already shows a recording: the host keeps the audio it is sent meanwhile.
 
 **Download.** `SpeechInstaller` owns one download at a time, for the application and not for a window:
 `watch` replays its state and closing the stream never stops it. What it installs, under

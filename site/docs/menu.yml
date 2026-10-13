@@ -8,6 +8,7 @@ doc:
   - {path: workspace.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace and Dialogs"}
   - {path: spaces.md, title: "<i class='bi bi-collection' aria-hidden='true'></i> Spaces"}
   - {path: sessions.md, title: "<i class='bi bi-diagram-3' aria-hidden='true'></i> Sessions and Delegation"}
+  - {path: speech.md, title: "<i class='bi bi-mic' aria-hidden='true'></i> Speech to Prompt"}
   - {path: worktrees.md, title: "<i class='bi bi-tree' aria-hidden='true'></i> Worktrees"}
   - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}
   - {path: work-items.md, title: "<i class='bi bi-list-check' aria-hidden='true'></i> Work Items"}

@@ -151,6 +151,15 @@ CodeAlta preserves prompt text when dispatch fails. Check:
 
 If the session is busy, the prompt may be in the waiting list rather than sent immediately.
 
+## The microphone button is missing or hears nothing
+
+[Speech to prompt]({{site.basepath}}/docs/speech/) is a feature of CodeAlta Desktop on Windows and macOS.
+
+- **No microphone button beside Send**: speech to prompt is turned off in **Settings > Personalization > Speech**, or the system has no microphone support for the window (Linux for now).
+- **"The microphone is not available"**: the system refuses the microphone. On Windows, turn on **Settings > Privacy & security > Microphone > Let desktop apps access your microphone**. On macOS, allow CodeAlta (or the terminal it was started from) in **System Settings > Privacy & Security > Microphone**. Check also that a microphone is plugged in and is the input device of the system.
+- **The download fails**: the model comes from `huggingface.co` and the speech engine from `api.nuget.org`. Both must be reachable. Start the download again: it goes on from where it stopped.
+- **"The speech model could not be loaded"**: the engine refused the model, which happens with a custom model it does not support. Choose another model, and delete this one on the Speech page. The application log has what the engine said.
+
 ## Context is too large
 
 Open the context usage popup with `Ctrl+G Ctrl+U`. For idle started sessions, press `Ctrl+F11` to run manual compaction. If compaction repeatedly misses its target, review attached file sizes and provider context metadata in the provider configuration.
