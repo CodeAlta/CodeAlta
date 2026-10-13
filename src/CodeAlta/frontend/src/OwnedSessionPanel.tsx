@@ -971,7 +971,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
 ${value}` : value);
       }} takeFocus={() => !latestText.current.trim() && !images.length} onAnswered={() => promptInput.current?.focus()} visible={active} />}
     <WaitingSubSessionsPanel sessions={waitingSubSessions} epoch={epoch} createReviewer={createSubSessionReviewer}
-      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} />
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onAnswered={() => promptInput.current?.focus()} />
     <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>

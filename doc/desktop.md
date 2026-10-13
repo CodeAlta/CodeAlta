@@ -2755,7 +2755,8 @@ composer (`WaitingSubSessionsPanel`): a line per sub-session with its `SessionRe
 command or file-change requests in a `CommandPermissionPanel` with a reviewer of its own (one reviewer reads
 one session at a time), labelled with its title, without the field that denies with what to do instead
 (that text goes to the composer of the session that asks). The answer goes by handle, as from the
-sub-session's own pane, whose card closes. Questions and forms are answered in the sub-session. The tab and
+sub-session's own pane, whose card closes, and the focus goes back to the prompt of the pane it was given
+in. Questions and forms are answered in the sub-session. The tab and
 the Explorer row of an ancestor that does not wait itself carry a lighter waiting mark (`SessionWaitingBadge`
 with `below`), and the "{title} waits for you" message is not shown for a session under the one on screen.
 
