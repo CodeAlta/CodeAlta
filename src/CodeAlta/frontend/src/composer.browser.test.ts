@@ -136,6 +136,17 @@ for (const { name, mac, permission } of scenarios) test(name, { skip: !edge, tim
       await choose("Ask first");
       assert.equal(await wait(`fixturePermission.calls.length===4 && !!document.querySelector('.bp6-toast') && ${shows("Bypass permissions")}`), true);
       assert.equal(await evaluate("document.querySelector('.bp6-toast').textContent.includes('The permission mode was not changed (busy).')"), true);
+
+      // Another choice of the selection is refused while the session holds an effort its model lists others than,
+      // and that is said: nothing else shows it.
+      await evaluate("document.querySelector('.composer-selection').click()");
+      const agent = "document.querySelector('#composer-agent-fixture-session')";
+      assert.equal(await wait(`!!${agent}`), true, "the agent prompts of the session configuration");
+      await evaluate(`(() => { const select = ${agent}; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, 'plan');
+        select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      assert.equal(await wait("[...document.querySelectorAll('.bp6-toast')].some(toast=>toast.textContent.includes('The choice was not changed: choose an available model and agent prompt first.'))"), true);
+      assert.equal(await evaluate(`${agent}.value`), "default", "the prompt of the session is still the one shown");
+      await evaluate("document.querySelector('.composer-selection').click()");
       // The rest of the selection is as it was: a Send names none of it.
       await write("after the modes"); await enter();
       assert.equal(await wait(`fixture.sendCalls.length===1 && ${running}`), true);

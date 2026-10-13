@@ -118,6 +118,31 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task SelectionOfAModelWithoutEfforts_TakesTheEffortItIsGiven() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        Assert.IsEmpty(choices.Models.Single(model => model.Id == "fixture-model").Efforts, "The model reports no effort.");
+        // What the window sends when another prompt is chosen for a session that holds an effort for such a model
+        // (one the alta tool, an automation or a work item gave it): the effort goes with it, and is passed on.
+        var selection = new OwnedSessionSelection(choices.Current.ProviderKey, "plan", "fixture-model", AgentReasoningEffort.Low);
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection));
+        var admission = f.AdmitSend(new OwnedTextSendRequest("effort-without-a-list", f.SessionId, "input") { Selection = selection });
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "send with an effort the model does not list");
+        Assert.AreEqual("fixture-model", f.Provider.Options!.Model);
+        Assert.AreEqual(AgentReasoningEffort.Low, f.Provider.Options.ReasoningEffort);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+        // The session holds it from then on, and what it holds is a selection it can be sent with again.
+        var held = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(held);
+        Assert.AreEqual(AgentReasoningEffort.Low, held.Current.ReasoningEffort);
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(held, held.Current));
+    });
+
+    [TestMethod]
     public Task SessionWithoutModel_StartsWithAModelOfItsProvider() => Fixture.RunAsync(async f =>
     {
         // The provider is configured with a model that is not the first one it lists, and with an effort that model lacks.
@@ -411,6 +436,13 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { ReasoningEffort = AgentReasoningEffort.Low }));
         Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(choices, selection with { ModelId = null }));
         Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection with { ModelId = null, ReasoningEffort = null }));
+
+        // A model that reports no effort takes the one it is given, or none: its provider did not say which it has.
+        var plain = new OwnedSelectionChoices(selection, [new("default", "Default")],
+            [new("model", "Model", [AgentReasoningEffort.High]), new("plain", "Plain", [])]);
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(plain, selection with { ModelId = "plain", ReasoningEffort = null }));
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(plain, selection with { ModelId = "plain", ReasoningEffort = AgentReasoningEffort.Low }));
+        Assert.IsFalse(OwnedSessionCommandService.IsValidSelection(plain, selection with { ReasoningEffort = AgentReasoningEffort.Low }), "A model that lists its efforts takes one of them.");
     }
 
     [TestMethod]

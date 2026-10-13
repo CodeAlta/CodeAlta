@@ -26,11 +26,29 @@ test("a selection names a listed model and one of its efforts: there is no defau
   assert.equal(validSelection(choices, { ...current, modelId: null, reasoningEffort: null }), false);
   assert.equal(validSelection(choices, { ...current, reasoningEffort: null }), false);
   assert.equal(validSelection(choices, { ...current, modelId: "plain", reasoningEffort: null }), true);
-  assert.equal(validSelection(choices, { ...current, modelId: "plain", reasoningEffort: "High" }), false);
   // A provider that lists nothing leaves the model open, so that the prompt can still be chosen.
   const unlisted = { ...choices, current: { ...current, modelId: null, reasoningEffort: null }, models: [] };
   assert.equal(validSelection(unlisted, { ...current, modelId: null, reasoningEffort: null }), true);
   assert.equal(changeSelection(unlisted, unlisted.current, "agentPromptId", "plan")?.agentPromptId, "plan");
+});
+
+test("a model that lists no effort takes the one the session holds, or none", () => {
+  // The session was given an effort elsewhere (the alta tool, an automation, a work item) for a model whose
+  // provider does not say which efforts it has: the selection is one the session can be sent with.
+  const held = { ...current, modelId: "plain", reasoningEffort: "Low" };
+  const value = { ...choices, current: held };
+  assert.equal(validSelection(value, held), true);
+  assert.equal(validSelection(value, { ...held, reasoningEffort: null }), true);
+  // Its other choices can be made, and keep the effort.
+  assert.deepEqual(changeSelection(value, held, "agentPromptId", "plan"), { ...held, agentPromptId: "plan" });
+  assert.deepEqual(restoreSelection(() => JSON.stringify(held), value), held);
+  assert.equal(completeSelection(value, held), held);
+  // Another model starts with its own effort, and this model is chosen without one.
+  assert.deepEqual(changeSelection(value, held, "modelId", "two"), { ...held, modelId: "two", reasoningEffort: "Medium" });
+  assert.deepEqual(changeSelection(choices, current, "modelId", "plain"), { ...current, modelId: "plain", reasoningEffort: null });
+  // A model that lists its efforts still takes one of them only.
+  assert.equal(validSelection(choices, { ...current, modelId: "two", reasoningEffort: "High" }), false);
+  assert.equal(changeSelection(choices, { ...current, modelId: "two", reasoningEffort: "High" }, "agentPromptId", "plan"), null);
 });
 
 test("a selection kept without a model or an effort takes what the session runs with", () => {

@@ -909,7 +909,12 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
     if (field === "permissionMode") { void applyPermissionMode(activeChoices, selected, value, scope.current.signal); return; }
     const next = changeSelection(activeChoices, selected, field, value);
-    if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
+    // What the session holds is no longer what its provider offers (a model or an agent prompt that is gone, an
+    // effort its model does not list any more): the choice is refused, and said, since nothing else shows it.
+    if (!next) {
+      showToast({ message: t("The choice was not changed: choose an available model and agent prompt first."), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
     if (!selections.set(epoch, sessionId, activeChoices, next)) return;
     setSelection(next);
     setChoicesNotice("");

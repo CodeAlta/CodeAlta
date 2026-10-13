@@ -11,7 +11,10 @@ public sealed record OwnedPromptChoice(string Id, string Name);
 /// <summary>Selectable model metadata.</summary>
 /// <param name="Id">Provider model identifier.</param>
 /// <param name="Name">Display name.</param>
-/// <param name="Efforts">Supported reasoning efforts.</param>
+/// <param name="Efforts">
+/// Supported reasoning efforts. Empty when the model reports none: a selection of it then takes any effort, or none,
+/// since its provider did not say which ones it has.
+/// </param>
 public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<AgentReasoningEffort> Efforts)
 {
     /// <summary>Gets observed image capability: true available, false unsupported, null unknown.</summary>
@@ -114,7 +117,10 @@ public sealed partial class OwnedSessionCommandService
         // No model keeps the session's own, which the send completes with a model of the provider.
         if (selection.ModelId is null) return selection.ReasoningEffort is null;
         var model = choices.Models.FirstOrDefault(m => m.Id == selection.ModelId);
-        return model is not null && (selection.ReasoningEffort is null || model.Efforts.Contains(selection.ReasoningEffort.Value));
+        // A model that lists no effort takes the one it is given, as the alta tool, the automations and the work items
+        // give it one: its provider did not say which efforts it has, and the turn passes the effort on.
+        return model is not null && (selection.ReasoningEffort is null || model.Efforts.Count == 0
+            || model.Efforts.Contains(selection.ReasoningEffort.Value));
     }
 
     // Completes what a session runs with among what its provider reports, as the terminal does. A session without a

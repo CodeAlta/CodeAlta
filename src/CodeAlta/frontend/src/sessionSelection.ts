@@ -4,13 +4,16 @@ import { offeredPermissionModes, providerPermissionMode } from "./permissionMode
 /**
  * A selection names a model its provider lists and one of the efforts of that model. There is no "default" one:
  * only a provider that lists no model leaves the model open, and only a model without efforts leaves the effort open.
+ * A model that lists no effort takes the one the session holds, or none: its provider did not say which efforts it
+ * has, the session was given one elsewhere (the alta tool, an automation, a work item), and the host passes it on.
+ * The composer shows that effort and offers no other.
  */
 export function validSelection(choices: SessionChoicesResponse, value: SessionSelection): boolean {
   if (value.providerKey !== choices.current?.providerKey || !choices.prompts.some(p => p.id === value.agentPromptId)) return false;
   if (!validPermissionMode(choices, value.permissionMode)) return false;
   if (value.modelId === null) return value.reasoningEffort === null && choices.models.length === 0;
   const model = choices.models.find(m => m.id === value.modelId);
-  return !!model && (value.reasoningEffort === null ? model.efforts.length === 0 : model.efforts.includes(value.reasoningEffort));
+  return !!model && (model.efforts.length === 0 || value.reasoningEffort !== null && model.efforts.includes(value.reasoningEffort));
 }
 
 /**

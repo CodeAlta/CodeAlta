@@ -1021,6 +1021,15 @@ selects nothing, so a Send never reaches a provider without a model while the pr
 Choosing another model starts it with its own effort. A saved model the provider does not list is
 kept and shown as **Unverified**; settings change again once a listed model is chosen.
 
+A model that lists no effort takes the one it is given, or none, everywhere: its provider did not say
+which efforts it has (Claude Code reports none for Haiku), and the turn passes the effort on
+(`ChatClientTurnExecutor`: a list that is not known lets the effort through). The alta tool, the
+automations and the work items give such a model the effort they are asked for; the window offers no
+effort for it, shows the one the session holds as **Unverified**, and keeps it when another agent prompt
+is chosen (`validSelection` in `sessionSelection.ts`, `OwnedSessionCommandService.IsValidSelection` for
+the Send). A model that lists its efforts takes one of them only. A choice the composer refuses, because
+the session holds a model, an effort or an agent prompt its provider no longer offers, is said in a toast.
+
 The model list (`ComposerModelPicker`, shared by a session and a draft) is a button that opens a search
 box over the models. The focus stays in the box: a search keeps the models whose name or id holds
 every word (`matchingModels`), Up, Down, Page Up and Page Down move the active model, Enter takes it,
