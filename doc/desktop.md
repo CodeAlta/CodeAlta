@@ -403,7 +403,7 @@ click outside them.
 
 In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
-**Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Chats** has
+**Remove from favorites**), **Details**, **Rename project…**, **Archive project…** and **Delete project…**. **Chats** has
 the same session actions. **Search sessions…** opens the search of the window on the sessions of
 that project, or on the chats.
 
@@ -531,6 +531,24 @@ its id and the title it is listed with (`confirmedTitle`), and the host refuses 
 is no longer that one. After a deletion the row that takes the place of the deleted one has the focus,
 so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
 is hidden.
+
+**Delete project…**, in the menu of a project and in the menu of the Projects header for the selected
+project, archived or not, asks in that same popover, every time: it has no **Do not ask again**, and
+**Cancel** has the focus, so Enter leaves everything as it is (`always` of `ConfirmPopover`). **Delete**
+removes the project from the catalog and deletes its sessions (`workspace.deleteProject`,
+`projectDeletion.ts`); its folder, its files and its git worktrees are not touched, the tabs of its
+sessions close, and Saved Statistics are kept. What refuses it is said in the popover: a session of the
+project that runs or waits for an answer (the sessions of the other projects go on), or a session of
+another project that was started from one of the project. A deletion that fails part of the way keeps
+the project listed with the sessions that are left, and can be asked again.
+
+The host (`SessionRuntimeService.DeleteOwnedCatalogProjectBodyAsync`) reads the journals from disk
+(`ListSessionsForDeletionAsync`: the list of the window is bounded), checks that the project is still
+the one that was named (id, folder, name, archived), holds new sends while it works, deletes the
+sessions the way a single session is deleted, children first, and removes the project file last, once
+no journal of the project is left. The normal and the developer instance share the projects and not the
+sessions: a project deleted in one of them leaves on disk the sessions the other has for it, and they
+are listed again when its folder is added again.
 
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. It is the transient
