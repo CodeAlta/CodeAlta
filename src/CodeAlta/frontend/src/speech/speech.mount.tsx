@@ -1,0 +1,64 @@
+// Test-owned mount of the production microphone button, prompt editor, download notice and Speech settings
+// page against a host and a microphone the test plays (speechFixture.ts): no native host, no model, no network.
+import { StrictMode, useRef, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { Button } from "@blueprintjs/core";
+import { AppIcon } from "../AppIcon";
+import { ComposerSurface } from "../ComposerSurface";
+import type { Locale } from "../localization";
+import type { PromptInput } from "../PromptEditor";
+import { settingsNavigation } from "../settingsNavigation";
+import { ShellLanguageContext } from "../shellLanguage";
+import { MicButton } from "./MicButton";
+import { SpeechContext, type Speech } from "./speech";
+import { createFixtureHost, createFixtureMicrophone } from "./speechFixture";
+import { SpeechSettings } from "./SpeechSettings";
+import { useSpeechInstall } from "./useSpeechInstall";
+
+const host = createFixtureHost(), microphone = createFixtureMicrophone();
+type ComposerState = { text: string; changes: string[]; sent: string[]; setDisabled: (value: boolean) => void; setVisible: (value: boolean) => void };
+const composers: Record<string, ComposerState> = {};
+const fixture = { host, microphone, composers, opened: [] as string[], renders: 0, speech: null as Speech | null,
+  setLocale: (_value: Locale) => { }, setComposers: (_value: boolean) => { }, setSettings: (_value: boolean) => { }, setSize: (_value: { width: number; height: number }) => { } };
+Object.assign(window, { speechFixture: fixture });
+settingsNavigation.subscribe(page => fixture.opened.push(page));
+
+// A composer as the session one keeps it: the text is state of React, and every change of the editor goes through it.
+function Composer({ name, active, speech }: { name: string; active: boolean; speech: Speech }) {
+  const [text, setText] = useState("");
+  const [disabled, setDisabled] = useState(false);
+  const [visible, setVisible] = useState(true);
+  const input = useRef<PromptInput>(null);
+  const state = composers[name] ??= { text: "", changes: [], sent: [], setDisabled, setVisible };
+  Object.assign(state, { text, setDisabled, setVisible });
+  return <div className="composer-region" data-composer={name} hidden={!visible}>
+    <ComposerSurface status="Prompt ready" editor={{ id: active ? "session-prompt" : `session-prompt-${name}`, ref: input, label: "Message", value: text, disabled,
+      placeholder: "Ask CodeAlta to work on this project…", onChange: value => { state.changes.push(value); setText(value); } }}>
+      <MicButton owner={name} input={input} disabled={disabled} visible={visible} id={active ? "dictate-prompt" : `dictate-prompt-${name}`} />
+      <Button intent="primary" icon={<AppIcon name="send" size={16} />} aria-label="Send" data-send={name}
+        onClick={() => { speech.abandon(name); state.sent.push(text); setText(""); }} />
+    </ComposerSurface>
+  </div>;
+}
+
+// The part of `App`: it owns speech to prompt, and nothing a dictation or a download tells renders it.
+function Fixture() {
+  const [locale, setLocale] = useState<Locale>("en");
+  const [showComposers, setComposers] = useState(true);
+  const [showSettings, setSettings] = useState(false);
+  const [size, setSize] = useState({ width: 760, height: 620 });
+  const speech = useSpeechInstall(host.api, host.epoch, locale, microphone.start);
+  fixture.renders++;
+  Object.assign(fixture, { speech, setLocale, setComposers, setSettings, setSize });
+  return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
+    <SpeechContext.Provider value={speech}>
+      <div id="workspace-shell" className="ide-shell"><div className="session-workspace">
+        {showComposers && <><Composer name="a" active speech={speech} /><Composer name="b" active={false} speech={speech} /></>}
+      </div></div>
+      {showSettings && <div className="settings-dialog-content" style={{ ...size, overflow: "auto" }}>
+        <SpeechSettings epoch={host.epoch} api={host.api} speech={speech} />
+      </div>}
+    </SpeechContext.Provider>
+  </ShellLanguageContext.Provider>;
+}
+createRoot(document.getElementById("root")!).render(<StrictMode><Fixture /></StrictMode>);

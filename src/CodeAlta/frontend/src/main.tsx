@@ -177,6 +177,7 @@ import { useStorageMaintenance } from "./storage/useStorageMaintenance";
 import { storage } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
 import { SpeechContext } from "./speech/speech";
+import { SpeechSettings } from "./speech/SpeechSettings";
 import { speechEnabled } from "./speech/speechStore";
 import { useSpeechInstall } from "./speech/useSpeechInstall";
 import { GeneralSettings } from "./GeneralSettings";
@@ -306,7 +307,7 @@ const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const noSubscription = () => () => { };
 const noRevision = () => 0;
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage";
+type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App() {
@@ -550,7 +551,7 @@ function App() {
   }
   // A control outside the shell (a composer status item) asks for a Settings page by name.
   const openSettingsPage = useRef<(page: string) => void>(() => {});
-  openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces") navigate(page); };
+  openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces" || page === "speech") navigate(page); };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
   const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm,
     singleSessionTab: singleTab, setSingleSessionTab: setSingleTab } = useWindowPreferences();
@@ -3959,6 +3960,7 @@ function App() {
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
+      : settingsSection === "speech" ? <SpeechSettings api={speechApi} speech={speech} epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
           maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject}
@@ -4098,7 +4100,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const { t } = useShellLanguage();
   const composingEscape = useRef(false);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
-    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["spaces", "Spaces", "space"]]],
+    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["speech", "Speech", "mic"], ["spaces", "Spaces", "space"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
       ["permissions", "Permissions", "shield"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
