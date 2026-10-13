@@ -1,4 +1,5 @@
-import type { SessionUsageObservation, SessionUsageOperation, SessionUsageRateWindow } from "#neoastra";
+import type { SessionUsageObservation, SessionUsageOperation, SessionUsageRateWindow, SessionUsageSummary } from "#neoastra";
+import { formatDuration } from "./toolCall";
 
 /** Context-window occupancy for the compact composer meter. Token counts stay decimal strings (Int64-safe). */
 export type ContextUsage = Readonly<{ used: string; limit: string | null; percent: number | null }>;
@@ -94,11 +95,14 @@ export function mergeUsageObservation(current: SessionUsageObservation | null, i
     rateLimits: limits, sessionTotal: incoming.sessionTotal ?? current.sessionTotal ?? null };
 }
 
-/** The cost of an operation with its unit when the provider names one ("0.0614 AI credits"), the reported number otherwise. */
+/**
+ * The cost of an operation with its unit when the provider names one ("0.0614 AI credits"), the number alone otherwise,
+ * without what the arithmetic of doubles leaves behind (0.021697300000000003 is shown as 0.021697).
+ */
 export function costText(operation: Pick<SessionUsageOperation, "cost" | "costUnit"> | null | undefined): string | null {
   if (!operation?.cost) return null;
-  if (!operation.costUnit) return operation.cost;
   const value = Number(operation.cost);
+  if (!operation.costUnit) return Number.isFinite(value) ? String(Number(value.toFixed(6))) : operation.cost;
   return `${Number.isFinite(value) ? String(Number(value.toFixed(4))) : operation.cost} ${operation.costUnit}`;
 }
 
@@ -170,16 +174,26 @@ export function rateWindowSummary(window: SessionUsageRateWindow, text: { used: 
   return parts.join(" · ");
 }
 
+// The input holds what the cache read and wrote: "input 26,317 (cache 26,003 · cache write 312)".
+function tokenParts(operation: SessionUsageOperation): (string | null | false | "")[] {
+  const whole = inputTokens(operation);
+  const cache = whole ? [whole.cacheRead !== "0" && `cache ${groupedTokens(whole.cacheRead)}`,
+    whole.cacheWrite !== "0" && `cache write ${groupedTokens(whole.cacheWrite)}`].filter(Boolean) : [];
+  return [whole && `input ${groupedTokens(whole.total)}${cache.length ? ` (${cache.join(" · ")})` : ""}`,
+    operation.outputTokens && `output ${groupedTokens(operation.outputTokens)}`, operation.reasoningTokens && `reasoning ${groupedTokens(operation.reasoningTokens)}`];
+}
+
 /** Canonical English Markdown of the usage window, with the sections and wording of the TUI copy. */
 export function usageMarkdown(input: {
   provider: string | null; model: string | null; usage: ContextUsage | null; messages: number | null;
   window: { totalContextEnvelope: string | null; maxOutputTokens: string | null } | null;
   operation: SessionUsageOperation | null; rateLimits: SessionUsageObservation["rateLimits"]; sessionTotal: SessionUsageObservation["sessionTotal"];
+  currentSession?: SessionUsageSummary | null;
 }): string {
   const lines = [`# ${input.provider ?? "Session"} context usage`, "", `- Model: ${input.model ?? "(default model)"}`];
   const { usage, operation, window } = input;
-  if (!usage && !operation) lines.push("- Status: Waiting for usage data from the active session.");
-  else {
+  if (!usage && !operation && !input.currentSession) lines.push("- Status: Waiting for usage data from the active session.");
+  else if (usage || operation) {
     lines.push("", input.messages !== null ? `## Context usage: ${input.messages} messages` : "## Context usage", "");
     if (usage) lines.push(`- Compaction pressure: ${usage.limit
       ? `${groupedTokens(usage.used)} / ${groupedTokens(usage.limit)} input tokens${usage.percent !== null ? ` (${usage.percent}%)` : ""}`
@@ -188,16 +202,17 @@ export function usageMarkdown(input: {
       window?.maxOutputTokens && `max output ${groupedTokens(window.maxOutputTokens)} tokens`].filter(Boolean);
     if (envelope.length) lines.push(`- Indicative model limits: ${envelope.join("; ")}`);
     if (operation) {
-      // The input holds what the cache read and wrote: "input 26,317 (cache 26,003 · cache write 312)".
-      const whole = inputTokens(operation);
-      const cache = whole ? [whole.cacheRead !== "0" && `cache ${groupedTokens(whole.cacheRead)}`,
-        whole.cacheWrite !== "0" && `cache write ${groupedTokens(whole.cacheWrite)}`].filter(Boolean) : [];
+      const elapsed = operation.durationMs ? formatDuration(Number(operation.durationMs)) : "";
       const tokens = [operation.model, operation.reasoningEffort && `effort ${operation.reasoningEffort}`, operation.initiator && `initiator ${operation.initiator}`,
-        whole && `input ${groupedTokens(whole.total)}${cache.length ? ` (${cache.join(" · ")})` : ""}`, operation.outputTokens && `output ${groupedTokens(operation.outputTokens)}`,
-        operation.reasoningTokens && `reasoning ${groupedTokens(operation.reasoningTokens)}`,
-        operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
+        ...tokenParts(operation), elapsed && `duration ${elapsed}`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
       if (tokens.length) lines.push(`- ${operation.label ?? "Last operation"}: ${tokens.join(" · ")}`);
     }
+  }
+  if (input.currentSession) {
+    const { operation: total, costs } = input.currentSession;
+    const duration = total.durationMs ? formatDuration(Number(total.durationMs)) : "";
+    const parts = [...tokenParts(total), duration && `duration ${duration}`, ...costs.map(cost => `cost ${costText(cost)}`)].filter(Boolean);
+    if (parts.length) lines.push("", "## Current session", "", `- ${parts.join(" · ")}`);
   }
   if (input.rateLimits) {
     const english = { used: (percent: number) => `${percent}% used`, window: (minutes: string) => `${minutes}m window`, resets: (time: string) => `resets ${time}` };

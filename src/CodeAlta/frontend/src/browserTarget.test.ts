@@ -48,6 +48,20 @@ test("startup failure includes the child exit and bounded stderr", async () => {
   } finally { browser.kill(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("the stderr pipe of a ready browser does not keep the test process running", async () => {
+  const root = await mkdtemp(join(tmpdir(), "codealta-browser-startup-"));
+  // What a browser leaves behind (its crash handler) holds the pipe as this child does.
+  const browser = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: ["ignore", "ignore", "pipe"] });
+  const pipes = () => process.getActiveResourcesInfo().filter(name => name === "PipeWrap").length;
+  try {
+    const held = pipes();
+    await writeFile(join(root, "DevToolsActivePort"), "9222\n/devtools/browser/id\n");
+    assert.equal(await waitForBrowserPort(root, browser), "9222");
+    assert.equal(pipes(), held - 1, "the pipe is read, and is not what the process waits for");
+    assert.equal(browser.stderr!.readableFlowing, true);
+  } finally { browser.kill(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("spawn errors and missing port deadlines are reported, not retried", async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-browser-startup-"));
   try {

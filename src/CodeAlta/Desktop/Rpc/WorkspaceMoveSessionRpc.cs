@@ -32,7 +32,7 @@ internal sealed partial class WorkspaceService
         lock (_sessionGate)
         {
             if (_sessionsClosed) return Refused("closed", request);
-            if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null) return Refused("busy", request);
+            if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Refused("busy", request);
             var completion = new TaskCompletionSource<WorkspaceMoveSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
             _moveWork = work = completion.Task;
             _ = MoveOwnedAsync(request, completion);

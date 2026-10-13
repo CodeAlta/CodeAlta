@@ -23,6 +23,7 @@ export type ProjectRowAuthority = {
   open: (id: string) => void;
   rename: () => void;
   archive: () => void;
+  delete?: () => void;
   /** Whether archiving and unarchiving ask first, which the menu says; they do when this is absent. */
   archiveAsks?: boolean;
   sessions?: ScopeSessionActions;
@@ -126,7 +127,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
     dismiss();
     owner.worktrees(value.project);
   }
-  function action(kind: "open" | "details" | "rename" | "archive", original: Review) {
+  function action(kind: "open" | "details" | "rename" | "archive" | "delete", original: Review) {
     const value = review.current;
     const owner = latest.current;
     if (!value || value !== original || value.details || !owner || !current(value)
@@ -139,6 +140,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
     dismiss();
     if (kind === "open") owner.open(value.project.id);
     else if (kind === "rename") owner.rename();
+    else if (kind === "delete") owner.delete?.();
     else owner.archive();
   }
   // A favorite is a preference of this window: it changes nothing of the project, so it asks for no access to it.
@@ -182,6 +184,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
         { key: "archive", label: t(authority?.archiveAsks === false ? project.archived ? "Unarchive project" : "Archive project" : project.archived ? "Unarchive project…" : "Archive project…"),
           icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },
+        ...(authority?.delete ? [{ key: "delete", label: t("Delete project…"), icon: "trash" as const, danger: true,
+          disabled: !access?.delete, onSelect: () => action("delete", visible) }] : []),
         ...(canvases && canvases.items.length > 0 ? [{ key: "canvases", divider: true as const },
           ...canvases.items.map(item => ({ key: `canvas:${canvasRef(item)}`, label: t("Open {title}", { title: item.title }), icon: "canvases" as const, onSelect: () => canvasAction(item, visible) })),
           ...(canvases.more ? [{ key: "canvases-more", label: t("More…"), icon: "canvases" as const, onSelect: () => canvasAction(null, visible) }] : [])] : []),

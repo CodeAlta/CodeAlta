@@ -374,7 +374,9 @@ at the top right of the timeline expands/collapses their floating panel without 
 composer. The panel (or its collapsed disclosure) can be dragged anywhere over the timeline and the open
 panel resized; its size and position are kept across collapse/expand and saved locally, relative to the
 pane's top-right corner, and its header restores the default. There is no nested notes dock or notes divider.
-Project and session rows open floating action menus from their **…** button, context menu or Shift+F10; the
+Project and session rows open floating action menus from their **…** button, context menu or Shift+F10. On
+macOS a Ctrl+click is a context-menu request like a right click: WebKit also sends the `click` of that press,
+which `contextClickGuard.ts` stops for the whole window, so the row is not opened behind its menu. The
 Projects header has a sort/actions menu (with **Open project…**) and a **+** button that adds a
 project folder with the operating system's folder dialog. The Explorer has no filter of its own: a project or
 a session is looked for in the search of the window (see "Search"). A dot-matrix spinner on a
@@ -401,7 +403,7 @@ click outside them.
 
 In the explorer, a project row has one **…** menu (also on right-click): **New session…**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
-**Remove from favorites**), **Details**, **Rename project…** and **Archive project…**. **Chats** has
+**Remove from favorites**), **Details**, **Rename project…**, **Archive project…** and **Delete project…**. **Chats** has
 the same session actions. **Search sessions…** opens the search of the window on the sessions of
 that project, or on the chats.
 
@@ -543,6 +545,24 @@ is no longer that one. After a deletion the row that takes the place of the dele
 so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
 is hidden.
 
+**Delete project…**, in the menu of a project and in the menu of the Projects header for the selected
+project, archived or not, asks in that same popover, every time: it has no **Do not ask again**, and
+**Cancel** has the focus, so Enter leaves everything as it is (`always` of `ConfirmPopover`). **Delete**
+removes the project from the catalog and deletes its sessions (`workspace.deleteProject`,
+`projectDeletion.ts`); its folder, its files and its git worktrees are not touched, the tabs of its
+sessions close, and Saved Statistics are kept. What refuses it is said in the popover: a session of the
+project that runs or waits for an answer (the sessions of the other projects go on), or a session of
+another project that was started from one of the project. A deletion that fails part of the way keeps
+the project listed with the sessions that are left, and can be asked again.
+
+The host (`SessionRuntimeService.DeleteOwnedCatalogProjectBodyAsync`) reads the journals from disk
+(`ListSessionsForDeletionAsync`: the list of the window is bounded), checks that the project is still
+the one that was named (id, folder, name, archived), holds new sends while it works, deletes the
+sessions the way a single session is deleted, children first, and removes the project file last, once
+no journal of the project is left. The normal and the developer instance share the projects and not the
+sessions: a project deleted in one of them leaves on disk the sessions the other has for it, and they
+are listed again when its folder is added again.
+
 Clicking a project opens one temporary **New session** tab, reused when selecting another project
 before creation. Selecting an existing session tab or sidebar session removes it. It is the transient
 tab of the dock, which a session that is only looked at takes as well: one tab, with its title in
@@ -565,9 +585,10 @@ actual portal DOM mount, including late-mounted panes. Session tab dragging uses
 and public FlexLayout move actions, avoiding native HTML5 drag/drop handling. A highlighted target
 previews the split/merge/insertion, and Escape or loss of capture cancels. The tab menu's **Split right** and
 **Split below** actions provide a keyboard alternative when a pane contains multiple tabs. A tab has a menu of
-its own, opened with the other button of the pointer: **Close**, **Close others**, **Close to the right** and
-**Close all** for the tabs of its pane, **Keep open** for the transient tab, and the two splits; the menu of a
-pane has **Close others** and **Close all** as well. See "The menu of a tab" in [session tabs](session-tabs.md).
+its own, opened with the other button of the pointer, the menu key or Shift+F10: **Close**, **Close others**,
+**Close to the right** and **Close all** for the tabs of its pane, **Keep open** for the transient tab, and the
+two splits; the menu of a pane has **Close others** and **Close all** as well. See "The menu of a tab" in
+[session tabs](session-tabs.md).
 
 Real FlexLayout session tabs project
 existing bounded identities, with compact status/close chrome and secondary Reopen/Refresh menus.
@@ -1201,8 +1222,43 @@ cost beside the title), rate limits (plan, primary and secondary windows with us
 percentage, window length and reset time) and the provider's session totals. **Copy as Markdown**
 copies the same content; **Refresh usage** reads again.
 
-`sessionUsage.read` is an owned-only generated Desktop RPC for an existing actor and the actual host
-epoch. It requires explicit project ID/path or global scope, checks the exact persisted session header,
+**Current session.** After the last operation, the window shows a **Current session** card: the
+same breakdown bar for every request the journal of the session records, the turns before the loaded
+timeline and the compaction requests included, with the whole input, the duration the providers
+reported (written as the tool-call windows write a duration, `formatDuration`) and the costs beside
+the title. A cost is shown as the last operation shows one (`costText`): with the unit its provider
+named, one sum per unit, and as a number alone when the provider named none. The card is there once
+the totals are, and stays away when the journal records no usage or cannot be read. These totals are
+the ones of the journal, not of the loaded timeline or of the Statistics plugin, and they are another
+thing than the **Session total** card, which repeats the cumulative token counts a provider reports
+by itself (Codex) in its last usage event.
+
+A request with `IncludeCurrentSession` makes the host read the journal, after the ownership checks
+and before a second check of the runtime and of the attachment. `FileSystemAgentSessionStore.ReadUsageUpdatesAsync`
+reads the journal once, from its start to the length it has when the read starts, so a run that
+appends meanwhile changes nothing; a record is known by the start of its line
+(`AgentJournalRecordText.Classify`), only the `UsageUpdated` records are parsed, and the size of the
+other records does not matter. The read goes through `OwnedSessionWorkspace.ReadUsageUpdatesAsync`
+(the same admission of eight reads as the timeline) and is canceled with the request. A usage record
+that cannot be parsed, or one larger than 8 MiB, fails the read: the totals are then unknown, never
+the sum of a part. `SessionUsageSummaryReader` adds the operations: each request is split with
+`AgentInputTokenUsage.From`, the usage that the end of a run or a compaction repeats is not a
+request, and the cost and duration of a whole turn that a provider repeats within a run count once,
+as in the Statistics plugin. The records a fork or a rewind copied from its source are left out, also
+as there: they are older than `AgentSessionForkOrigin.CountedFrom`.
+
+The window asks for the totals when it opens and on **Refresh usage**, once each (`createUsageReads`
+in `sessionUsage.ts`). The reads the meter makes by itself never ask for them: while the totals are
+being read they wait, and one of them follows. The window keeps the last totals it received until it
+closes, so a later read without totals does not remove them; closing it gives up a read of the totals
+that is still going. A saved session that no runtime has loaded has its totals too: the request then
+carries the creation time of the session, its header, scope and project are verified before and
+after the journal is read, and the reply is `saved_session`, with no observation and no attachment.
+The usage a provider turn reports has the source name `LocalProviderUsage` on the wire.
+
+`sessionUsage.read` is an owned-only generated Desktop RPC for the actual host epoch. Its live
+observation requires an existing actor; saved-session totals do not. It requires explicit project
+ID/path or global scope, checks the exact persisted session header,
 confirms unarchived project ownership when applicable, and rechecks the original attachment after
 asynchronous reads. It returns the last admitted usage event: numeric counters as decimal strings,
 bounded single-line text (model, effort, initiator, labels, plan; anything longer than 128 characters
