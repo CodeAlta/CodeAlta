@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, Callout, Tag } from "@blueprintjs/core";
-import { providerUsage, sessionUsage, type SessionUsageObservation, type SessionUsageResponse } from "#neoastra";
+import { providerUsage, sessionUsage, type SessionUsageObservation, type SessionUsageResponse, type SessionUsageSummary } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import { AppWindow } from "./AppWindow";
@@ -8,7 +8,8 @@ import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, 
   persistedOperation, persistedUsageFields, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
 import { UsageLimitList, usageNote, useProviderUsage } from "./UsageLimits";
 import { limitsMarkdown, liveLimitsAreCurrent, planLabel, providerLimits, sessionLimits } from "./subscriptionUsage";
-import { usageMessage, validateUsage, type UsageTarget } from "./sessionUsage";
+import { createUsageReads, sessionTotalsAfterRead, usageMessage, validateUsage, type UsageReadEvents, type UsageReadReason, type UsageTarget } from "./sessionUsage";
+import { formatDuration } from "./toolCall";
 import type { createMutationCapability } from "./sessionOperations";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
@@ -40,7 +41,8 @@ function UsageCard({ title, aside, children }: { title: ReactNode; aside?: React
  * provider's session totals. The usage of the subscription is what the last turns reported while that is recent;
  * otherwise the provider is asked, when the window opens and on a refresh only. It reads the last observed usage when the session is shown and again
  * (at most every few seconds) when `refreshKey` changes; until the host has an observation it falls
- * back to the last persisted usage record of the loaded timeline.
+ * back to the last persisted usage record of the loaded timeline. The totals of the whole session are read from its
+ * journal when the window opens and on a refresh, once each, and stay shown until the window closes.
  */
 export function SessionUsageInspector({ target, capability, refreshKey, persisted, provider, model, subscription = providerUsage }: {
   target: UsageTarget; capability: ReturnType<typeof createMutationCapability>;
@@ -55,7 +57,6 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
 }) {
   const { t } = useShellLanguage();
   const trigger = useRef<HTMLButtonElement>(null);
-  const request = useRef<AbortController | null>(null);
   const lastRead = useRef(0);
   const runtime = useRef<string | null>(null);
   // Fields accumulate across the events of one attachment; a new attachment starts over.
@@ -66,19 +67,14 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const [status, setStatus] = useState<MessageKey | { raw: string } | null>(null);
   const [snapshot, setSnapshot] = useState<SessionUsageResponse | null>(null);
   const [observation, setObservation] = useState<SessionUsageObservation | null>(null);
+  // The totals of the whole session, as the last read that brought some gave them.
+  const [totals, setTotals] = useState<SessionUsageSummary | null>(null);
   const allowed = useSyncExternalStore(capability.subscribe, capability.canMutate);
 
-  function read(includeCurrentSession = open) {
-    if (!capability.canMutate()) return;
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    lastRead.current = Date.now();
-    setPending(true);
-    void sessionUsage.read({ expectedHostEpoch: target.epoch, sessionId: target.sessionId,
-      scope: target.scope, projectId: target.projectId, expectedProjectPath: target.expectedProjectPath, includeCurrentSession, createdAt: target.createdAt ?? null },
-    { signal: controller.signal, timeoutMilliseconds: 15000 }).then(value => {
-      if (request.current !== controller || controller.signal.aborted) return;
+  const events = useRef<UsageReadEvents>(null!);
+  events.current = {
+    started: () => setPending(true),
+    response(value) {
       if (value.status === "stale_epoch" || value.hostEpoch !== target.epoch) capability.observe({ status: "stale_epoch", epoch: value.hostEpoch });
       if (!capability.canMutate()) return;
       const verified = validateUsage(target, value);
@@ -89,6 +85,7 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
       }
       if (verified.runtimeInstanceId) runtime.current = verified.runtimeInstanceId;
       setSnapshot(verified);
+      setTotals(shown => sessionTotalsAfterRead(shown, verified));
       setStatus(verified.status === "ok" || verified.status === "saved_session" ? null : { raw: usageMessage(verified.status) });
       const identity = verified.attachmentGeneration ? `${verified.runtimeInstanceId}:${verified.attachmentGeneration}` : null;
       if (verified.status === "ok" && verified.observation) {
@@ -99,10 +96,23 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
       } else if (verified.status === "saved_session" || identity && attachment.current !== identity) {
         attachment.current = identity; setObservation(null);
       }
-    }).catch(() => {
-      // A failed refresh keeps the previous observation; the details window says the read failed.
-      if (request.current === controller && !controller.signal.aborted) setStatus("Usage read failed; no observation established. Refresh explicitly if needed.");
-    }).finally(() => { if (request.current === controller) setPending(false); });
+    },
+    // A failed refresh keeps the previous observation; the details window says the read failed.
+    failed: () => setStatus("Usage read failed; no observation established. Refresh explicitly if needed."),
+    ended: () => setPending(false),
+  };
+  const [reads] = useState(() => createUsageReads(target, (request, options) => sessionUsage.read(request, options), {
+    started: () => events.current.started(), response: value => events.current.response(value),
+    failed: () => events.current.failed(), ended: () => events.current.ended() }));
+  function read(reason: UsageReadReason = "periodic") {
+    if (!capability.canMutate()) return;
+    lastRead.current = Date.now();
+    reads.read(reason);
+  }
+  function close() {
+    setOpen(false);
+    setTotals(null);
+    reads.closeTotals();
   }
   // Read when shown and whenever the refresh key changes, but never more often than the minimum interval.
   useEffect(() => {
@@ -110,9 +120,9 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
     const wait = Math.max(0, lastRead.current + minimumReadInterval - Date.now());
     const timer = setTimeout(() => read(), wait);
     return () => clearTimeout(timer);
-  }, [allowed, refreshKey, open]);
-  useEffect(() => () => request.current?.abort(), []);
-  useEffect(() => { if (!allowed) { request.current?.abort(); setOpen(false); setSnapshot(null); setObservation(null); attachment.current = null; } }, [allowed]);
+  }, [allowed, refreshKey]);
+  useEffect(() => () => reads.abort(), [reads]);
+  useEffect(() => { if (!allowed) { reads.abort(); setOpen(false); setSnapshot(null); setObservation(null); setTotals(null); attachment.current = null; } }, [allowed, reads]);
   useEffect(() => { if (copied === null) return; const timer = setTimeout(() => setCopied(null), 2500); return () => clearTimeout(timer); }, [copied]);
 
   const observed = contextUsage(observation?.window?.currentTokens, observation?.window?.tokenLimit);
@@ -131,12 +141,12 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const modelName = operation?.model ?? model ?? null;
   const limits = observation?.rateLimits ?? null;
   const total = observation?.sessionTotal ?? null;
-  const currentSession = snapshot?.currentSession ?? null;
-  const sessionInput = inputTokens(currentSession?.operation);
-  const sessionSegments = operationSegments(currentSession?.operation);
-  const sessionFacts = [sessionInput && t("{count} input tokens", { count: groupedTokens(sessionInput.total) }),
-    currentSession?.operation.durationMs && t("duration {duration} ms", { duration: String(Math.round(Number(currentSession.operation.durationMs))) }),
-    ...(currentSession?.costs.map(cost => t("cost {cost}", { cost: costText(cost)! })) ?? [])].filter(Boolean);
+  const sessionInput = inputTokens(totals?.operation);
+  const sessionSegments = operationSegments(totals?.operation);
+  const sessionDuration = totals?.operation.durationMs ? formatDuration(Number(totals.operation.durationMs)) : "";
+  const sessionFacts = totals ? [sessionInput && sessionInput.uncached !== sessionInput.total && t("{count} input tokens", { count: groupedTokens(sessionInput.total) }),
+    sessionDuration && t("duration {duration}", { duration: sessionDuration }),
+    ...totals.costs.map(cost => t("cost {cost}", { cost: costText(cost) ?? cost.cost }))].filter((value): value is string => !!value) : [];
   const updated = observation?.sourceUpdatedAt ?? observation?.eventTimestamp ?? null;
   const updatedTime = updated && !Number.isNaN(new Date(updated).getTime()) ? new Date(updated).toLocaleTimeString([], { hour12: false }) : null;
   const envelope = [observation?.window?.totalContextEnvelope && t("context window {tokens} tokens", { tokens: groupedTokens(observation.window.totalContextEnvelope) }),
@@ -158,24 +168,24 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   const subscriptionNote = !shownLimits.length && asked.response?.supported ? usageNote(asked.response) : null;
   async function copy() {
     const markdown = [usageMarkdown({ provider: provider ?? null, model: modelName, usage, messages, window: observation?.window ?? null,
-      operation, rateLimits: limits, sessionTotal: total, currentSession }), ...(liveCurrent || !reading ? [] : limitsMarkdown(shownLimits, plan, Date.now()))].join("\n");
+      operation, rateLimits: limits, sessionTotal: total, currentSession: totals }), ...(liveCurrent || !reading ? [] : limitsMarkdown(shownLimits, plan, Date.now()))].join("\n");
     try { await navigator.clipboard.writeText(markdown); setCopied(true); } catch { setCopied(false); }
   }
   const operations = operationSegments(operation);
   return <>
     <Button ref={trigger} id="session-usage-trigger" data-usage-target={JSON.stringify(target)} variant="minimal" className="context-usage" data-intent={intent}
-      disabled={!allowed} aria-label={label} aria-haspopup="dialog" aria-expanded={open && allowed} title={label} onClick={() => { if (capability.canMutate()) { setOpen(true); read(true); } }}>
+      disabled={!allowed} aria-label={label} aria-haspopup="dialog" aria-expanded={open && allowed} title={label} onClick={() => { if (capability.canMutate()) { setOpen(true); read(open ? "periodic" : "open"); } }}>
       <span className="context-usage-meter" aria-hidden="true"><span style={{ width: `${percent ?? 0}%` }} /></span>
       <span className="context-usage-text">{usage ? percent === null ? summary : `${Math.round(percent)}%` : <AppIcon name="usage" size={15} />}</span>
       {usage && percent !== null && <span className="context-usage-tokens">{summary}</span>}
     </Button>
     {open && allowed && <AppWindow storageKey="codealta.desktop.window.usage.v2" className="session-usage-dialog" titleId="session-usage-title" title={t("Context usage")}
       preferredSize={viewport => ({ width: Math.min(620, viewport.width - 40), height: Math.min(720, viewport.height - 40) })} minimumSize={{ width: 400, height: 320 }}
-      onClose={() => setOpen(false)} closeLabel={t("Close usage inspector")}
-      onCancel={event => { event.preventDefault(); setOpen(false); }} onKeyDown={event => event.stopPropagation()}
+      onClose={close} closeLabel={t("Close usage inspector")}
+      onCancel={event => { event.preventDefault(); close(); }} onKeyDown={event => event.stopPropagation()}
       headerActions={<>
         <Button variant="minimal" size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={15} />} aria-label={t("Copy as Markdown")} title={t("Copy as Markdown")} onClick={() => void copy()} />
-        <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={() => { read(); if (!liveCurrent) asked.refresh(); }} /></>}>
+        <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={pending} aria-label={t("Refresh usage")} title={t("Refresh usage")} onClick={() => { read("refresh"); if (!liveCurrent) asked.refresh(); }} /></>}>
       <div className="context-usage-details">
         <header className="context-usage-subject">
           <div><strong className="with-logo"><ProviderIcon providerKey={provider} size={15} />{provider ?? t("session provider")}</strong>{modelName && <span>{modelName}</span>}</div>
@@ -194,11 +204,10 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
           {operations.length ? <UsageBreakdown segments={operations} label={operation.label ?? t("Last operation")} />
             : <p className="usage-card-note">{t("No token counts were reported for this operation.")}</p>}
         </UsageCard>}
-        <UsageCard title={t("Current session")} aside={sessionFacts.join(" · ")}>
+        {totals && <UsageCard title={t("Current session")} aside={sessionFacts.join(" · ")}>
           {sessionSegments.length ? <UsageBreakdown segments={sessionSegments} label={t("Current session")} />
-            : <p className="usage-card-note">{t(currentSession ? "No token counts were reported for this session."
-              : pending ? "Reading the usage…" : "Session costs are unavailable until recorded usage can be read.")}</p>}
-        </UsageCard>
+            : <p className="usage-card-note">{t("No token counts were reported for this session.")}</p>}
+        </UsageCard>}
         {(shownLimits.length > 0 || subscriptionNote || asked.loading && !liveCurrent) && <UsageCard title={t("Subscription usage")} aside={planLabel(plan)}>
           {shownLimits.length > 0 ? <UsageLimitList limits={shownLimits} />
             : <p className="usage-card-note">{subscriptionNote ? t(subscriptionNote.key, subscriptionNote.tool ? { tool: subscriptionNote.tool } : undefined) : t("Reading the usage…")}</p>}

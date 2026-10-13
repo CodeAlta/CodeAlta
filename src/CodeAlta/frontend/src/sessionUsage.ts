@@ -1,7 +1,90 @@
-import type { SessionUsageResponse } from "#neoastra";
+import type { SessionUsageRequest, SessionUsageResponse, SessionUsageSummary } from "#neoastra";
 
 export type UsageTarget = Readonly<{ epoch: string; sessionId: string; scope: "global" | "project";
   projectId: string | null; expectedProjectPath: string | null; createdAt?: string | null }>;
+
+/** Why the usage is read: by itself while the session is shown, because the details window opens, or because **Refresh usage** is pressed. */
+export type UsageReadReason = "periodic" | "open" | "refresh";
+
+/**
+ * The request of a read. The totals of the whole session cost a read of its journal: they are asked for when the
+ * details window opens and on a refresh, never by the reads the session makes by itself.
+ */
+export function usageRequest(target: UsageTarget, reason: UsageReadReason): SessionUsageRequest {
+  return { expectedHostEpoch: target.epoch, sessionId: target.sessionId, scope: target.scope, projectId: target.projectId,
+    expectedProjectPath: target.expectedProjectPath, includeCurrentSession: reason !== "periodic", createdAt: target.createdAt ?? null };
+}
+
+/** The totals the details window shows after a read: the ones the read brings, otherwise the ones it already shows. */
+export function sessionTotalsAfterRead(shown: SessionUsageSummary | null, response: SessionUsageResponse | null): SessionUsageSummary | null {
+  return response?.currentSession ?? shown;
+}
+
+type UsageSend = (request: SessionUsageRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<SessionUsageResponse>;
+
+/** What the reads of a session tell: only the read that is still the current one speaks. */
+export type UsageReadEvents = Readonly<{
+  started(): void;
+  response(value: SessionUsageResponse): void;
+  failed(): void;
+  ended(): void;
+}>;
+
+/** The reads of the usage of one session, one at a time. */
+export type UsageReads = Readonly<{
+  /**
+   * Starts a read in the place of the one in flight. A periodic read does not replace the read of the totals, which
+   * takes the time of a whole journal: it waits for it, and one periodic read follows when the totals are there.
+   */
+  read(reason: UsageReadReason): void;
+  /** Gives up the read of the totals, for a details window that closes before they are there: the usage is read without them instead. */
+  closeTotals(): void;
+  /** Aborts the read in flight, without another one. */
+  abort(): void;
+}>;
+
+const periodicReadTimeout = 15000;
+// The totals are asked for by hand and go through the whole journal of the session.
+const totalsReadTimeout = 30000;
+
+/** Creates the reads of the usage of a session: see {@link UsageReads}. */
+export function createUsageReads(target: UsageTarget, send: UsageSend, events: UsageReadEvents): UsageReads {
+  let current: { controller: AbortController; totals: boolean } | null = null;
+  let waiting = false;
+  function read(reason: UsageReadReason) {
+    if (reason === "periodic" && current?.totals) { waiting = true; return; }
+    current?.controller.abort();
+    const controller = new AbortController();
+    const mine = current = { controller, totals: reason !== "periodic" };
+    waiting = false;
+    const live = () => current === mine && !controller.signal.aborted;
+    events.started();
+    void send(usageRequest(target, reason), { signal: controller.signal, timeoutMilliseconds: mine.totals ? totalsReadTimeout : periodicReadTimeout })
+      .then(value => { if (live()) events.response(value); }, () => { if (live()) events.failed(); })
+      .finally(() => {
+        if (!live()) return;
+        current = null;
+        events.ended();
+        if (waiting) read("periodic");
+      });
+  }
+  function abort() {
+    const read = current;
+    current = null;
+    waiting = false;
+    read?.controller.abort();
+    if (read) events.ended();
+  }
+  return {
+    read,
+    closeTotals() {
+      if (!current?.totals) return;
+      abort();
+      read("periodic");
+    },
+    abort,
+  };
+}
 
 const max64 = 9223372036854775807n;
 const scopes = new Set(["Unknown", "CurrentWindow", "LastOperation", "SessionTotal", "Compaction", "Truncation", "RateLimitOnly"]);

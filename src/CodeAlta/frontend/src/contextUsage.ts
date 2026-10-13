@@ -1,4 +1,5 @@
 import type { SessionUsageObservation, SessionUsageOperation, SessionUsageRateWindow, SessionUsageSummary } from "#neoastra";
+import { formatDuration } from "./toolCall";
 
 /** Context-window occupancy for the compact composer meter. Token counts stay decimal strings (Int64-safe). */
 export type ContextUsage = Readonly<{ used: string; limit: string | null; percent: number | null }>;
@@ -170,6 +171,15 @@ export function rateWindowSummary(window: SessionUsageRateWindow, text: { used: 
   return parts.join(" · ");
 }
 
+// The input holds what the cache read and wrote: "input 26,317 (cache 26,003 · cache write 312)".
+function tokenParts(operation: SessionUsageOperation): (string | null | false | "")[] {
+  const whole = inputTokens(operation);
+  const cache = whole ? [whole.cacheRead !== "0" && `cache ${groupedTokens(whole.cacheRead)}`,
+    whole.cacheWrite !== "0" && `cache write ${groupedTokens(whole.cacheWrite)}`].filter(Boolean) : [];
+  return [whole && `input ${groupedTokens(whole.total)}${cache.length ? ` (${cache.join(" · ")})` : ""}`,
+    operation.outputTokens && `output ${groupedTokens(operation.outputTokens)}`, operation.reasoningTokens && `reasoning ${groupedTokens(operation.reasoningTokens)}`];
+}
+
 /** Canonical English Markdown of the usage window, with the sections and wording of the TUI copy. */
 export function usageMarkdown(input: {
   provider: string | null; model: string | null; usage: ContextUsage | null; messages: number | null;
@@ -189,25 +199,16 @@ export function usageMarkdown(input: {
       window?.maxOutputTokens && `max output ${groupedTokens(window.maxOutputTokens)} tokens`].filter(Boolean);
     if (envelope.length) lines.push(`- Indicative model limits: ${envelope.join("; ")}`);
     if (operation) {
-      // The input holds what the cache read and wrote: "input 26,317 (cache 26,003 · cache write 312)".
-      const whole = inputTokens(operation);
-      const cache = whole ? [whole.cacheRead !== "0" && `cache ${groupedTokens(whole.cacheRead)}`,
-        whole.cacheWrite !== "0" && `cache write ${groupedTokens(whole.cacheWrite)}`].filter(Boolean) : [];
       const tokens = [operation.model, operation.reasoningEffort && `effort ${operation.reasoningEffort}`, operation.initiator && `initiator ${operation.initiator}`,
-        whole && `input ${groupedTokens(whole.total)}${cache.length ? ` (${cache.join(" · ")})` : ""}`, operation.outputTokens && `output ${groupedTokens(operation.outputTokens)}`,
-        operation.reasoningTokens && `reasoning ${groupedTokens(operation.reasoningTokens)}`,
-        operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
+        ...tokenParts(operation), operation.durationMs && `duration ${operation.durationMs} ms`, operation.cost && `cost ${costText(operation)}`].filter(Boolean);
       if (tokens.length) lines.push(`- ${operation.label ?? "Last operation"}: ${tokens.join(" · ")}`);
     }
   }
   if (input.currentSession) {
     const { operation: total, costs } = input.currentSession;
-    const whole = inputTokens(total);
-    const parts = [whole && `input ${groupedTokens(whole.total)}`, whole && whole.cacheRead !== "0" && `cache ${groupedTokens(whole.cacheRead)}`,
-      whole && whole.cacheWrite !== "0" && `cache write ${groupedTokens(whole.cacheWrite)}`, total.outputTokens && `output ${groupedTokens(total.outputTokens)}`,
-      total.reasoningTokens && `reasoning ${groupedTokens(total.reasoningTokens)}`, total.durationMs && `duration ${total.durationMs} ms`,
-      ...costs.map(cost => `cost ${costText(cost)}`)].filter(Boolean);
-    lines.push("", "## Current session", "", `- ${parts.join(" · ")}`);
+    const duration = total.durationMs ? formatDuration(Number(total.durationMs)) : "";
+    const parts = [...tokenParts(total), duration && `duration ${duration}`, ...costs.map(cost => `cost ${costText(cost)}`)].filter(Boolean);
+    if (parts.length) lines.push("", "## Current session", "", `- ${parts.join(" · ")}`);
   }
   if (input.rateLimits) {
     const english = { used: (percent: number) => `${percent}% used`, window: (minutes: string) => `${minutes}m window`, resets: (time: string) => `resets ${time}` };

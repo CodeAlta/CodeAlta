@@ -152,13 +152,17 @@ test("rate windows and the Markdown copy carry only what was reported", () => {
     /Waiting for usage data/);
 });
 
-test("current session uses the same disjoint breakdown and copies totals with separate cost units", () => {
-  const total = { ...observation().lastOperation!, inputTokens: "1000", cachedInputTokens: "600", cacheWriteTokens: "100",
-    outputTokens: "200", reasoningTokens: "50", durationMs: "1234" };
+test("current session uses the same disjoint breakdown and copies its totals as the last operation is copied", () => {
+  const total = { ...observation().lastOperation!, model: null, reasoningEffort: null, inputTokens: "1000", cachedInputTokens: "600", cacheWriteTokens: "100",
+    outputTokens: "200", reasoningTokens: "50", durationMs: "3725000.5" };
   assert.deepEqual(operationSegments(total).map(segment => [segment.key, segment.tokens]),
     [["uncachedInput", "300"], ["output", "150"], ["cacheWrite", "100"], ["cachedInput", "600"], ["reasoning", "50"]]);
-  const markdown = usageMarkdown({ provider: "copilot", model: null, usage: null, messages: null, window: null,
-    operation: null, rateLimits: null, sessionTotal: null, currentSession: { operation: total,
-      costs: [{ cost: "0.5", costUnit: "AI credits" }, { cost: "1.25", costUnit: "USD" }] } });
-  assert.match(markdown, /## Current session\n\n- input 1,000 · cache 600 · cache write 100 · output 200 · reasoning 50 · duration 1234 ms · cost 0.5 AI credits · cost 1.25 USD/);
+  const copy = (currentSession: Parameters<typeof usageMarkdown>[0]["currentSession"]) => usageMarkdown({ provider: "copilot", model: null, usage: null,
+    messages: null, window: null, operation: null, rateLimits: null, sessionTotal: null, currentSession });
+  // A cost has the unit its provider named, and none otherwise; the duration of a session is not a count of milliseconds.
+  assert.equal(copy({ operation: total, costs: [{ cost: "0.5", costUnit: "AI credits" }, { cost: "1.25", costUnit: null }] }),
+    ["# copilot context usage", "", "- Model: (default model)", "", "## Current session", "",
+      "- input 1,000 (cache 600 · cache write 100) · output 200 · reasoning 50 · duration 1 h 02 min · cost 0.5 AI credits · cost 1.25"].join("\n"));
+  assert.match(copy({ operation: { ...total, cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null, durationMs: "850" }, costs: [] }),
+    /## Current session\n\n- input 1,000 · output 200 · duration 850 ms$/);
 });

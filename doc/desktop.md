@@ -1188,23 +1188,38 @@ cost beside the title), rate limits (plan, primary and secondary windows with us
 percentage, window length and reset time) and the provider's session totals. **Copy as Markdown**
 copies the same content; **Refresh usage** reads again.
 
-Desktop also shows **Current session** immediately after the last operation: the same token
-breakdown, accumulated reported provider duration and costs for all recorded requests in the
-session, including earlier turns and compaction requests. Costs with different units are shown
-separately. These totals come from the full session journal, not the loaded timeline or the
-Statistics plugin, and are distinct from provider-reported session totals. Missing usage is not
-treated as zero; an unavailable or incomplete journal leaves the totals unavailable.
+**Current session.** After the last operation, the window shows a **Current session** card: the
+same breakdown bar for every request the journal of the session records, the turns before the loaded
+timeline and the compaction requests included, with the whole input, the duration the providers
+reported (written as the tool-call windows write a duration, `formatDuration`) and the costs beside
+the title. A cost is shown as the last operation shows one (`costText`): with the unit its provider
+named, one sum per unit, and as a number alone when the provider named none. The card is there once
+the totals are, and stays away when the journal records no usage or cannot be read. These totals are
+the ones of the journal, not of the loaded timeline or of the Statistics plugin, and they are another
+thing than the **Session total** card, which repeats the cumulative token counts a provider reports
+by itself (Codex) in its last usage event.
 
-The host reads the journal only after the existing ownership checks succeed, then rechecks the
-runtime and attachment before releasing the totals. Only `UsageUpdated` records count as
-requests; idle and compaction-completed snapshots do not count again. Repeated whole-turn
-cost/duration pairs within a run count once, while equal per-request charges still accumulate.
-The journal is read only while the details window is open (`IncludeCurrentSession`); background
-context-meter and session-info reads do not scan history.
-Saved sessions do not need a live attachment to show these totals: their header creation time,
-scope and project ownership are verified before and after reading the journal. Such replies
-are marked `saved_session`, with no live observation or attachment generation. Live provider
-usage uses the serialized source name `LocalProviderUsage`, matching the frontend validator.
+A request with `IncludeCurrentSession` makes the host read the journal, after the ownership checks
+and before a second check of the runtime and of the attachment. `FileSystemAgentSessionStore.ReadUsageUpdatesAsync`
+reads the journal once, from its start to the length it has when the read starts, so a run that
+appends meanwhile changes nothing; a record is known by the start of its line
+(`AgentJournalRecordText.Classify`), only the `UsageUpdated` records are parsed, and the size of the
+other records does not matter. The read goes through `OwnedSessionWorkspace.ReadUsageUpdatesAsync`
+(the same admission of eight reads as the timeline) and is canceled with the request. A usage record
+that cannot be parsed, or one larger than 8 MiB, fails the read: the totals are then unknown, never
+the sum of a part. `SessionUsageSummaryReader` adds the operations: each request is split with
+`AgentInputTokenUsage.From`, the usage that the end of a run or a compaction repeats is not a
+request, and the cost and duration of a whole turn that a provider repeats within a run count once,
+as in the Statistics plugin.
+
+The window asks for the totals when it opens and on **Refresh usage**, once each (`createUsageReads`
+in `sessionUsage.ts`). The reads the meter makes by itself never ask for them: while the totals are
+being read they wait, and one of them follows. The window keeps the last totals it received until it
+closes, so a later read without totals does not remove them; closing it gives up a read of the totals
+that is still going. A saved session that no runtime has loaded has its totals too: the request then
+carries the creation time of the session, its header, scope and project are verified before and
+after the journal is read, and the reply is `saved_session`, with no observation and no attachment.
+The usage a provider turn reports has the source name `LocalProviderUsage` on the wire.
 
 `sessionUsage.read` is an owned-only generated Desktop RPC for the actual host epoch. Its live
 observation requires an existing actor; saved-session totals do not. It requires explicit project
