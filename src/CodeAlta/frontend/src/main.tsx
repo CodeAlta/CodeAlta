@@ -74,6 +74,7 @@ import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type Act
 import { ReminderBadge } from "./ReminderBadge";
 import { SessionWaitingBadge, WaitingBadge } from "./WaitingBadge";
 import { PermissionSettings } from "./PermissionSettings";
+import { SessionSettings } from "./SessionSettings";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
 import { createMutationCapability, createOwnedSubmissions, noOutgoing } from "./sessionOperations";
@@ -112,7 +113,7 @@ import { createProjectOpening } from "./projectOpening";
 import { OpenProjectDialog } from "./OpenProjectDialog";
 import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
-import { createSessionCreation, createdSessionSelection, initialSessionTitle, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
+import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
 import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage, splitPendingTabMoves } from "./sessionMove";
 import { createCoalescedRead } from "./coalescedRead";
@@ -290,7 +291,7 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "storage";
+type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App() {
@@ -392,6 +393,8 @@ function App() {
     const was = liveRuns.current.has(id);
     if (running) liveRuns.current.add(id); else liveRuns.current.delete(id);
     if (was && !running) { readSessionList.current(); refreshWorkItems.current(); }
+    // The first prompt of a session titles it when its run starts: the list is read once that is written.
+    if (!was && running) setTimeout(() => readSessionList.current(), 1_500);
   };
   useEffect(() => {
     const timer = setInterval(() => { if (liveRuns.current.size > 0) readSessionList.current(); }, 10_000);
@@ -3009,7 +3012,7 @@ function App() {
     setCreatingMessage("");
     if (handoff) setDraftHandoffNotice("");
     try {
-      const result = await createSession(epoch, target, handoff ? initialSessionTitle(handoff.text) : creatingTitle.trim() || null, capability, providerId, place);
+      const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId, place);
       if (!creationAlive.current) return;
       if (result.kind === "created") {
         if (!isCurrent()) { setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); return; }
@@ -3784,6 +3787,7 @@ function App() {
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "sessions" ? <SessionSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "worktrees" ? <WorktreeSettings epoch={owned ? status!.hostEpoch : null}
         pick={owned ? initial => pickFolder(desktopShell.pickFolder, t("Folder for worktrees"), initial) : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
@@ -3934,7 +3938,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["spaces", "Spaces", "space"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
-      ["permissions", "Permissions", "shield"],
+      ["permissions", "Permissions", "shield"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
     ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
     ["Advanced", [["config", "Configuration file", "config"], ["storage", "Storage", "database"], ["mcpHost", "CodeAlta MCP", "remote"]]],

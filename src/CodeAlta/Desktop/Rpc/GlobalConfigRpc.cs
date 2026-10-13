@@ -121,6 +121,42 @@ internal sealed class GlobalConfigService
         }
     }
 
+    /// <summary>Reads how a session nobody named is titled: the <c>[sessions] title</c> setting.</summary>
+    [NeoRpcMethod("sessionTitles")]
+    public GlobalConfigSessionTitlesResponse SessionTitles(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
+        lock (_gate) return new("ok", CodeAlta.Agent.AgentSessionTitles.NameOf(_store.LoadGlobalSessionTitleMode()));
+    }
+
+    /// <summary>
+    /// Saves how a session nobody named is titled. A session that follows the setting takes the mode with its next
+    /// prompt; a title somebody gave stays.
+    /// </summary>
+    [NeoRpcMethod("saveSessionTitles")]
+    public GlobalConfigSessionTitlesResponse SaveSessionTitles(GlobalConfigSaveSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
+        if (CodeAlta.Agent.AgentSessionTitles.ParseMode(request.Mode) is not { } mode) return new("invalid", null);
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveGlobalSessionTitleMode(mode);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
+            {
+                return new("write_failed", null);
+            }
+        }
+
+        return new("ok", CodeAlta.Agent.AgentSessionTitles.NameOf(mode));
+    }
+
     /// <summary>Lists the configured provider definitions, including disabled ones, without their secrets.</summary>
     [NeoRpcMethod("providers")]
     public GlobalConfigProvidersResponse Providers(GlobalConfigProvidersRequest request)
@@ -469,6 +505,13 @@ internal sealed record GlobalConfigValidationResponse(bool Valid, string? Messag
 internal sealed record GlobalConfigSaveRequest(string? ExpectedEpoch, string? Content, string? ExpectedRevision, bool ApplyProviders);
 internal sealed record GlobalConfigSaveResponse(string Status, string? Revision, string? Message, int? Line, int? Column, int ProvidersApplied);
 internal sealed record GlobalConfigProvidersRequest(string? ExpectedEpoch);
+internal sealed record GlobalConfigSessionTitlesRequest(string? ExpectedEpoch);
+/// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
+/// <param name="Mode"><c>first_prompt</c>, <c>last_message</c> or <c>model</c>.</param>
+internal sealed record GlobalConfigSaveSessionTitlesRequest(string? ExpectedEpoch, string? Mode);
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c> or <c>write_failed</c>.</param>
+/// <param name="Mode">The mode in the settings; null unless <c>ok</c>.</param>
+internal sealed record GlobalConfigSessionTitlesResponse(string Status, string? Mode);
 internal sealed record GlobalConfigProvidersResponse(string Status, string? Revision, string? DefaultProvider,
     IReadOnlyList<GlobalConfigProvider> Providers, IReadOnlyList<string> ProviderTypes, IReadOnlyList<string> ReasoningEfforts,
     IReadOnlyList<GlobalConfigProviderTypeDefaults> TypeDefaults, IReadOnlyList<GlobalConfigBuiltInProvider> BuiltIn)

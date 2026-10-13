@@ -219,6 +219,8 @@ export const globalConfig = Object.freeze({
   saveProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   deleteProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   addBuiltInProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
+  sessionTitles: async () => ({ status: "unavailable", mode: null }),
+  saveSessionTitles: async () => ({ status: "unavailable", mode: null }),
 });
 
 // The demo has no host to edit: every Settings editor reports itself unavailable.
