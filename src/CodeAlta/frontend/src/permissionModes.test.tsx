@@ -58,6 +58,22 @@ test("the mode belongs to the session: another model or prompt keeps it, and the
   assert.equal(changeSelection(overridden, overridden.current, "permissionMode", "plan"), null);
 });
 
+test("a model or an effort the provider no longer lists does not hold back a change of mode", () => {
+  // The session holds an effort its model does not list, a model that is gone or a prompt that is gone: the mode
+  // goes to the host by itself, and the rest of the selection stays as it was.
+  for (const held of [{ ...current, reasoningEffort: "Max" }, { ...current, modelId: "gone" }, { ...current, agentPromptId: "gone" }]) {
+    const value = { ...choices, current: held };
+    assert.equal(validSelection(value, held), false);
+    assert.deepEqual(changeSelection(value, held, "permissionMode", "acceptEdits"), { ...held, permissionMode: "acceptEdits" });
+    // The mode is still one the provider offers, or its own.
+    assert.equal(changeSelection(value, held, "permissionMode", "plan"), null);
+    assert.equal(changeSelection({ ...without, current: held }, held, "permissionMode", "acceptEdits"), null);
+    const own = { ...value, current: { ...held, permissionMode: "auto" } };
+    assert.deepEqual(changeSelection(own, own.current, "permissionMode", ""), { ...held, permissionMode: providerPermissionMode });
+    assert.equal(changeSelection(own, own.current, "permissionMode", "auto")?.permissionMode, null, "the mode it has is no change");
+  }
+});
+
 test("a saved mode the provider no longer offers does not hold back another change", () => {
   // The session keeps it: the change sends no mode. A provider without modes has no field to choose another.
   for (const value of [{ ...choices, current: { ...current, permissionMode: "removed" } }, { ...without, current: { ...current, permissionMode: "auto" } }]) {

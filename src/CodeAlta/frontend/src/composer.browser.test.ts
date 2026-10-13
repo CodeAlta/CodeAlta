@@ -12,8 +12,14 @@ import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browse
 const edge = browserExecutable;
 
 // Mounts the production OwnedSessionPanel with the production styles. The fixture plays the host: it takes or
-// refuses a Send, starts and ends the run, and takes steering.
-for (const mac of [false, true]) test(`composer sends, enqueues and explicitly steers on ${mac ? "macOS" : "Windows"}`, { skip: !edge, timeout: 90_000 }, async () => {
+// refuses a Send, starts and ends the run, and takes steering. The last scenario is the permission mode of a session
+// whose model and effort are no longer a pair its provider lists: the host is asked for the mode alone.
+const scenarios = [
+  { name: "composer sends, enqueues and explicitly steers on Windows", mac: false, permission: false },
+  { name: "composer sends, enqueues and explicitly steers on macOS", mac: true, permission: false },
+  { name: "composer sends the permission mode of a session whose saved selection is not valid", mac: false, permission: true },
+];
+for (const { name, mac, permission } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -92,11 +98,51 @@ for (const mac of [false, true]) test(`composer sends, enqueues and explicitly s
     await command("Page.enable");
     await command("Runtime.enable");
     await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'platform',{get:()=>${JSON.stringify(mac ? "MacIntel" : "Win32")}});
-      window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ')` });
+      window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ');
+      ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
+
+    if (permission) {
+      // The session holds the effort "max", which its model does not list: nothing else of its selection can be
+      // changed, but the mode is the session's and goes to the host by itself.
+      const button = "document.querySelector('.composer-permission')";
+      const shows = (mode: string) => `${button}?.getAttribute('aria-label')===${JSON.stringify(`Permissions: ${mode}`)}`;
+      const choose = async (mode: string) => {
+        await evaluate(`${button}.click()`);
+        const option = `[...document.querySelectorAll('.permission-mode-item')].find(item=>item.querySelector('.permission-mode-name')?.textContent===${JSON.stringify(mode)})`;
+        assert.equal(await wait(`!!${option}`), true, `the list of modes offers ${mode}`);
+        await evaluate(`${option}.click()`);
+      };
+      const calls = async () => JSON.parse(await evaluate("JSON.stringify(fixturePermission.calls)")) as string[];
+      assert.equal(await wait(shows("Bypass permissions")), true, "the mode of the provider, which the session runs in");
+
+      await choose("Ask first");
+      assert.equal(await wait(`fixturePermission.calls.length===1 && ${shows("Ask first")}`), true);
+      assert.deepEqual(await calls(), ["default"], "the host is asked for the mode alone");
+      await choose("Accept edits");
+      assert.equal(await wait(`fixturePermission.calls.length===2 && ${shows("Accept edits")}`), true);
+      assert.deepEqual(await calls(), ["default", "acceptEdits"]);
+      // Back to the mode of the provider, by its name.
+      await choose("Bypass permissions");
+      assert.equal(await wait(`fixturePermission.calls.length===3 && ${shows("Bypass permissions")}`), true);
+      assert.deepEqual(await calls(), ["default", "acceptEdits", "provider"]);
+      assert.equal(await evaluate("document.querySelectorAll('.bp6-toast').length"), 0);
+
+      // A mode the host refuses is said, and the button shows the mode in force again.
+      await evaluate("fixturePermission.status='busy'");
+      await choose("Ask first");
+      assert.equal(await wait(`fixturePermission.calls.length===4 && !!document.querySelector('.bp6-toast') && ${shows("Bypass permissions")}`), true);
+      assert.equal(await evaluate("document.querySelector('.bp6-toast').textContent.includes('The permission mode was not changed (busy).')"), true);
+      // The rest of the selection is as it was: a Send names none of it.
+      await write("after the modes"); await enter();
+      assert.equal(await wait(`fixture.sendCalls.length===1 && ${running}`), true);
+      assert.equal(await evaluate("JSON.stringify(fixture.sendCalls[0].selection ?? null)"), "null");
+      assert.deepEqual(exceptions, []);
+      return;
+    }
 
     // Background work is visible even when no foreground turn is thinking.
     const backgroundStatus = "document.querySelector('.background-tasks-status')";

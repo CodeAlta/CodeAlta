@@ -916,23 +916,28 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   // The permission mode applies at once, also to a turn that runs: what waits for an answer and the new mode grants is
   // allowed. The button shows the choice while the host takes it, and the mode in force again when it refuses.
+  // The mode is the session's and is asked for alone: a session whose model or effort is no longer one its provider
+  // lists takes it too. What the next Send carries is then left as it was, since a Send refuses a selection that is
+  // not valid, and the button shows the mode once the host has it.
   async function applyPermissionMode(current: SessionChoicesResponse, chosen: SessionSelection, value: string, signal: AbortSignal) {
     const next = changeSelection(current, chosen, "permissionMode", value);
     if (!next) return;
-    setSelection(next);
+    const sendable = validSelection(current, next);
+    if (sendable) setSelection(next);
     // The mode the session has already is no change to ask for.
-    if (next.permissionMode == null) { selections.set(epoch, sessionId, current, next); return; }
+    if (next.permissionMode == null) { if (sendable) selections.set(epoch, sessionId, current, next); return; }
     const result = await sessions.setPermissionMode({ expectedEpoch: epoch, sessionId, permissionMode: next.permissionMode }, { signal }).catch(() => null);
     if (signal.aborted) return;
     if (result?.status !== "ok" || result.epoch !== epoch || result.sessionId !== sessionId) {
-      setSelection(chosen);
+      if (sendable) setSelection(chosen);
       showToast({ message: t("The permission mode was not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
       return;
     }
     // The session has it now: the next Send carries none, and the choices name it as the session's.
     const updated = { ...current, current: { ...current.current!, permissionMode: result.permissionMode ?? null } };
     const kept = { ...next, permissionMode: null };
-    if (!selections.set(epoch, sessionId, updated, kept)) { setChoices(updated); setSelection(kept); }
+    if (!sendable) setChoices(updated);
+    else if (!selections.set(epoch, sessionId, updated, kept)) { setChoices(updated); setSelection(kept); }
     setChoicesNotice("");
   }
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;

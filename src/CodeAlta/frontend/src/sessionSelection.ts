@@ -43,9 +43,13 @@ export function changeSelection(choices: SessionChoicesResponse, current: Sessio
   if (field === "modelId") next.reasoningEffort = choices.models.find(model => model.id === next.modelId)?.startEffort ?? null;
   // A saved mode the provider no longer offers does not hold back another change: the session keeps it.
   if (field !== "permissionMode" && !validPermissionMode(choices, next.permissionMode)) next.permissionMode = null;
-  // The mode the session already has is no change; going back to the provider's from another one is named.
-  if (field === "permissionMode")
+  // The mode the session already has is no change; going back to the provider's from another one is named. The mode
+  // is checked alone: it is the session's and goes to the host by itself, so a model or an effort the provider no
+  // longer lists does not hold it back. The rest of the selection stays as it was, and is checked when it is sent.
+  if (field === "permissionMode") {
     next.permissionMode = (value || null) === (choices.current?.permissionMode ?? null) ? null : value || providerPermissionMode;
+    return validPermissionMode(choices, next.permissionMode) ? next : null;
+  }
   return validSelection(choices, next) ? next : null;
 }
 

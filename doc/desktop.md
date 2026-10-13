@@ -1039,7 +1039,10 @@ keeps it in the session's local state (`permission_mode`), the requests of the s
 on, those that wait for the user and that it grants are allowed (see "Permission modes"), and for Claude
 Code the running CLI is switched with `set_permission_mode`. Before a turn the CLI is restarted when it
 refuses; during a turn it is not, since that would end the turn. When the host refuses the choice, the
-button shows the mode in force again and a toast says why. A send can still carry a mode
+button shows the mode in force again and a toast says why. The mode is checked alone (`changeSelection`
+with `permissionMode`): a session whose model or effort is no longer a pair its provider lists, for which no
+other choice of the selection can be made, takes it too, and what its next Send carries is left as it was. A
+send can still carry a mode
 (`SessionSelection.PermissionMode`; absent keeps the session's). A provider switch clears it. New-session
 drafts have no button: the choice appears once the session exists.
 
