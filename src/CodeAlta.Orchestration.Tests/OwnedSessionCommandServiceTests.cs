@@ -607,6 +607,92 @@ public sealed class OwnedSessionCommandServiceTests
     }, sessionPermissionModes: true);
 
     [TestMethod]
+    public Task SessionPermissionModes_AModeChosenWhileATurnRuns_AnswersWhatWaits_AndWhatComesNext() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var permissions = f.Host.RuntimeService.Permissions;
+
+        // The session asks first: a command and a file change of its running turn wait for the user.
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("ask", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Ask } }));
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var command = f.Track(f.Provider.SendPermission!);
+        var change = f.Track(f.Provider.FirstSendOptions!.OnPermissionRequest!(new AgentFileChangePermissionRequest(f.Provider.Descriptor.ProviderId,
+            f.SessionId, DateTimeOffset.UtcNow, null, "owned-change", f.Provider.Options!.WorkingDirectory, null), CancellationToken.None));
+        async Task<IReadOnlyList<SessionOwnedPermissionSnapshot>> WaitingAsync(int count)
+        {
+            for (var attempt = 0; attempt < 2000; attempt++)
+            {
+                var page = await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask());
+                if (page.Entries.Count == count) return page.Entries;
+                await Task.Delay(5);
+            }
+
+            Assert.Fail($"{count} requests did not wait for the user.");
+            throw new InvalidOperationException("Unreachable.");
+        }
+
+        await WaitingAsync(2);
+
+        // Accept edits, chosen while the turn runs: the file change that waits is allowed, the command still waits.
+        var edits = await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, SessionPermissionModes.AcceptEdits));
+        Assert.AreEqual(new OwnedPermissionModeResult("ok", SessionPermissionModes.AcceptEdits), edits);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(change)).Kind);
+        Assert.IsFalse(command.IsCompleted);
+        Assert.AreEqual("inert fixture command", (await WaitingAsync(1)).Single().Request.Command);
+
+        // Bypass: the command is allowed too, and what the turn asks next is allowed without waiting.
+        Assert.AreEqual("ok", (await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, SessionPermissionModes.Bypass))).Status);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(command)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce,
+            (await f.Observe(f.Track(f.Provider.FirstSendOptions!.OnPermissionRequest!(f.Provider.CommandRequest(), CancellationToken.None)))).Kind);
+        await WaitingAsync(0);
+
+        // A mode the provider does not offer is refused, and the session keeps its own.
+        Assert.AreEqual(new OwnedPermissionModeResult("invalid_mode", null),
+            await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, "plan")));
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        Assert.AreEqual(SessionPermissionModes.Bypass, (await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId)))!.Current.PermissionMode);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
+    public Task SessionPermissionModes_AModeThatAsksChosenWhileATurnRuns_ReviewsWhatTheTurnAsksNext() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var permissions = f.Host.RuntimeService.Permissions;
+
+        // The turn starts in Bypass: it has no review of its own, and what it asks is allowed.
+        f.Provider.RequestPerSendPermission = true;
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("bypass", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = SessionPermissionModes.Bypass } }));
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await f.Observe(f.Track(f.Provider.SendPermission!))).Kind);
+
+        // Ask, chosen while it runs: what it asks next waits for the user on the card of the session.
+        Assert.AreEqual("ok", (await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, SessionPermissionModes.Ask))).Status);
+        var next = f.Track(f.Provider.FirstSendOptions!.OnPermissionRequest!(f.Provider.CommandRequest(), CancellationToken.None));
+        SessionOwnedPermissionSnapshot? entry = null;
+        for (var attempt = 0; attempt < 2000 && entry is null; attempt++)
+        {
+            entry = (await f.Observe(permissions.ListOwnedCommandsAsync(f.SessionId, CancellationToken.None).AsTask())).Entries.SingleOrDefault();
+            if (entry is null) await Task.Delay(5);
+        }
+
+        Assert.IsNotNull(entry, "The request did not wait for the user.");
+        Assert.IsFalse(next.IsCompleted);
+        Assert.IsTrue(await f.Observe(permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Observe(next)).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task SessionPermissionModes_ATurnTheOwnerDidNotSendAsksOnTheCardOfItsSession() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;

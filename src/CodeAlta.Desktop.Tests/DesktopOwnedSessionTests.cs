@@ -103,6 +103,32 @@ public sealed class DesktopOwnedSessionTests
     }
 
     [TestMethod]
+    public Task PermissionMode_IsChosenAtOnce_OutsideASend() => RealFixture.RunAsync(async f =>
+    {
+        f.Host.ModelProviderRegistry.RegisterOrReplace(f.Provider.Descriptor with
+            { PermissionModes = ["default", "acceptEdits", "plan", "bypassPermissions"], DefaultPermissionMode = "default" },
+            () => new FakeRuntime(f.Provider));
+        f.Provider.Release.TrySetResult();
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+        async Task<SessionPermissionModeResult> ChooseAsync(string mode, string epoch = "fixture-epoch")
+            => await f.Wait(f.Keep(service.SetPermissionModeAsync(new(epoch, f.SessionId, mode), CancellationToken.None)));
+        async Task<string?> ModeAsync()
+            => (await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)))).Current!.PermissionMode;
+
+        // The session has the mode without sending anything, and keeps it.
+        Assert.AreEqual(new SessionPermissionModeResult("ok", "fixture-epoch", f.SessionId, "acceptEdits"), await ChooseAsync("acceptEdits"));
+        Assert.AreEqual("acceptEdits", await ModeAsync());
+        // Plan stays a mode of the provider's configuration, and an empty or unknown mode is refused.
+        Assert.AreEqual("invalid_mode", (await ChooseAsync("plan")).Status);
+        Assert.AreEqual("invalid_request", (await ChooseAsync(" ")).Status);
+        Assert.AreEqual("stale_epoch", (await ChooseAsync("bypassPermissions", "other-epoch")).Status);
+        Assert.AreEqual("acceptEdits", await ModeAsync());
+        // The provider's own mode is named, and leaves the session without one of its own.
+        Assert.AreEqual(new SessionPermissionModeResult("ok", "fixture-epoch", f.SessionId, null), await ChooseAsync(OwnedSessionSelection.ProviderPermissionMode));
+        Assert.IsNull(await ModeAsync());
+    });
+
+    [TestMethod]
     public Task PermissionMode_ChoicesNameTheModesOfTheProvider_AndASendGivesOneToTheSession() => RealFixture.RunAsync(async f =>
     {
         f.Host.ModelProviderRegistry.RegisterOrReplace(f.Provider.Descriptor with

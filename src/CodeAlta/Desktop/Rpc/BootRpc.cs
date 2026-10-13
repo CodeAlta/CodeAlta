@@ -125,6 +125,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(SessionProviderResult))]
 [JsonSerializable(typeof(SessionStopBackgroundTaskRequest))]
 [JsonSerializable(typeof(SessionStopBackgroundTaskResult))]
+[JsonSerializable(typeof(SessionPermissionModeRequest))]
+[JsonSerializable(typeof(SessionPermissionModeResult))]
 [JsonSerializable(typeof(SessionRemoteControlRequest))]
 [JsonSerializable(typeof(SessionRemoteControlResult))]
 [JsonSerializable(typeof(SessionRemoteControlResponse))]

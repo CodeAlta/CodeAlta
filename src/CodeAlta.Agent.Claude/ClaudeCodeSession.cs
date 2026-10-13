@@ -179,10 +179,12 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 }
             }
 
-            // A run that shows a turn of the CLI reads the process that wrote it: another one would not have it.
+            // A run that shows a turn of the CLI reads the process that wrote it: another one would not have it. A
+            // segment that sends nothing continues the turn the CLI runs: that process is not started again for a
+            // permission mode, which would end the turn; the next turn starts it in the mode if it must.
             if (!showsOwnTurn)
             {
-                await EnsureConnectionAsync(request, cancellationToken).ConfigureAwait(false);
+                await EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: newUserMessages.Count > 0).ConfigureAwait(false);
             }
 
             if (toolsChanged)
@@ -367,7 +369,10 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         return newMessages;
     }
 
-    private async Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken)
+    private Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken)
+        => EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: true);
+
+    private async Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken, bool mayRestartForMode)
     {
         // An effort is only given to a model the CLI lists it for; a model it does not list is given what was asked.
         var effort = request.ModelInfo is { } modelInfo &&
@@ -385,7 +390,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         if (_connection is { IsClosed: false } connection && key == _launchKey &&
-            await SwitchPermissionModeAsync(connection, permissionMode, cancellationToken).ConfigureAwait(false))
+            (await SwitchPermissionModeAsync(connection, permissionMode, cancellationToken).ConfigureAwait(false) || !mayRestartForMode))
         {
             return;
         }
@@ -450,6 +455,22 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _instructions = appendSystemPrompt;
         _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
         _costTotal = 0;
+    }
+
+    // Puts the running CLI in a new permission mode now, during a turn or between turns (a turn it starts by itself
+    // then follows it), without starting it again: that would end a turn. A CLI that refuses keeps its mode until the
+    // next turn of the user, which starts it again in the new one if it must; meanwhile CodeAlta answers what it asks
+    // by the new mode.
+    internal async Task<bool> SetRunningPermissionModeAsync(string? permissionMode, CancellationToken cancellationToken)
+    {
+        var mode = NormalizePermissionMode(permissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
+        lock (_gate)
+        {
+            _permissionMode = mode;
+        }
+
+        return _connection is { IsClosed: false } connection
+            && await SwitchPermissionModeAsync(connection, mode, cancellationToken).ConfigureAwait(false);
     }
 
     // Puts the running CLI in the permission mode of the turn, null being the one of the user's settings. Returns

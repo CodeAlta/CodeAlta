@@ -341,6 +341,22 @@ public sealed partial class AgentHub : IAsyncDisposable
         return await ExecuteReferencedAsync(entry, () => entry.Coordinator.SetTitleModeAsync(mode, releaseTitle, cancellationToken)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Gives the permission mode set last on a session to it now, during a run or between runs, so that what its
+    /// provider does next follows it (<see cref="IAgentPermissionModeProvider.ApplyPermissionModeNowAsync"/>).
+    /// </summary>
+    /// <param name="sessionHandleId">Existing attachment identity.</param>
+    /// <param name="cancellationToken">Cancels admission and the wait for the provider.</param>
+    /// <returns>Whether the provider took the mode now.</returns>
+    /// <exception cref="InvalidOperationException">The handle no longer admits references.</exception>
+    /// <exception cref="OperationCanceledException">Admission was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or provider is disposed.</exception>
+    public async Task<bool> ApplyPermissionModeNowAsync(AgentSessionHandleId sessionHandleId, CancellationToken cancellationToken = default)
+    {
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.ApplyPermissionModeNowAsync(cancellationToken)).ConfigureAwait(false);
+    }
+
     /// <summary>Signals only the expected run on an existing attachment and joins original cancellation work.</summary>
     /// <param name="sessionHandleId">Existing attachment identity; never acquired from a catalog or replaced.</param>
     /// <param name="expectedRunId">Immutable original provider run identity.</param>
@@ -865,6 +881,10 @@ public sealed partial class AgentHub : IAsyncDisposable
             if (releaseTitle) await provider.ReleaseTitleAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
+
+        public async Task<bool> ApplyPermissionModeNowAsync(CancellationToken cancellationToken)
+            => _session is IAgentPermissionModeProvider provider
+                && await InvokeOriginalAsync(() => provider.ApplyPermissionModeNowAsync(cancellationToken)).ConfigureAwait(false);
 
         public Task<AgentTargetedAbortOutcome> AbortRunAsync(AgentRunId expectedRunId, CancellationToken cancellationToken)
             => _session is IAgentTargetedAbortProvider provider

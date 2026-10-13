@@ -36,6 +36,7 @@ import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
+import { showToast } from "./appToaster";
 import { PermissionModeMenu } from "./PermissionModeMenu";
 import { chosenPermissionMode, offeredPermissionModes } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
@@ -193,7 +194,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     selectionRevision.current++;
     setChoices(value.choices);
     setSelection(value.selection);
-    setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
+    setChoicesNotice("The agent, the model and the effort apply on Send; the permission mode applies at once, also to a running turn.");
   }), [epoch, sessionId, capability, selections]);
   useEffect(() => {
     if (!observing) { setLoadingChoices(false); return; }
@@ -224,7 +225,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         // A temporarily empty catalog must not silently replace an unsent preference.
         // Keep it visibly unverified; normal Send still requires validSelection.
         setSelection(verified ?? (retained?.providerKey === value.current.providerKey ? retained : null));
-        setChoicesNotice("Selections apply on Send; active runs and queued text are unchanged.");
+        setChoicesNotice("The agent, the model and the effort apply on Send; the permission mode applies at once, also to a running turn.");
       }).catch(() => { if (!controller.signal.aborted && revision === selectionRevision.current) setChoicesNotice("Session choices could not be loaded. Reopen the Model selector to try again."); })
       .finally(() => { if (!controller.signal.aborted) setLoadingChoices(false); });
     return () => controller.abort();
@@ -906,10 +907,32 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
+    if (field === "permissionMode") { void applyPermissionMode(activeChoices, selected, value, scope.current.signal); return; }
     const next = changeSelection(activeChoices, selected, field, value);
     if (!next) { setChoicesNotice("Choose an available model and prompt before sending with changed settings."); return; }
     if (!selections.set(epoch, sessionId, activeChoices, next)) return;
     setSelection(next);
+    setChoicesNotice("");
+  }
+  // The permission mode applies at once, also to a turn that runs: what waits for an answer and the new mode grants is
+  // allowed. The button shows the choice while the host takes it, and the mode in force again when it refuses.
+  async function applyPermissionMode(current: SessionChoicesResponse, chosen: SessionSelection, value: string, signal: AbortSignal) {
+    const next = changeSelection(current, chosen, "permissionMode", value);
+    if (!next) return;
+    setSelection(next);
+    // The mode the session has already is no change to ask for.
+    if (next.permissionMode == null) { selections.set(epoch, sessionId, current, next); return; }
+    const result = await sessions.setPermissionMode({ expectedEpoch: epoch, sessionId, permissionMode: next.permissionMode }, { signal }).catch(() => null);
+    if (signal.aborted) return;
+    if (result?.status !== "ok" || result.epoch !== epoch || result.sessionId !== sessionId) {
+      setSelection(chosen);
+      showToast({ message: t("The permission mode was not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+    // The session has it now: the next Send carries none, and the choices name it as the session's.
+    const updated = { ...current, current: { ...current.current!, permissionMode: result.permissionMode ?? null } };
+    const kept = { ...next, permissionMode: null };
+    if (!selections.set(epoch, sessionId, updated, kept)) { setChoices(updated); setSelection(kept); }
     setChoicesNotice("");
   }
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;
