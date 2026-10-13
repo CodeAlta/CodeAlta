@@ -12,7 +12,7 @@ import { createAppearancePreview } from "./appearancePreview";
 import { useColorSchemeLibrary } from "./colorSchemeLibrary";
 import { ShellAppearance } from "./ShellAppearance";
 import { RunningExitDialog } from "./RunningExitDialog";
-import { NewSessionDialog } from "./NewSessionDialog";
+import { NewSessionPopover } from "./NewSessionPopover";
 import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
 import { EntryAddedDialog } from "./EntryAddedDialog";
@@ -681,8 +681,6 @@ function App() {
   const menuOrigin = useRef<HTMLButtonElement>(null);
   const [creatingVisible, writeCreatingVisible] = useState(false);
   const [creatingTitle, writeCreatingTitle] = useState("");
-  const [creatingProvider, writeCreatingProvider] = useState("");
-  function setCreatingProvider(value: string) { invalidateCreation(); writeCreatingProvider(value); }
   function setCreatingVisible(value: boolean | ((previous: boolean) => boolean)) { invalidateCreation(); writeCreatingVisible(value); }
   function setCreatingTitle(value: string) { invalidateCreation(); writeCreatingTitle(value); }
   const [creatingBusy, setCreatingBusy] = useState(false);
@@ -2088,7 +2086,7 @@ function App() {
     return () => { alive = false; clearInterval(timer); unsubscribe(); };
   }, [reminderEpoch, reminderActions]);
   const draftChoices = useNewSessionChoices(status?.hostEpoch, projectId, selectedProject?.path ?? null,
-    creatingProvider, configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
+    configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
@@ -2478,6 +2476,8 @@ function App() {
     }
     else if (action === "renameProject") void beginProjectRename();
     else if (action === "escape") {
+      // The form of a new session waits for the session it creates: Escape then dismisses nothing.
+      if (creatingBusy && creatingVisible) return;
       if (dialog === "help") closeHelp();
       else if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
       else { setDialog(null); (document.activeElement as HTMLElement | null)?.blur(); }
@@ -2547,10 +2547,11 @@ function App() {
     // The sessions of a scope are searched in the search of the window, which then keeps to that scope.
     if (kind === "search") { openSearch({ category: "sessions", projectId: id }); return; }
     if (id !== selectedScope.current) selectProject(id);
-    // Keep the newly created session visible beneath its project, even if the scope was folded.
+    // The session that is created is listed under its scope: a closed scope would hide it.
     if (kind === "create") setProjectTree(current => expandScope(current, id));
     if (kind === "browse") openSessionBrowser();
-    else if (scopeCanCreateSession(id)) { setCreatingVisible(true); setCreatingMessage(""); }
+    // The form is beside the row of the scope it creates in, which is the selected one by now.
+    else if (selectedScope.current === id && scopeCanCreateSession(id)) { setCreatingTitle(""); setCreatingVisible(true); setCreatingMessage(""); }
   }
 
   function toggleProjects() {
@@ -2570,7 +2571,6 @@ function App() {
     setProjectRenameTarget(null);
     setProjectRenameConflict(false);
     setProjectRenameNotice(uncertainProjectRename.current ? { key: "A previous project rename is unconfirmed. Refresh and inspect; no retry will be sent." } : "");
-    if (selectedScope.current !== nextProjectId) setCreatingProvider("");
     selectedScope.current = nextProjectId;
     setProjectId(nextProjectId);
     const nextSessionId = selectedId ?? null;
@@ -2932,15 +2932,18 @@ function App() {
     } finally { projectRenameRefreshPending.current = false; }
   }
 
-  function creationProviderChoice(inDialog = false) {
+  function creationProviderChoice(inPopover = false) {
     const inventory = configurationState.snapshot;
     const providers = inventory?.providerRuntimeAvailable ? inventory.providers.slice(0, 32).filter(provider => provider.enabled
       && provider.id.length > 0 && provider.id.length <= 256 && provider.id === provider.id.trim()
       && !/[\u0000-\u001f\u007f-\u009f\ud800-\udfff]/u.test(provider.id)
       && inventory.providers.filter(other => other.id === provider.id).length === 1) : [];
-    // The provider in use is named even before the user picks one: the remembered choice, else an enabled default.
+    // The provider in use is named even before the user picks one: the one chosen earlier, else the default provider, else the first enabled one.
     const usedProvider = draftChoices.value.providerKey;
-    const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => setCreatingProvider(event.target.value)}>
+    const change = (field: "providerKey" | "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {
+      invalidateCreation(); draftChoices.change(field, next);
+    };
+    const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => change("providerKey", event.target.value)}>
       {!usedProvider && <option value="">{t("No provider")}</option>}
       {usedProvider && !providers.some(provider => provider.id === usedProvider) && <option value={usedProvider} disabled>{usedProvider}</option>}
       {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.isDefault ? t("{name} (default)", { name: provider.id }) : provider.id}</option>)}
@@ -2948,11 +2951,8 @@ function App() {
     const locked = creatingBusy || creationLocked || !owned;
     const value = draftChoices.value;
     const efforts = draftChoices.models.find(model => model.id === value.modelId)?.efforts ?? null;
-    const change = (field: "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {
-      invalidateCreation(); draftChoices.change(field, next);
-    };
-    const choiceId = inDialog ? "create" : "new";
-    return <ComposerSelectionFields sessionId={choiceId} onOpenCatalog={page => { if (inDialog) setCreatingVisible(false); navigate(page); }}
+    const choiceId = inPopover ? "create" : "new";
+    return <ComposerSelectionFields sessionId={choiceId} onOpenCatalog={page => { if (inPopover) setCreatingVisible(false); navigate(page); }}
       summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
         provider: usedProvider || t("No provider"), providerKey: usedProvider || null, modelId: value.modelId || null,
         model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model"),
@@ -2969,13 +2969,9 @@ function App() {
   }
 
   async function createSelectedSession(fromDraft = false) {
-    // Only our own creation dialog may be open. Unrelated/nested dialogs still fence admission and completion.
-    const creationDialog = !fromDraft && creatingVisible ? document.querySelector<HTMLDialogElement>(".new-session-dialog[open]") : null;
-    const blockedByModal = () => Array.from(document.querySelectorAll('dialog[open], [role="dialog"][aria-modal="true"]'))
-      .some(element => element !== creationDialog);
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
-      || currentView.current !== "workspace" || blockedByModal() || !draftChoices.ready) return;
+      || currentView.current !== "workspace" || modalDialogOpen() || !draftChoices.ready) return;
     // The text as it is now, not as it was when App was last rendered.
     const typed = localDrafts.peek(draftScope) ?? localDraft;
     if (fromDraft && (!draftChoices.ready || sessionId !== null || (!typed.text.trim() && !localImages.images.length)
@@ -2991,7 +2987,7 @@ function App() {
     const providerId = creationSelection.providerKey || null;
     const target: SessionTarget = selectedProject
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
-    // The dialog and draft use the same remembered working-place choice.
+    // The place is the one the chip shows, in the form beside the row as in the draft.
     const place = selectedProject ? workPlaces.get(selectedProject.id) ?? null : null;
     const generation = creationGeneration.current;
     const epoch = status?.hostEpoch;
@@ -3001,7 +2997,7 @@ function App() {
       && currentHostEpoch.current === epoch && currentHostAvailable.current && capability.canMutate()
       && selectedScope.current === (target.scope === "project" ? target.projectId : null)
       && selectedSessionId.current === sessionAtAdmission && currentView.current === "workspace"
-      && !settingsVisible.current && !blockedByModal()
+      && !settingsVisible.current && !modalDialogOpen()
       && (!handoff || localDrafts.peek(handoff.scope)?.revision === handoff.revision)
       && (!handoff || submissions.imageDrafts.get(handoff.imageKey) === handoff.images)
       && (!handoff || localImageGeneration.current === handoff.imageGeneration)
@@ -3036,13 +3032,13 @@ function App() {
               { signal: creationRefresh.current.signal, timeoutMilliseconds: 15000 });
             capability.observe(choices);
           } catch { /* Original draft and choices stay available for manual review. */ }
-          if (!isCurrent() || !choices || choices.status !== "ok" || choices.epoch !== epoch
-            || choices.sessionId !== selection.sessionId || !choices.current || !validSelection(choices, creationSelection)) {
-            const message = "Session created, but its selected agent and model could not be verified. Inspect sessions; nothing sent.";
-            setCreatingMessage(message); recordHandoff(message + " Original draft retained.");
-            return;
-          }
+          const offered = choices && choices.status === "ok" && choices.epoch === epoch && choices.sessionId === selection.sessionId
+            && choices.current && validSelection(choices, creationSelection) ? choices : undefined;
           if (handoff) {
+            if (!isCurrent() || !offered) {
+              recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
+              return;
+            }
             // Never overwrite a pre-existing session editor. Storage failure cannot
             // certify delivery into the ordinary composer, so leave navigation alone.
             if (snapshot.sessions.some(row => row.id === selection.sessionId) || submissions.pending(selection.sessionId)
@@ -3056,17 +3052,19 @@ function App() {
               recordHandoff("Session created, but draft transfer could not be confirmed. Original text and images retained. Destination text storage may be uncertain; inspect sessions. Nothing sent.");
               return;
             }
-          }
-          if (!isCurrent() || !nextSendSelections.set(epoch!, selection.sessionId, choices, creationSelection)) {
-            const message = "Session created, but its selected agent and model could not be verified. Inspect sessions; nothing sent.";
-            setCreatingMessage(message); recordHandoff(message + " Original draft retained.");
-            return;
-          }
-          if (handoff) {
+            if (!isCurrent() || !nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection)) {
+              recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
+              return;
+            }
             recordHandoff("");
             if (handoff.images.length === 0 && handoff.text.trim()) autoSend.current = { sessionId: selection.sessionId, text: handoff.text };
             // The session now owns the text; the New session tab starts empty again.
             if (handoff.scope === draftScope && localDrafts.peek(draftScope)?.revision === handoff.revision) editLocalDraft("");
+          } else {
+            if (!isCurrent()) { setCreatingMessage(completedElsewhere); return; }
+            // The session exists. When what was chosen cannot be kept for its first Send, it opens as it is, and says so.
+            if (!offered || !nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection))
+              showToast({ message: translate(shownLocale.current, "The session uses its default agent and model."), intent: "warning", icon: "warning-sign", timeout: 8000 });
           }
           publishWorkspaceState({ kind: "ready", snapshot: fresh });
           creationHeld.current = false;
@@ -3094,6 +3092,14 @@ function App() {
           : sessionCreationMessage(result.code) + (isCurrent() ? "" : ` ${completedElsewhere}`);
         setCreatingMessage(message); recordHandoff(message + " Original draft retained; nothing sent."); }
     } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
+  }
+
+  // After a creation that was refused or is unconfirmed: the list of sessions is read again, to be looked at.
+  function refreshSessionsAfterCreation() {
+    void refreshProjects(creationRefresh.current.signal).then(fresh => {
+      if (creationAlive.current) setCreatingMessage({ key: fresh ? "Session list refreshed. Inspect the entries before creating another."
+        : "Could not refresh the session list. Inspect before creating another." });
+    });
   }
 
   // The window of a fork or a rewind is the one of the selected session's pane: a command only asks for it.
@@ -3375,6 +3381,8 @@ function App() {
     void settingsFiles.open({ expectedEpoch: status?.hostEpoch ?? null, projectId: null, kind: "colorSchemes", scope: "Global", id: null, part: null }, { timeoutMilliseconds: 15000 })
       .then(result => { if (result.status === "ok") closeSettings(); else failed(); }, failed);
   }
+  // The form of a new session is beside the row of its scope. What is said about its creation is said there, not also in the list.
+  const creatingShown = creatingVisible && view === "workspace" && !settingsOpen && (projectId === null || !!selectedProject);
   const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
@@ -3491,6 +3499,17 @@ function App() {
                 confirmLabel={t(archiveAsk.archived ? "Unarchive" : "Archive")} busy={archiveBusy} error={archiveMessage || null}
                 onConfirm={remember => { if (remember) setConfirm("projectArchive", false); void archiveSelectedProject(true); }}
                 onCancel={() => { setArchiveAsk(null); setArchiveMessage(""); }} /> } : undefined}
+            creating={creatingShown ? { id: projectId, form: <NewSessionPopover heading={selectedProject ? t("New session in {name}", { name: selectedProject.name }) : t("New chat")}
+              title={creatingTitle} onTitle={setCreatingTitle} choices={creationProviderChoice(true)}
+              place={selectedProject && <ProjectContext epoch={owned ? status?.hostEpoch ?? null : null} project={selectedProject} read={projectGit.status} branches
+                place={draftPlaceControl && { ...draftPlaceControl, onOpenSettings: () => { setCreatingVisible(false); navigate("worktrees"); } }} />}
+              busy={creatingBusy} disabled={creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !!selectedProject?.archived}
+              error={creatingMessage ? workflowNotice(language.locale, creatingMessage)
+                : creationLocked && !creatingBusy ? t("An earlier creation is unconfirmed. Inspect sessions; creation is blocked in this window.") : null}
+              refresh={draftChoices.failed ? { label: t("Refresh composer choices"), run: draftChoices.refresh }
+                : creationLocked && creatingMessage ? { label: t("Refresh session list"), run: refreshSessionsAfterCreation } : undefined}
+              // A refusal that was read goes with the form; an unconfirmed creation stays said in the list.
+              onCreate={() => void createSelectedSession()} onCancel={() => { setCreatingVisible(false); if (!creationLocked) setCreatingMessage(""); }} /> } : undefined}
             actions={{ current: () => ({ ...currentProjectDetailsContext(),
               active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
               generation: browserRevision.current + projectRenameGeneration.current, modalGeneration: creationGeneration.current,
@@ -3514,15 +3533,10 @@ function App() {
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
-          {creatingBusy && <p role="status" className="notice">{t("Creating session…")}</p>}
-          {creationLocked && !creatingBusy && <p role="status" className="notice">{t("An earlier creation is unconfirmed. Inspect sessions; creation is blocked in this window.")}</p>}
-          {creatingMessage && <p role="alert" className="notice error-text">{workflowNotice(language.locale, creatingMessage)}</p>}
-          {creatingMessage && <button type="button" className="quiet-button" disabled={creatingBusy} onClick={() => {
-            void refreshProjects(creationRefresh.current.signal).then(fresh => {
-              if (creationAlive.current) setCreatingMessage({ key: fresh ? "Session list refreshed. Inspect the entries before creating another."
-                : "Could not refresh the session list. Inspect before creating another." });
-            });
-          }}>{t("Refresh session list")}</button>}
+          {creatingBusy && !creatingShown && <p role="status" className="notice">{t("Creating session…")}</p>}
+          {creationLocked && !creatingBusy && !creatingShown && <p role="status" className="notice">{t("An earlier creation is unconfirmed. Inspect sessions; creation is blocked in this window.")}</p>}
+          {creatingMessage && !creatingShown && <p role="alert" className="notice error-text">{workflowNotice(language.locale, creatingMessage)}</p>}
+          {creatingMessage && !creatingShown && <button type="button" className="quiet-button" disabled={creatingBusy} onClick={refreshSessionsAfterCreation}>{t("Refresh session list")}</button>}
           {renameLocked && <div role="alert" className="notice error-text">{t("A rename is unconfirmed. No further rename will be sent until the exact title is visible after refresh.")}
             <button type="button" className="quiet-button" onClick={() => void refreshRenamedSession()}>{t("Refresh title")}</button>
           </div>}
@@ -3831,15 +3845,6 @@ function App() {
           return result;
         }} />}
     </SettingsOverlay>}
-    {creatingVisible && view === "workspace" && !settingsOpen && <NewSessionDialog projectName={selectedProject?.name ?? null}
-      title={creatingTitle} onTitle={setCreatingTitle} choices={creationProviderChoice(true)}
-      place={selectedProject && <ProjectContext epoch={owned ? status?.hostEpoch ?? null : null} project={selectedProject} read={projectGit.status}
-        branches={!creatingBusy && !creationLocked} place={!creatingBusy && !creationLocked ? draftPlaceControl : undefined} />}
-      disabled={creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !!selectedProject?.archived}
-      busy={creatingBusy} onCreate={() => void createSelectedSession()} onClose={() => { if (!creatingBusy) setCreatingVisible(false); }}
-      notice={<>{creatingMessage && <p role="alert" className="notice error-text">{workflowNotice(language.locale, creatingMessage)}</p>}
-        {creationLocked && !creatingBusy && <p role="status" className="notice">{t("An earlier creation is unconfirmed. Inspect sessions; creation is blocked in this window.")}</p>}
-        {draftChoices.failed && <Button variant="minimal" disabled={creatingBusy || creationLocked} onClick={draftChoices.refresh}>{t("Refresh composer choices")}</Button>}</>} />}
     {dialog === "project" && <OpenProjectDialog snapshot={snapshot} getCurrentSnapshot={() => currentSnapshot.current}
       initialFolder={projectFolder ?? undefined} pickFolder={canPickFolder() ? browseForFolder : undefined}
       epoch={owned ? status?.hostEpoch : undefined}

@@ -47,7 +47,7 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, editor, changes, terminals, tree, head, drop }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -65,6 +65,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   renaming?: { id: string; form: ReactNode };
   /** The question asked about a project before it is archived or unarchived, shown beside its row. */
   asking?: { id: string; form: ReactNode };
+  /** The form of a new session of a project, or of a new chat (no id), shown beside its row. */
+  creating?: { id: string | null; form: ReactNode };
   actions?: ProjectRowAuthority;
   /** The code editors of the projects: which are open, which hold unsaved edits, and how one is opened. */
   editor?: ProjectTabs & Readonly<{ unsaved: (project: WorkspaceProject) => boolean }>;
@@ -102,6 +104,15 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   // The sessions of the selected scope stay in the page while it is closed: what is being typed there is kept.
   const branch = (id: string | null) => id === selectedId ? <li className="project-session-branch" hidden={!open(id)}>{children}{tree?.after?.(id)}</li>
     : tree && open(id) ? <li className="project-session-branch">{tree.sessions(id)}{tree.after?.(id)}</li> : null;
+  // The form of a new session closes on a press outside it, also on the button that opened it: the click of that
+  // press must not open it again.
+  const closing = useRef(false);
+  const newSession = (id: string | null, label: string, title: string) => sessions && <button type="button"
+    className="icon-button project-row-action project-session-trigger" data-open={creating?.id === id} aria-label={label} title={title}
+    aria-haspopup="dialog" aria-expanded={creating?.id === id} disabled={!sessions.canCreate(id)}
+    onPointerDown={() => { closing.current = creating?.id === id; }}
+    onClick={event => { const closed = closing.current && event.detail > 0; closing.current = false; if (!closed) sessions.create(id); }}>
+    <AppIcon name="plus" size={15} /></button>;
   const row = (project: WorkspaceProject) => {
     const favorite = !!tree?.favorite(project.id);
     const editing = !!editor?.open(project.id);
@@ -131,12 +142,10 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         title={running > 0 ? `${t("New terminal")} (${t(running === 1 ? "{count} terminal" : "{count} terminals", { count: running })})` : t("New terminal")}
         onClick={() => terminals.create(project)}>
         <AppIcon name="terminal" size={15} /></button>}
-      {sessions && !project.archived && <button type="button" className="icon-button project-row-action project-session-trigger"
-        aria-label={t("New session in {name}", { name: project.name })} title={t("New session")} aria-haspopup="dialog"
-        disabled={!sessions.canCreate(project.id)} onClick={() => sessions.create(project.id)}>
-        <AppIcon name="plus" size={15} /></button>}
+      {!project.archived && newSession(project.id, t("New session in {name}", { name: project.name }), t("New session"))}
       {renaming?.id === project.id && renaming.form}
       {asking?.id === project.id && asking.form}
+      {creating?.id === project.id && creating.form}
     </ProjectRowActions>{branch(project.id)}</Fragment>;
   };
   const title = (key: "Favorites" | "Other projects", icon: boolean) => <li className="project-section" role="presentation">
@@ -148,15 +157,17 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         <button type="button" aria-pressed={selectedId === null} aria-expanded={open(null)} data-scope="" onClick={() => select(null)} onDoubleClick={() => onKeep?.(null)}>
           {twist(null)}<span className="project-icon" data-file-tone="teal"><AppIcon name="chat" size={15} /></span><strong>{t("Chats")}</strong>{activity?.(null)}
         </button>
+        {newSession(null, t("New chat"), t("New chat"))}
         {sessions && <button ref={otherTrigger} type="button" className="icon-button project-actions-trigger" aria-label={t("Actions for {title}", { title: t("Chats") })}
           aria-haspopup="menu" aria-expanded={otherMenu} onClick={() => setOtherMenu(value => !value)}><AppIcon name="ellipsis" size={16} /></button>}
         {sessions && otherMenu && otherTrigger.current && <SessionTabMenu anchor={otherTrigger.current} title={t("Chats")} container={document.body}
           current={() => true} onClose={() => queueMicrotask(() => setOtherMenu(false))}
           items={[
-            { key: "create", label: t("New chat"), icon: "newSession", disabled: !sessions.canCreate(null), onSelect: () => sessions.create(null) },
+            { key: "create", label: t("New chat…"), icon: "newSession", disabled: !sessions.canCreate(null), onSelect: () => sessions.create(null) },
             { key: "search", label: `${t("Search sessions")}…`, icon: "search", onSelect: () => sessions.search(null) },
             { key: "browse", label: t("Browse saved sessions"), icon: "browse", onSelect: () => sessions.browse(null) },
           ]} />}
+        {creating?.id === null && creating.form}
       </li>
       {branch(null)}
     </ul>

@@ -13,7 +13,8 @@ createRoot(document.getElementById("root")!).render(<div className="ide-shell" s
   <aside className="project-rail">
     <ProjectRailRows projects={projects} selectedId={null} onSelect={nothing} canRename renameBusy={false} onRename={nothing}
       // No menu is opened here: the button of a menu is only laid out.
-      actions={{ current: () => { throw new Error("no menu is opened"); }, open: nothing, rename: nothing, archive: nothing }}
+      actions={{ current: () => { throw new Error("no menu is opened"); }, open: nothing, rename: nothing, archive: nothing,
+        sessions: { canCreate: () => true, create: nothing, search: nothing, browse: nothing } }}
       tree={{ expanded: () => false, toggle: nothing, favorite: id => id === "both", setFavorite: nothing, sessions: () => null }}
       editor={{ open: id => id === "editor" || id === "both", unsaved: () => false, show: nothing }}
       changes={{ open: id => id === "changes" || id === "both", show: nothing }}

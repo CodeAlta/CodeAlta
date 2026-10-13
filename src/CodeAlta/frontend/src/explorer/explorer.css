@@ -46,6 +46,13 @@ body.session-row-dragging, body.session-row-dragging * { cursor: grabbing !impor
   .ide-shell .project-action-row:has(> .project-row-action[data-open="true"]):not(:hover, :focus-within) > .project-row-action:not([data-open="true"]),
   .ide-shell .project-action-row:has(> .project-row-action[data-open="true"]):not(:hover, :focus-within) > .project-actions-trigger:not([aria-expanded="true"]) { display: inline-flex; visibility: hidden; }
 }
+/* The row of the chats has one of these buttons, for a new chat: it is sized and shown as those of a project are. */
+.ide-shell .project-root-list > li > button.project-row-action { display: none; flex: 0 0 24px; width: 24px; min-height: 24px; height: 24px; padding: 0; justify-content: center; }
+.ide-shell .project-root-list > li:hover > button.project-row-action, .ide-shell .project-root-list > li:focus-within > button.project-row-action,
+.ide-shell .project-root-list > li > button.project-row-action[data-open="true"] { display: inline-flex; }
+@media (hover: none) {
+  .ide-shell .project-root-list > li > button.project-row-action { display: inline-flex; }
+}
 
 /* The global sessions stay at the foot of the projects; open, they scroll in what they are given. */
 .ide-shell .project-root-list { max-height: 45%; overflow-x: hidden; overflow-y: auto; }
