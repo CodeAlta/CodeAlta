@@ -2,10 +2,19 @@ import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandle
 import { Classes } from "@blueprintjs/core";
 import "monaco-editor/languages/definitions/markdown/register.js";
 import { followShellTheme, monaco } from "./monaco/monacoEnvironment";
+import { spokenInsertion } from "./speech/spokenText";
 
 
 export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "selectionStart" | "selectionEnd"
-  | "isConnected" | "focus" | "contains" | "closest" | "setSelectionRange" | "addEventListener" | "removeEventListener">;
+  | "isConnected" | "focus" | "contains" | "closest" | "setSelectionRange" | "addEventListener" | "removeEventListener"> & {
+  /**
+   * Writes a spoken piece at the caret, in place of the selection, as one step of undo; the caret ends after
+   * it. It is separated by a space from the word it follows. False when the editor took nothing.
+   */
+  insertAtCaret: (text: string) => boolean;
+  /** Shows a text greyed at the caret that is no part of the prompt, of its draft or of undo; an empty text removes it. */
+  setInterimText: (text: string) => void;
+};
 
 export function PromptEditor({ ref, value, onChange, disabled = false, expanded = false, id, label, placeholder,
   onPaste, onKeyDown, onCompositionStart }: {
@@ -16,6 +25,25 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
   const latest = useRef({ value, onChange, disabled }); latest.current = { value, onChange, disabled };
+  // What a dictation is hearing: a decoration at the caret, which the text of the model never holds.
+  const interim = useRef<{ text: string; shown: monaco.editor.IEditorDecorationsCollection | null }>({ text: "", shown: null });
+  // The character before the caret, a line break at the start of a line, nothing at the start of the prompt.
+  function beforeCaret(model: monaco.editor.ITextModel, position: monaco.IPosition) {
+    return position.column > 1 ? model.getValueInRange(new monaco.Range(position.lineNumber, position.column - 1, position.lineNumber, position.column))
+      : position.lineNumber > 1 ? "\n" : "";
+  }
+  function showInterim() {
+    const instance = editor.current, model = instance?.getModel(), node = host.current;
+    if (!instance || !model || !node) return;
+    const position = instance.getSelection()?.getStartPosition() ?? model.getFullModelRange().getEndPosition();
+    const content = interim.current.text ? spokenInsertion(beforeCaret(model, position), interim.current.text) : "";
+    // The placeholder of an empty prompt gives its place to what is being said.
+    node.toggleAttribute("data-interim", !!content);
+    const decorations = content ? [{ range: monaco.Range.fromPositions(position), options: { description: "speech-interim", showIfCollapsed: true,
+      after: { content, inlineClassName: "speech-interim", cursorStops: monaco.editor.InjectedTextCursorStops.None } } }] : [];
+    if (interim.current.shown) interim.current.shown.set(decorations);
+    else if (decorations.length) interim.current.shown = instance.createDecorationsCollection(decorations);
+  }
   useLayoutEffect(() => {
     const node = host.current!;
     const model = monaco.editor.createModel(latest.current.value, "markdown");
@@ -41,8 +69,13 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       if (next !== latest.current.value) latest.current.onChange(next);
       node.dispatchEvent(new Event("input", { bubbles: true }));
     });
-    const selection = instance.onDidChangeCursorSelection(() => node.dispatchEvent(new Event("select")));
-    return () => { unfollowTheme(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null; };
+    const selection = instance.onDidChangeCursorSelection(() => {
+      node.dispatchEvent(new Event("select"));
+      // What is being said follows the caret.
+      if (interim.current.text) showInterim();
+    });
+    return () => { unfollowTheme(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+      interim.current = { text: "", shown: null }; node.removeAttribute("data-interim"); };
   }, [expanded]);
   useImperativeHandle(ref, () => ({
     get value() { return editor.current?.getValue() ?? latest.current.value; },
@@ -57,6 +90,24 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       editor.current?.setSelection(new monaco.Selection(a.lineNumber, a.column, b.lineNumber, b.column)); },
     addEventListener: (...args: Parameters<HTMLElement["addEventListener"]>) => host.current?.addEventListener(...args),
     removeEventListener: (...args: Parameters<HTMLElement["removeEventListener"]>) => host.current?.removeEventListener(...args),
+    insertAtCaret: text => {
+      const instance = editor.current, model = instance?.getModel();
+      if (!instance || !model || latest.current.disabled) return false;
+      const range = instance.getSelection() ?? monaco.Range.fromPositions(model.getFullModelRange().getEndPosition());
+      const insertion = spokenInsertion(beforeCaret(model, range.getStartPosition()), text);
+      if (!insertion) return false;
+      // The same path as typing: the change of the model tells the owner of the draft, and a text that is too long is undone.
+      instance.pushUndoStop();
+      const done = instance.executeEdits("dictation", [{ range, text: insertion, forceMoveMarkers: true }], inverse => {
+        const end = inverse[0].range.getEndPosition();
+        return [new monaco.Selection(end.lineNumber, end.column, end.lineNumber, end.column)];
+      });
+      instance.pushUndoStop();
+      const caret = instance.getPosition();
+      if (caret) instance.revealPosition(caret);
+      return done;
+    },
+    setInterimText: text => { interim.current.text = text; showInterim(); },
   }), []);
   useLayoutEffect(() => {
     const instance = editor.current;

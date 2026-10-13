@@ -175,6 +175,10 @@ import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis
 import { StorageSettings } from "./storage/StorageSettings";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
 import { storage } from "#neoastra";
+import { speech as speechApi } from "#neoastra";
+import { SpeechContext } from "./speech/speech";
+import { speechEnabled } from "./speech/speechStore";
+import { useSpeechInstall } from "./speech/useSpeechInstall";
 import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
 import { collectSessionRetention, createSessionRetention } from "./sessionRetention";
@@ -268,6 +272,7 @@ import { BookmarkRail } from "./bookmarks/BookmarkRail";
 import { BookmarksPanel } from "./bookmarks/BookmarksPanel";
 import { SessionBookmarkMark } from "./bookmarks/SessionBookmarkMark";
 import "./bookmarks/bookmarks.css";
+import "./speech/speech.css";
 
 type TimelineCommand = Readonly<{ sessionId: string; projectId: string | null; epoch: string | null;
   ready: () => boolean; navigate: (action: MessageNavigation) => void;
@@ -1909,6 +1914,10 @@ function App() {
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const storageMaintenance = useStorageMaintenance(storage, owned ? status!.hostEpoch : null, language.locale, !hostSilent);
+  // Speech to prompt: the microphones of the composers and the download of a model follow it by themselves.
+  const speech = useSpeechInstall(speechApi, owned && !hostSilent ? status!.hostEpoch : null, language.locale);
+  // Settings covers the workspace: the pane of a session stops being observed, and the prompt of a new session is told here.
+  useEffect(() => { if (settingsOpen) speech.abandon(`draft:${draftScope}`); }, [speech, settingsOpen, draftScope]);
   // The terminals belong to the application: this window lists them, and shows in tabs those it was asked to.
   // A terminal runs with or without a tab, and its tab goes when it does.
   const [terminalWorkspace] = useState(() => createTerminalWorkspace(address => {
@@ -2331,6 +2340,7 @@ function App() {
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
+      case "dictate": return view === "workspace" && !fileTabs.active && speechEnabled(speech.getState());
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
@@ -2406,6 +2416,8 @@ function App() {
       case "toggleNavigator": toggleProjects(); break;
       case "modelSelector": invokeComposerControl(activeComposerControl(".composer-selection")); break;
       case "usage": invokeComposerControl(activeComposerControl("#session-usage-trigger")); break;
+      // The microphone of the composer in front starts, or stops what it records.
+      case "dictate": invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#dictate-prompt")); break;
       case "searchSessions": openSearch({ category: "sessions" }); break;
       case "refreshStatuses": runtimeObservationControls().refresh(tabs.open); break;
       case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
@@ -3040,6 +3052,8 @@ function App() {
     if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
       || currentView.current !== "workspace" || modalDialogOpen() || !draftChoices.ready) return;
+    // What is sent is what the prompt holds: a dictation into it ends, and writes nothing after this.
+    speech.abandon(`draft:${draftScope}`);
     // The text as it is now, not as it was when App was last rendered.
     const typed = localDrafts.peek(draftScope) ?? localDraft;
     if (fromDraft && (!draftChoices.ready || sessionId !== null || (!typed.text.trim() && !localImages.images.length)
@@ -3519,7 +3533,7 @@ function App() {
     ? { expectedEpoch: referenceEpoch, projectId: referenceProject, projectPath: referencePath, sessionId, lifetime: referenceLifetime,
       capturePopup: captureReferencePopup, observe: observeReference } : null,
   [referenceAvailable, referenceEpoch, referenceProject, referencePath, sessionId, referenceLifetime, captureReferencePopup, observeReference]);
-  return <ShellLanguageContext.Provider value={language}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -4072,7 +4086,7 @@ function App() {
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,

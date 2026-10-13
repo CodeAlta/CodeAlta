@@ -134,6 +134,7 @@ import {
   GitPullRequest,
   Hand,
   MessagesSquare,
+  Mic,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -269,6 +270,7 @@ const icons = {
   pullRequest: GitPullRequest,
   hand: Hand,
   chat: MessagesSquare,
+  mic: Mic,
   question: ShieldQuestion,
   shield: Shield,
   warning: TriangleAlert,

@@ -1,0 +1,58 @@
+/* Speech to prompt: the microphone of a composer, what is being said in its prompt, the notice of a download
+   and the settings page. Colors are the variables of the shell, so both themes and every color scheme apply. */
+
+/* The button, beside Send. While it records it is red, with a ring that follows the voice (--speech-level, 0 to 1). */
+.bp6-button.bp6-minimal.speech-button[data-speech="starting"]:not([class*="bp6-intent-"]),
+.bp6-button.bp6-minimal.speech-button[data-speech="recording"]:not([class*="bp6-intent-"]) { color: var(--red); }
+.bp6-button.bp6-minimal.speech-button[data-speech="starting"] { opacity: .7; }
+.bp6-button.bp6-minimal.speech-button[data-speech="recording"] {
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  box-shadow: 0 0 0 calc(1px + var(--speech-level, 0) * 5px) color-mix(in srgb, var(--red) 38%, transparent);
+  transition: box-shadow .12s linear;
+}
+.bp6-button.bp6-minimal.speech-button[data-speech="installing"]:not([class*="bp6-intent-"]) { color: var(--accent); }
+.speech-button[data-speech="installing"] > svg { animation: speech-wait 1.6s ease-in-out infinite; }
+@keyframes speech-wait { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .speech-button[data-speech="installing"] > svg { animation: none; }
+  .bp6-button.bp6-minimal.speech-button[data-speech="recording"] { transition: none; }
+}
+
+/* What is being said, greyed at the caret of the prompt. It is not text of the prompt: the placeholder of an
+   empty prompt gives its place to it. */
+.prompt-editor .speech-interim { color: var(--muted); font-style: italic; }
+.prompt-editor[data-interim][data-placeholder]::after { content: none; }
+
+/* The question of the first use, beside the button. */
+.confirm-form.speech-ask { width: min(360px, calc(100vw - 32px)); }
+.speech-ask .rename-actions { flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.speech-ask .speech-ask-other.bp6-button { margin-right: auto; margin-left: -7px; color: var(--accent); }
+.speech-ask-answers { display: inline-flex; gap: 6px; margin-left: auto; }
+
+/* The notice of a download: one line and a bar. */
+.speech-install-notice { display: grid; gap: 7px; min-width: min(280px, 60vw); }
+.speech-install-notice > span { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+/* The settings page: the choices, then the models in the cache. */
+.speech-settings { container-type: inline-size; }
+.speech-layout { display: grid; gap: 14px; min-width: 0; }
+.speech-card.bp6-card { min-width: 0; }
+.speech-card h2 { margin: 0 0 10px; font-size: var(--bp-typography-size-heading-medium); font-weight: var(--bp-typography-weight-bold); }
+.speech-settings .settings-field-control .bp6-html-select { max-width: min(100%, 420px); }
+.speech-settings .settings-field-control .bp6-html-select select { max-width: 100%; text-overflow: ellipsis; }
+.speech-model-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 10px; color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.speech-custom { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.speech-custom > .bp6-input-group { flex: 1 1 220px; min-width: 0; }
+.speech-address-error { flex: 1 1 100%; margin: 0; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.speech-hint { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
+.speech-table.bp6-html-table { width: 100%; margin-bottom: 8px; }
+.speech-table th, .speech-table td { vertical-align: middle; overflow-wrap: anywhere; }
+.speech-table tbody th { font-weight: 600; }
+.speech-table td { color: var(--muted); }
+.speech-table .speech-size { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.speech-table .speech-actions { width: 1%; padding-block: 2px; text-align: right; }
+.speech-models .settings-file-location { font-size: 12.5px; }
+.speech-models .settings-file-label { color: var(--muted); white-space: nowrap; }
+@container (max-width: 460px) {
+  .speech-model-state { justify-content: flex-start; }
+}

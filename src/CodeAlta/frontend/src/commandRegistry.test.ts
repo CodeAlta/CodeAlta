@@ -36,6 +36,8 @@ test("single-stroke gestures follow the terminal key map and work inside the pro
     assert.equal(resolveCommandKey(key("F4", { shiftKey: true }), false, focus).command, "bookmarkNext");
     assert.equal(resolveCommandKey(ctrl("F4"), false, focus).command, "messageLatest");
     assert.equal(resolveCommandKey(key("F6"), false, focus).command, "expandPrompt");
+    // Dictation starts and stops with one key, from the prompt it writes into as from anywhere else.
+    assert.equal(resolveCommandKey(key("F9"), false, focus).command, "dictate");
     assert.equal(resolveCommandKey(key("F1"), false, focus).command, "help");
     // A new terminal, with the key it has in most editors and with a chord.
     assert.equal(resolveCommandKey(ctrl("`"), false, focus).command, "newTerminal");

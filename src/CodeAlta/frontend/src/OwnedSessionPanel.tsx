@@ -26,6 +26,8 @@ import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { WaitingSubSessionsPanel } from "./WaitingSubSessionsPanel";
 import type { WaitingSubSession } from "./spaces/spaces";
 import { RemoteControlButton } from "./RemoteControlButton";
+import { MicButton } from "./speech/MicButton";
+import { SpeechContext } from "./speech/speech";
 import { entryRemoteControl, remoteControlView, sameRemoteControl, type RemoteControlOpenRequest, type RemoteControlView } from "./remoteControl";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
@@ -160,6 +162,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     setDraft({ text: "", editGeneration: null });
   }
   const promptInput = useRef<PromptInput>(null);
+  // The dictation of the window, which this composer ends when its prompt leaves.
+  const speech = useContext(SpeechContext);
+  const speechOwner = `session:${sessionId}`;
   const referenceScope = useContext(ProjectReferenceContext);
   const [expanded, setExpanded] = useState(false);
   const [enqueue, setEnqueue] = useState(false);
@@ -456,6 +461,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // for the running turn. Only the composer's own text takes its images along.
   function stagePrompt(kind: "Queue" | "Steer", value = text, attached = value === latestText.current ? images : []) {
     if (pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted) return false;
+    if (value === latestText.current) speech?.abandon(speechOwner);
     if (!queue.composer.add(kind, epoch, sessionId, value, attached.length ? attached : null)) return false;
     if (value === latestText.current) {
       inputRevision.current++; clearText();
@@ -575,6 +581,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   function submit(queuePrompt = enqueue) {
     if (!canAdmit()) return;
+    // What is sent is what the prompt holds: a dictation into it ends, and writes nothing after this.
+    speech?.abandon(speechOwner);
     const signal = scope.current?.signal;
     sendDiagnostics.info("composer action", { mounted: !!signal, aborted: signal?.aborted ?? false,
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
@@ -1115,6 +1123,8 @@ ${value}` : value);
         aria-label={pendingAbortRun ? t("Retry exact cancellation request for observed run {run}", { run: pendingAbortRun.request.expectedRunId }) : t("Cancel observed run")}
         title={pendingAbortRun ? `${t("Manual retry of exact cancellation:")} ${t("epoch")} ${pendingAbortRun.request.expectedEpoch}, ${t("session")} ${pendingAbortRun.request.sessionId}, ${t("runtime")} ${pendingAbortRun.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingAbortRun.request.expectedAttachmentGeneration}, ${t("run")} ${pendingAbortRun.request.expectedRunId}, ${t("request")} ${pendingAbortRun.request.clientRequestId}`
           : t("Stop the running turn")} />}
+      <MicButton owner={speechOwner} input={promptInput} disabled={!!pending || invalidEpoch || expanded} visible={observing}
+        id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} />
       <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
       <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={() => submit()} />
       </SendSplitButton>

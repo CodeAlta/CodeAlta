@@ -11,6 +11,7 @@ import { ComposerSurface } from "./ComposerSurface";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { IssuePicker } from "./IssuePicker";
+import { MicButton } from "./speech/MicButton";
 import { useShellLanguage } from "./shellLanguage";
 
 const noSubscription = () => () => { };
@@ -98,6 +99,8 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} />
         {localDraft?.surface && <Button variant="minimal" icon={<AppIcon name="compact" size={16} />} disabled
           aria-label={t("Compact the conversation (Ctrl+F11)")} title={t("Compact the conversation (Ctrl+F11)")} />}
+        {localDraft && <MicButton owner={`draft:${sessionId}`} input={promptInput} disabled={expanded || localDraft.busy} visible={active}
+          id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} />}
         {localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}
   </ComposerSurface></>;
 }

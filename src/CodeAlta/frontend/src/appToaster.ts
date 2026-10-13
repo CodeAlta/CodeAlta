@@ -13,3 +13,8 @@ export function showToast(toast: ToastProps, key?: string): void {
     { domRenderer: (element, container) => createRoot(container).render(element) });
   void toaster.then(value => { value.show(toast, key); }, () => { /* Without a toaster the message is simply not shown. */ });
 }
+
+/** Takes away the message shown with a key: one that was kept until what it follows ended. */
+export function dismissToast(key: string): void {
+  void toaster?.then(value => { value.dismiss(key); }, () => { /* There was no toaster to show it. */ });
+}
