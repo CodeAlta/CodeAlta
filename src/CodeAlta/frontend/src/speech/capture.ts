@@ -70,9 +70,9 @@ export const startMicrophone: StartCapture = handlers => {
       context = new AudioContext();
       await context.audioWorklet.addModule(workletAddress());
       if (stopped) { release(); return; }
-      // A context made outside a gesture of the user can start suspended.
-      if (context.state === "suspended") await context.resume();
-      if (stopped) { release(); return; }
+      // A context made outside a gesture of the user can start suspended. Asked to run and not waited for: where
+      // the system holds it back, the capture can still be stopped, and gives its audio once it runs.
+      if (context.state === "suspended") void context.resume().catch(() => { /* It stays suspended: no audio comes. */ });
       const encoder = createChunkEncoder(context.sampleRate);
       source = context.createMediaStreamSource(stream);
       node = new AudioWorkletNode(context, workletProcessor, { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
