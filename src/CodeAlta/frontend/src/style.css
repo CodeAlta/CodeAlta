@@ -453,6 +453,11 @@ dd { margin: 0; overflow-wrap: anywhere; }
 /* A request waiting for permission sits on top of the composer: what it asks, then its choices as one list. */
 .command-permission-panel { flex-shrink: 0; margin: 8px 4px 6px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow); }
 .command-permission-panel h3 { margin: 0 0 6px; font-size: 14px; }
+/* The sessions under this one that wait for the user: a line each, with the request to allow when there is one. */
+.waiting-sub-sessions { flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; margin: 6px 4px 2px; }
+.waiting-sub-session-line { display: flex; align-items: center; gap: 6px; min-width: 0; margin: 0 4px; color: var(--muted); font-size: 12px; }
+.waiting-sub-session-line .session-reference { margin-inline-start: 0; }
+.waiting-sub-session .command-permission-panel { margin-top: 4px; }
 .command-permission-panel pre { max-height: 8.5em; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .command-permission-panel > p { margin: 4px 0 0; }
 .command-permission-panel > p.permission-shortened { color: var(--red); font-weight: 600; }
@@ -1191,6 +1196,8 @@ dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { di
 /* A session that waits for the user: easy to spot among the marks of the Explorer and on its tab. */
 .waiting-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; margin-inline-start: 4px; padding: 1px 5px; border-radius: 999px; color: #1c1300; background: var(--yellow); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .flexlayout__tab_button_leading .waiting-badge { margin-inline: 0 2px; }
+/* A session whose sub-sessions wait: the same mark, lighter, since it is not the one asking. */
+.waiting-badge[data-below] { color: inherit; background: color-mix(in srgb, var(--yellow) 35%, transparent); box-shadow: inset 0 0 0 1px var(--yellow); }
 .reminder-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; margin-inline-start: 4px; color: var(--accent); font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 /* Sub-agents have a color of their own, the one of the row of a session started by another: the count of the
    sessions a session started, the card of a message between agents, and the session such a message names. */

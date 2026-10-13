@@ -145,7 +145,7 @@ test("the window shows one space at a time: its projects, its sessions and its o
     };
     const captureToast = async (sessionId = "one") => {
       const message = JSON.stringify(`${sessionId} waits for you in Default`);
-      await evaluate(`spacesFixture.sessions=${JSON.stringify([{ sessionId, projectId: "project", title: sessionId, running: false, backgroundTasks: 0, failed: false, waiting: true }])}`);
+      await evaluate(`spacesFixture.sessions=${JSON.stringify([{ sessionId, projectId: "project", title: sessionId, running: false, backgroundTasks: 0, failed: false, waiting: true, ancestors: [] }])}`);
       assert.equal(await wait(`[...document.querySelectorAll('.bp6-toast')].some(toast=>toast.textContent.includes(${message}))`), true);
       await evaluate(`window.waitingToastShow=[...document.querySelectorAll('.bp6-toast')].find(toast=>toast.textContent.includes(${message})).querySelector('a');void 0`);
       assert.equal(await evaluate("waitingToastShow.textContent.trim()"), "Show");

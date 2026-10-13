@@ -140,6 +140,40 @@ public sealed class SpacesRpcTests
         Assert.AreEqual((SpacesService.MaximumActivitySessions, true, "last"), (reply.Sessions.Count, reply.Truncated, reply.Sessions[0].SessionId));
     }
 
+    [TestMethod]
+    public async Task ASessionThatWaits_NamesTheSessionsAboveIt_NearestFirst()
+    {
+        using var fixture = new Fixture();
+        fixture.Runs =
+        [
+            new("root", "p1", "Root", false, 0, false),
+            new("child", "p1", "Child", true, 0, false) { ParentSessionId = "root" },
+            new("grandchild", "p1", "Grandchild", true, 0, false) { ParentSessionId = "CHILD" },
+            new("orphan", "p1", "Orphan", false, 0, false) { ParentSessionId = "not-held" },
+            new("busy", "p1", "Busy", true, 0, false) { ParentSessionId = "root" },
+        ];
+        fixture.Waiting = ["grandchild", "orphan"];
+        var reply = await fixture.Service.ActivityAsync(new(Epoch), default);
+        var sessions = reply.Sessions.ToDictionary(static session => session.SessionId);
+
+        // The chain goes as far as the runtime holds it; the first parent is known even when it is not held.
+        CollectionAssert.AreEqual(new[] { "CHILD", "root" }, sessions["grandchild"].Ancestors.ToArray());
+        CollectionAssert.AreEqual(new[] { "not-held" }, sessions["orphan"].Ancestors.ToArray());
+        // Only a session that waits names them.
+        Assert.AreEqual(0, sessions["busy"].Ancestors.Count);
+        StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"ancestors\":[\"CHILD\",\"root\"]");
+    }
+
+    [TestMethod]
+    public void TheSessionsAboveOne_StopAtALoopAndAtTheDepthLimit()
+    {
+        var loop = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["a"] = "b", ["b"] = "c", ["c"] = "A" };
+        CollectionAssert.AreEqual(new[] { "b", "c" }, SpacesService.Ancestors("a", loop).ToArray());
+
+        var deep = Enumerable.Range(0, 40).ToDictionary(static index => $"s{index}", static index => $"s{index + 1}", StringComparer.OrdinalIgnoreCase);
+        Assert.AreEqual(SpacesService.MaximumAncestors, SpacesService.Ancestors("s0", deep).Count);
+    }
+
     private static async Task<List<T>> Collect<T>(IAsyncEnumerable<T> source)
     {
         var items = new List<T>();

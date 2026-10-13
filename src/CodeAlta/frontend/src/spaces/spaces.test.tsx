@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { dropChange, movedOrder } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
-import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, restoreShownSpace, sameMembers, sameSpaces, scopeSnapshot,
+import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameMembers, sameSpaces, scopeSnapshot,
   spaceActivities, spaceBrand, spaceCalls, spaceMembers, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey } from "./spaces";
 import { activityMilliseconds, createSpacesHub, type SpacesApi } from "./spacesHub";
 
@@ -15,7 +15,7 @@ const session = (id: string, scopeKind: string | null, projectId: string | null,
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
   messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0 });
 const doing = (sessionId: string, projectId: string | null, changes: Partial<SpaceSessionActivity> = {}): SpaceSessionActivity =>
-  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ...changes });
+  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], ...changes });
 
 test("the spaces are read as the host lists them, the default one first, and what is not a space is left out", () => {
   const spaces = readSpaces([item("work", ["a", "b"], { icon: "briefcase", color: "#2D72D2", description: "Paid work" }), item("default", ["a", "b", "c"]),
@@ -89,6 +89,10 @@ test("what each space is doing is worked out from what the sessions do", () => {
   assert.deepEqual(readSessionActivity({ ...doing("s", "a"), backgroundTasks: 500, title: "x".repeat(400) })?.backgroundTasks, 99);
   assert.equal(readSessionActivity({ ...doing("s", "a"), sessionId: "" }), null);
   assert.equal(readSessionActivity(null), null);
+  // A session that waits names the sessions above it; what is not an id is left out, and a session that does not wait names none.
+  assert.deepEqual(readSessionActivity({ ...doing("s", "a", { waiting: true }), ancestors: ["p", "", 7 as unknown as string, "g"] })?.ancestors, ["p", "g"]);
+  assert.deepEqual(readSessionActivity({ ...doing("s", "a"), ancestors: ["p"] })?.ancestors, []);
+  assert.deepEqual(readSessionActivity({ ...doing("s", "a", { waiting: true }), ancestors: undefined as unknown as string[] })?.ancestors, []);
 });
 
 test("the space that is shown has the sessions of its projects and the chats, and the default one has them all", () => {
@@ -293,4 +297,19 @@ test("the foot of the Explorer lists the spaces once there are several, with wha
   assert.match(bar, /aria-pressed="false" data-activity="waiting" aria-label="Personal: 1 session waits for you"/);
   assert.match(bar, /class="space-call" data-kind="waiting" title="Title of s1 waits for you in Personal"/);
   assert.equal((bar.match(/class="space-call"/g) ?? []).length, 1);
+});
+
+test("the sessions that wait are listed under every session above them, the nearest first", () => {
+  const below = waitingSubSessions([
+    doing("grandchild", "a", { waiting: true, ancestors: ["child", "root"] }),
+    doing("child", "a", { running: true }),
+    doing("other", "a", { waiting: true, ancestors: ["root"] }),
+    doing("busy", "a", { running: true, ancestors: ["root"] }),
+    doing("self", "a", { waiting: true, ancestors: ["self", "root"] }),
+  ]);
+  assert.deepEqual(below.get("child")?.map(session => session.sessionId), ["grandchild"]);
+  assert.deepEqual(below.get("root")?.map(session => session.sessionId), ["other", "grandchild", "self"]);
+  assert.deepEqual(below.get("root")?.[0], { sessionId: "other", title: "Title of other" });
+  assert.equal(below.has("self"), false);
+  assert.equal(below.has("busy"), false);
 });

@@ -12,10 +12,14 @@ export function WaitingBadge({ count }: { count: number }) {
   return <span className="waiting-badge" role="img" aria-label={label} title={label}><AppIcon name="ask" size={12} />{count > 1 && <span aria-hidden="true">{count}</span>}</span>;
 }
 
-/** The same mark for one session, which says that it waits. */
-export function SessionWaitingBadge({ waiting }: { waiting: boolean }) {
+/**
+ * The same mark for one session, which says that it waits, or, when it does not, that sessions under it (the ones it
+ * created, theirs…) wait: its own work waits for theirs.
+ */
+export function SessionWaitingBadge({ waiting, below = 0 }: { waiting: boolean; below?: number }) {
   const { t } = useShellLanguage();
-  if (!waiting) return null;
-  const label = t("Waits for your answer");
-  return <span className="waiting-badge" role="img" aria-label={label} title={label}><AppIcon name="ask" size={12} /></span>;
+  if (!waiting && below <= 0) return null;
+  const label = waiting ? t("Waits for your answer")
+    : t(below === 1 ? "A sub-session waits for you" : "{count} sub-sessions wait for you", { count: below });
+  return <span className="waiting-badge" data-below={waiting ? undefined : "true"} role="img" aria-label={label} title={label}><AppIcon name="ask" size={12} /></span>;
 }

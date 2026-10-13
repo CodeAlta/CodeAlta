@@ -9,7 +9,11 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="Running">Whether a run is in flight or queued prompts are being sent.</param>
 /// <param name="BackgroundTasks">How many tasks go on in the background for it: those of its provider and its background jobs.</param>
 /// <param name="Failed">Whether its last run ended with an error and no run started since.</param>
-public sealed record SessionRuntimeOverview(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed);
+public sealed record SessionRuntimeOverview(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed)
+{
+    /// <summary>Gets the session that created this one, when one did; <see langword="null"/> otherwise.</summary>
+    public string? ParentSessionId { get; init; }
+}
 
 /// <summary>A session that is at work, and the folder it works in.</summary>
 /// <param name="SessionId">The session.</param>

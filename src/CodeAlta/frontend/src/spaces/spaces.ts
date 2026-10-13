@@ -185,8 +185,34 @@ export function readSessionActivity(value: SpaceSessionActivity | null | undefin
   if (!value || !text(value.sessionId, 256)) return null;
   return { sessionId: value.sessionId, projectId: text(value.projectId, 256) ? value.projectId : null, title: typeof value.title === "string" ? value.title.slice(0, 256) : "",
     running: value.running === true, backgroundTasks: Number.isInteger(value.backgroundTasks) && value.backgroundTasks > 0 ? Math.min(value.backgroundTasks, 99) : 0,
-    failed: value.failed === true, waiting: value.waiting === true };
+    failed: value.failed === true, waiting: value.waiting === true,
+    // The sessions above one that waits, nearest first: the session that created it, and so on.
+    ancestors: value.waiting === true && Array.isArray(value.ancestors) ? value.ancestors.filter(id => text(id, 256)).slice(0, maximumAncestors) : [] };
 }
+
+/** A session that waits for the user, as the session above it shows it. */
+export type WaitingSubSession = Readonly<{ sessionId: string; title: string }>;
+
+/**
+ * The sessions that wait for the user under each session: its children, theirs, and so on, the nearest first, a
+ * session that waits under itself left out.
+ */
+export function waitingSubSessions(sessions: readonly SpaceSessionActivity[]): ReadonlyMap<string, readonly WaitingSubSession[]> {
+  const below = new Map<string, { depth: number; session: WaitingSubSession }[]>();
+  for (const session of sessions) {
+    if (!session.waiting) continue;
+    session.ancestors.forEach((ancestor, depth) => {
+      if (ancestor === session.sessionId) return;
+      const list = below.get(ancestor) ?? [];
+      if (!list.some(item => item.session.sessionId === session.sessionId)) list.push({ depth, session: { sessionId: session.sessionId, title: session.title } });
+      below.set(ancestor, list);
+    });
+  }
+  return new Map([...below].map(([ancestor, list]) => [ancestor, list.sort((left, right) => left.depth - right.depth).map(item => item.session)]));
+}
+
+/** How many sessions above a waiting one are read, as many as the host names. */
+const maximumAncestors = 16;
 
 /**
  * What each space is doing, from what the sessions do: a session counts for every space its project is in,
@@ -270,6 +296,7 @@ export function sameSessions(left: readonly SpaceSessionActivity[], right: reado
   return left === right || left.length === right.length && left.every((session, index) => {
     const other = right[index];
     return session.sessionId === other.sessionId && session.projectId === other.projectId && session.title === other.title && session.running === other.running
-      && session.backgroundTasks === other.backgroundTasks && session.failed === other.failed && session.waiting === other.waiting;
+      && session.backgroundTasks === other.backgroundTasks && session.failed === other.failed && session.waiting === other.waiting
+      && session.ancestors.length === other.ancestors.length && session.ancestors.every((id, at) => id === other.ancestors[at]);
   });
 }

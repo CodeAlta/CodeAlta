@@ -802,6 +802,12 @@ A turn that starts without you asks the same way: a sub-agent that another sessi
 that receives the answer of a sub-agent or a reminder. Its session waits until you answer, however long
 that is, and the mark and the message tell you which one it is. Stopping the session ends the request.
 
+A sub-session that waits for you also shows on the session that created it, and on the ones above that: a
+line above the prompt names it, with a link that opens it, and its tab and Explorer row carry a lighter
+mark. When it waits to run a command or change files, its request is shown there too: **Allow once** and
+**Deny** answer it from the parent. A question or a form, or a denial with what to do instead, is answered
+in the sub-session itself.
+
 A session in a mode that asks cannot do what would run a command without asking you: start a
 [background job](sessions.md#background-jobs), type in a terminal, give an automation a command to run, or
 create and build a plugin. It cannot use the tools that drive the window either, where its requests are
