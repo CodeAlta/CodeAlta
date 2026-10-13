@@ -136,8 +136,11 @@ public sealed class WorkspaceRenameSessionTests
             var store = new SessionViewJournalStore(new CatalogOptions { GlobalRoot = globalRoot }).CreateSessionStore();
             var summary = await store.GetSessionSummaryAsync(id, cancellationToken);
             Assert.IsNotNull(summary);
-            await store.UpsertSessionAsync(summary with { Title = title }, cancellationToken);
+            await store.UpsertSessionAsync(summary with { Title = title, TitleSource = AgentSessionTitleSource.User }, cancellationToken);
         }
+        public AgentSessionTitleMode TitleMode { get; private set; } = AgentSessionTitles.DefaultMode;
+        public void SetTitleMode(AgentSessionTitleMode mode) => TitleMode = mode;
+        public Task ReleaseTitleAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public async IAsyncEnumerable<AgentEvent> StreamEventsAsync([EnumeratorCancellation] CancellationToken token = default)
         { await Task.CompletedTask; yield break; }
         public IDisposable Subscribe(Action<AgentEvent> handler) => new Subscription();

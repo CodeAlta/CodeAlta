@@ -324,6 +324,23 @@ public sealed partial class AgentHub : IAsyncDisposable
         return await ExecuteReferencedAsync(entry, () => entry.Coordinator.RenameAsync(title, cancellationToken)).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Tells an attached session how to title itself from now on, without attaching it again nor interrupting its run.
+    /// </summary>
+    /// <param name="sessionHandleId">Existing attachment identity.</param>
+    /// <param name="mode">The mode.</param>
+    /// <param name="releaseTitle">Whether the title is handed back to CodeAlta: a title somebody chose follows the mode again.</param>
+    /// <param name="cancellationToken">Cancels admission and persistence.</param>
+    /// <returns>False when the session does not title itself.</returns>
+    /// <exception cref="InvalidOperationException">The handle no longer admits references.</exception>
+    /// <exception cref="OperationCanceledException">The operation was cancelled.</exception>
+    /// <exception cref="ObjectDisposedException">The hub or session is disposed.</exception>
+    public async Task<bool> SetTitleModeAsync(AgentSessionHandleId sessionHandleId, AgentSessionTitleMode mode, bool releaseTitle, CancellationToken cancellationToken = default)
+    {
+        var entry = await AcquireSessionEntryAsync(sessionHandleId, cancellationToken).ConfigureAwait(false);
+        return await ExecuteReferencedAsync(entry, () => entry.Coordinator.SetTitleModeAsync(mode, releaseTitle, cancellationToken)).ConfigureAwait(false);
+    }
+
     /// <summary>Signals only the expected run on an existing attachment and joins original cancellation work.</summary>
     /// <param name="sessionHandleId">Existing attachment identity; never acquired from a catalog or replaced.</param>
     /// <param name="expectedRunId">Immutable original provider run identity.</param>
@@ -838,6 +855,14 @@ public sealed partial class AgentHub : IAsyncDisposable
         {
             if (_session is not IAgentSessionTitleProvider provider) return false;
             await provider.RenameAsync(title, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+
+        public async Task<bool> SetTitleModeAsync(AgentSessionTitleMode mode, bool releaseTitle, CancellationToken cancellationToken)
+        {
+            if (_session is not IAgentSessionTitleProvider provider) return false;
+            provider.SetTitleMode(mode);
+            if (releaseTitle) await provider.ReleaseTitleAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
 

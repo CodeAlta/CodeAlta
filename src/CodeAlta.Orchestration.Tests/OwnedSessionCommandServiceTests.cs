@@ -2412,8 +2412,12 @@ public sealed class OwnedSessionCommandServiceTests
                 Assert.IsNotNull(store);
                 var summary = await store.GetSessionSummaryAsync(sessionId, cancellationToken);
                 Assert.IsNotNull(summary);
-                await store.UpsertSessionAsync(summary with { Title = title }, cancellationToken);
+                await store.UpsertSessionAsync(summary with { Title = title, TitleSource = AgentSessionTitleSource.User }, cancellationToken);
             }
+
+            public AgentSessionTitleMode TitleMode { get; private set; } = AgentSessionTitles.DefaultMode;
+            public void SetTitleMode(AgentSessionTitleMode mode) => TitleMode = mode;
+            public Task ReleaseTitleAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
             public ModelProviderId ProviderId => owner.Descriptor.ProviderId;
             public string? PermissionMode => owner.SessionPermissionMode;

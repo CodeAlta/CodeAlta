@@ -61,6 +61,21 @@ public sealed class CodeAltaConfigDocument
     /// <summary>Gets or sets profile storage policy, read from the user's configuration only.</summary>
     [JsonPropertyName("storage")]
     public CodeAltaStorageSettingsDocument? Storage { get; set; }
+
+    /// <summary>Gets or sets the choices for sessions. Read from the user's file only.</summary>
+    [JsonPropertyName("sessions")]
+    public CodeAltaSessionSettingsDocument? Sessions { get; set; }
+}
+
+/// <summary>Represents the choices for sessions.</summary>
+public sealed class CodeAltaSessionSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets how a session nobody named is titled: <c>first_prompt</c>, <c>last_message</c> or <c>model</c>
+    /// (<see cref="CodeAlta.Agent.AgentSessionTitles.DefaultMode"/> when absent).
+    /// </summary>
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
 }
 
 /// <summary>Global-only automatic storage maintenance preferences.</summary>

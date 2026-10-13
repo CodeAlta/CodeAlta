@@ -174,9 +174,12 @@ public sealed partial class SessionRuntimeService
 
             var recorded = NormalizeOptionalText(summary.WorktreeDirectory);
             var worktree = KeptWorktree(recorded, target.ProjectPath);
-            // A session that was never named is named after its project: it takes the name of the new one.
-            var named = GivenTitle(metadata, session, projects) is not null;
-            var title = named ? null : target.DisplayName;
+            // A session that still has the title it was created with, the name of its project, takes the name of
+            // the new one. A title somebody chose stays, and so does one CodeAlta derived from the conversation.
+            var saved = NormalizeOptionalText(summary.Title);
+            var title = !TitleWasChosen(metadata, session.Kind, source) && (saved is null || IsCreationTitle(saved, session.Kind, source))
+                ? target.DisplayName
+                : null;
             var preview = summary.Summary == UnnamedProjectSessionSummary(source) ? UnnamedProjectSessionSummary(target) : null;
             providerState = await store.GetStateAsync(sessionId, token).ConfigureAwait(false);
             await _sessionViewCatalog.JournalStore.MoveSessionAsync(session,

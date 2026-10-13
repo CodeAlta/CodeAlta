@@ -501,6 +501,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         var descriptor = entry.ToDescriptor();
+        // The session that runs writes its title: the title it has now, and who chose it, are the ones it saved.
+        if ((await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false))?.Details
+            is RawApiSessionMetadataDetails { TitleSource: { } titleSource } details && NormalizeOptionalText(details.Title) is { } savedTitle)
+        {
+            descriptor.Title = savedTitle;
+            descriptor.TitleSource = titleSource;
+        }
+
         var localState = await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, cancellationToken).ConfigureAwait(false);
         if (localState is not null)
         {
@@ -563,17 +571,164 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var session = TryCreateRecoverableSession(metadata, projects);
             if (session is null || session.Kind != (projectId is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession)
                 || session.ProjectRef != projectId || session.WorkingDirectory != workspacePath) return false;
-            var summary = await store.GetSessionSummaryAsync(sessionId, token).ConfigureAwait(false);
-            if (summary is null) return false;
-            var attached = _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated;
-            // A live session owns its summary snapshots: update it too, or its next write would undo the rename.
-            if (attached && !await _agentHub.RenameSessionAsync(entry!.SessionHandleId, title, token).ConfigureAwait(false)) return false;
-            if (!attached)
-                await store.UpsertSessionAsync(summary with { Title = title }, token).ConfigureAwait(false);
-            if (attached) entry!.Title = title;
+            if (!await RenameInActorAsync(store, sessionId, title, token).ConfigureAwait(false)) return false;
             await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, token).ConfigureAwait(false);
             return true;
         }).AsTask(), CancellationToken.None);
+
+    // Runs on the actor of the session. The title is one somebody chose from now on: no turn replaces it.
+    private async Task<bool> RenameInActorAsync(IAgentSessionJournalStore store, string sessionId, string title, CancellationToken token)
+    {
+        var summary = await store.GetSessionSummaryAsync(sessionId, token).ConfigureAwait(false);
+        if (summary is null) return false;
+        var attached = _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated;
+        // A live session owns its summary snapshots: update it too, or its next write would undo the rename.
+        if (attached && !await _agentHub.RenameSessionAsync(entry!.SessionHandleId, title, token).ConfigureAwait(false)) return false;
+        if (!attached)
+            await store.UpsertSessionAsync(summary with { Title = title, TitleSource = AgentSessionTitleSource.User }, token).ConfigureAwait(false);
+        if (attached) entry!.Title = title;
+        return true;
+    }
+
+    /// <summary>
+    /// Says why a title cannot be given to a session: it is at most 256 characters, without spaces around it,
+    /// without control characters, and made of valid Unicode.
+    /// </summary>
+    /// <param name="title">The title.</param>
+    /// <returns>What is wrong with the title, or <see langword="null" /> for one that can be given.</returns>
+    public static string? SessionTitleError(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return "A title is not empty.";
+        if (title.Length > 256 || title != title.Trim() || title.Any(char.IsControl))
+            return "A title must be unpadded, free of control characters, and at most 256 characters.";
+        for (var index = 0; index < title.Length; index++)
+        {
+            if (!char.IsSurrogate(title[index])) continue;
+            if (!char.IsHighSurrogate(title[index]) || ++index == title.Length || !char.IsLowSurrogate(title[index]))
+                return "A title must contain only valid Unicode scalars.";
+        }
+
+        return null;
+    }
+
+    /// <summary>Reads the title of a stored session, who chose it, and how the session is titled.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The title of the session, or <see langword="null" /> for a session that is not known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId" /> is blank.</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public async Task<SessionTitleState?> GetSessionTitleAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return await AdmitAsync(() => GetActorForWork(sessionId).QueryAsync(token => ReadTitleStateAsync(sessionId, token), CancellationToken.None).AsTask(), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Names a session, or changes how it is titled, also while it runs. It changes that session only, never the
+    /// setting.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="title">The title somebody chose for the session; <see langword="null" /> to leave its title.</param>
+    /// <param name="changeMode">Whether <paramref name="mode" /> is set.</param>
+    /// <param name="mode">How the session titles itself; <see langword="null" /> to follow the setting again.</param>
+    /// <param name="cancellationToken">Stops waiting; what was started is completed.</param>
+    /// <returns>The title of the session after the change, or <see langword="null" /> for a session that is not known.</returns>
+    /// <remarks>
+    /// A mode that is set without a title hands the title back to CodeAlta: it follows the mode from then on. With a
+    /// title, the title is the one somebody chose, and only the mode is recorded.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="sessionId" /> is blank, or <paramref name="title" /> cannot be given (<see cref="SessionTitleError" />).</exception>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public async Task<SessionTitleState?> SetSessionTitleAsync(string sessionId, string? title, bool changeMode, AgentSessionTitleMode? mode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (title is not null && SessionTitleError(title) is { } error) throw new ArgumentException(error, nameof(title));
+        return await AdmitAsync(async () =>
+        {
+            while (true)
+            {
+                ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
+                var (transition, state) = await GetActorForWork(sessionId).QueryAsync(async token =>
+                {
+                    // An attachment that is being made reads what is saved: it is waited for, then told.
+                    if (_transitions.TryGetValue(sessionId, out var pending)) return ((Task?)pending, (SessionTitleState?)null);
+                    var session = await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false);
+                    if (session is null) return (null, null);
+                    var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+                    if (_entries.TryGetValue(sessionId, out var entry) && (entry.IsTerminated || entry.Attachment.IsRetiring)) entry = null;
+                    if (changeMode)
+                    {
+                        var name = mode is { } own ? AgentSessionTitles.NameOf(own) : null;
+                        var localState = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false);
+                        if (AgentSessionTitles.ParseMode(localState?.TitleMode) != mode)
+                        {
+                            if (localState is null)
+                            {
+                                localState = new SessionViewLocalState();
+                                CopySessionMetadata(session, localState);
+                            }
+
+                            localState.TitleMode = name;
+                            await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, token).ConfigureAwait(false);
+                        }
+
+                        var effective = mode ?? _configStore.LoadGlobalSessionTitleMode();
+                        var release = title is null;
+                        if (entry is not null)
+                        {
+                            // The session that runs is the one that writes its title: it is told, and goes on.
+                            await _agentHub.SetTitleModeAsync(entry.SessionHandleId, effective, release, token).ConfigureAwait(false);
+                            entry.OwnTitleMode = mode;
+                            entry.TitleMode = effective;
+                        }
+                        else if (release && await store.GetSessionSummaryAsync(sessionId, token).ConfigureAwait(false) is { } summary)
+                        {
+                            await store.UpsertSessionAsync(summary with
+                            {
+                                Title = (effective is AgentSessionTitleMode.LastMessage ? SummaryTitle(summary.Summary) : null) ?? summary.Title,
+                                TitleSource = AgentSessionTitleSource.Auto,
+                            }, token).ConfigureAwait(false);
+                        }
+                    }
+
+                    if (title is not null && !await RenameInActorAsync(store, sessionId, title, token).ConfigureAwait(false)) return (null, null);
+                    await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, token).ConfigureAwait(false);
+                    var changed = await ReadTitleStateAsync(sessionId, token).ConfigureAwait(false);
+                    if (entry is not null && changed is not null) entry.Title = changed.Title;
+                    return (null, changed);
+                }, CancellationToken.None).ConfigureAwait(false);
+                if (transition is null) return state;
+                // Its failure belongs to the one that attaches.
+                await transition.ContinueWith(static _ => { }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).ConfigureAwait(false);
+            }
+        }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Runs on the actor of the session.
+    private async ValueTask<SessionTitleState?> ReadTitleStateAsync(string sessionId, CancellationToken token)
+    {
+        var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(sessionId, token).ConfigureAwait(false);
+        if (metadata is null) return null;
+        var projects = await _projectCatalog.LoadAsync(token).ConfigureAwait(false);
+        var session = TryCreateRecoverableSession(metadata, projects);
+        if (session is null) return null;
+        var own = AgentSessionTitles.ParseMode((await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, token).ConfigureAwait(false))?.TitleMode);
+        return new SessionTitleState(sessionId, ListedTitle(metadata, session.Kind, ProjectOf(session, projects)),
+            (metadata.Details as RawApiSessionMetadataDetails)?.TitleSource, own ?? _configStore.LoadGlobalSessionTitleMode(), own is not null);
+    }
+
+    /// <summary>Reads how a session nobody named is titled, as the settings say (<c>[sessions] title</c>).</summary>
+    /// <returns>The mode of the sessions that have none of their own.</returns>
+    public AgentSessionTitleMode GetSessionTitleMode() => _configStore.LoadGlobalSessionTitleMode();
+
+    /// <summary>
+    /// Saves how a session nobody named is titled, in the settings. A session that follows the setting takes the mode
+    /// with its next prompt.
+    /// </summary>
+    /// <param name="mode">The mode.</param>
+    public void SaveSessionTitleMode(AgentSessionTitleMode mode) => _configStore.SaveGlobalSessionTitleMode(mode);
 
     private async Task<SessionViewDescriptor?> ResolveOwnedSessionBodyAsync(string sessionId, CancellationToken cancellationToken)
     {
@@ -732,6 +887,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         // Only the local state says it, and none is a choice too: the mode of the provider.
         session.PermissionMode = NormalizeOptionalText(localState.PermissionMode);
+        session.TitleMode = AgentSessionTitles.ParseMode(localState.TitleMode) is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null;
 
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
         {
@@ -763,6 +919,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = localState.ModelId,
             ReasoningEffort = localState.ReasoningEffort,
             PermissionMode = localState.PermissionMode,
+            TitleMode = localState.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
             MessageCount = localState.MessageCount,
@@ -968,6 +1125,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             WorkingDirectory = options.WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(title) ? UnnamedGlobalSessionTitle : title.Trim(),
+            // A title that is given was chosen; without one, CodeAlta titles the session.
+            TitleSource = string.IsNullOrWhiteSpace(title) ? AgentSessionTitleSource.Auto : AgentSessionTitleSource.User,
             Status = SessionViewStatus.Draft,
             ParentSessionId = NormalizeOptionalText(parentSessionId),
             CreatedBy = createdBy,
@@ -1081,6 +1240,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             WorkingDirectory = options.WorkingDirectory,
             WorktreeDirectory = NormalizeOptionalText(worktreeDirectory),
             Title = string.IsNullOrWhiteSpace(title) ? project.DisplayName : title.Trim(),
+            // A title that is given was chosen; without one, CodeAlta titles the session.
+            TitleSource = string.IsNullOrWhiteSpace(title) ? AgentSessionTitleSource.Auto : AgentSessionTitleSource.User,
             Status = SessionViewStatus.Draft,
             ParentSessionId = NormalizeOptionalText(parentSessionId),
             CreatedBy = createdBy,
@@ -1246,6 +1407,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (existing is not null && !existing.Attachment.IsRetiring && Reusable(existing))
         {
             existing.PendingAgentPromptId = null;
+            await SyncTitleModeAsync(existing, actorCancellationToken).ConfigureAwait(false);
             return new CoordinatorPreparation(existing, null);
         }
         var launch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1370,9 +1532,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         bool startNewSession;
         lock (_identityGate) startNewSession = _newSessionIds.Remove(session.SessionId);
 
-        // Attachments retain the saved title. Only creation and an explicit Rename choose a new one.
-        var stored = startNewSession ? null : await StoredTitleAsync(session, cancellationToken).ConfigureAwait(false);
+        // An attachment retains the saved title and who chose it. A session that starts says it itself; one that
+        // says nothing (a frontend that built its descriptor) was named unless its title is one a session is created with.
+        var stored = startNewSession ? null : await StoredTitleAsync(session, project, cancellationToken).ConfigureAwait(false);
         var title = stored is { } kept ? kept.Saved : NormalizeOptionalText(session.Title);
+        var titleSource = stored?.Source ?? session.TitleSource
+            ?? (title is not null && !IsCreationTitle(title, session.Kind, project) ? AgentSessionTitleSource.User : AgentSessionTitleSource.Auto);
         var shownTitle = title ?? session.Title;
         var requestedSessionId = NormalizeOptionalText(session.SessionId);
         var systemMessage = AppendPromptPart(instructions.SystemMessage, options.AdditionalSystemMessage);
@@ -1410,10 +1575,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             instructionsAlreadyComposed = instructionTransformations.Count > 0;
         }
 
-        // The permission mode is the one saved with the session: what attaches it does not have to know it.
-        var permissionMode = NormalizeOptionalText(startNewSession
-            ? session.PermissionMode
-            : (await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false))?.PermissionMode);
+        // The permission mode is the one saved with the session: what attaches it does not have to know it. So is
+        // how the session titles itself, which is the setting unless the session has a mode of its own.
+        var savedLocalState = startNewSession ? null : await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
+        var permissionMode = NormalizeOptionalText(startNewSession ? session.PermissionMode : savedLocalState?.PermissionMode);
+        var ownTitleMode = AgentSessionTitles.ParseMode(startNewSession ? session.TitleMode : savedLocalState?.TitleMode);
+        var titleMode = ownTitleMode ?? _configStore.LoadGlobalSessionTitleMode();
         var sessionOptions = new AgentSessionResumeOptions
         {
             SessionId = requestedSessionId,
@@ -1422,6 +1589,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             // The journal header records this instant; the provider's own record must not name a later one.
             CreatedAt = session.CreatedAt == default ? null : session.CreatedAt,
             Title = title,
+            TitleSource = titleSource,
+            TitleMode = titleMode,
+            TitleInstructions = SessionTitleGuidance,
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
@@ -1479,15 +1649,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.ModelId = options.Model;
         session.ReasoningEffort = options.ReasoningEffort;
         session.PermissionMode = permissionMode;
+        session.TitleMode = ownTitleMode is { } ownMode ? AgentSessionTitles.NameOf(ownMode) : null;
+        session.TitleSource = titleSource;
         session.AgentPromptId = effectiveAgentPromptId ?? session.AgentPromptId;
-        await UpsertSessionMetadataAsync(session, options, title, cancellationToken).ConfigureAwait(false);
+        await UpsertSessionMetadataAsync(session, options, title, titleSource, cancellationToken).ConfigureAwait(false);
         var actor = GetActorForWork(session.SessionId);
         // Queue mutations share this mailbox. Keep the durable read/modify/append indivisible
         // with respect to them, without joining setup or retirement from inside the actor.
         await actor.QueryAsync(async actorCancellationToken =>
         {
-            // The mode a session is created with is saved with it: the next attachment reads it from there.
-            await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null).ConfigureAwait(false);
+            // The modes a session is created with are saved with it: the next attachment reads them from there.
+            await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null,
+                startNewSession ? session.TitleMode : null).ConfigureAwait(false);
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
         if (startNewSession)
@@ -1538,6 +1711,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ForkedFrom = session.ForkedFrom,
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
+            OwnTitleMode = ownTitleMode,
+            TitleMode = titleMode,
         };
 
         projector.Entry = entry;
@@ -2586,6 +2761,31 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ? null
             : $"Parent session: `{session.ParentSessionId}`. CodeAlta auto-forwards your final assistant reply. For progress/intermediate parent updates, include `<notify-parent>update text</notify-parent>` in an assistant reply.";
 
+    // What a session titled by its model is asked. The session adds it to the developer instructions of a run
+    // while that is its mode and nobody named it, so a change of mode reaches the next prompt without attaching the
+    // session again. It starts with words that name it: Claude Code is told which paragraph no longer applies by them.
+    internal const string SessionTitleGuidance =
+        "Session title: CodeAlta lists this session under a short title. When you answer the first prompt, and later only when the main subject of the session has changed, start your answer with a line `"
+        + AgentSessionTitleTag.Opening + "Title in a few words" + AgentSessionTitleTag.Closing
+        + "` (at most 60 characters, plain text, in the language of the user). CodeAlta removes that line from what is shown. Do not write the tag otherwise, and never explain it.";
+
+    // An attachment that follows the setting takes the mode the setting has now: a change of the setting reaches a
+    // session with its next prompt, without attaching it again. Runs on the actor of the session.
+    private async ValueTask SyncTitleModeAsync(RuntimeSessionEntry entry, CancellationToken cancellationToken)
+    {
+        var mode = entry.OwnTitleMode ?? _configStore.LoadGlobalSessionTitleMode();
+        if (mode == entry.TitleMode) return;
+        try
+        {
+            if (await _agentHub.SetTitleModeAsync(entry.SessionHandleId, mode, releaseTitle: false, cancellationToken).ConfigureAwait(false))
+                entry.TitleMode = mode;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException)
+        {
+            // The attachment is going away: the one that replaces it reads the setting.
+        }
+    }
+
     private static string? AppendPromptPart(string? baseText, string? additionalText)
     {
         if (string.IsNullOrWhiteSpace(additionalText))
@@ -3141,7 +3341,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         or AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle })
                     parentNotificationClaim = ClaimRetentionWork(sessionId, projector.Entry.ParentSessionId,
                         projector.Entry.CreatedBy?.SourceSessionId);
-                return actor.QueryAsync(_ =>
+                return actor.QueryAsync(async _ =>
                 {
                     if (arrivedOnOpenActivity) ObserveAdmittedActivity(sessionId, projector.Entry!, @event);
                     var sanitized = projector.Project(@event);
@@ -3152,7 +3352,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     RefuseUnavailableOwnedQueue(sessionId);
                     notifications = projector.Entry!.TakeParentNotifications(sanitized);
                     actorChoresCompleted = true;
-                    return ValueTask.FromResult(true);
+                    // The session that runs writes its title: the sessions that are listed after a prompt or after
+                    // the end of a run are read again, and show it.
+                    if (@event is AgentContentCompletedEvent { Kind: AgentContentKind.User } or AgentErrorEvent
+                        or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle })
+                        await _agentSessionCatalog.InvalidateAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+                    return true;
                 }).AsTask();
             }, projectionUse.Dispose, ObserveLivePluginEventAsync, () =>
             {
@@ -3693,6 +3898,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         SessionViewDescriptor session,
         SessionExecutionOptions options,
         string? title,
+        AgentSessionTitleSource titleSource,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(session.SessionId) || session.CreatedAt == default)
@@ -3714,6 +3920,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     WorkingDirectory = session.WorkingDirectory,
                     WorktreeDirectory = NormalizeOptionalText(session.WorktreeDirectory),
                     Title = title,
+                    TitleSource = titleSource,
                     Summary = session.LatestSummary,
                     ParentSessionId = NormalizeOptionalText(session.ParentSessionId),
                     CreatedBySessionId = NormalizeOptionalText(session.CreatedBy?.SourceSessionId ?? session.ParentSessionId),
@@ -3943,6 +4150,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort,
             PermissionMode = session.PermissionMode,
+            TitleMode = session.TitleMode,
+            TitleSource = session.TitleSource,
             AgentPromptId = session.AgentPromptId,
             MessageCount = session.MessageCount,
             SourcePath = session.SourcePath,
@@ -3976,7 +4185,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProviderId = providerKey,
                 ProviderKey = providerKey,
                 WorkingDirectory = normalizedCwd,
-                Title = BuildSessionTitle(session, UnnamedGlobalSessionTitle),
+                Title = ListedTitleOrNull(session, SessionViewKind.GlobalSession, null) ?? UnnamedGlobalSessionTitle,
+                TitleSource = (session.Details as RawApiSessionMetadataDetails)?.TitleSource,
                 Status = SessionViewStatus.Active,
                 ParentSessionId = parentSessionId,
                 ForkedFrom = session.ForkedFrom,
@@ -4009,7 +4219,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             WorkingDirectory = normalizedCwd,
             // As recorded: whether the folder is still there is looked at where the session is about to work.
             WorktreeDirectory = NormalizeOptionalText(session.WorktreePath),
-            Title = BuildSessionTitle(session, project.DisplayName),
+            Title = ListedTitleOrNull(session, SessionViewKind.ProjectSession, project) ?? project.DisplayName,
+            TitleSource = (session.Details as RawApiSessionMetadataDetails)?.TitleSource,
             Status = SessionViewStatus.Active,
             ParentSessionId = parentSessionId,
             ForkedFrom = session.ForkedFrom,
@@ -4124,57 +4335,77 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     private static string UnnamedProjectSessionSummary(ProjectDescriptor project) => $"Project session for {project.DisplayName}.";
 
-    private static string BuildSessionTitle(AgentSessionMetadata session, string fallback)
-        => NormalizeOptionalText((session.Details as RawApiSessionMetadataDetails)?.Title) ?? SummaryTitle(session.Summary) ?? fallback;
+    // The first line of a summary, as the title of a session that follows its last message.
+    private static string? SummaryTitle(string? summary) => AgentSessionTitles.FromMessage(summary);
 
-    private static string? SummaryTitle(string? summary)
-    {
-        if (!string.IsNullOrWhiteSpace(summary))
-        {
-            var firstLine = summary.Trim().Split(['\r', '\n'], 2, StringSplitOptions.RemoveEmptyEntries)[0].Trim();
-            if (!string.IsNullOrWhiteSpace(firstLine))
-            {
-                // Cut between two characters and without a space at the end: a list shows this text as it is, and a
-                // deletion is confirmed with it.
-                return firstLine.Length <= 80 ? firstLine : firstLine[..(char.IsHighSurrogate(firstLine[79]) ? 79 : 80)].TrimEnd();
-            }
-        }
-
-        return null;
-    }
-
-    // A wrapper distinguishes an unstored session from a stored session without a title.
-    private async Task<StoredSessionTitle?> StoredTitleAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    // The title a stored session is attached with and who chose it; null for a session that is not stored. A session
+    // written before the source of a title was recorded is decided here, once: its attachment saves the answer. A
+    // title that is one a session is created with was never chosen: the session keeps the title it is listed under
+    // (the first line of its summary) until its mode gives it another.
+    private async Task<StoredSessionTitle?> StoredTitleAsync(SessionViewDescriptor session, ProjectDescriptor? project, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(session.SessionId)) return null;
         var metadata = await _sessionViewCatalog.JournalStore.CreateSessionStore()
             .GetSessionAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
         if (metadata is null) return null;
-        return new(NormalizeOptionalText((metadata.Details as RawApiSessionMetadataDetails)?.Title));
+        var details = metadata.Details as RawApiSessionMetadataDetails;
+        var saved = NormalizeOptionalText(details?.Title);
+        if (details?.TitleSource is { } source) return new(saved, source);
+        return TitleWasChosen(metadata, session.Kind, project)
+            ? new(saved, AgentSessionTitleSource.User)
+            : new(SummaryTitle(metadata.Summary) ?? saved, AgentSessionTitleSource.Auto);
     }
 
-    private readonly record struct StoredSessionTitle(string? Saved);
+    private readonly record struct StoredSessionTitle(string? Saved, AgentSessionTitleSource Source);
+
+    // Whether somebody chose the saved title of a stored session. A session written before the source of a title
+    // was recorded says nothing: its title was chosen unless it is one a session is created with.
+    private static bool TitleWasChosen(AgentSessionMetadata metadata, SessionViewKind? kind, ProjectDescriptor? project)
+    {
+        var details = metadata.Details as RawApiSessionMetadataDetails;
+        if (details?.TitleSource is { } source) return source is AgentSessionTitleSource.User;
+        return NormalizeOptionalText(details?.Title) is { } title && !IsCreationTitle(title, kind, project);
+    }
+
+    // The titles a session is created with: "Global Session" or the name of its project, or the first line of the
+    // summary it is created with. Only what was written before the source of a title was recorded is compared with
+    // them, and a title a frontend gave without saying who chose it.
+    private static bool IsCreationTitle(string title, SessionViewKind? kind, ProjectDescriptor? project) => kind switch
+    {
+        null => false,
+        SessionViewKind.GlobalSession => title is UnnamedGlobalSessionTitle || title == SummaryTitle(UnnamedGlobalSessionSummary),
+        _ => project is not null && (title == project.DisplayName || title == SummaryTitle(UnnamedProjectSessionSummary(project))),
+    };
 
     private static ProjectDescriptor? ProjectOf(SessionViewDescriptor session, IReadOnlyList<ProjectDescriptor> projects)
         => session.Kind == SessionViewKind.GlobalSession ? null
             : projects.FirstOrDefault(candidate => string.Equals(candidate.Id, session.ProjectRef, StringComparison.Ordinal));
 
     /// <summary>
-    /// The title a list of sessions shows for a stored session, and the one its deletion is confirmed with: the
-    /// saved title, then (for older sessions without a saved title) the first line of its summary (80 characters at
-    /// most), then its id. A saved title never follows changes to the conversation summary.
+    /// The title a list of sessions shows for a stored session, and the one its deletion is confirmed with: its saved
+    /// title, which only the session itself and a Rename write. A session written before the source of a title was
+    /// recorded is listed as it always was until it runs again: by its saved title when somebody chose it, and
+    /// otherwise by the first line of its summary (80 characters at most). A session without any of them is listed
+    /// by its id.
     /// </summary>
     /// <param name="session">The stored session.</param>
-    /// <param name="kind">The session kind, retained for caller compatibility; saved titles are authoritative for every kind.</param>
-    /// <param name="project">The project, retained for caller compatibility.</param>
+    /// <param name="kind">Whether the session is a global one or the session of a project; <see langword="null" /> when that is not known: a saved title without a source is then taken as chosen.</param>
+    /// <param name="project">The project of a project session.</param>
     /// <returns>The title of the session in a list.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="session" /> is <see langword="null" />.</exception>
     public static string ListedTitle(AgentSessionMetadata session, SessionViewKind? kind, ProjectDescriptor? project)
     {
         ArgumentNullException.ThrowIfNull(session);
-        var saved = (session.Details as RawApiSessionMetadataDetails)?.Title;
+        return ListedTitleOrNull(session, kind, project) ?? session.SessionId;
+    }
+
+    private static string? ListedTitleOrNull(AgentSessionMetadata session, SessionViewKind? kind, ProjectDescriptor? project)
+    {
+        var details = session.Details as RawApiSessionMetadataDetails;
+        var saved = details?.Title;
         if (string.IsNullOrWhiteSpace(saved)) saved = null;
-        return saved ?? SummaryTitle(session.Summary) ?? session.SessionId;
+        if (details?.TitleSource is not null && saved is not null) return saved;
+        return saved is not null && !IsCreationTitle(saved.Trim(), kind, project) ? saved : SummaryTitle(session.Summary) ?? saved;
     }
 
     // The session of the agent a prompt comes from; null for a prompt of a person, of a reminder or of the host.
@@ -4239,13 +4470,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
         => UpdateSessionLocalStateAsync(session, cancellationToken, null);
 
-    // createdPermissionMode: the mode of a session that starts, when it has one. Any other update leaves the saved
-    // mode as it is: only the owner of the session changes it.
-    private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode)
+    // createdPermissionMode, createdTitleMode: the modes of a session that starts, when it has them. Any other
+    // update leaves the saved modes as they are: only the owner of the session changes them.
+    private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode,
+        string? createdTitleMode = null)
     {
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
         if (createdPermissionMode is not null) localState.PermissionMode = createdPermissionMode;
+        if (createdTitleMode is not null) localState.TitleMode = createdTitleMode;
         localState.ProviderKey = session.ResolvedProviderKey;
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;
@@ -4354,6 +4587,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         private string? _permissionMode;
+
+        /// <summary>How the session titles itself when it does not follow the setting. Read and written on the actor of the session.</summary>
+        public AgentSessionTitleMode? OwnTitleMode { get; set; }
+
+        /// <summary>The mode the attached session was last told. Read and written on the actor of the session.</summary>
+        public AgentSessionTitleMode TitleMode { get; set; }
 
         public string? Model { get; }
 

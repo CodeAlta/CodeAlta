@@ -123,7 +123,7 @@ public sealed class WorkspaceDeleteSessionTests
     }
 
     [TestMethod]
-    public async Task CreationTitle_IsListedUnchangedAndUsedToConfirmDeletion()
+    public async Task SessionTitledByItsLastMessage_IsDeletedWithTheTitleTheListShows()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-delete-" + Guid.NewGuid().ToString("N"));
         var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
@@ -138,20 +138,21 @@ public sealed class WorkspaceDeleteSessionTests
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
             });
             var project = host.CurrentProject;
+            host.RuntimeService.SaveSessionTitleMode(AgentSessionTitleMode.LastMessage);
             var sessionId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, null)).SessionId;
             var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
             Assert.IsNotNull(receipt);
             Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
 
-            // A saved creation title remains authoritative even when the model has answered.
+            // Nobody named the session: its title is the first line of what it last said, 80 characters at most.
             var rpc = new WorkspaceService(host, Epoch);
             var listed = (await rpc.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(session => session.Id == sessionId);
-            Assert.AreEqual(project.DisplayName, listed.Title);
+            Assert.AreEqual(AnsweringProvider.FirstLine[..79], listed.Title);
             Assert.AreEqual(listed.Title, listed.FullTitle);
 
-            // A response-summary title cannot confirm deletion; the unchanged listed title can.
+            // The title it was created with is not the one the list shows; the one the list shows deletes it.
             WorkspaceDeleteSessionRequest Request(string title) => new(Epoch, "project", project.Id, project.ProjectPath, sessionId, title);
-            Assert.AreEqual("session_missing", (await rpc.DeleteSessionAsync(Request(AnsweringProvider.FirstLine[..79]), CancellationToken.None)).Status);
+            Assert.AreEqual("session_missing", (await rpc.DeleteSessionAsync(Request(project.DisplayName), CancellationToken.None)).Status);
             Assert.AreEqual("ok", (await rpc.DeleteSessionAsync(Request(listed.Title), CancellationToken.None)).Status);
             Assert.IsFalse((await rpc.SnapshotAsync(new(), CancellationToken.None)).Sessions.Any(session => session.Id == sessionId));
             await rpc.CloseSessionsAsync();

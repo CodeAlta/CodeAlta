@@ -622,6 +622,36 @@ public sealed class CodeAltaConfigStore
         SaveDocument(_options.ConfigPath, document);
     }
 
+    /// <summary>
+    /// Reads how a session nobody named is titled, from the user's configuration file (<c>[sessions] title</c>).
+    /// </summary>
+    /// <returns>The mode; <see cref="CodeAlta.Agent.AgentSessionTitles.DefaultMode"/> when the file names none, or cannot be read.</returns>
+    public CodeAlta.Agent.AgentSessionTitleMode LoadGlobalSessionTitleMode()
+    {
+        try
+        {
+            return CodeAlta.Agent.AgentSessionTitles.ParseMode(LoadGlobal().Sessions?.Title) ?? CodeAlta.Agent.AgentSessionTitles.DefaultMode;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return CodeAlta.Agent.AgentSessionTitles.DefaultMode;
+        }
+    }
+
+    /// <summary>
+    /// Persists how a session nobody named is titled, in the user's configuration file. The default is not written.
+    /// </summary>
+    /// <param name="mode">The mode.</param>
+    public void SaveGlobalSessionTitleMode(CodeAlta.Agent.AgentSessionTitleMode mode)
+    {
+        var document = LoadGlobal();
+        NormalizeDocument(document);
+        document.Sessions = mode == CodeAlta.Agent.AgentSessionTitles.DefaultMode
+            ? null
+            : new CodeAltaSessionSettingsDocument { Title = CodeAlta.Agent.AgentSessionTitles.NameOf(mode) };
+        SaveDocument(_options.ConfigPath, document);
+    }
+
     /// <summary>Saves global storage choices, omitting default fields and retaining unknown TOML settings.</summary>
     /// <exception cref="ArgumentNullException">The settings or retention is null.</exception>
     /// <exception cref="InvalidDataException">The duration or existing configuration is invalid.</exception>
@@ -1185,6 +1215,18 @@ public sealed class CodeAltaConfigStore
             if (worktrees.Location is null && worktrees.Folder is null)
             {
                 document.Worktrees = null;
+            }
+        }
+
+        if (document.Sessions is { } sessions)
+        {
+            // The default is the absence of a mode.
+            sessions.Title = CodeAlta.Agent.AgentSessionTitles.ParseMode(sessions.Title) is { } titleMode && titleMode != CodeAlta.Agent.AgentSessionTitles.DefaultMode
+                ? CodeAlta.Agent.AgentSessionTitles.NameOf(titleMode)
+                : null;
+            if (sessions.Title is null)
+            {
+                document.Sessions = null;
             }
         }
 

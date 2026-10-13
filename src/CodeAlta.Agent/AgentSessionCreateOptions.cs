@@ -38,6 +38,26 @@ public class AgentSessionCreateOptions
     public string? Title { get; init; }
 
     /// <summary>
+    /// Gets or initializes who chose <see cref="Title"/>: recorded with a session that starts, and with a resumed
+    /// session that has no recorded source yet (one written before sources were recorded). A resumed session that
+    /// has a source keeps it. Null leaves a session without one.
+    /// </summary>
+    public AgentSessionTitleSource? TitleSource { get; init; }
+
+    /// <summary>
+    /// Gets or initializes how the session titles itself while nobody named it. Null is
+    /// <see cref="AgentSessionTitles.DefaultMode"/>.
+    /// </summary>
+    public AgentSessionTitleMode? TitleMode { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the instructions that ask the model for a <c>&lt;session_title&gt;</c> tag. They are part
+    /// of the developer instructions of a run only while the mode of the session is
+    /// <see cref="AgentSessionTitleMode.Model"/>.
+    /// </summary>
+    public string? TitleInstructions { get; init; }
+
+    /// <summary>
     /// Gets or initializes the configured provider key.
     /// </summary>
     public string? ProviderKey { get; init; }

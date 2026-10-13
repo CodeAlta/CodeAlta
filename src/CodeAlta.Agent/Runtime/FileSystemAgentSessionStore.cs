@@ -1398,7 +1398,10 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             WorkspacePath: summary.WorkingDirectory,
             Details: new RawApiSessionMetadataDetails(
                 ProviderSessionId: state?.ProviderSessionId,
-                Title: summary.Title),
+                Title: summary.Title)
+            {
+                TitleSource = summary.TitleSource,
+            },
             ProtocolFamily: summary.ProtocolFamily,
             ProviderKey: summary.ProviderKey,
             ModelId: summary.ModelId,

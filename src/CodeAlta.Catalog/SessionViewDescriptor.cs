@@ -145,6 +145,20 @@ public sealed class SessionViewDescriptor
     public string? PermissionMode { get; set; }
 
     /// <summary>
+    /// Gets or sets how the session titles itself (<c>first_prompt</c>, <c>last_message</c> or <c>model</c>), or
+    /// <see langword="null"/> when it follows the setting.
+    /// </summary>
+    [JsonPropertyName("title_mode")]
+    public string? TitleMode { get; set; }
+
+    /// <summary>
+    /// Gets or sets who chose <see cref="Title"/>, as its saved summary says; <see langword="null"/> when that is
+    /// not recorded. It is not part of the header of the journal.
+    /// </summary>
+    [JsonIgnore]
+    public CodeAlta.Agent.AgentSessionTitleSource? TitleSource { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier when known.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]

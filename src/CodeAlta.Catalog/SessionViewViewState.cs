@@ -287,6 +287,13 @@ public sealed class SessionViewLocalState
     public string? PermissionMode { get; set; }
 
     /// <summary>
+    /// Gets or sets how the session titles itself (<c>first_prompt</c>, <c>last_message</c> or <c>model</c>), or
+    /// <see langword="null"/> when it follows the setting. A journal written before the choice existed has none.
+    /// </summary>
+    [JsonPropertyName("title_mode")]
+    public string? TitleMode { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]
