@@ -401,11 +401,24 @@ other than a message, the editor of an automation and **New space**. Such a `dia
 questions that are Blueprint dialogs (unsaved changes, closing the window, exiting) already ignore a
 click outside them.
 
-In the explorer, a project row has one **…** menu (also on right-click): **New session**, **Search
+In the explorer, a project row has one **…** menu (also on right-click): **New session…**, **Search
 sessions…** and **Browse saved sessions** for that project, then **Open**, **Add to favorites** (or
 **Remove from favorites**), **Details**, **Rename project…**, **Archive project…** and **Delete project…**. **Chats** has
 the same session actions. **Search sessions…** opens the search of the window on the sessions of
 that project, or on the chats.
+
+**New session…**, and the **+** of the row between its terminal button and **…**, open the form of a
+new session in a popover beside the row, as a rename does (`NewSessionPopover.tsx`): an optional
+title, the chips of the prompt bar for the agent, the model and the reasoning, and for a project the
+chips of where the session works. **Chats** has the same button and **New chat…**. Enter in the title
+or **Create** creates the session and opens it, without sending a prompt; Escape, **Cancel** or a
+click elsewhere creates nothing and gives the focus back to the row. The picker of a chip is a popover
+of its own: a choice in it keeps the form open, and Escape closes the picker first. What is refused is
+said in the form. A session that cannot be given what was chosen is opened as it is, and a toast says
+so. What is chosen in the form, or in the prompt of a new session, is kept for the next sessions of
+that project (or of the chats) in this WebView's local storage
+(`codealta.desktop.newSessionPreferences.v1`): only what was chosen, so a default that was never
+changed follows the settings, and a choice that is no longer offered gives way to the default.
 
 The **Chats** are the sessions of no project, which the TUI calls global sessions. Their row is the
 first of the Explorer, above the projects, and is closed until it is opened.

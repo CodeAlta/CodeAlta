@@ -1,0 +1,370 @@
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { build } from "esbuild";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "./browserTarget";
+
+type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+const preferencesKey = "codealta.desktop.newSessionPreferences.v1";
+const projectScope = JSON.stringify(["project", "/fixture/project"]);
+const projectRow = '#project-list button[data-scope="project"]', projectPlus = "#project-list .project-session-trigger";
+const chatsRow = '.project-root-list button[data-scope=""]', chatsPlus = ".project-root-list .project-session-trigger";
+const form = ".new-session-form", create = `${form} button[type=submit]`, chip = `${form} .composer-selection`, placeChip = `${form} .project-context-place`;
+
+// The whole window, as the application renders it (under StrictMode), with a host that only records what it is asked.
+test("a new session is created from a form beside the row of its project or of the chats", { skip: !browserExecutable, timeout: 180_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), "codealta-new-session-"));
+  let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
+  try {
+    await build({ entryPoints: [fileURLToPath(new URL("./main.tsx", import.meta.url))], outfile: join(root, "fixture.js"),
+      bundle: true, platform: "browser", format: "iife", loader: { ".css": "empty", ".flf": "text", ".svg": "dataurl" },
+      define: { "import.meta.env.VITE_DEMO_MODE": '"false"' }, plugins: [{ name: "isolated-creation", setup(bundle) {
+        bundle.onResolve({ filter: /^#neoastra$/ }, () => ({ path: fileURLToPath(new URL("./newSessionPopover.neoastra.mount.ts", import.meta.url)) }));
+        bundle.onResolve({ filter: /^monaco-editor\/.*\?worker$/ }, args => ({ path: args.path, namespace: "fixture-worker" }));
+        bundle.onLoad({ filter: /.*/, namespace: "fixture-worker" }, async () => {
+          const worker = await build({ entryPoints: [fileURLToPath(new URL("../node_modules/monaco-editor/esm/vs/editor/editor.worker.js", import.meta.url))],
+            bundle: true, platform: "browser", format: "iife", write: false });
+          return { loader: "js", contents: `export default class extends Worker { constructor() {
+            const url=URL.createObjectURL(new Blob([${JSON.stringify(worker.outputFiles[0].text)}],{type:"text/javascript"}));
+            super(url); URL.revokeObjectURL(url);
+          } }` };
+        });
+      } }] });
+    await writeFile(join(root, "style.css"), (await Promise.all([
+      "../node_modules/@blueprintjs/core/lib/css/blueprint.css", "../node_modules/flexlayout-react/style/light.css", "./style.css", "./explorer/explorer.css", "./worktrees/worktrees.css",
+    ].map(path => readFile(new URL(path, import.meta.url), "utf8")))).join("\n"));
+    const page = join(root, "fixture.html");
+    await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
+    browser = spawn(browserExecutable!, [...browserBaseArgs, "--allow-file-access-from-files",
+      `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    const port = await waitForBrowserPort(join(root, "profile"), browser);
+    const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as { type: string; webSocketDebuggerUrl: string }[];
+    socket = new WebSocket(pages.find(tab => tab.type === "page")!.webSocketDebuggerUrl);
+    await new Promise<void>((resolve, reject) => { socket!.addEventListener("open", () => resolve(), { once: true }); socket!.addEventListener("error", reject, { once: true }); });
+    const exceptions: string[] = [];
+    socket.addEventListener("message", event => {
+      const value = JSON.parse(String(event.data));
+      if (value.method === "Runtime.exceptionThrown") exceptions.push(value.params.exceptionDetails.exception?.description ?? value.params.exceptionDetails.text);
+    });
+    let sequence = 0;
+    const command = (method: string, params: object = {}) => new Promise<Record<string, any>>((resolve, reject) => {
+      const id = ++sequence;
+      const reply = (event: MessageEvent) => {
+        const value = JSON.parse(String(event.data));
+        if (value.id !== id) return;
+        socket!.removeEventListener("message", reply); clearTimeout(timer);
+        value.error ? reject(new Error(JSON.stringify(value.error))) : resolve(value.result);
+      };
+      const timer = setTimeout(() => { socket!.removeEventListener("message", reply); reject(new Error(`${method} timed out`)); }, 12_000);
+      socket!.addEventListener("message", reply); socket!.send(JSON.stringify({ id, method, params }));
+    });
+    const evaluate = async (expression: string) => {
+      const value = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
+      assert.equal(value.exceptionDetails, undefined, JSON.stringify(value.exceptionDetails)); return value.result?.value;
+    };
+    const until = async (condition: string, what: string) => {
+      assert.equal(await evaluate(`new Promise(resolve=>{const end=Date.now()+7000;const tick=()=>{if(${condition})resolve(true);else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`), true,
+        `${what}; ${exceptions.join("\n")}; form: ${await evaluate(`document.querySelector(${JSON.stringify(form)})?.textContent`)}`);
+    };
+    const text = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`) as Promise<string | null>;
+    const shown = (selector: string) => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`) as Promise<boolean>;
+    const box = (selector: string) => evaluate(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); if (!node) return null;
+      const { left, top, right, bottom, width, height } = node.getBoundingClientRect(); return { left, top, right, bottom, width, height }; })()`) as Promise<Box | null>;
+    // The pointer itself: a press is what a popover takes as "elsewhere", which a click made by script never is.
+    const pointer = (type: string, x: number, y: number) => command("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+    const pressAt = async (x: number, y: number) => { for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await pointer(type, x, y); };
+    const over = async (selector: string) => { const at = await box(selector); assert.ok(at && at.width > 0, `${selector} is shown`); await pointer("mouseMoved", at.left + 40, at.top + at.height / 2); };
+    // A popover grows into its place: what is pressed is pressed where it ends up.
+    const settled = (selector: string) => evaluate(`new Promise(resolve => { let last = ""; const end = Date.now() + 3000; (function check() {
+      const at = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(), now = at ? [at.left, at.top, at.width, at.height].join() : "";
+      if (now && now === last || Date.now() > end) resolve(true); else { last = now; requestAnimationFrame(() => requestAnimationFrame(check)); } })(); })`);
+    const press = async (selector: string, across = 0.5) => {
+      await settled(selector);
+      const at = await box(selector);
+      assert.ok(at && at.width > 0 && at.height > 0, `${selector} is shown`);
+      await pressAt(at.left + at.width * across, at.top + at.height / 2);
+    };
+    const select = (selector: string, value: string) => evaluate(`(() => { const node=document.querySelector(${JSON.stringify(selector)}); node.value=${JSON.stringify(value)}; node.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+    const key = async (key: string, virtual: number, text?: string) => {
+      await command("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode: virtual, ...(text ? { text } : {}) });
+      await command("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode: virtual });
+    };
+    const escape = () => key("Escape", 27), enter = () => key("Enter", 13, "\r");
+    const gone = (selector: string, what: string) => until(`!document.querySelector(${JSON.stringify(selector)})`, what);
+    const titleFocused = `document.activeElement === document.querySelector(${JSON.stringify(`${form} input`)})`;
+    // The buttons of a row are shown with the pointer on it.
+    const open = async (row = projectRow, plus = projectPlus) => {
+      await over(row); await press(plus);
+      await until(`${titleFocused} && !document.querySelector(${JSON.stringify(create)}).disabled`, "the form is open, its title has the focus and its choices are read");
+      await settled(".new-session-popover");
+    };
+    // Whether something of the form is cut or out of it: the form itself, the text of the first chip, a chip of the place.
+    const overflows = () => evaluate(`(() => { const form = document.querySelector(${JSON.stringify(form)}), edge = form.getBoundingClientRect().right;
+      return form.scrollHeight > form.clientHeight || form.scrollWidth > form.clientWidth
+        || [...form.querySelectorAll(".composer-selection, .composer-selection-part > span")].some(node => node.scrollWidth > node.clientWidth + 1)
+        || [...form.querySelectorAll(".new-session-choices button")].some(node => node.getBoundingClientRect().right > edge); })()`) as Promise<boolean>;
+    const remembered = async () => JSON.parse(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`) ?? "null");
+    const creates = () => evaluate("newSessionFixture.creates.map(({scope,title,providerId,worktree,baseBranch})=>({scope,title,providerId,worktree,baseBranch}))") as Promise<object[]>;
+    const start = async (what: string) => until(`!!document.querySelector(${JSON.stringify(projectPlus)})`, what);
+
+    await command("Page.enable"); await command("Runtime.enable");
+    await command("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await command("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await command("Page.addScriptToEvaluateOnNewDocument", { source: "localStorage.setItem('settingsFixtureOwned','true')" });
+    await command("Page.navigate", { url: pathToFileURL(page).href });
+    await start("the shell");
+    await until("!!document.querySelector('.session-row > button[aria-pressed=true]')", "a session is selected: the form is not the prompt of a new session");
+
+    // The menu of the row opens the same form as its button; Escape closes it and the row has the focus again.
+    await over(projectRow); await press("#project-list .project-actions-trigger");
+    await until("!!document.querySelector('.session-tab-popup')", "project actions");
+    await evaluate("[...document.querySelectorAll('.session-tab-popup [role=menuitem]')].find(node=>node.textContent.trim()==='New session…').click()");
+    await until(titleFocused, "the form opened from the menu");
+    assert.equal(await text(`${form} > strong`), "New session in Project");
+    await escape();
+    await gone(form, "Escape closes the form");
+    assert.equal(await evaluate("document.activeElement.dataset.scope"), "project", "the row has the focus again");
+
+    // The button of the row: the form is a popover beside that row, not a form in the Explorer or a window.
+    await open();
+    assert.equal(await shown(".session-create, dialog[open]"), false);
+    const row = (await box("#project-list li.project-action-row"))!, wide = (await box(".new-session-popover"))!;
+    assert.ok(wide.left >= row.right && wide.left - row.right < 24 && Math.abs(wide.top - row.top) < 24, `beside its row: ${JSON.stringify({ row, wide })}`);
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(projectPlus)}).getAttribute("aria-expanded")`), "true");
+    assert.equal(await overflows(), false, "nothing overflows the form");
+    assert.equal(wide.width, 380, "the width the form is given");
+    assert.equal(await remembered(), null, "the defaults that are shown are not stored as choices");
+
+    // The pickers of the chips are popovers and lists of their own: a choice in one of them keeps the form open.
+    await command("Input.insertText", { text: "Named work" });
+    await press(chip);
+    await until("!!document.querySelector('#composer-agent-create')", "the choices of the chip");
+    await select("#composer-agent-create", "plan");
+    await select(".composer-selection-form select[aria-label='Provider for new session']", "alternate");
+    await until("!document.querySelector('#composer-model-create').disabled", "the models of the other provider");
+    assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate" } }, "what was chosen, and nothing else");
+    await press("#composer-model-create");
+    await until("!!document.querySelector('.composer-model-picker [data-model-id=old]')", "the list of models");
+    await press(".composer-model-picker [data-model-id=old]");
+    await gone(".composer-model-picker", "a model was taken");
+    assert.match((await text(chip))!, /Plan.*alternate.*Old model$/);
+    await press("#composer-model-create");
+    await until("!!document.querySelector('.composer-model-picker [data-model-id=new]')", "the list of models again");
+    // Escape in the list closes the list alone.
+    await escape();
+    await gone(".composer-model-picker", "Escape closes the list of models");
+    assert.equal(await shown("#composer-agent-create") && await shown(form), true, "the choices and the form stay");
+    await press("#composer-model-create");
+    await until("!!document.querySelector('.composer-model-picker [data-model-id=new]')", "the list of models once more");
+    await press(".composer-model-picker [data-model-id=new]");
+    await gone(".composer-model-picker", "another model was taken");
+    await until("!!document.querySelector('.composer-reasoning-slider .bp6-slider-track')", "the efforts of that model");
+    await press(".composer-reasoning-slider .bp6-slider-track", 0.01);
+    await until(`/Plan.*alternate.*New model.*Low$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)`, "the chip names what was chosen");
+    assert.equal(await shown(form), true, "the form stayed open through every choice");
+    // Escape in the choices closes them alone.
+    await escape();
+    await gone(".composer-selection-form", "Escape closes the choices");
+    assert.equal(await shown(form), true, "and not the form");
+
+    // Where the session works.
+    await until(`!!document.querySelector(${JSON.stringify(placeChip)})`, "the chip of the place");
+    assert.equal(await evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(`${form} .project-context-folder`)})).display`), "none", "the heading names the project");
+    await press(placeChip);
+    await until("!!document.querySelector('.work-place-form')", "the places");
+    await settled(".work-place-form");
+    const segment = await evaluate("(() => { const node=[...document.querySelectorAll('.work-place-form button')].find(node=>node.textContent==='New worktree'); const box=node.getBoundingClientRect(); return { x: box.left+box.width/2, y: box.top+box.height/2 }; })()") as { x: number; y: number };
+    await pressAt(segment.x, segment.y);
+    await until("[...document.querySelectorAll('.work-place-form select option')].some(node=>node.value==='feature')", "the branches a worktree starts from");
+    await select(".work-place-form select", "feature");
+    assert.equal(await shown(form), true, "the form stayed open");
+    await escape();
+    await gone(".work-place-form", "Escape closes the places");
+    assert.match((await text(placeChip))!, /New worktree from feature/);
+
+    // Enter in the title creates, with what was typed and chosen; the session is opened with those choices.
+    await press(`${form} input`);
+    await until(titleFocused, "the title has the focus");
+    await enter();
+    await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-1] button[aria-pressed=true]')`, "the created session is opened");
+    assert.deepEqual(await creates(), [{ scope: "project", title: "Named work", providerId: "alternate", worktree: true, baseBranch: "feature" }]);
+    await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*alternate.*New model.*Low/.test(node.textContent))", "the choices are those of its first Send");
+    assert.deepEqual(await evaluate("settingsShellFixture.sends"), [], "a creation sends nothing");
+    assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate", modelId: "new", reasoningEffort: "Low" } });
+
+    // The next form of that project starts from those choices, with an empty title.
+    await open();
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(`${form} input`)}).value`), "");
+    assert.match((await text(chip))!, /Plan.*alternate.*New model.*Low$/);
+    await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the place of the last session");
+    // Escape closes the picker that is open, and a second Escape the form: the row has the focus again.
+    await press(chip);
+    await until("!!document.querySelector('#composer-agent-create')", "the choices of the chip");
+    // An Escape that reaches the form while a picker is open, as in the moment before the picker has the focus, closes nothing.
+    await evaluate(`document.querySelector(${JSON.stringify(`${form} input`)}).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))`);
+    assert.equal(await shown(form), true, "the form is not closed in the place of its picker");
+    // Blueprint gives the focus to the overlay of the choices, a frame after it opens.
+    await until("!!document.activeElement.closest('.bp6-overlay')?.querySelector('.composer-selection-form')", "the choices have the focus");
+    await escape();
+    await gone(".composer-selection-form", "the first Escape closes the choices");
+    assert.equal(await shown(form), true);
+    await escape();
+    await gone(form, "the second Escape closes the form");
+    assert.equal(await evaluate("document.activeElement.dataset.scope"), "project");
+    // A press elsewhere closes it, and so does a press on the button that opened it.
+    await open();
+    await pressAt(1200, 700);
+    await gone(form, "a press elsewhere closes the form");
+    await open();
+    await press(projectPlus);
+    await evaluate("new Promise(resolve => setTimeout(resolve, 150))");
+    assert.equal(await shown(form), false, "its button closes it");
+    assert.equal((await creates()).length, 1, "closing creates nothing");
+
+    // While the session is created the button says so, and the form can neither be dismissed nor sent again.
+    await open();
+    await evaluate("newSessionFixture.hold=true");
+    await press(create);
+    await until("newSessionFixture.creates.length===2", "the creation was asked");
+    await until(`!!document.querySelector(${JSON.stringify(`${create}.bp6-loading`)})`, "the button shows the creation");
+    assert.equal(await evaluate(`[...document.querySelectorAll(${JSON.stringify(`${form} .rename-actions button, ${form} input`)})].every(node => node.disabled)`), true);
+    assert.equal(await text(".session-rail .notice"), null, "nothing is said beside the form");
+    await escape(); await pressAt(1200, 700); await press(create);
+    assert.equal(await shown(form), true, "a creation on its way keeps the form");
+    await evaluate("newSessionFixture.release(); newSessionFixture.hold=false");
+    await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-2] button[aria-pressed=true]')`, "the second session is opened");
+    assert.deepEqual((await creates())[1], { scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }, "a title is optional");
+
+    // A refused creation says why in the form, which stays to be corrected; Cancel leaves nothing behind.
+    await open();
+    await evaluate("newSessionFixture.refused=true");
+    await press(create);
+    await until(`!!document.querySelector(${JSON.stringify(`${form} [role=alert]`)}) && !document.querySelector(${JSON.stringify(create)}).disabled`, "the refusal is said in the form");
+    assert.match((await text(`${form} [role=alert]`))!, /branch the worktree starts from/);
+    assert.equal(await text(".session-rail .notice"), null, "and not also in the list");
+    await evaluate("newSessionFixture.refused=false");
+    await press(`${form} .rename-actions button:not([type=submit])`);
+    await gone(form, "Cancel closes the form");
+    assert.equal(await text(".session-rail .notice"), null);
+    assert.equal(await evaluate("document.activeElement.dataset.scope"), "project");
+
+    // A session that exists but cannot be given the choices is opened as it is, and a toast says so.
+    await open();
+    await evaluate("newSessionFixture.choicesFail=true");
+    await press(create);
+    await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-4] button[aria-pressed=true]')`, "the session is opened");
+    await until("[...document.querySelectorAll('.bp6-toast')].some(node=>node.textContent.includes('The session uses its default agent and model.'))", "the toast");
+    await evaluate("newSessionFixture.choicesFail=false");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(projectPlus)}).disabled`), false, "another session can be created");
+
+    // The chats have the same button, menu entry and form, without a place.
+    await over(chatsRow); await press(".project-root-list .project-actions-trigger");
+    await until("[...document.querySelectorAll('.session-tab-popup [role=menuitem]')].some(node=>node.textContent.trim()==='New chat…')", "the menu of the chats");
+    await escape();
+    await gone(".session-tab-popup", "the menu is closed");
+    await open(chatsRow, chatsPlus);
+    assert.equal(await text(`${form} > strong`), "New chat");
+    assert.equal(await shown(`${form} .project-context`), false);
+    const chats = (await box(".project-root-list li.project-action-row"))!, beside = (await box(".new-session-popover"))!;
+    assert.ok(beside.left >= chats.right && Math.abs(beside.top - chats.top) < 24, `beside the row of the chats: ${JSON.stringify({ chats, beside })}`);
+    assert.match((await text(chip))!, /Default.*fixture.*New model.*High$/, "the chats have choices of their own");
+    await command("Input.insertText", { text: "A chat" });
+    await enter();
+    await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-5] button[aria-pressed=true]')`, "the chat is opened");
+    assert.deepEqual((await creates())[4], { scope: "global", title: "A chat", providerId: "fixture", worktree: false, baseBranch: null });
+    assert.deepEqual(Object.keys(await remembered()), [projectScope], "nothing was chosen for the chats");
+
+    // A narrow window: the form is whole, in the page.
+    await command("Emulation.setDeviceMetricsOverride", { width: 900, height: 650, deviceScaleFactor: 1, mobile: false });
+    await open();
+    const narrow = (await box(".new-session-popover"))!;
+    assert.ok(narrow.left >= 0 && narrow.top >= 0 && narrow.right <= 900 && narrow.bottom <= 650, `in the page: ${JSON.stringify(narrow)}`);
+    assert.equal(await overflows(), false, "nothing overflows the narrow form");
+    assert.equal(narrow.width, 380);
+    // The choices of a chip open over the form, and are whole in the page too.
+    await press(chip);
+    await until("!!document.querySelector('#composer-agent-create')", "the choices of the chip");
+    await settled(".composer-selection-form");
+    const choices = (await box(".composer-selection-form"))!;
+    assert.ok(choices.left >= 0 && choices.top >= 0 && choices.right <= 900 && choices.bottom <= 650, `the choices are in the page: ${JSON.stringify(choices)}`);
+    await escape();
+    await gone(".composer-selection-form", "the choices are closed");
+    await escape();
+    await gone(form, "closed");
+    await command("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
+
+    // A creation the host does not confirm: the form says so and offers to read the sessions again; nothing is sent twice.
+    await open();
+    await evaluate("newSessionFixture.uncertain=true");
+    await press(create);
+    await until(`document.querySelector(${JSON.stringify(create)}).disabled && !!document.querySelector(${JSON.stringify(`${form} [role=alert]`)})`, "the unconfirmed creation is said in the form");
+    assert.equal(await text(`${form} .new-session-refresh`), "Refresh session list");
+    assert.equal(await text(".session-rail .notice"), null);
+    await enter();
+    assert.equal((await creates()).length, 6, "an unconfirmed creation is not sent again");
+    await press(`${form} .rename-actions button:not([type=submit]):not(.new-session-refresh)`);
+    await gone(form, "Cancel closes the form");
+    await until("!!document.querySelector('.session-rail .notice.error-text')", "the list says what is unconfirmed once the form is closed");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(projectPlus)}).disabled`), true);
+
+    // Another window reads what was chosen from local storage, and only looks at it: a project that is looked at stores nothing.
+    const stored = await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`);
+    await command("Page.reload");
+    await start("the reloaded shell");
+    await open();
+    assert.match((await text(chip))!, /Plan.*alternate.*New model.*Low$/);
+    await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the restored place");
+    await escape();
+    await gone(form, "closed");
+
+    // What was chosen is a preference, not an authority: a model that is gone leaves the default of the provider.
+    await evaluate("localStorage.setItem('newSessionFixtureMissingModel','true')");
+    await command("Page.reload");
+    await start("the shell with other models");
+    await open();
+    assert.match((await text(chip))!, /Plan.*alternate.*Old model$/);
+    await escape();
+    await gone(form, "closed");
+    assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored, "looking changes nothing of what is remembered");
+
+    // Models that cannot be read: nothing is created, and the form offers to read them again.
+    await evaluate("localStorage.removeItem('newSessionFixtureMissingModel'); localStorage.setItem('newSessionFixtureFailModels','true')");
+    await command("Page.reload");
+    await start("the shell without models");
+    await over(projectRow); await press(projectPlus);
+    await until(`document.querySelector(${JSON.stringify(`${form} .new-session-refresh`)})?.textContent === "Refresh composer choices"`, "the models can be read again");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(create)}).disabled`), true);
+    await enter();
+    assert.equal(await evaluate("newSessionFixture.creates.length"), 0);
+    assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored);
+    await escape();
+    await gone(form, "closed");
+
+    // The prompt of a new session still hands its text to the session it creates, with the same choices and place.
+    await evaluate("localStorage.removeItem('newSessionFixtureFailModels')");
+    await command("Page.reload");
+    await start("the shell for a draft");
+    // The name of the row: its buttons take the rest of it once the pointer is there.
+    await press(projectRow, 0.15);
+    await until(`document.querySelector(${JSON.stringify(projectRow)}).getAttribute("aria-pressed") === "true" && !!document.querySelector('#catalog-prompt textarea')`, "the prompt of a new session of the project");
+    await evaluate("document.querySelector('#catalog-prompt').focus()");
+    await command("Input.insertText", { text: "Original local draft" });
+    await until("!document.querySelector('button[aria-label=\"Start session\"]').disabled", "the draft can be sent");
+    await evaluate("document.querySelector('button[aria-label=\"Start session\"]').click()");
+    await until("settingsShellFixture.sends.length===1", "the draft is sent once");
+    assert.deepEqual(await creates(), [{ scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }]);
+    assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Original local draft");
+    assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored);
+    assert.deepEqual(exceptions, []);
+  } finally {
+    // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
+    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
+    socket?.close();
+    await endBrowser(browser);
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
+});

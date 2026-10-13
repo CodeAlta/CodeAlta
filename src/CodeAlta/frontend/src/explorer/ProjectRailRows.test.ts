@@ -9,6 +9,7 @@ import { ShellLanguageContext } from "../shellLanguage";
 import { ExplorerSessions, sessionTwistKey } from "./ExplorerSessions";
 import { projectRailProjection } from "./projectRail";
 import { ProjectRailRows, type ProjectTreeView } from "./ProjectRailRows";
+import type { ProjectRowAuthority } from "./ProjectRowActions";
 import { sessionList } from "./sessionTree";
 
 const never = () => assert.fail("rendering must not act");
@@ -27,6 +28,33 @@ const tree = (expanded: readonly (string | null)[], favorites: readonly string[]
 });
 // What a row holds, from its opening tag to the next row. The first one is the row of the chats.
 const rows = (html: string) => html.split('<li class="project-action-row"').slice(1);
+
+test("a project and the chats have a button for a new session, between the terminal and the actions menu, and its form in their row", () => {
+  const actions: ProjectRowAuthority = { current: never, open: never, rename: never, archive: never,
+    sessions: { canCreate: (id: string | null) => id === "a" || id === null, create: never, search: never, browse: never } };
+  const render = (creating?: string | null) => rows(renderToStaticMarkup(createElement(ProjectRailRows, {
+    projects: [project("a", "Alpha"), project("b", "Beta"), project("z", "Old", true)],
+    selectedId: null, onSelect: never, canRename: false, renameBusy: false, onRename: never, actions,
+    terminals: { count: () => 0, create: never },
+    creating: creating === undefined ? undefined : { id: creating, form: createElement("form", { className: "the-form" }) } })));
+  const [chats, alpha, beta, old] = render();
+  assert.match(alpha, /project-session-trigger" data-open="false" aria-label="New session in Alpha" title="New session" aria-haspopup="dialog" aria-expanded="false"/);
+  assert.ok(alpha.indexOf("project-terminal-trigger") < alpha.indexOf("project-session-trigger"));
+  assert.ok(alpha.indexOf("project-session-trigger") < alpha.indexOf("project-actions-trigger"));
+  assert.match(beta, /project-session-trigger"[^>]*disabled=""/);
+  assert.doesNotMatch(old, /project-session-trigger/);
+  assert.match(chats, /project-session-trigger" data-open="false" aria-label="New chat" title="New chat" aria-haspopup="dialog" aria-expanded="false"/);
+  assert.ok(chats.indexOf("project-session-trigger") < chats.indexOf("project-actions-trigger"));
+  assert.doesNotMatch(chats + alpha + beta + old, /the-form/);
+  // The form is in the row it is about, whose button says it is open.
+  const [, opened, other] = render("a");
+  assert.match(opened, /project-session-trigger" data-open="true"[^>]*aria-expanded="true"/);
+  assert.match(opened, /the-form/);
+  assert.doesNotMatch(render("a")[0] + other, /the-form|data-open="true"/);
+  const [chat, ...others] = render(null);
+  assert.match(chat, /project-session-trigger" data-open="true"[^>]*aria-expanded="true"[\s\S]*the-form/);
+  assert.doesNotMatch(others.join(""), /the-form|data-open="true"/);
+});
 
 test("favorite projects are listed first, in the chosen order, and the others follow", () => {
   const value = snapshot([project("c", "Gamma"), project("a", "Alpha"), project("b", "Beta"), project("d", "Delta")]);

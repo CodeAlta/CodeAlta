@@ -171,7 +171,7 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
       onClose={() => queueMicrotask(() => { if (review.current === visible) dismiss(); })}
       items={[
         ...(authority?.sessions ? [
-          { key: "create", label: t("New session"), icon: "newSession" as const, disabled: !authority.sessions.canCreate(project.id), onSelect: () => sessionAction("create", visible) },
+          { key: "create", label: t("New session…"), icon: "newSession" as const, disabled: !authority.sessions.canCreate(project.id), onSelect: () => sessionAction("create", visible) },
           { key: "search", label: `${t("Search sessions")}…`, icon: "search" as const, onSelect: () => sessionAction("search", visible) },
           { key: "browse", label: t("Browse saved sessions"), icon: "browse" as const, onSelect: () => sessionAction("browse", visible) },
           { key: "project", divider: true as const },

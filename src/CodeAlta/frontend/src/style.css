@@ -622,13 +622,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .project-import p { margin: 0; overflow-wrap: anywhere; }
 .project-import label { display: flex; align-items: start; gap: 6px; }
 .project-import label input { margin-top: 2px; }
-.session-create { display: grid; gap: 8px; min-width: 0; min-height: 0; overflow-y: auto; padding: 10px; }
-.session-create label { display: grid; gap: 5px; font-size: 12px; }
-.session-create input { min-width: 0; }
-.creation-provider { display: grid; gap: 5px; min-width: 0; max-width: 100%; }
-.creation-provider label { display: grid; gap: 5px; min-width: 0; }
-.creation-provider select { min-width: 0; max-width: 100%; }
-.creation-provider small { color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
 .app-dialog > footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; color: var(--muted); font-size: 11px; }
 kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--panel-2); font: inherit; }
 
@@ -1992,6 +1985,18 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .rename-form .bp6-label { color: var(--muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 .rename-form .bp6-form-helper-text { overflow-wrap: anywhere; }
 .rename-actions { display: flex; justify-content: flex-end; gap: 6px; }
+/* The form of a new session beside the row of its project, or of the chats: wider, for the chips of its choices. */
+.new-session-form { grid-template-columns: minmax(0, 1fr); width: min(380px, calc(100vw - 32px)); }
+.new-session-form > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.new-session-choices { display: grid; gap: 8px; justify-items: start; min-width: 0; }
+.new-session-choices > .bp6-popover-target, .new-session-choices .project-context { max-width: 100%; }
+/* The two rows of chips start at the same place: the first one is drawn without its border until it is used. */
+.new-session-choices > .bp6-popover-target { margin-left: -6px; }
+/* The heading names the project: its chips say where the session works, not what is changed there now. */
+.new-session-choices .project-context { flex-wrap: wrap; row-gap: 6px; }
+.new-session-choices .project-context-folder, .new-session-choices .project-context-changes { display: none; }
+.new-session-error { margin: 0; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.new-session-refresh { margin-right: auto; }
 /* The question asked beside a row before its session is deleted or its project archived. */
 .confirm-form { display: grid; gap: 8px; width: min(320px, calc(100vw - 32px)); padding: 12px 14px 10px; }
 .confirm-form p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
