@@ -10,7 +10,7 @@ import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../brows
 
 const edge = browserExecutable;
 
-test("the Documentation tab shows the guide under the policy of the application: navigation, links, headings, pictures, search, a question, and a narrow pane",
+test("the Documentation tab shows the guide under the policy of the application: navigation, links, headings, pictures, search, a search in the page, a question, and a narrow pane",
   { skip: !edge, timeout: 240_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "codealta-documentation-"));
   let browser: ReturnType<typeof spawn> | undefined, socket: WebSocket | undefined;
@@ -213,6 +213,67 @@ test("the Documentation tab shows the guide under the policy of the application:
     await command("Input.dispatchKeyEvent", { type: "keyDown", key: "/", code: "Slash", windowsVirtualKeyCode: 191, text: "/" });
     await command("Input.dispatchKeyEvent", { type: "keyUp", key: "/", code: "Slash", windowsVirtualKeyCode: 191 });
     await expect("document.activeElement === document.querySelector('.documentation-search input') && document.activeElement.value === ''");
+
+    // Ctrl+F finds in the page that is read: every place is marked, the one shown is counted, Enter and Shift+Enter
+    // and the arrows go through them, and Escape closes the search and takes the marks away.
+    const findInput = "document.querySelector('.documentation-find input')";
+    const count = "document.querySelector('.documentation-find-count').textContent";
+    const shown = "[...CSS.highlights.get('documentation-find-current')][0]";
+    const inView = `(() => { const box = ${shown}.getBoundingClientRect(), view = document.querySelector('.documentation-scroll').getBoundingClientRect(); return box.top >= view.top && box.bottom <= view.bottom; })()`;
+    await evaluate("document.querySelector('.documentation-scroll').scrollTop = 0; document.querySelector('.documentation-scroll').focus()");
+    await press("f", "KeyF", 70, 2);
+    await expect(`document.activeElement === ${findInput}`, "Ctrl+F in the page opens its search.");
+    assert.deepEqual(await evaluate("documentationFixture.state.commands"), [], "The window does not search the sessions.");
+    await evaluate(`documentationFixture.type(${findInput}, 'PARAGRAPH 1')`);
+    // "Paragraph 1" and "Paragraph 10" to "19", in the two halves of the page.
+    await expect(`${count} === '1 of 22'`);
+    assert.equal(await evaluate("CSS.highlights.get('documentation-find').size"), 22);
+    assert.equal(await evaluate(`${shown}.toString()`), "Paragraph 1");
+    await capture("find");
+    await press("Enter", "Enter", 13);
+    await expect(`${count} === '2 of 22' && ${shown}.toString() === 'Paragraph 1' && ${shown}.startContainer.data.startsWith('Paragraph 10 ')`);
+    await press("Enter", "Enter", 13, 8);
+    await expect(`${count} === '1 of 22'`);
+    await press("Enter", "Enter", 13, 8);
+    await expect(`${count} === '22 of 22' && ${inView}`, "Shift+Enter goes round to the last place, and the page shows it.");
+    assert.ok(await evaluate<number>(scrollTop) > 1000);
+    await evaluate("document.querySelector('.documentation-find button[aria-label=\"Next match\"]').click()");
+    await expect(`${count} === '1 of 22' && ${inView}`);
+    await evaluate("document.querySelector('.documentation-find button[aria-label=\"Previous match\"]').click()");
+    await expect(`${count} === '22 of 22'`);
+    // A place can cross the parts of a paragraph that are written differently; the text typed is looked for at once.
+    await evaluate(`documentationFixture.type(${findInput}, 'keeps a  prompt')`);
+    await expect(`${count} === '1 of 1' && ${shown}.toString() === 'keeps a prompt' && ${inView}`);
+    await evaluate(`documentationFixture.type(${findInput}, 'zzzz')`);
+    await expect(`${count} === '0 of 0' && document.querySelector('.documentation-find-count').hasAttribute('data-empty')`);
+    assert.equal(await evaluate("document.querySelector('.documentation-find button[aria-label=\"Next match\"]').disabled"), true);
+    assert.equal(await evaluate("CSS.highlights.has('documentation-find')"), false);
+    await evaluate(`documentationFixture.type(${findInput}, 'queue')`);
+    await expect("CSS.highlights.get('documentation-find')?.size === 2");
+    await press("Escape", "Escape", 27);
+    await expect("!document.querySelector('.documentation-find') && document.activeElement === document.querySelector('.documentation-scroll')");
+    assert.equal(await evaluate("CSS.highlights.has('documentation-find') || CSS.highlights.has('documentation-find-current')"), false, "Closing takes the marks away.");
+    // Words selected in the page are what is looked for; the button of the bar opens and closes the search too.
+    await evaluate("(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('.documentation-article strong')); getSelection().removeAllRanges(); getSelection().addRange(range); })()");
+    await press("f", "KeyF", 70, 2);
+    await expect(`${findInput}?.value === 'prompt queue' && ${count} === '1 of 1'`);
+    await evaluate("getSelection().removeAllRanges(); document.querySelector('.documentation-find-toggle').click()");
+    await expect("!document.querySelector('.documentation-find')");
+    await evaluate("document.querySelector('.documentation-find-toggle').click()");
+    await expect(`document.activeElement === ${findInput} && ${findInput}.value === 'prompt queue'`, "The search keeps its text.");
+    // From the search of the guide, Ctrl+F finds in the page, and Escape there closes it; "/" still goes to the search of the guide.
+    await evaluate("document.querySelector('.documentation-search input').focus()");
+    await press("f", "KeyF", 70, 2);
+    await expect(`document.activeElement === ${findInput}`);
+    await press("Escape", "Escape", 27);
+    await expect("!document.querySelector('.documentation-find')");
+    // Outside the tab Ctrl+F is the search of the sessions.
+    await evaluate("(() => { const other = document.createElement('button'); other.id = 'outside'; other.textContent = 'Outside'; document.body.appendChild(other); other.focus(); })()");
+    await press("f", "KeyF", 70, 2);
+    await expect("documentationFixture.state.commands.length === 1");
+    assert.deepEqual(await evaluate("documentationFixture.state.commands"), ["searchSessions"]);
+    assert.equal(await evaluate("document.querySelector('.documentation-find')"), null);
+    await evaluate("document.getElementById('outside').remove()");
 
     // A question for an agent: nothing is asked until it is sent; it is about the page, or about the whole guide; the chat is then shown.
     assert.deepEqual(await evaluate("documentationFixture.state.calls.ask"), []);

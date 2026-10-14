@@ -7,7 +7,9 @@ import { MarkdownLinksContext } from "../MarkdownContent";
 import { SessionTabStrip } from "../SessionTabStrip";
 import { closeFileTab, documentationTab, emptyFileTabs, openFileTab, type FileTabs } from "../fileTabs";
 import { emptySessionTabs } from "../sessionTabs";
+import { resolveCommandKey } from "../commandRegistry";
 import { DocumentationPanel } from "./DocumentationPanel";
+import { findKeyKept } from "./documentationFind";
 import { createDocumentationHub, type DocumentationApi } from "./documentationHub";
 
 const epoch = "6f1d2c3b-4a59-4e68-9b7a-0c1d2e3f4a5b";
@@ -20,7 +22,7 @@ const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfD
 const filler = Array.from({ length: 40 }, (_, index) => `Paragraph ${index + 1} of the page, long enough to make the page taller than the tab so that a heading further down is out of sight.`).join("\n\n");
 
 const state = {
-  executed: 0, web: [] as string[], notices: [] as string[], sessions: [] as string[], providers: 0, activated: 0,
+  executed: 0, web: [] as string[], notices: [] as string[], sessions: [] as string[], providers: 0, activated: 0, commands: [] as string[],
   calls: { menu: 0, page: [] as string[], image: [] as string[], search: [] as string[], ask: [] as { question: string | null; page: string | null }[] },
   /** What the next question gets. */
   askReply: { status: "ok", sessionId: "chat-1", problem: null } as { status: string; sessionId: string | null; problem: string | null },
@@ -98,6 +100,17 @@ function PaneSlot({ content }: { content: HTMLElement }) {
   useLayoutEffect(() => { if (self.current && content.parentElement !== self.current) self.current.appendChild(content); }, [content]);
   return createElement("div", { ref: self, className: "fixture-pane", style: { height: "100%" } });
 }
+
+// The keys of the window, as its dispatcher takes them before the page (capture): Ctrl+F searches the sessions,
+// except where the Documentation tab keeps it.
+window.addEventListener("keydown", event => {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (findKeyKept(event, target)) return;
+  const resolved = resolveCommandKey(event, false, target?.closest("input, textarea, select, [contenteditable]") ? "text" : "none");
+  if (resolved.command !== "searchSessions") return;
+  event.preventDefault(); event.stopPropagation();
+  state.commands.push(resolved.command);
+}, true);
 
 // The hub is the window's: it lasts while the tab is closed and opened again.
 const hub = createDocumentationHub(api);

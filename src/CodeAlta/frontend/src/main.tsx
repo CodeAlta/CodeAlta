@@ -254,6 +254,7 @@ import "./canvases/canvases.css";
 import "./landing/landing.css";
 import "./documentation/documentation.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
+import { findKeyKept } from "./documentation/documentationFind";
 import { createDocumentationHub } from "./documentation/documentationHub";
 import "./pluginButtons/pluginButtons.css";
 import "./sessionBranch/sessionBranch.css";
@@ -2537,6 +2538,8 @@ function App() {
       if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
+      // The Documentation tab finds in its page with Ctrl+F, which searches the sessions everywhere else.
+      if (!commandChord.current && findKeyKept(event, target)) return;
       if (editing && !commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "g") return;
       const focus = target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : target?.closest(workspaceEditingSelector) ? "text" : "none";
       // After Ctrl+G a digit shows the space at that place of the list.

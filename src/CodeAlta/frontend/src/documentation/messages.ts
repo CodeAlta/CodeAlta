@@ -6,6 +6,7 @@ export const documentationMessages = {
   "Documentation": ["Documentación", "Documentation", "Dokumentation", "ドキュメント", "文档"],
   "Open the user guide of CodeAlta.": ["Abre la guía de usuario de CodeAlta.", "Ouvre le guide d’utilisation de CodeAlta.", "Öffnet das Benutzerhandbuch von CodeAlta.", "CodeAlta のユーザーガイドを開きます。", "打开 CodeAlta 用户指南。"],
   "Search the guide": ["Buscar en la guía", "Rechercher dans le guide", "Im Handbuch suchen", "ガイドを検索", "搜索指南"],
+  "Find in this page": ["Buscar en esta página", "Rechercher dans cette page", "Auf dieser Seite suchen", "このページ内を検索", "在本页中查找"],
   "Clear the search": ["Borrar la búsqueda", "Effacer la recherche", "Suche leeren", "検索をクリア", "清除搜索"],
   "Pages of the guide": ["Páginas de la guía", "Pages du guide", "Seiten des Handbuchs", "ガイドのページ", "指南页面"],
   "Pages": ["Páginas", "Pages", "Seiten", "ページ", "页面"],
