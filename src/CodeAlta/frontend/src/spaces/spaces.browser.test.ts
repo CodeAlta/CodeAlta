@@ -258,6 +258,10 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await evaluate("document.querySelector('.space-available-tabs .bp6-tab[aria-selected=\"true\"] .space-section-count').textContent"), "2");
       assert.equal(await evaluate("!!document.querySelector('.space-page .space-agent-prompt select')"), true);
       assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
+      // The resources are read when the page opens (twice in strict mode), not again at each render: a loop would
+      // exceed the request rate of the host, which closes the connection of the page.
+      await evaluate("new Promise(resolve => setTimeout(resolve, 1500))");
+      assert.ok(Number(await evaluate("spacesFixture.serverReads")) <= 2, `Read ${await evaluate("spacesFixture.serverReads")} times.`);
       await evaluate("document.querySelector('.space-page-back').click()");
       assert.equal(await wait("!document.querySelector('.space-page') && !!document.querySelector('.space-card')"), true);
 

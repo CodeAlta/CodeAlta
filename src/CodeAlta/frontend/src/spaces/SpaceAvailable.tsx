@@ -84,7 +84,7 @@ export function SpaceAvailable({ space, spaces, hub, canEdit, busy, run, read = 
   /** Reads the resources of each kind; the pages of Settings by default. */
   read?: (epoch: string, t: (key: MessageKey) => string) => Promise<Lists>;
 }>) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const epoch = hub.hostEpoch();
   const [tab, setTab] = useState<Tabbed>("provider");
@@ -97,7 +97,8 @@ export function SpaceAvailable({ space, spaces, hub, canEdit, busy, run, read = 
     let alive = true;
     void read(epoch, t).then(value => { if (alive) setLists(value); });
     return () => { alive = false; };
-  }, [epoch, revision, read, t]);
+    // `t` is a new function at each render: the lists are read again when the language changes, not at each render.
+  }, [epoch, revision, read, locale]);
   const every = useMemo(() => spaces.map(item => item.id), [spaces]);
   if (!state.available) return null;
   const wanted = filter.trim().toLowerCase();

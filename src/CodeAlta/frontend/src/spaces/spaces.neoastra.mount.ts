@@ -2,6 +2,7 @@
 // that keeps two spaces in memory. No native bridge or user data is touched.
 import type { SpaceAssignRequest, SpaceIdentityCheckRequest, SpaceIdentityItem, SpaceIdentityUpdateRequest, SpaceItem, SpaceShownRequest, SpacesEvent } from "#neoastra";
 export * from "../projectFocus.neoastra.mount";
+import { mcpServers as fixtureServers } from "../projectFocus.neoastra.mount";
 // The real editor can open an in-memory file; disk and git operations remain unavailable.
 export { projectFiles, projectGit } from "../demo-api";
 import { globalConfig as demoConfig } from "../demo-api";
@@ -11,8 +12,11 @@ const space = (id: string, name: string, projectIds: string[], look: Partial<Spa
 // The default space holds both projects of the fixture; Work has the second one.
 const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work",
   localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" })];
-const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; tell: (event: SpacesEvent) => void; sessions: object[] } = { shown: [], assigned: [], tell: () => { }, sessions: [] };
+const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number } =
+  { shown: [], assigned: [], tell: () => { }, sessions: [], serverReads: 0 };
 Object.assign(window, { spacesFixture: fixture });
+// How many times the page of a space read the MCP servers: once when it opens, not at each render.
+export const mcpServers = { ...fixtureServers, list: (...args: Parameters<typeof fixtureServers.list>) => { fixture.serverReads++; return fixtureServers.list(...args); } };
 const done = async () => ({ status: "ok", message: null, space: null });
 
 // The providers of the user: an account of Work, one of the default space, and one of every space.
