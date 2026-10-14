@@ -5,10 +5,11 @@ namespace CodeAlta.Agent.Claude;
 /// <summary>
 /// What one CLI process of a session is started with. A change of any of these starts another process, which
 /// resumes the conversation. <paramref name="Environment"/> is the environment of the session (its Git identity),
-/// which the CLI and the commands of its tools inherit.
+/// which the CLI and the commands of its tools inherit. <paramref name="WithoutShell"/> starts it without its shell
+/// tools: the session does without <c>shell_command</c>.
 /// </summary>
 internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort, bool PromptSuggestions = false,
-    AgentProcessEnvironment? Environment = null);
+    AgentProcessEnvironment? Environment = null, bool WithoutShell = false);
 
 /// <summary>
 /// Builds the command line and the environment of a CLI process.
@@ -27,6 +28,13 @@ internal static class ClaudeCodeLauncher
     // The tools that start agents inside the CLI: a subagent, by its name and by the one older versions gave it,
     // and the agents of a workflow script.
     private const string SubagentTools = "Agent,Task,Workflow";
+
+    /// <summary>
+    /// The tools of the CLI that run commands, as version 2.1.292 names them: the shell, the PowerShell of Windows,
+    /// and Monitor, which runs a command in the background and reads its output. A session that does without
+    /// <c>shell_command</c> is started without them.
+    /// </summary>
+    public const string ShellTools = "Bash,PowerShell,Monitor";
 
     // The server is served by this process over the control protocol: nothing is listening anywhere.
     private const string McpConfig = "{\"mcpServers\":{\"" + McpServerName + "\":{\"type\":\"sdk\",\"name\":\"" + McpServerName + "\"}}}";
@@ -147,11 +155,15 @@ internal static class ClaudeCodeLauncher
             arguments.Add($"--allowedTools=mcp__{McpServerName}");
         }
 
-        if (delegatesToSessions)
+        // A subagent of the CLI works where the user does not see it: no session, no timeline, nothing to steer or
+        // stop. The model has the sessions of CodeAlta for that, and is not offered both. A session without the
+        // shell runs no command either.
+        var disallowed = new List<string>();
+        if (delegatesToSessions) disallowed.Add(SubagentTools);
+        if (key.WithoutShell) disallowed.Add(ShellTools);
+        if (disallowed.Count > 0)
         {
-            // A subagent of the CLI works where the user does not see it: no session, no timeline, nothing to
-            // steer or stop. The model has the sessions of CodeAlta for that, and is not offered both.
-            arguments.Add($"--disallowedTools={SubagentTools}");
+            arguments.Add($"--disallowedTools={string.Join(',', disallowed)}");
         }
 
         if (showReasoning)

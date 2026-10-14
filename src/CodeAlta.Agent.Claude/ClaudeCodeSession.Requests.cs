@@ -54,6 +54,19 @@ internal sealed partial class ClaudeCodeSession
             }
 
             var interactionId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? requestId;
+            bool withoutShell;
+            lock (_gate)
+            {
+                withoutShell = _launchKey?.WithoutShell == true;
+            }
+
+            if (withoutShell && ClaudeCodeLauncher.ShellTools.Split(',').Contains(toolName, StringComparer.Ordinal))
+            {
+                // The CLI was started without its shell tools; a setting of the user that allows one is not a reason to run it.
+                return Deny("Shell commands are turned off for this session in CodeAlta: run none. Use the other tools of the session, or ask the user to run the command.",
+                    interrupt: false);
+            }
+
             if (string.Equals(toolName, "AskUserQuestion", StringComparison.Ordinal))
             {
                 return await AskUserAsync(run, interactionId, input, prompt.Token).ConfigureAwait(false);

@@ -1555,8 +1555,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var project = await ResolveProjectAsync(session, actorCancellationToken).ConfigureAwait(false);
         ValidateDiscoveryPaths(session, options, project);
         session.AgentPromptId = prompt;
-        _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, prompt);
-        if (existing is not null && !existing.Attachment.IsRetiring && Reusable(existing))
+        var built = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, prompt);
+        // The tools the session does without follow the settings of the user, of its space and of its agent prompt:
+        // an idle attachment that runs with others is attached again.
+        if (existing is not null && !existing.Attachment.IsRetiring && Reusable(existing)
+            && (settled || existing.DisabledTools.SetEquals(built.PromptBundle?.DisabledTools ?? new HashSet<string>())))
         {
             existing.PendingAgentPromptId = null;
             await SyncTitleModeAsync(existing, actorCancellationToken).ConfigureAwait(false);
@@ -1767,6 +1770,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             AgentPromptId = NormalizeOptionalText(session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             AgentPromptUsage = agentPromptUsage,
             Tools = tools,
+            DisabledBuiltInTools = instructions.PromptBundle?.DisabledTools,
             OnPermissionRequest = options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
         };
@@ -1874,6 +1878,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             PermissionMode = permissionMode,
             OwnTitleMode = ownTitleMode,
             TitleMode = titleMode,
+            DisabledTools = instructions.PromptBundle?.DisabledTools ?? System.Collections.Frozen.FrozenSet<string>.Empty,
         };
 
         projector.Entry = entry;
@@ -3137,6 +3142,26 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="IOException">The global configuration cannot be read.</exception>
     public async Task<SpaceFilter> GetSessionSpaceFilterAsync(string sessionId, CancellationToken cancellationToken = default)
         => SpaceFilter.Load(_configStore, await GetSessionSpaceIdAsync(sessionId, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// Gets the built-in tools a session does without, as the settings of the user, of its space and of its agent
+    /// prompt say them now. A session that is not known has the settings of the user.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The names of the tools.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
+    public async Task<IReadOnlySet<string>> GetDisabledToolsAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        // What the settings say now: an attachment that runs with less is attached again at its next turn.
+        var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (session is null) return _configStore.LoadGlobalDisabledTools();
+        var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
+        var prompt = _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated ? entry.AgentPromptId : session.AgentPromptId;
+        return _instructionTemplateProvider.ResolveDisabledTools(session, project, prompt);
+    }
 
     /// <summary>
     /// Gets the space a session is in: the space it records, else the only space of its project, else the default
@@ -4860,6 +4885,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The identity the attachment runs under, read when it attached.</summary>
         public SessionIdentity Identity { get; init; } = SessionIdentity.Usual;
+
+        /// <summary>The built-in tools the attachment runs without.</summary>
+        public IReadOnlySet<string> DisabledTools { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
 
         /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
         public long ProviderRegistrationVersion { get; init; }

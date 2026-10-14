@@ -167,6 +167,12 @@ internal sealed partial class BuiltInAltaCommandContributor
             return PermissionDenied(context, "job.startDenied", "The user reviews the commands of this session: it cannot start a command in the background. Run it with your shell tool.");
         }
 
+        // A session that does without the shell runs no command through a job either.
+        if (await ShellTurnedOffAsync(context, sessionId).ConfigureAwait(false))
+        {
+            return PermissionDenied(context, "job.shellDisabled", ShellTurnedOffMessage("start a command in the background"));
+        }
+
         if (sessionId is null)
         {
             return UsageError(context, "usage.missingSession", "A job belongs to a session, which is told its end: use --session <session-id> when no session calls.", path);

@@ -160,6 +160,12 @@ public class AgentSessionCreateOptions
     public IReadOnlyList<AgentToolDefinition>? Tools { get; init; }
 
     /// <summary>
+    /// Gets or initializes the built-in tools the session does without, by name (such as <c>shell_command</c>);
+    /// <see langword="null"/> or empty for none. A provider that runs its own tools leaves out its counterparts.
+    /// </summary>
+    public IReadOnlySet<string>? DisabledBuiltInTools { get; init; }
+
+    /// <summary>
     /// Gets or initializes MCP server configurations available to this session.
     /// </summary>
     public IReadOnlyDictionary<string, AgentMcpServerConfig>? McpServers { get; init; }

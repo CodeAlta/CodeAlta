@@ -1571,6 +1571,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 EnableUserInputTool = enableUserInputTool,
                 Provider = Provider,
                 HttpClient = BuiltInToolHttpClient,
+                DisabledTools = _options.DisabledBuiltInTools,
             });
         return _options.Tools is { Count: > 0 }
             ? [.. builtIns, .. _options.Tools]
@@ -1655,6 +1656,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // runs outside one takes the current mode.
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
             PromptSuggestions = _promptSuggestions,
+            DisabledTools = _options.DisabledBuiltInTools,
             Conversation = _toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,

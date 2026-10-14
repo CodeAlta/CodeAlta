@@ -1110,14 +1110,11 @@ public static class AgentBuiltInToolFactory
         ArgumentNullException.ThrowIfNull(options);
         ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
 
-        if (options.Provider?.Profile?.BuiltInToolOverrides is { Count: > 0 } overrides &&
-            overrides.TryGetValue(toolName, out var enabled))
-        {
-            return enabled;
-        }
-
-        return !string.Equals(toolName, "apply_patch", StringComparison.Ordinal) ||
-               IsApplyPatchSupported(options.Provider, options.ProviderId);
+        var included = options.Provider?.Profile?.BuiltInToolOverrides is { Count: > 0 } overrides && overrides.TryGetValue(toolName, out var enabled)
+            ? enabled
+            : !string.Equals(toolName, "apply_patch", StringComparison.Ordinal) || IsApplyPatchSupported(options.Provider, options.ProviderId);
+        // After the provider: what the session turns off is off, whatever its provider would offer.
+        return included && options.DisabledTools?.Contains(toolName) != true;
     }
 
     private static bool IsApplyPatchSupported(ModelProviderRuntimeDescriptor? provider, ModelProviderId ProviderId)

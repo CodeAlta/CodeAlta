@@ -1228,6 +1228,31 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public void CreateDefaultTools_LeavesOutTheToolsTheSessionTurnsOff_WhateverTheProviderOverrides()
+    {
+        using var temp = TestTempDirectory.Create();
+        var provider = CreateProviderDescriptor(
+            AgentTransportKind.OpenAIResponses,
+            new Uri("https://openrouter.ai/api/v1"),
+            new AgentProviderProfile { BuiltInToolOverrides = new Dictionary<string, bool>(StringComparer.Ordinal) { ["apply_patch"] = true, ["shell_command"] = true } });
+        var options = CreateOptions(temp.Path, provider: provider);
+
+        var tools = AgentBuiltInToolFactory.CreateDefaultTools(new AgentBuiltInToolOptions
+        {
+            ProviderId = options.ProviderId,
+            SessionId = options.SessionId,
+            WorkingDirectory = options.WorkingDirectory,
+            OnPermissionRequest = options.OnPermissionRequest,
+            Provider = options.Provider,
+            DisabledTools = new HashSet<string>(["shell_command", "apply_patch"], StringComparer.Ordinal),
+        }).Select(static tool => tool.Spec.Name).ToArray();
+
+        CollectionAssert.DoesNotContain(tools, "shell_command");
+        CollectionAssert.DoesNotContain(tools, "apply_patch", "The provider turns it on; the session turns it off.");
+        CollectionAssert.Contains(tools, "read_file");
+    }
+
+    [TestMethod]
     public async Task WriteAndReplaceTools_EditFilesDeterministically()
     {
         using var temp = TestTempDirectory.Create();

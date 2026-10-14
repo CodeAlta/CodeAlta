@@ -136,5 +136,28 @@ public static class PromptFileFormat
         return value.Trim('"', '\'');
     }
 
+    /// <summary>
+    /// Reads the tools an agent prompt turns off, <c>disabled_tools</c> of its front matter: a flow list
+    /// (<c>[shell_command, webget]</c>) or names separated by commas. A name that is not the name of a tool is left out.
+    /// </summary>
+    /// <param name="frontmatter">The front matter.</param>
+    /// <returns>The names, each once, in their order; empty when none is set.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="frontmatter"/> is <see langword="null"/>.</exception>
+    public static IReadOnlyList<string> ParseDisabledTools(IReadOnlyDictionary<string, string> frontmatter)
+    {
+        ArgumentNullException.ThrowIfNull(frontmatter);
+        if (!frontmatter.TryGetValue("disabled_tools", out var value) || string.IsNullOrWhiteSpace(value)) return [];
+        var list = value.Trim();
+        if (list.StartsWith('[') && list.EndsWith(']')) list = list[1..^1];
+        var names = new List<string>();
+        foreach (var part in list.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var name = DecodeScalar(part).Trim();
+            if (SpaceTools.IsToolName(name) && !names.Contains(name, StringComparer.Ordinal)) names.Add(name);
+        }
+
+        return names;
+    }
+
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

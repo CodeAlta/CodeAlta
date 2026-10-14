@@ -396,7 +396,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             ClaudeCodeLauncher.ToModelOption(request.ModelId),
             effort,
             _options.PromptSuggestions && request.PromptSuggestions && !_promptSuggestionsRefused,
-            request.Environment is { IsEmpty: false } environment ? environment : null);
+            request.Environment is { IsEmpty: false } environment ? environment : null,
+            request.DisabledTools?.Contains(ShellCommandTool) == true);
         var permissionMode = NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
         lock (_gate)
         {
@@ -549,6 +550,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
     }
 
+    // The built-in shell tool of CodeAlta, whose counterparts the CLI is started without when the session turns it off.
+    private const string ShellCommandTool = "shell_command";
+
     private static string? NormalizePermissionMode(string? permissionMode)
         => string.IsNullOrWhiteSpace(permissionMode) ? null : permissionMode.Trim();
 
@@ -560,7 +564,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
         }
 
-        return ClaudeCodePrompts.CreateAppendSystemPrompt(request.DeveloperInstructions, hasGateway);
+        return ClaudeCodePrompts.CreateAppendSystemPrompt(request.DeveloperInstructions, hasGateway, request.DisabledTools?.Contains(ShellCommandTool) != true);
     }
 
     // Returns what the conversation has to be told of its instructions before the prompt that starts, if anything:

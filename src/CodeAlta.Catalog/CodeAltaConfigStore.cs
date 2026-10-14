@@ -419,6 +419,37 @@ public sealed class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads the tools every session does without (<c>[tools] disabled</c>), from the user's file only. A name that
+    /// is not the name of a tool is left out.
+    /// </summary>
+    /// <returns>The names; empty when the file sets none.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public IReadOnlySet<string> LoadGlobalDisabledTools()
+    {
+        var document = LoadGlobal();
+        return new HashSet<string>((document.Tools?.Disabled ?? []).Where(SpaceTools.IsToolName).Select(static name => name.Trim()), StringComparer.Ordinal);
+    }
+
+    /// <summary>Saves the tools every session does without; an empty list removes the setting.</summary>
+    /// <param name="tools">The names of the tools.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="tools"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A name is not the name of a tool, or there are too many.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    public void SaveGlobalDisabledTools(IEnumerable<string> tools)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        var names = tools.Select(static name => name?.Trim() ?? string.Empty).Distinct(StringComparer.Ordinal).ToList();
+        if (names.FirstOrDefault(static name => !SpaceTools.IsToolName(name)) is { } wrong) throw new ArgumentException($"'{wrong}' is not the name of a tool.", nameof(tools));
+        if (names.Count > SpaceTools.MaximumTools) throw new ArgumentException($"At most {SpaceTools.MaximumTools} tools are turned off.", nameof(tools));
+        var document = LoadGlobal();
+        NormalizeDocument(document);
+        document.Tools = names.Count == 0 ? null : new CodeAltaToolSettingsDocument { Disabled = names };
+        SaveDocument(_options.ConfigPath, document);
+    }
+
+    /// <summary>
     /// Persists the complete global disabled skill set.
     /// </summary>
     /// <remarks>Edits only skill enablement tokens, preserving TOML comments and unknown settings. This is not an external-writer compare-and-swap.</remarks>

@@ -510,6 +510,33 @@ public sealed class AutomationHostTests
         }, sessionPermissionModes: modes, inherit: () => inherit, review: () => review);
 
     [TestMethod]
+    public Task ASessionWithoutTheShell_StartsNoCommand_InAJobOrAnAutomation()
+        => WithPermissionCallerAsync(SessionPermissionModes.Bypass, async (fixture, host, caller) =>
+        {
+            File.WriteAllText(Path.Combine(host.CatalogOptions.GlobalRoot!, "config.toml"), "[tools]\ndisabled = [\"shell_command\"]\n");
+
+            var command = await fixture.Run(["automation", "create", "--name", "Watch", "--chat", "--trigger", "command@gh run watch 1", "--content", "x"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, command.Code, command.Text);
+            StringAssert.Contains(command.Text, "automation.shellDisabled");
+            StringAssert.Contains(command.Text, "`shell_command` is turned off for this session");
+            Assert.AreEqual(0, fixture.Service.Snapshot.Entries.Count, "Nothing is written.");
+            // An automation without a command is one it may create.
+            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "create", "--name", "Daily", "--chat", "--trigger", "daily@09:00", "--content", "x"], caller: caller)).Code);
+            var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("User command") with
+            {
+                Enabled = false, Triggers = [new("command", 0, 1, [], [], null, "opened", "trusted", "never-run", null)],
+            }, null), default);
+            var enable = await fixture.Run(["automation", "enable", saved.Id!], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+            StringAssert.Contains(enable.Text, "automation.shellDisabled");
+
+            var job = await fixture.Run(["job", "start", "--command", "echo hi"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, job.Code, job.Text);
+            StringAssert.Contains(job.Text, "job.shellDisabled");
+            Assert.AreEqual(0, fixture.Commands.Count);
+        });
+
+    [TestMethod]
     public Task SameAsCreator_ChecksEveryCreateShapeWithoutWeakeningCommandReviewOrNonStartingActions()
         => WithPermissionCallerAsync(SessionPermissionModes.Ask, async (fixture, host, caller) =>
         {

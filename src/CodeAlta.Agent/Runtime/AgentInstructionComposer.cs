@@ -27,7 +27,7 @@ internal static class AgentInstructionComposer
         var developerInstructionsInput = Normalize(options.DeveloperInstructions);
         var runtimeContext = options.InstructionsAlreadyComposed || ContainsSection(developerInstructionsInput, "# Runtime Context")
             ? string.Empty
-            : BuildRuntimeContextSection(ExecutionDirectory(options), options.ProjectRoots);
+            : BuildRuntimeContextSection(ExecutionDirectory(options), options.ProjectRoots, options.DisabledBuiltInTools?.Contains("shell_command") != true);
         var developerSections = new List<string>();
         if (!string.IsNullOrWhiteSpace(developerInstructionsInput))
         {
@@ -88,14 +88,15 @@ internal static class AgentInstructionComposer
     private static bool ContainsSection(string? value, string marker)
         => !string.IsNullOrWhiteSpace(value) && value.Contains(marker, StringComparison.OrdinalIgnoreCase);
 
-    private static string BuildRuntimeContextSection(string? workingDirectory, IReadOnlyList<string> projectRoots)
+    private static string BuildRuntimeContextSection(string? workingDirectory, IReadOnlyList<string> projectRoots, bool hasShell)
     {
         var lines = new List<string>
         {
             $"Current date: {DateTimeOffset.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}",
             $"Platform: {GetPlatformLabel()}",
-            $"Default shell for `shell_command`: `{GetDefaultShellLabel()}`",
         };
+        // A session without the shell is not told which one it would have.
+        if (hasShell) lines.Add($"Default shell for `shell_command`: `{GetDefaultShellLabel()}`");
 
         var normalizedWorkingDirectory = NormalizePath(workingDirectory);
         if (normalizedWorkingDirectory is not null)

@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -73,6 +74,14 @@ public sealed class SystemPromptBuilder
             throw new InvalidOperationException($"Missing required agent prompt 'agents/{composition.AgentPromptName}.prompt.md'.");
         }
 
+        // What the session does without: what the host says (the user's settings, the space), and what the agent
+        // prompt turns off, with the files it adds to.
+        var disabledTools = new HashSet<string>(request.DisabledTools ?? new HashSet<string>(), StringComparer.Ordinal);
+        foreach (var applied in promptResolution.Applied)
+        {
+            disabledTools.UnionWith(applied.Resource.DisabledTools);
+        }
+
         var selectedSystemOverride = NormalizeName(request.SelectedBaseName);
         var agentSystemPromptName = ResolveEffectiveSystemPromptName(promptResolution);
         var selectedSystemName = selectedSystemOverride ?? agentSystemPromptName ?? DefaultName;
@@ -96,7 +105,7 @@ public sealed class SystemPromptBuilder
         }
 
         var parts = new List<SystemPromptManifestPart>();
-        var systemMessage = systemResolution.Body!.Trim();
+        var systemMessage = PromptToolConditions.Apply(systemResolution.Body!, disabledTools).Trim();
         foreach (var applied in systemResolution.Applied)
         {
             parts.Add(CreateResourcePart(applied.Resource, "system", selectedSystemName, "system", 100, applied.Status, applied.Replaces));
@@ -113,7 +122,7 @@ public sealed class SystemPromptBuilder
             parts.Add(CreateResourcePart(applied.Resource, "agent_prompt", composition.AgentPromptName, "developer", 300, applied.Status, applied.Replaces));
         }
 
-        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", promptResolution.Body!)));
+        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", PromptToolConditions.Apply(promptResolution.Body!, disabledTools))));
         foreach (var skipped in promptResolution.Skipped)
         {
             parts.Add(CreateResourcePart(skipped.Resource, "agent_prompt", composition.AgentPromptName, "developer", 300, skipped.Status, null));
@@ -123,7 +132,7 @@ public sealed class SystemPromptBuilder
 
         if (composition.PartOptions.RuntimeContext)
         {
-            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, BuildRuntimeContext(request, projectRoot, roots));
+            AddGeneratedPart(developerParts, parts, "runtime.context", "runtime_context", "Runtime Context", 400, BuildRuntimeContext(request, projectRoot, roots, disabledTools));
         }
 
         if (composition.PartOptions.ToolGuidance)
@@ -192,6 +201,7 @@ public sealed class SystemPromptBuilder
             Manifest = manifest,
             Statistics = statistics,
             Diagnostics = diagnostics,
+            DisabledTools = disabledTools.ToFrozenSet(StringComparer.Ordinal),
         };
     }
 
@@ -403,7 +413,7 @@ public sealed class SystemPromptBuilder
 
         var (frontmatter, body) = SplitFrontmatter(text, path, diagnostics);
         var allowedFields = resourceKind == SystemPromptResourceKind.AgentPrompt
-            ? new HashSet<string>(["name", "description", "system", "skills", "project_context", "runtime_context", "tool_guidance", "mode", "append", "version", "max_tokens", "id", "kind", "path"], StringComparer.OrdinalIgnoreCase)
+            ? new HashSet<string>(["name", "description", "system", "skills", "project_context", "runtime_context", "tool_guidance", "disabled_tools", "mode", "append", "version", "max_tokens", "id", "kind", "path"], StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(["description", "mode", "append", "version", "max_tokens", "id", "kind", "path"], StringComparer.OrdinalIgnoreCase);
         var partOptions = PartialSystemPromptPartOptions.Empty;
         var hasErrors = false;
@@ -460,7 +470,10 @@ public sealed class SystemPromptBuilder
             ? NormalizeName(frontmatter.GetValueOrDefault("system"))
             : null;
         var trimmed = body.Trim();
-        return new PromptResource(root.SourceKind, root.Precedence, path, trimmed, frontmatter.GetValueOrDefault("description"), displayName, systemPromptName, partOptions, HashText(trimmed), mode.Value);
+        return new PromptResource(root.SourceKind, root.Precedence, path, trimmed, frontmatter.GetValueOrDefault("description"), displayName, systemPromptName, partOptions, HashText(trimmed), mode.Value)
+        {
+            DisabledTools = resourceKind == SystemPromptResourceKind.AgentPrompt ? CodeAlta.Catalog.PromptFileFormat.ParseDisabledTools(frontmatter) : [],
+        };
     }
 
     private static Dictionary<string, string> ParseFlatKeyValueFile(string text, List<SystemPromptDiagnostic> diagnostics, string path, bool allowFrontmatterDelimiters)
@@ -555,14 +568,16 @@ public sealed class SystemPromptBuilder
         return part;
     }
 
-    private static string BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot, SystemPromptContentRoots? roots = null)
+    private static string BuildRuntimeContext(SystemPromptBuildRequest request, string? projectRoot, SystemPromptContentRoots? roots = null,
+        IReadOnlySet<string>? disabledTools = null)
     {
         var lines = new List<string>
         {
             $"- Current date: {DateTimeOffset.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}",
             $"- Platform: {GetPlatformLabel()}",
-            $"- Default shell for shell commands: {GetDefaultShellLabel()}",
         };
+        // A session without the shell is not told which one it would have.
+        if (disabledTools?.Contains(PromptToolConditions.ShellCommand) != true) lines.Add($"- Default shell for shell commands: {GetDefaultShellLabel()}");
         // A session in a git worktree works there: the folder of its project is then named as what it is, the
         // main checkout, which is not where this session writes.
         var worktree = ExistingWorktree(request.Session);
@@ -1202,7 +1217,10 @@ public sealed class SystemPromptBuilder
     }
 
     private sealed record PromptRoot(string SourceKind, int Precedence, string Path);
-    private sealed record PromptResource(string SourceKind, int Precedence, string Path, string Body, string? Description, string? DisplayName, string? SystemPromptName, PartialSystemPromptPartOptions PartOptions, string Hash, PromptCompositionMode Mode);
+    private sealed record PromptResource(string SourceKind, int Precedence, string Path, string Body, string? Description, string? DisplayName, string? SystemPromptName, PartialSystemPromptPartOptions PartOptions, string Hash, PromptCompositionMode Mode)
+    {
+        public IReadOnlyList<string> DisabledTools { get; init; } = [];
+    }
     private sealed record ResourceResolution(PromptResource? Selected, string? Body, IReadOnlyList<AppliedResource> Applied, IReadOnlyList<SkippedResource> Skipped);
     private sealed record AppliedResource(PromptResource Resource, string Status, string? Replaces);
     private sealed record SkippedResource(PromptResource Resource, string Status);
@@ -1303,6 +1321,12 @@ public sealed class SystemPromptBuildRequest
     /// the Runtime Context says so, since Git has no setting for it.
     /// </summary>
     public SpaceGitIdentity? GitIdentity { get; init; }
+
+    /// <summary>
+    /// Gets the built-in tools the session does without, from the settings of the user and of its space; the agent
+    /// prompt adds its own <c>disabled_tools</c>. The text that names a tool turned off is left out. Null for none.
+    /// </summary>
+    public IReadOnlySet<string>? DisabledTools { get; init; }
 }
 
 /// <summary>
@@ -1367,6 +1391,12 @@ public sealed class SystemPromptBundle
 
     /// <summary>Gets build diagnostics.</summary>
     public IReadOnlyList<SystemPromptDiagnostic> Diagnostics { get; init; } = [];
+
+    /// <summary>
+    /// Gets the built-in tools the session does without: those of the request and the <c>disabled_tools</c> of the
+    /// agent prompt. The session leaves them out of its tools.
+    /// </summary>
+    public IReadOnlySet<string> DisabledTools { get; init; } = FrozenSet<string>.Empty;
 }
 
 /// <summary>

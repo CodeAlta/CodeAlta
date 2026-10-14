@@ -166,6 +166,42 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task ASessionWithoutTheShell_StartsTheCliWithoutItsShellTools_AndDeniesThemWithoutAsking()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        JsonElement? decision = null;
+        cli.OnUserMessage = async (process, user) =>
+        {
+            var input = new JsonObject { ["command"] = "git status" };
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Bash", input)));
+            decision = await process.AskPermissionAsync("Bash", input, "toolu_1");
+            process.EmitToolResult("toolu_1", "Denied.", isError: true);
+            process.EmitResult("No shell here.", user);
+        };
+        var asked = 0;
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            DisabledBuiltInTools = new HashSet<string>(["shell_command"], StringComparer.Ordinal),
+            OnPermissionRequest = (_, _) => { asked++; return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)); },
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("show the status") }).WaitAsync(Timeout);
+
+        var process = SessionProcess(cli);
+        CollectionAssert.Contains(process.Launch.Arguments.ToArray(), "--disallowedTools=Bash,PowerShell,Monitor");
+        Assert.AreEqual("deny", decision!.Value.GetProperty("behavior").GetString());
+        Assert.AreEqual(0, asked, "CodeAlta is not asked: the session runs no command.");
+        var appended = process.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!;
+        StringAssert.Contains(appended, "Shell commands are turned off for this session");
+        Assert.IsFalse(appended.Contains("Bash", StringComparison.Ordinal), "No tool of Claude Code is named.");
+    }
+
+    [TestMethod]
     public async Task DeniedPermission_IsAnsweredAsADenial()
     {
         using var directory = TestTempDirectory.Create();

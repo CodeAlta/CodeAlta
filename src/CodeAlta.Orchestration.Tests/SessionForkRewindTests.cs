@@ -455,6 +455,53 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task ASession_DoesWithoutTheToolsOfTheUserItsSpaceAndItsAgentPrompt_AndNamesNone()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+        Assert.AreEqual(SpaceChangeStatus.Ok, (await host.SpaceCatalog.UpdateSettingsAsync("business", settings => settings with { Tools = new SpaceTools(["webget"]) })).Status);
+        var prompts = Path.Combine(temp.GlobalRoot, "prompts", "agents");
+        Directory.CreateDirectory(prompts);
+        File.WriteAllText(Path.Combine(prompts, "reader.prompt.md"), "---\nname: Reader\ndisabled_tools: [write_file]\n---\nRead only.\n");
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Business", null, null, null, "business", CancellationToken.None);
+        await SendAsync(host, session, options, "one");
+
+        string[] Tools() => [.. provider.Requests.Last(value => value.SessionId == session.SessionId).Tools.Select(static tool => tool.Spec.Name)];
+        string Instructions() { var request = provider.Requests.Last(value => value.SessionId == session.SessionId); return request.SystemMessage + request.DeveloperInstructions; }
+        CollectionAssert.Contains(Tools(), "shell_command");
+        CollectionAssert.DoesNotContain(Tools(), "webget", "The space does without it.");
+        StringAssert.Contains(Instructions(), "Default shell for shell commands");
+        StringAssert.Contains(Instructions(), "Background jobs");
+        Assert.IsFalse(Instructions().Contains("<!-- if-tool", StringComparison.Ordinal), "The markers of the prompt files are never sent.");
+
+        // The user turns the shell off for every session: the next turn runs without it, and is not told about it.
+        File.WriteAllText(Path.Combine(temp.GlobalRoot, "config.toml"), "[tools]\ndisabled = [\"shell_command\"]\n");
+        await SendAsync(host, session, options, "two");
+        CollectionAssert.DoesNotContain(Tools(), "shell_command");
+        CollectionAssert.DoesNotContain(Tools(), "webget");
+        Assert.IsFalse(Instructions().Contains("Default shell", StringComparison.Ordinal));
+        Assert.IsFalse(Instructions().Contains("Background jobs", StringComparison.Ordinal));
+        Assert.IsFalse(Instructions().Contains("use shell for builds", StringComparison.Ordinal));
+        StringAssert.Contains(Instructions(), "Set one reminder first", "What is said without the shell takes its place.");
+        Assert.IsTrue(provider.Requests.Last(value => value.SessionId == session.SessionId).DisabledTools!.SetEquals(["shell_command", "webget"]));
+        CollectionAssert.AreEquivalent(new[] { "shell_command", "webget" }, (await host.RuntimeService.GetDisabledToolsAsync(session.SessionId)).ToArray());
+
+        // An agent prompt adds its own.
+        var reader = new SessionExecutionOptions
+        {
+            ProviderId = options.ProviderId, ProviderKey = options.ProviderKey, WorkingDirectory = options.WorkingDirectory, ProjectRoots = options.ProjectRoots,
+            Model = options.Model, OnPermissionRequest = options.OnPermissionRequest, AgentPromptId = "reader",
+        };
+        await host.RuntimeService.SendAsync(session, reader, new AgentSendOptions { Input = AgentInput.Text("three") }, CancellationToken.None);
+        await WaitIdleAsync(host, session);
+        CollectionAssert.DoesNotContain(Tools(), "write_file");
+        CollectionAssert.Contains(Tools(), "read_file");
+    }
+
+    [TestMethod]
     public void BranchTitle_CountsTheForksOfAFork()
     {
         Assert.AreEqual("Review (fork)", SessionRuntimeService.BranchTitle("Review", "fork"));

@@ -356,7 +356,10 @@ public sealed class AgentPromptCatalog
             Precedence: root.Precedence,
             SourcePath: Path.GetFullPath(path),
             ContentHash: HashText(trimmedBody),
-            Mode: mode.Value);
+            Mode: mode.Value)
+        {
+            DisabledTools = CodeAlta.Catalog.PromptFileFormat.ParseDisabledTools(frontmatter),
+        };
         return true;
     }
 
@@ -427,7 +430,11 @@ public sealed class AgentPromptCatalog
             ContentHash: HashText(body),
             Mode: top.Mode,
             IsShadowed: false,
-            ShadowedByPath: null);
+            ShadowedByPath: null)
+        {
+            // A file that adds to another one adds to what it turns off too.
+            DisabledTools = [.. applied.SelectMany(static prompt => prompt.DisabledTools).Distinct(StringComparer.Ordinal)],
+        };
     }
 
     private static AgentPromptDescriptor ToDescriptor(LoadedAgentPromptResource prompt, bool isShadowed, string? shadowedByPath)
@@ -443,7 +450,10 @@ public sealed class AgentPromptCatalog
             ContentHash: prompt.ContentHash,
             Mode: prompt.Mode,
             IsShadowed: isShadowed,
-            ShadowedByPath: shadowedByPath);
+            ShadowedByPath: shadowedByPath)
+        {
+            DisabledTools = prompt.DisabledTools,
+        };
 
     private static SystemPromptDescriptor ToDescriptor(LoadedSystemPromptResource prompt, bool isShadowed, string? shadowedByPath)
         => new(
@@ -566,7 +576,10 @@ public sealed class AgentPromptCatalog
         int Precedence,
         string SourcePath,
         string ContentHash,
-        PromptCompositionMode Mode) : ILoadedPromptResource;
+        PromptCompositionMode Mode) : ILoadedPromptResource
+    {
+        public IReadOnlyList<string> DisabledTools { get; init; } = [];
+    }
 
     private sealed record LoadedSystemPromptResource(
         string PromptName,
@@ -670,6 +683,12 @@ public sealed record AgentPromptDescriptor(
 {
     /// <summary>Gets a value indicating whether the prompt is built into CodeAlta.</summary>
     public bool IsBuiltIn => SourceKind == AgentPromptSourceKind.BuiltIn;
+
+    /// <summary>
+    /// Gets the tools a session of this prompt does without (<c>disabled_tools</c> of its front matter), with those of
+    /// the files it adds to.
+    /// </summary>
+    public IReadOnlyList<string> DisabledTools { get; init; } = [];
 
     /// <summary>Gets a value indicating whether the prompt is a custom agent of GitHub Copilot, which CodeAlta reads and does not write.</summary>
     public bool IsCopilot => SourceKind.IsCopilot();

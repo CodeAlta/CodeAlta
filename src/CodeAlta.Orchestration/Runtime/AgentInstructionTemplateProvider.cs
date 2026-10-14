@@ -150,12 +150,48 @@ public sealed class AgentInstructionTemplateProvider
             DiscoveryScope = DiscoveryScope,
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources),
             SpaceResources = spaceResources,
+            DisabledTools = HostDisabledTools(spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal))),
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
             ModelFallback = models.Fallback.Enabled,
         });
+    }
+
+    /// <summary>
+    /// Works out the built-in tools a session does without, as its instructions do: those the user turns off for
+    /// every session, those its space does without and the <c>disabled_tools</c> of its agent prompt.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="project">Its project, or <see langword="null"/>.</param>
+    /// <param name="agentPromptId">Its agent prompt; <see langword="null"/> for the default one.</param>
+    /// <returns>The names of the tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
+    public IReadOnlySet<string> ResolveDisabledTools(SessionViewDescriptor session, ProjectDescriptor? project, string? agentPromptId)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var spaces = LoadSpaces();
+        var spaceId = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
+        var disabled = new HashSet<string>(HostDisabledTools(spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal))), StringComparer.Ordinal);
+        var prompt = new AgentPromptCatalog().ResolvePrompt(new AgentPromptCatalogQuery
+        {
+            ProjectRoot = project?.ProjectPath,
+            ProjectPromptResourcesTrusted = project is not null,
+            UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
+            UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        }, agentPromptId);
+        disabled.UnionWith(prompt?.DisabledTools ?? []);
+        return disabled;
+    }
+
+    // The tools the user turns off for every session, and those the space of the session does without.
+    private IReadOnlySet<string> HostDisabledTools(SpaceDescriptor space)
+    {
+        var disabled = new HashSet<string>(_configStore?.LoadGlobalDisabledTools() ?? new HashSet<string>(), StringComparer.Ordinal);
+        disabled.UnionWith(space.Settings.Tools?.Disabled ?? []);
+        return disabled;
     }
 
     // The spaces of the catalog; the default one alone while the catalog keeps no space.

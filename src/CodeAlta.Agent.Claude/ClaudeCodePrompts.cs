@@ -48,6 +48,15 @@ internal static class ClaudeCodePrompts
     /// <param name="developerInstructions">The instructions CodeAlta composed for the session.</param>
     /// <param name="hasGateway">Whether the session has the <c>alta</c> live tool.</param>
     public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasGateway)
+        => CreateAppendSystemPrompt(developerInstructions, hasGateway, hasShell: true);
+
+    /// <summary>
+    /// Writes what the CLI appends to its own system prompt, for a session that may do without the shell.
+    /// </summary>
+    /// <param name="developerInstructions">The instructions CodeAlta composed for the session.</param>
+    /// <param name="hasGateway">Whether the session has the <c>alta</c> live tool.</param>
+    /// <param name="hasShell">Whether the session runs commands; false when it does without <c>shell_command</c>.</param>
+    public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasGateway, bool hasShell)
     {
         const string Prefix = ClaudeCodeLauncher.McpToolPrefix;
         var builder = new StringBuilder();
@@ -65,6 +74,11 @@ internal static class ClaudeCodePrompts
 
         builder.AppendLine(" A tool that joins while a turn runs may not be in your tool list yet: your tool search loads it by that name.");
         builder.AppendLine("- CodeAlta's own file, search, web, shell and question tools (`read_file`, `view_image`, `list_dir`, `grep`, `webget`, `shell_command`, `write_file`, `replace_in_file`, `delete_file_or_dir`, `rename_file_or_dir`, `apply_patch`, `request_user_input`) are not part of this session. Where the instructions mention them, do the same work with your own tools.");
+        if (!hasShell)
+        {
+            builder.AppendLine("- Shell commands are turned off for this session: run none, not even in the background. Do the work with the other tools, or ask the user to run a command.");
+        }
+
         if (hasGateway)
         {
             // Claude Code has a tool of its own for most of what CodeAlta does with its sessions, questions,
@@ -73,7 +87,11 @@ internal static class ClaudeCodePrompts
             builder.AppendLine($"- What CodeAlta has its own way for, do its way: the user sees and manages it in the CodeAlta window. That is `{GatewayTool} session` for everything you delegate (a sub-agent is a child session of CodeAlta, as the instructions describe, also for a search or a review of your own: this session has no subagent tool of Claude Code), `{GatewayTool} ask` for questions to the user, `{GatewayTool} skill` for the skills the instructions list, the plan mode and the plan files as the instructions describe them, `{GatewayTool} notes` and `{GatewayTool} reminder`.");
             // The CLI tells the model that a background command starts it again when it ends. CodeAlta shows that
             // turn as a run, but only a process that is still there starts it: a reminder does not depend on it.
-            builder.AppendLine($"- A background command of yours that ends after your turn, or a wake-up of yours that fires, starts a turn the user sees as a run of the session, as long as the session stays open in CodeAlta. A command started with `{GatewayTool} job start` is run by CodeAlta itself: the user sees what it writes and can stop it, and its result is sent to you as a prompt when it ends, so prefer it to a background command of your own for what takes long. For what has to bring you back in any case, set a `{GatewayTool} reminder` as the instructions say.");
+            if (hasShell)
+            {
+                builder.AppendLine($"- A background command of yours that ends after your turn, or a wake-up of yours that fires, starts a turn the user sees as a run of the session, as long as the session stays open in CodeAlta. A command started with `{GatewayTool} job start` is run by CodeAlta itself: the user sees what it writes and can stop it, and its result is sent to you as a prompt when it ends, so prefer it to a background command of your own for what takes long. For what has to bring you back in any case, set a `{GatewayTool} reminder` as the instructions say.");
+            }
+
             builder.AppendLine($"- Your own question tool reaches the user only in a run CodeAlta lets ask that way. When it is refused, `{GatewayTool} ask` is the way to ask, within the rules the instructions give for asking.");
         }
 

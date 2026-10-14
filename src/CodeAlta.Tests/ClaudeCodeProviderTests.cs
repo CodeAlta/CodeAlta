@@ -171,6 +171,23 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public void Launcher_StartsTheCliWithoutItsShellTools_WhenTheKeySaysSo()
+    {
+        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code" };
+
+        var alone = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null, WithoutShell: true), null, null, withTools: true);
+        var both = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null, WithoutShell: true), null, null, withTools: true, delegatesToSessions: true);
+        var with = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true);
+
+        CollectionAssert.Contains(alone.Arguments.ToArray(), "--disallowedTools=Bash,PowerShell,Monitor");
+        // One option: the CLI takes the last one it is given.
+        Assert.AreEqual("--disallowedTools=Agent,Task,Workflow,Bash,PowerShell,Monitor", both.Arguments.Single(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)));
+        Assert.IsFalse(with.Arguments.Any(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)));
+        // Turning the shell on or off starts another process, which resumes the conversation.
+        Assert.AreNotEqual(new ClaudeCodeLaunchKey(null, null, null), new ClaudeCodeLaunchKey(null, null, null, WithoutShell: true));
+    }
+
+    [TestMethod]
     public void Launcher_LeavesOutTheApiKeyOnlyWhenAskedTo()
     {
         var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code" };

@@ -44,6 +44,12 @@ public sealed class AgentBuiltInToolOptions
     public bool EnableUserInputTool { get; init; }
 
     /// <summary>
+    /// Gets or initializes the built-in tools the session does without, by name (such as <c>shell_command</c>);
+    /// <see langword="null"/> or empty for none. A tool named here is left out whatever the provider profile says.
+    /// </summary>
+    public IReadOnlySet<string>? DisabledTools { get; init; }
+
+    /// <summary>
     /// Gets or initializes the shared HTTP client for web retrieval.
     /// </summary>
     public HttpClient? HttpClient { get; init; }

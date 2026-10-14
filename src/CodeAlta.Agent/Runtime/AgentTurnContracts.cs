@@ -293,6 +293,12 @@ public sealed record AgentTurnRequest
     public bool PromptSuggestions { get; init; }
 
     /// <summary>
+    /// Gets or initializes the built-in tools the session does without, by name (such as <c>shell_command</c>); a
+    /// provider that runs its own tools turns off its counterparts. <see langword="null"/> or empty for none.
+    /// </summary>
+    public IReadOnlySet<string>? DisabledTools { get; init; }
+
+    /// <summary>
     /// Gets or initializes the maximum number of output tokens the provider should generate when supported.
     /// </summary>
     public int? MaxOutputTokens { get; init; }

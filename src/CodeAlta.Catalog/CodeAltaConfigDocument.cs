@@ -73,6 +73,18 @@ public sealed class CodeAltaConfigDocument
     /// <summary>Gets or sets the model tiers and the provider fallback. Read from the user's file only.</summary>
     [JsonPropertyName("models")]
     public CodeAltaModelSettingsDocument? Models { get; set; }
+
+    /// <summary>Gets or sets the tools every session does without. Read from the user's file only.</summary>
+    [JsonPropertyName("tools")]
+    public CodeAltaToolSettingsDocument? Tools { get; set; }
+}
+
+/// <summary>Represents the tools every session does without.</summary>
+public sealed class CodeAltaToolSettingsDocument
+{
+    /// <summary>Gets or sets the names of the tools turned off, such as <c>shell_command</c>.</summary>
+    [JsonPropertyName("disabled")]
+    public List<string>? Disabled { get; set; }
 }
 
 /// <summary>Represents the choices for speech to prompt.</summary>
