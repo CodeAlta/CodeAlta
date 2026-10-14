@@ -572,7 +572,8 @@ internal sealed partial class ClaudeCodeSession
         return completed;
     }
 
-    private static AgentToolResult ReadToolResult(JsonElement block)
+    // Also how a tool result of a transcript is read (ClaudeCodeTranscriptReader).
+    internal static AgentToolResult ReadToolResult(JsonElement block)
     {
         var isError = ClaudeCodeJson.GetBoolean(block, "is_error");
         var items = new List<AgentToolResultItem>();
