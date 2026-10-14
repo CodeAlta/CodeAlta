@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTierProvider, providersInSpace, rememberNewSessionPreference, restoreNewSessionPreferences, tierNewSessionPreference,
+import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTier, newSessionTierProvider, providersInSpace, rememberNewSessionPreference, restoreNewSessionPreferences, tierNewSessionPreference,
   type NewSessionPreference } from "./newSessionPreferences";
 
 const chosen: NewSessionPreference = { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" };
@@ -131,4 +131,18 @@ test("a tier chosen for new sessions is remembered with its model, kept with a n
   assert.equal(chosenNewSessionPreference(remembered.get("scope"), "codex", "modelId", "model").tier, undefined);
   assert.equal(chosenNewSessionPreference(remembered.get("scope"), "codex", "providerKey", "claude").tier, undefined);
   assert.deepEqual(tierNewSessionPreference(undefined, "complex", { providerKey: "claude", modelId: "opus", reasoning: null }), { providerKey: "claude", modelId: "opus", tier: "complex" });
+});
+
+test("a new session is on a tier only while that tier gives its model", () => {
+  const choices = { complex: null, standard: { providerKey: "codex", modelId: "model", reasoning: "medium" }, quick: null };
+  const chosen = { providerKey: "codex", modelId: "model", tier: "standard" };
+  assert.equal(newSessionTier(chosen, { providerKey: "codex", modelId: "model" }, choices), "standard");
+  // In another space, or once the tiers changed, the tier gives another model: the model chosen stays, without the tier.
+  assert.equal(newSessionTier(chosen, { providerKey: "codex", modelId: "model" }, { ...choices, standard: { providerKey: "claude", modelId: "haiku" } }), null);
+  assert.equal(newSessionTier(chosen, { providerKey: "codex", modelId: "small" }, choices), null);
+  // A user who chose nothing starts on the standard tier when the session starts with its model.
+  assert.equal(newSessionTier(undefined, { providerKey: "codex", modelId: "model" }, choices), "standard");
+  assert.equal(newSessionTier(undefined, { providerKey: "codex", modelId: "small" }, choices), null);
+  assert.equal(newSessionTier({ providerKey: "codex" }, { providerKey: "codex", modelId: "model" }, choices), null, "A provider the user chose is not a tier.");
+  assert.equal(newSessionTier(chosen, { providerKey: "codex", modelId: "model" }, null), null, "Without tiers there is no tier.");
 });

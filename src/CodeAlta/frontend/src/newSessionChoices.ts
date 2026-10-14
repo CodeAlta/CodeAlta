@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogModel, type SessionPromptChoice } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
-import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
+import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTier, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
   restoreNewSessionPreferences, tierNewSessionPreference, type NewSessionChoiceField } from "./newSessionPreferences";
 import { useTiers } from "./modelTiers";
 
@@ -57,9 +57,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   const configured = providers.find(candidate => candidate.id === provider);
   const value = newSessionSelection(saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard,
     prompts?.key === key ? prompts.defaultId : null);
-  // The session runs on the tier chosen with its model, else on the standard tier when it starts with the model that tier gives.
-  const tier = saved?.tier && saved.providerKey === value.providerKey && saved.modelId === value.modelId ? saved.tier
-    : !saved?.providerKey && standard && value.providerKey === standard.providerKey && value.modelId === standard.modelId ? "standard" : null;
+  const tier = newSessionTier(saved, value, tiers?.choices);
   const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId)
     && models?.key === key && !models.loading && !models.failed
     && (value.modelId === null ? models.rows.length === 0 && value.reasoningEffort === null : models.rows.some(model => model.id === value.modelId

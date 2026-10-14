@@ -102,6 +102,23 @@ export function newSessionSelection(saved: NewSessionPreference | undefined, pro
       ?? defaultReasoningEffort(model, configured?.defaultReasoning) };
 }
 
+type TierChoice = Readonly<{ providerKey: string; modelId: string }>;
+
+/**
+ * The tier a new session runs on: the tier chosen with its model, while that tier still gives the model (the tiers of
+ * another space, or tiers changed since, give another one); else the standard tier, when the user chose nothing and
+ * the session starts with the model that tier gives.
+ */
+export function newSessionTier(saved: NewSessionPreference | undefined, value: Readonly<{ providerKey: string; modelId: string | null }>,
+  choices: Readonly<Record<string, TierChoice | null>> | null | undefined): string | null {
+  const gives = (tier: string) => {
+    const choice = choices?.[tier];
+    return !!choice && choice.providerKey === value.providerKey && choice.modelId === value.modelId;
+  };
+  if (saved?.tier) return saved.providerKey === value.providerKey && saved.modelId === value.modelId && gives(saved.tier) ? saved.tier : null;
+  return !saved?.providerKey && gives("standard") ? "standard" : null;
+}
+
 /**
  * The provider of a new session when the user chose none: the one of the model the standard tier gives, while it is
  * enabled; otherwise null, and the default provider is taken.
