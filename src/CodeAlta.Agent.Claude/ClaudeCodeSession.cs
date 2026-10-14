@@ -304,6 +304,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             }
         }
 
+        var startsNew = false;
         if (!_conversationBound || users < _syncedUsers || assistants < _syncedAssistants)
         {
             var persisted = ClaudeCodeProviderState.Read(request.State);
@@ -337,6 +338,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 _claudeSessionId = null;
                 _leaf = null;
                 _branchPending = false;
+                startsNew = true;
                 _pendingPreamble = priorUsers > 0 || assistants > 0
                     ? ClaudeCodePrompts.CreateHistoryPreamble([.. conversation.Take(conversation.Count - trailing)])
                     : null;
@@ -368,6 +370,14 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         newMessages.Reverse();
+        if (startsNew && newMessages.Count > 1)
+        {
+            // Prompts another provider left unanswered (a run that failed before it answered, then the prompt that
+            // follows it) are one request: sent apart, the CLI would answer the first, then the next as if it came
+            // after that answer.
+            return [new AgentConversationMessage(AgentConversationRole.User, [.. newMessages.SelectMany(static message => message.Parts)])];
+        }
+
         return newMessages;
     }
 

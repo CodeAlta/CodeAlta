@@ -47,6 +47,20 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ConversationOfAnotherProvider_EndingWithPromptsNotAnswered_IsSentThemAsOnePrompt()
+    {
+        // A run of another provider failed before it answered, and the next prompt follows it (a fallback): the CLI
+        // answers both at once instead of the first, then the second as if it came after an answer.
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var request = CreateRequest([User("reply ok"), User("[CodeAlta fallback] continue")]);
+
+        await ExecuteAsync(executor, request);
+
+        StringAssert.EndsWith(ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages.Single()), "reply ok\n[CodeAlta fallback] continue");
+    }
+
+    [TestMethod]
     public async Task LaterTurns_SendOnlyTheNewUserMessages()
     {
         var cli = new ClaudeCodeFakeCli();
