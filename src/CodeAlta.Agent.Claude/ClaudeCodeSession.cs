@@ -198,7 +198,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             // permission mode, which would end the turn; the next turn starts it in the mode if it must.
             if (!showsOwnTurn)
             {
-                await EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: newUserMessages.Count > 0).ConfigureAwait(false);
+                await EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: newUserMessages.Count > 0, CreateHeldAsk(onSessionUpdate)).ConfigureAwait(false);
             }
 
             if (toolsChanged)
@@ -393,10 +393,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         return newMessages;
     }
 
+    // Without a run to ask (a compaction, Remote Control), a conversation another process holds is not resumed.
     private Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken)
-        => EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: true);
+        => EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: true, HeldConversationAsk.Nobody);
 
-    private async Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken, bool mayRestartForMode)
+    private async Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken, bool mayRestartForMode, HeldConversationAsk held)
     {
         // An effort is only given to a model the CLI lists it for; a model it does not list is given what was asked.
         var effort = request.ModelInfo is { } modelInfo &&
@@ -452,37 +453,46 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             // conversation starts again in the CLI at once, with what CodeAlta recorded of it as context.
             if (LocateTranscript(key.WorkingDirectory, resumeSessionId) != ClaudeCodeTranscriptPresence.Missing)
             {
-                try
+                // Another Claude process (VS Code, a terminal) may hold the conversation: the user says what to do. A
+                // fork writes a new conversation, which no other process holds.
+                var waiting = !(_branchPending && _branchFork)
+                    && await ResolveHeldConversationAsync(resumeSessionId, held, cancellationToken).ConfigureAwait(false);
+                while (true)
                 {
-                    await StartConnectionAsync(resolution.Path, key, newSessionId: null, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
-                    return;
-                }
-                catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
-                {
-                    var failed = _connection;
-                    var detail = failed?.DescribeExit() ?? ex.Message;
-                    // Closed first: what the process wrote before it exited is read to the end.
-                    await CloseConnectionAsync().ConfigureAwait(false);
-                    if (failed is not null && IsHeldByBackground(failed))
+                    try
                     {
-                        // A background session of Claude Code runs the conversation: it is not a missing one.
-                        ForgetBinding();
-                        throw new InvalidOperationException(
-                            $"Claude Code refused to resume the conversation {resumeSessionId}: a background session of Claude Code is running it. " +
-                            $"Continue it there, or stop it, then send the message again. {detail}", ex);
+                        await StartConnectionAsync(resolution.Path, key, newSessionId: null, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+                        return;
                     }
-
-                    if (ex is TimeoutException)
+                    catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
                     {
-                        // A CLI that is slow to start has the transcript all the same: the conversation is kept for the
-                        // next try, not started again in the CLI with only its text.
-                        ForgetBinding();
-                        throw new InvalidOperationException(
-                            $"Claude Code did not start in time to resume the conversation {resumeSessionId}. The conversation is kept: send the message again to retry. {ex.Message}", ex);
-                    }
+                        var failed = _connection;
+                        var detail = failed?.DescribeExit() ?? ex.Message;
+                        // Closed first: what the process wrote before it exited is read to the end.
+                        await CloseConnectionAsync().ConfigureAwait(false);
+                        if (failed is not null && IsHeldByBackground(failed))
+                        {
+                            // A background session of Claude Code runs the conversation: it is not a missing one. The
+                            // user can wait for it to end or continue a copy; the start is then tried again. A copy that
+                            // is refused all the same is not asked about again.
+                            var ask = _branchPending && _branchFork ? HeldConversationAsk.Nobody : held;
+                            waiting = await ResolveBackgroundRefusalAsync(resumeSessionId, ask, waiting, detail, ex, cancellationToken).ConfigureAwait(false);
+                            continue;
+                        }
 
-                    // The CLI could not open the transcript that was found, or does not resume it at the entry it was
-                    // given: the conversation starts again, as for a transcript that is gone.
+                        if (ex is TimeoutException)
+                        {
+                            // A CLI that is slow to start has the transcript all the same: the conversation is kept for the
+                            // next try, not started again in the CLI with only its text.
+                            ForgetBinding();
+                            throw new InvalidOperationException(
+                                $"Claude Code did not start in time to resume the conversation {resumeSessionId}. The conversation is kept: send the message again to retry. {ex.Message}", ex);
+                        }
+
+                        // The CLI could not open the transcript that was found, or does not resume it at the entry it was
+                        // given: the conversation starts again, as for a transcript that is gone.
+                        break;
+                    }
                 }
             }
 

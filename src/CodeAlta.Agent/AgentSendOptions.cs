@@ -42,6 +42,14 @@ public sealed class AgentSendOptions
     /// Selection alone confers no authority, cancellation or recovery guarantee.</remarks>
     public AgentUserInputRequestHandler? OnUserInputRequest { get; init; }
 
+    /// <summary>
+    /// Gets the optional handler asked when the conversation this send continues is held by another process (the same
+    /// conversation open in an editor or a terminal). Null falls back to
+    /// <see cref="AgentSessionCreateOptions.OnConversationHeld"/>; without either the run fails with a message that
+    /// says how to go on. Only providers that keep a conversation outside the session ask it.
+    /// </summary>
+    public AgentConversationHeldHandler? OnConversationHeld { get; init; }
+
     /// <summary>Gets explicit activation of the user-input built-in for this send; defaults to false.</summary>
     /// <remarks>Requires a selected callback and respects provider profile opt-out. Neither callback presence
     /// nor a profile override activates the tool. Other providers must explicitly support this option.</remarks>

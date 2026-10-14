@@ -118,6 +118,45 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
         return process;
     }
 
+    /// <summary>
+    /// Gets or sets the configuration folder of Claude Code the provider reads: its registry of live sessions
+    /// (<c>sessions/&lt;pid&gt;.json</c>). By default a folder that does not exist: no other process holds anything.
+    /// </summary>
+    public string ConfigRoot { get; set; } = Path.Combine(Path.GetTempPath(), "CodeAlta-fake-claude-" + Guid.NewGuid().ToString("N"));
+
+    /// <summary>Gets the processes of the system as the registry of live sessions sees them.</summary>
+    public ClaudeCodeFakeProbe Probe { get; } = new();
+
+    /// <summary>
+    /// Writes the entry of the registry of live sessions of a process that holds a conversation, as Claude Code 2.1.296
+    /// writes it, and makes the process run.
+    /// </summary>
+    public void HoldConversation(int pid, string conversationId, string entrypoint = "claude-vscode", string kind = "interactive")
+    {
+        var folder = Path.Combine(ConfigRoot, "sessions");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, $"{pid}.json"), new JsonObject
+        {
+            ["pid"] = pid,
+            ["sessionId"] = conversationId,
+            ["cwd"] = Path.GetTempPath(),
+            ["startedAt"] = 1_791_616_422_304,
+            ["version"] = "2.1.296",
+            ["kind"] = kind,
+            ["entrypoint"] = entrypoint,
+            ["status"] = "idle",
+            ["updatedAt"] = 1_791_616_422_304,
+        }.ToJsonString());
+        Probe.Run(pid);
+    }
+
+    /// <summary>Ends a process that held a conversation, as when it exits: the CLI removes its entry.</summary>
+    public void ReleaseConversation(int pid)
+    {
+        Probe.Stop(pid);
+        File.Delete(Path.Combine(ConfigRoot, "sessions", $"{pid}.json"));
+    }
+
     /// <summary>The options of a provider that runs this CLI.</summary>
     public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", bool promptSuggestions = false, string? configDirectory = null, TimeSpan? startupTimeout = null)
         => new()
@@ -129,12 +168,33 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
             TransportFactory = this,
             LocateTranscript = LocateTranscript,
             ResolveCli = static () => new ClaudeCodeCliResolution("/fake/bin/claude", null),
-            // Not the environment of the machine that runs the tests, where an API key may wait for an answer.
-            GetEnvironmentVariable = static _ => null,
+            // Not the environment of the machine that runs the tests, where an API key may wait for an answer, nor
+            // its registry of live sessions.
+            GetEnvironmentVariable = name => name == ClaudeCodeProjectFolders.ConfigDirectoryVariable ? ConfigRoot : null,
+            ProcessProbe = Probe,
+            HeldConversationPollInterval = TimeSpan.FromMilliseconds(20),
             IdleTimeout = TimeSpan.Zero,
             StartupTimeout = startupTimeout ?? TimeSpan.FromSeconds(10),
             InterruptTimeout = TimeSpan.FromSeconds(2),
         };
+}
+
+/// <summary>A scripted view of the processes of the system, for the registry of live sessions of Claude Code.</summary>
+internal sealed class ClaudeCodeFakeProbe : IClaudeCodeProcessProbe
+{
+    private readonly ConcurrentDictionary<int, bool> _running = new();
+
+    public string? PidDomain => null;
+
+    /// <summary>Makes a process run, with no start time to compare.</summary>
+    public void Run(int pid) => _running[pid] = true;
+
+    /// <summary>Ends a process.</summary>
+    public void Stop(int pid) => _running.TryRemove(pid, out _);
+
+    public bool IsRunning(int pid) => _running.ContainsKey(pid);
+
+    public ClaudeCodeProcessStart? GetStart(int pid) => null;
 }
 
 internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport

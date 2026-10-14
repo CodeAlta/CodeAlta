@@ -447,6 +447,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog)) : SessionIdentityResolver.None,
+                AskWhenConversationHeld = options.AskWhenConversationHeld,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,

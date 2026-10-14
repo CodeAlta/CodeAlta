@@ -1856,6 +1856,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             DisabledBuiltInTools = instructions.PromptBundle?.DisabledTools,
             OnPermissionRequest = options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
+            OnConversationHeld = AskWhenConversationHeld ? ConversationHolds.Handler : null,
         };
 
         // Read before the runtime is created: a provider registered again in between is only attached again once more.
@@ -3508,7 +3509,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // The commands of the jobs are ended first: none tells its end to a session that is closing.
         var jobs = Jobs.DisposeAsync().AsTask();
         return new ValueTask(Task.WhenAll(jobs, _forwarding.CloseAsync(
-            () => Permissions.DisposeAsync().AsTask(),
+            () => Task.WhenAll(Permissions.DisposeAsync().AsTask(), ConversationHolds.DisposeAsync().AsTask()),
             async () =>
             {
                 await _sessionActors.DisposeAsync().ConfigureAwait(false);

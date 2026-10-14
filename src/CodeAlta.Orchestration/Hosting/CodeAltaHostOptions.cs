@@ -118,6 +118,14 @@ public sealed class CodeAltaHostOptions
     /// Answers may enter provider tool results and persisted history; this is not credential entry or command permission.</remarks>
     public bool EnableOwnedUserInput { get; init; }
 
+    /// <summary>
+    /// Gets whether a run whose conversation another process holds (a Claude Code conversation open in VS Code or a
+    /// terminal) asks the user what to do, through <see cref="Runtime.SessionRuntimeService.ConversationHolds"/>. Default
+    /// false, for a host that does not show these questions: such a run fails with a message that says how to go on.
+    /// </summary>
+    /// <remarks>A host that enables it must show the pending questions and resolve them; a run waits until it does or ends.</remarks>
+    public bool AskWhenConversationHeld { get; init; }
+
     /// <summary>Gets an optional environment map copied for host-created plugin adapter operation options; null preserves the original ambient snapshot.</summary>
     /// <remarks>This does not isolate the process or provider environment.</remarks>
     public IReadOnlyDictionary<string, string?>? PluginEnvironment { get; init; }
