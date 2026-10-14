@@ -213,7 +213,7 @@ import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove"
 import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, type Space, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
-import { composerTierEntries } from "./modelTiers";
+import { composerTierEntries, tierStore } from "./modelTiers";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -928,6 +928,8 @@ function App() {
   }, [hostAnswered, hostLiveness]);
   // After a configuration save re-registered providers, re-read the inventory that pickers and settings show.
   function refreshConfiguration() {
+    // A provider enabled, disabled or given to other spaces changes what the tiers give.
+    if (spacesEpoch) void tierStore.refreshAll(spacesEpoch);
     return configuration.snapshot({}, { timeoutMilliseconds: 8_000 })
       .then(value => { if (creationAlive.current) setConfigurationState({ snapshot: value }); })
       .catch(() => { /* The previous inventory stays visible. */ });

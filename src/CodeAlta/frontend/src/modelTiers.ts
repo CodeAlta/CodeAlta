@@ -179,6 +179,10 @@ export function createTierStore(read: Read) {
     of: (epoch: string, scope?: TierScope | null) => readings.get(scopeKey(epoch, scope)),
     /** Reads the tiers of a scope again from the host. */
     refresh,
+    /** Reads again every scope of a host the window read, once its providers changed what the tiers give. */
+    async refreshAll(epoch: string) {
+      await Promise.all([...scopes.values()].filter(known => known.epoch === epoch).map(known => refresh(known.epoch, known.scope)));
+    },
     /** What a save answered, for its scope; the other scopes of the host are read again, as the save may change them. */
     set(epoch: string, state: TierState, scope: TierScope | null = null) {
       const key = scopeKey(epoch, scope);

@@ -91,3 +91,14 @@ test("the store reads the tiers of a host once at a time and tells its listeners
   store.set("e1", state());
   assert.equal(told, 2);
 });
+
+test("a change of the providers reads again every scope of the host the window knows", async () => {
+  const asked: string[] = [];
+  const store = createTierStore(async request => { asked.push(`${request.expectedEpoch}|${request.spaceId ?? ""}`); return reply(); });
+  await store.refresh("e1");
+  await store.refresh("e1", { spaceId: "work" });
+  await store.refresh("e0", { spaceId: "work" });
+  asked.length = 0;
+  await store.refreshAll("e1");
+  assert.deepEqual(asked.sort(), ["e1|", "e1|work"], "Only the scopes of that host are read again.");
+});
