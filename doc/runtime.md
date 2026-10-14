@@ -1350,8 +1350,9 @@ instead of the effects of the event. The fallback then runs detached (`Task.Run`
 4. It sends a continuation prompt through `AdmitSend` with the new selection. The prompt says it comes from
    CodeAlta, names the failure and the new model, and asks the agent to continue from where the run stopped and to
    check the state (files, git status, the output of a command) before running again a tool call that was running.
-5. Once the continuation has started, `HeldRunFailure.Replace` drops the held notification: the parent is not told
-   of the failure that was replaced, and the run that continues tells its own end. The queue drains after that run.
+5. Once the send of the continuation settles with a run (its answer, or a failure of its own),
+   `HeldRunFailure.Replace` drops the held notification: the parent is not told of the failure that was replaced,
+   and the run that continues tells its own end. The queue drains after that run.
 
 When no step can take over, a `Warning` card says so ("no other model of the … tier can take over", with what to
 do), and `HeldRunFailure.ReleaseAsync` lets the failure through: the parent is told and the queue drains. The same
