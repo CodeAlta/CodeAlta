@@ -3,7 +3,8 @@ import { defaultModelId, defaultReasoningEffort } from "./newSessionDefaults";
 
 export const newSessionPreferencesKey = "codealta.desktop.newSessionPreferences.v1";
 const limit = 256;
-const fields = ["providerKey", "agentPromptId", "modelId", "reasoningEffort"] as const;
+// The tier is the tier of models whose model was chosen: it stays with that model, and goes with another one.
+const fields = ["providerKey", "agentPromptId", "modelId", "reasoningEffort", "tier"] as const;
 const identifier = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 256
   && value === value.trim() && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
 
@@ -55,6 +56,13 @@ export function chosenNewSessionPreference(saved: NewSessionPreference | undefin
   if (field === "modelId") return next && provider ? { ...kept("agentPromptId"), providerKey: provider, modelId: next } : kept("agentPromptId", "providerKey");
   const others = kept(...fields.filter(name => name !== field));
   return next ? { ...others, [field]: next } : others;
+}
+
+/** What is remembered once the user chooses a tier: the model it gives, with its provider and effort, and the tier. */
+export function tierNewSessionPreference(saved: NewSessionPreference | undefined, tier: string,
+  choice: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }>): NewSessionPreference {
+  return { ...(saved?.agentPromptId ? { agentPromptId: saved.agentPromptId } : {}), providerKey: choice.providerKey, modelId: choice.modelId,
+    ...(choice.reasoning ? { reasoningEffort: choice.reasoning } : {}), tier };
 }
 
 type Model = Readonly<{ id: string; efforts: readonly string[]; defaultEffort: string | null }>;

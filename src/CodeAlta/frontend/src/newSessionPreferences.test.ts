@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTierProvider, rememberNewSessionPreference, restoreNewSessionPreferences,
+import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTierProvider, rememberNewSessionPreference, restoreNewSessionPreferences, tierNewSessionPreference,
   type NewSessionPreference } from "./newSessionPreferences";
 
 const chosen: NewSessionPreference = { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" };
@@ -99,4 +99,16 @@ test("with tiers, a new session the user chose nothing for starts on the model o
   // A model the user chose for the provider stays; a tier model the provider does not list gives the default.
   assert.equal(newSessionSelection({ providerKey: "codex", modelId: "small" }, "codex", prompts, models, providers[0], standard).modelId, "small");
   assert.equal(newSessionSelection(undefined, "codex", prompts, models, providers[0], { ...standard, modelId: "gone" }).modelId, "small");
+});
+
+test("a tier chosen for new sessions is remembered with its model, kept with a new effort and dropped with another model", () => {
+  const chosenTier = tierNewSessionPreference({ agentPromptId: "plan", providerKey: "claude" }, "quick", { providerKey: "codex", modelId: "small", reasoning: "low" });
+  assert.deepEqual(chosenTier, { agentPromptId: "plan", providerKey: "codex", modelId: "small", reasoningEffort: "low", tier: "quick" });
+  let stored = "";
+  const remembered = rememberNewSessionPreference(new Map(), "scope", chosenTier, value => { stored = value; });
+  assert.deepEqual(restoreNewSessionPreferences(() => stored).get("scope"), chosenTier);
+  assert.equal(chosenNewSessionPreference(remembered.get("scope"), "codex", "reasoningEffort", "high").tier, "quick");
+  assert.equal(chosenNewSessionPreference(remembered.get("scope"), "codex", "modelId", "model").tier, undefined);
+  assert.equal(chosenNewSessionPreference(remembered.get("scope"), "codex", "providerKey", "claude").tier, undefined);
+  assert.deepEqual(tierNewSessionPreference(undefined, "complex", { providerKey: "claude", modelId: "opus", reasoning: null }), { providerKey: "claude", modelId: "opus", tier: "complex" });
 });

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogModel, type SessionPromptChoice } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
 import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTierProvider, rememberNewSessionPreference,
-  restoreNewSessionPreferences, type NewSessionChoiceField } from "./newSessionPreferences";
+  restoreNewSessionPreferences, tierNewSessionPreference, type NewSessionChoiceField } from "./newSessionPreferences";
 import { useTiers } from "./modelTiers";
 
 // Catalogs only. Draft choices are preferences, never send or provider-switch authority.
@@ -15,7 +15,8 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   const [remembered, setRemembered] = useState(() => restoreNewSessionPreferences(() => localStorage.getItem(newSessionPreferencesKey)));
   const saved = remembered.get(scope);
   // With tiers in the settings, a new session the user chose nothing for starts on the standard tier.
-  const standard = useTiers(epoch)?.choices.standard ?? null;
+  const tiers = useTiers(epoch);
+  const standard = tiers?.choices.standard ?? null;
   const provider = newSessionTierProvider(saved, providers, standard) ?? newSessionProvider(saved, providers);
   const key = JSON.stringify([epoch, projectId, projectPath, provider]);
   const [revision, setRevision] = useState(0);
@@ -51,8 +52,9 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   // What was chosen is used while the catalogs still offer it.
   const configured = providers.find(candidate => candidate.id === provider);
   const value = newSessionSelection(saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard);
-  // The session runs on the standard tier when it starts with the model that tier gives.
-  const tier = standard && value.providerKey === standard.providerKey && value.modelId === standard.modelId ? "standard" : null;
+  // The session runs on the tier chosen with its model, else on the standard tier when it starts with the model that tier gives.
+  const tier = saved?.tier && saved.providerKey === value.providerKey && saved.modelId === value.modelId ? saved.tier
+    : !saved?.providerKey && standard && value.providerKey === standard.providerKey && value.modelId === standard.modelId ? "standard" : null;
   const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId)
     && models?.key === key && !models.loading && !models.failed
     && (value.modelId === null ? models.rows.length === 0 && value.reasoningEffort === null : models.rows.some(model => model.id === value.modelId
@@ -67,6 +69,16 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     change(field: NewSessionChoiceField, next: string) {
       setRemembered(rememberNewSessionPreference(remembered, scope, chosenNewSessionPreference(saved, provider, field, next),
         stored => localStorage.setItem(newSessionPreferencesKey, stored)));
+    },
+    /** The tiers of the settings, with the model each gives now; null until they are read. */
+    tiers,
+    /** Takes the model a tier gives now, and the tier with it; false when the tier gives none. */
+    chooseTier(name: string) {
+      const choice = tiers?.choices[name as keyof typeof tiers.choices];
+      if (!choice) return false;
+      setRemembered(rememberNewSessionPreference(remembered, scope, tierNewSessionPreference(saved, name, choice),
+        stored => localStorage.setItem(newSessionPreferencesKey, stored)));
+      return true;
     },
     refresh: () => setRevision(previous => previous + 1),
   };

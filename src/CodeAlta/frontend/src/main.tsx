@@ -202,6 +202,7 @@ import { SpaceSettings } from "./spaces/SpaceSettings";
 import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers, spaceShows,
   spaceStorageKey, waitingSubSessions, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
+import { composerTierEntries } from "./modelTiers";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -3056,7 +3057,9 @@ function App() {
         {draftChoices.prompts.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name}</option>)}
       </HTMLSelect>} provider={select}
       model={<ComposerModelPicker id={`composer-model-${choiceId}`} value={value.modelId || null} models={draftChoices.models} providerKey={usedProvider || null}
-        disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)} />}
+        disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)}
+        tiers={composerTierEntries(draftChoices.tiers, t)} currentTier={draftChoices.tier}
+        onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }} />}
       reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} disabled={locked}
         onChange={next => change("reasoningEffort", next)} />} />;
   }
