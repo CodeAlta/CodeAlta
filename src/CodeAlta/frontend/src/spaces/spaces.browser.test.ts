@@ -247,8 +247,11 @@ test("the window shows one space at a time: its projects, its sessions and its o
 
       await evaluate("document.querySelector('.space-card .space-open').click()");
       assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work'"), true);
-      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects"],
-        "The sections with nothing to show yet are left out.");
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects", "Available here", "New sessions"],
+        "Identity, with nothing to show yet, is left out.");
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-available-tabs .bp6-tab')].map(tab=>tab.firstChild.textContent)"),
+        ["MCP Servers", "Skills", "Agent prompts", "Plugins"]);
+      assert.equal(await evaluate("!!document.querySelector('.space-page .space-agent-prompt select')"), true);
       assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
       await evaluate("document.querySelector('.space-page-back').click()");
       assert.equal(await wait("!document.querySelector('.space-page') && !!document.querySelector('.space-card')"), true);

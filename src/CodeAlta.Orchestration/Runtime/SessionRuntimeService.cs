@@ -3106,6 +3106,17 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="InvalidDataException">The global configuration cannot be parsed.</exception>
     /// <exception cref="IOException">The global configuration cannot be read.</exception>
     public async Task<SpaceFilter> GetSessionSpaceFilterAsync(string sessionId, CancellationToken cancellationToken = default)
+        => SpaceFilter.Load(_configStore, await GetSessionSpaceIdAsync(sessionId, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// Gets the space a session is in: the space it records, else the only space of its project, else the default
+    /// space. A session that is not known is read as in the default space. Reads no configuration.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identifier of an existing space, or <see cref="SpaceDescriptor.DefaultId"/>.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    public async Task<string> GetSessionSpaceIdAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         var record = await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false);
         ProjectDescriptor? project = null;
@@ -3115,7 +3126,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 .FirstOrDefault(candidate => string.Equals(candidate.Id, record.ProjectId, StringComparison.OrdinalIgnoreCase));
         }
 
-        return await GetSpaceFilterAsync(record?.SpaceId, project, cancellationToken).ConfigureAwait(false);
+        return SpaceCatalog.ResolveSessionSpace(record?.SpaceId, project, await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>

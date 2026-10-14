@@ -4603,7 +4603,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     // The space of a session, as the host resolves it for its own sends; null where the host keeps no runtime.
     private static async Task<string?> SessionSpaceIdAsync(AltaCommandContext context, string sessionId)
         => context.Services.Get<SessionRuntimeService>() is { } runtime
-            ? (await runtime.GetSessionSpaceFilterAsync(sessionId, context.CancellationToken).ConfigureAwait(false)).SpaceId
+            ? await runtime.GetSessionSpaceIdAsync(sessionId, context.CancellationToken).ConfigureAwait(false)
             : null;
 
     private static IReadOnlyList<AgentToolDefinition>? CreateAltaSessionTools(

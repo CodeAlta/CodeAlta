@@ -775,12 +775,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch) { Jobs = host.RuntimeService.Jobs });
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime)
                     {
-                        SessionSpace = async (sessionId, token) => (await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false)).SpaceId,
+                        SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
                     });
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch, canvases)
                     {
                         ShownSpace = () => spaceView.ShownSpaceId,
-                        SessionSpace = async (sessionId, token) => (await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false)).SpaceId,
+                        SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
                     };
                     builder.AddPluginUiService(pluginCommands);
                     builder.AddCanvasesService(canvases is null ? new CanvasesService() : new CanvasesService(canvases, epoch));
