@@ -220,17 +220,63 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
     private sealed partial class McpOAuthJsonContext : JsonSerializerContext;
 }
 
+/// <summary>
+/// The browser authorization an MCP OAuth login waits for: the address to open and when CodeAlta stops waiting
+/// for the browser to come back to its loopback callback.
+/// </summary>
+/// <param name="AuthorizationUri">The authorization address to open in a browser.</param>
+/// <param name="ExpiresAt">When CodeAlta stops listening for the browser's answer.</param>
+/// <param name="Timeout">How long CodeAlta waits for the browser's answer from the moment the address is reported.</param>
+public sealed record McpOAuthBrowserPrompt(Uri AuthorizationUri, DateTimeOffset ExpiresAt, TimeSpan Timeout);
+
+/// <summary>The browser did not come back to the loopback callback before the authorization's time ran out.</summary>
+internal sealed class McpOAuthBrowserTimeoutException(string message) : TimeoutException(message);
+
 internal sealed class McpOAuthBrowserAuthorization
 {
+    /// <summary>How long a login waits for the browser by default: long enough to sign in, with a code sent by email for example.</summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
+
     private const string SuccessHtml = "<html><body><h1>CodeAlta MCP authorization complete</h1><p>You may close this browser tab and return to CodeAlta.</p></body></html>";
     private const string FailureHtml = "<html><body><h1>CodeAlta MCP authorization failed</h1><p>Return to CodeAlta for details.</p></body></html>";
     private readonly Action<string>? _reportStatus;
+    private readonly Action<McpOAuthBrowserPrompt>? _reportPrompt;
     private readonly bool _openBrowser;
+    private readonly TimeSpan _timeout;
 
     public McpOAuthBrowserAuthorization(Action<string>? reportStatus = null, bool openBrowser = true)
+        : this(reportStatus, reportPrompt: null, openBrowser, DefaultTimeout)
     {
+    }
+
+    public McpOAuthBrowserAuthorization(Action<string>? reportStatus, Action<McpOAuthBrowserPrompt>? reportPrompt, bool openBrowser, TimeSpan timeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
         _reportStatus = reportStatus;
+        _reportPrompt = reportPrompt;
         _openBrowser = openBrowser;
+        _timeout = timeout;
+    }
+
+    /// <summary>The status text that asks to open the authorization address, with the time left to do it.</summary>
+    public static string FormatPrompt(McpOAuthBrowserPrompt prompt)
+    {
+        ArgumentNullException.ThrowIfNull(prompt);
+        // The address stays last: readers of the status text take it from the end.
+        return $"Open MCP authorization in your browser within {FormatDuration(prompt.Timeout)}: {prompt.AuthorizationUri}";
+    }
+
+    /// <summary>A duration in words, such as <c>5 minutes</c> or <c>90 seconds</c>.</summary>
+    public static string FormatDuration(TimeSpan duration)
+    {
+        if (duration.TotalSeconds >= 60 && duration.Ticks % TimeSpan.TicksPerMinute == 0)
+        {
+            var minutes = (long)duration.TotalMinutes;
+            return minutes == 1 ? "1 minute" : $"{minutes} minutes";
+        }
+
+        var seconds = Math.Max(1, (long)Math.Ceiling(duration.TotalSeconds));
+        return seconds == 1 ? "1 second" : $"{seconds} seconds";
     }
 
     public async Task<AuthorizationResult?> AuthorizeAsync(AuthorizationCallbackContext authorization, CancellationToken cancellationToken)
@@ -251,10 +297,22 @@ internal sealed class McpOAuthBrowserAuthorization
         var prefix = $"http://{redirectUri.Authority}/";
         listener.Prefixes.Add(prefix);
         listener.Start();
-        using var registration = cancellationToken.Register(static state => ((HttpListener)state!).Stop(), listener);
+        // The browser has its own time limit, reported with the address, and the caller's cancellation still applies.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_timeout);
+        var prompt = new McpOAuthBrowserPrompt(authorizationUri, DateTimeOffset.UtcNow + _timeout, _timeout);
+        Task<HttpListenerContext>? pending = null;
         try
         {
-            _reportStatus?.Invoke("Open MCP authorization in your browser: " + authorizationUri);
+            // A caller that takes the prompt itself gets it once, not also as status text.
+            if (_reportPrompt is not null)
+            {
+                _reportPrompt(prompt);
+            }
+            else
+            {
+                _reportStatus?.Invoke(FormatPrompt(prompt));
+            }
             if (_openBrowser)
             {
                 TryOpenBrowser(authorizationUri);
@@ -262,7 +320,9 @@ internal sealed class McpOAuthBrowserAuthorization
 
             while (true)
             {
-                var context = await listener.GetContextAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+                pending = listener.GetContextAsync();
+                var context = await pending.WaitAsync(timeout.Token).ConfigureAwait(false);
+                pending = null;
                 if (string.Equals(context.Request.HttpMethod, "OPTIONS", StringComparison.OrdinalIgnoreCase))
                 {
                     WritePreflightResponse(context);
@@ -303,12 +363,16 @@ internal sealed class McpOAuthBrowserAuthorization
                 };
             }
         }
-        catch (HttpListenerException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            throw new OperationCanceledException(cancellationToken);
+            var message = $"MCP authorization timed out: the browser did not return to CodeAlta within {FormatDuration(_timeout)}.";
+            _reportStatus?.Invoke(message);
+            throw new McpOAuthBrowserTimeoutException(message);
         }
         finally
         {
+            // Stopping the listener faults the wait still pending on it, which nobody awaits any more.
+            pending?.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             listener.Stop();
         }
     }

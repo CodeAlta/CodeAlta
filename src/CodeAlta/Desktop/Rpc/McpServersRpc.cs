@@ -45,9 +45,9 @@ internal sealed class McpServersService
     private readonly string? _home;
     private readonly McpManagementService _management = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly McpServerLogin _login = static (key, paths, report, cancellationToken)
+    private readonly McpServerLogin _login = static (key, paths, report, prompt, cancellationToken)
         // Its own service: an authorization runs for minutes, beside the listing and the edits of the other one.
-        => new McpManagementService().LoginOAuthAsync(key, report, paths, cancellationToken);
+        => new McpManagementService().LoginOAuthAsync(key, report, prompt, paths, cancellationToken);
     private readonly Lock _loginGate = new();
     private readonly CancellationTokenSource _closing = new();
     private Task? _activeLogin; // The running authorization, if any; guarded by the login gate.
@@ -347,13 +347,15 @@ internal sealed class McpServersService
         {
             var count = 0;
             string? refused = null;
-            var result = await Task.Run(() => login(key, paths, message =>
-            {
-                // The plugin reports the address to open, and afterwards why the browser's answer was refused.
-                if (AuthorizationAddress(message) is not { } address) Volatile.Write(ref refused, message);
-                else if (Interlocked.Increment(ref count) <= MaximumPrompts)
-                    prompts.TryWrite(new("prompt", address.Length <= MaximumUrlLength ? address : null, 0, null, null));
-            }, cancellationToken), cancellationToken).ConfigureAwait(false);
+            var result = await Task.Run(() => login(key, paths,
+                // The plugin's texts say why the browser's answer was refused or why the browser did not come back.
+                message => { if (AuthorizationAddress(message) is null) Volatile.Write(ref refused, message); },
+                // The address to open, with when the host stops waiting for the browser.
+                prompt =>
+                {
+                    if (AuthorizationAddress(prompt.AuthorizationUri.AbsoluteUri) is { } address && Interlocked.Increment(ref count) <= MaximumPrompts)
+                        prompts.TryWrite(new("prompt", address.Length <= MaximumUrlLength ? address : null, 0, null, null, prompt.ExpiresAt));
+                }, cancellationToken), cancellationToken).ConfigureAwait(false);
             // The plugin's texts are written for display and redacted by it.
             var detail = Detail(Volatile.Read(ref refused) ?? result.Diagnostics.FirstOrDefault());
             return result.Status switch
@@ -741,17 +743,18 @@ internal sealed record McpServersMutationResponse(string Status, string? Message
 internal sealed record McpServerLoginRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Key, string? Origin = null);
 
 /// <summary>
-/// One authorization event. <c>prompt</c> carries the address to open in a browser; <c>completed</c> the number
-/// of tools the server listed; <c>failed</c> a code and, as detail, the MCP plugin's redacted explanation or an
-/// exception type name.
+/// One authorization event. <c>prompt</c> carries the address to open in a browser and when the host stops
+/// waiting for the browser (<c>ExpiresAt</c>); <c>completed</c> the number of tools the server listed; <c>failed</c>
+/// a code and, as detail, the MCP plugin's redacted explanation or an exception type name.
 /// </summary>
-internal sealed record McpServerLoginEvent(string Kind, string? Url, int Tools, string? Detail, string? Code);
+internal sealed record McpServerLoginEvent(string Kind, string? Url, int Tools, string? Detail, string? Code, DateTimeOffset? ExpiresAt = null);
 internal sealed record McpServerLogoutResponse(string Status, bool Removed);
 
 /// <summary>The browser authorization of one server: tests supply a literal one.</summary>
 /// <param name="key">The server key.</param>
 /// <param name="paths">The configuration and token paths.</param>
-/// <param name="report">Receives the plugin's redacted progress messages, among them the address to open.</param>
+/// <param name="report">Receives the plugin's redacted progress messages.</param>
+/// <param name="prompt">Receives the address to open and when the authorization stops waiting for the browser.</param>
 /// <param name="cancellationToken">Cancels the authorization.</param>
 internal delegate Task<McpManagementServerTestResult> McpServerLogin(string key, McpManagementRequest paths, Action<string> report,
-    CancellationToken cancellationToken);
+    Action<McpOAuthBrowserPrompt> prompt, CancellationToken cancellationToken);

@@ -262,7 +262,7 @@ public sealed class McpServersRpcTests
 
         // An authorization is for the definition in effect, whose file it is.
         var requests = new List<string>();
-        var service = fixture.WithLogin((key, _, _, _) =>
+        var service = fixture.WithLogin((key, _, _, _, _) =>
         {
             requests.Add(key);
             return Task.FromResult(new McpManagementServerTestResult { Server = key, Status = McpManagementTestStatus.Succeeded });
@@ -356,7 +356,7 @@ public sealed class McpServersRpcTests
 
         using var fixture = await Fixture.CreateAsync();
         File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
-        var service = fixture.WithLogin(static (_, _, _, _) => throw new AssertFailedException("No authorization is expected."));
+        var service = fixture.WithLogin(static (_, _, _, _, _) => throw new AssertFailedException("No authorization is expected."));
         AssertFailed("stale_epoch", (await Events(service, new("another", null, "Global", "remote"))).Single());
         AssertFailed("invalid", (await Events(service, null)).Single());
         AssertFailed("invalid", (await Events(service, new(Epoch, null, "Elsewhere", "remote"))).Single());
@@ -408,10 +408,10 @@ public sealed class McpServersRpcTests
         File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
         File.WriteAllText(fixture.ProjectJson, """{"mcpServers":{"remote":{"type":"http","url":"https://project.example.invalid/mcp"}}}""");
         var requests = new List<(string Key, string? Project, string? Home)>();
-        var service = fixture.WithLogin((key, paths, report, _) =>
+        var service = fixture.WithLogin((key, paths, _, prompt, _) =>
         {
             requests.Add((key, paths.ProjectDirectory, paths.UserHomeDirectory));
-            report("Open MCP authorization in your browser: " + Authorize);
+            prompt(Prompt(Authorize));
             return Task.FromResult(new McpManagementServerTestResult
             {
                 Server = key, Status = McpManagementTestStatus.Succeeded,
@@ -422,7 +422,7 @@ public sealed class McpServersRpcTests
         var events = await Events(service, new(Epoch, fixture.Project.Id, "Project", "remote"));
 
         Assert.AreEqual(2, events.Count);
-        Assert.AreEqual(new McpServerLoginEvent("prompt", Authorize, 0, null, null), events[0]);
+        Assert.AreEqual(new McpServerLoginEvent("prompt", Authorize, 0, null, null, Expires), events[0], "The page learns when the host stops waiting.");
         Assert.AreEqual(new McpServerLoginEvent("completed", null, 2, null, null), events[1]);
         Assert.AreEqual(("remote", fixture.ProjectPath, fixture.Home), requests.Single());
 
@@ -444,24 +444,24 @@ public sealed class McpServersRpcTests
         async Task<McpServerLoginEvent> Outcome(McpServerLogin login)
             => (await Events(fixture.WithLogin(login), new(Epoch, null, "Global", "remote")))[^1];
 
-        AssertFailed("login_failed", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Failed, "rejected with HTTP 401", "second"))), "rejected with HTTP 401");
-        AssertFailed("timeout", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.TimedOut, "did not finish within 30000 ms"))), "did not finish within 30000 ms");
-        AssertFailed("unsupported", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Unsupported))));
-        AssertFailed("canceled", await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Canceled, "was canceled"))));
-        AssertFailed("canceled", await Outcome(static (_, _, _, _) => throw new OperationCanceledException()));
+        AssertFailed("login_failed", await Outcome((_, _, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Failed, "rejected with HTTP 401", "second"))), "rejected with HTTP 401");
+        AssertFailed("timeout", await Outcome((_, _, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.TimedOut, "did not finish within 30000 ms"))), "did not finish within 30000 ms");
+        AssertFailed("unsupported", await Outcome((_, _, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Unsupported))));
+        AssertFailed("canceled", await Outcome((_, _, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Canceled, "was canceled"))));
+        AssertFailed("canceled", await Outcome(static (_, _, _, _, _) => throw new OperationCanceledException()));
 
         // What the browser answered is more precise than the connection's diagnostic.
-        AssertFailed("login_failed", await Outcome((_, _, report, _) =>
+        AssertFailed("login_failed", await Outcome((_, _, report, _, _) =>
         {
             report("MCP authorization failed: access_denied");
             return Task.FromResult(Result(McpManagementTestStatus.Failed, "unavailable"));
         }), "MCP authorization failed: access_denied");
 
-        var thrown = await Outcome(static (_, _, _, _) => throw new InvalidOperationException("token=secret-value"));
+        var thrown = await Outcome(static (_, _, _, _, _) => throw new InvalidOperationException("token=secret-value"));
         AssertFailed("login_failed", thrown, nameof(InvalidOperationException));
         Assert.IsFalse(thrown.ToString().Contains("secret-value", StringComparison.Ordinal));
 
-        var bounded = await Outcome((_, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Failed, "line one\r\n" + new string('x', 2000))));
+        var bounded = await Outcome((_, _, _, _, _) => Task.FromResult(Result(McpManagementTestStatus.Failed, "line one\r\n" + new string('x', 2000))));
         Assert.AreEqual(512, bounded.Detail!.Length);
         Assert.IsFalse(bounded.Detail.Any(char.IsControl));
     }
@@ -471,19 +471,20 @@ public sealed class McpServersRpcTests
     {
         using var fixture = await Fixture.CreateAsync();
         File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
-        var service = fixture.WithLogin(static (key, _, report, _) =>
+        var service = fixture.WithLogin(static (key, _, report, prompt, _) =>
         {
-            report("Open MCP authorization in your browser: http://127.0.0.1:8123/authorize");
-            report("Open MCP authorization in your browser: https://auth.example.test/" + new string('a', McpServersService.MaximumUrlLength));
-            report("Open MCP authorization in your browser: file:///etc/passwd");
+            prompt(Prompt("http://127.0.0.1:8123/authorize"));
+            prompt(Prompt("https://auth.example.test/" + new string('a', McpServersService.MaximumUrlLength)));
+            prompt(Prompt("file:///etc/passwd"));
             report("  ");
-            for (var index = 0; index < McpServersService.MaximumPrompts; index++) report("Open MCP authorization in your browser: " + Authorize);
+            report("Open MCP authorization in your browser within 5 minutes: " + Authorize);
+            for (var index = 0; index < McpServersService.MaximumPrompts; index++) prompt(Prompt(Authorize));
             return Task.FromResult(new McpManagementServerTestResult { Server = key, Status = McpManagementTestStatus.Succeeded });
         });
 
         var events = await Events(service, new(Epoch, null, "Global", "remote"));
 
-        Assert.AreEqual(McpServersService.MaximumPrompts + 1, events.Count, "Addresses beyond the limit are dropped; other messages are not prompts.");
+        Assert.AreEqual(McpServersService.MaximumPrompts + 1, events.Count, "Addresses beyond the limit are dropped; status texts are not prompts.");
         Assert.AreEqual("http://127.0.0.1:8123/authorize", events[0].Url, "A local authorization server may use http.");
         Assert.IsNull(events[1].Url, "An address beyond the limit is not sent.");
         Assert.IsTrue(events.Skip(2).Take(McpServersService.MaximumPrompts - 2).All(static item => item.Url == Authorize));
@@ -497,9 +498,9 @@ public sealed class McpServersRpcTests
         File.WriteAllText(fixture.GlobalJson, RemoteAndLocal);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var canceled = 0;
-        var service = fixture.WithLogin(async (key, _, report, token) =>
+        var service = fixture.WithLogin(async (key, _, _, prompt, token) =>
         {
-            report("Open MCP authorization in your browser: " + Authorize);
+            prompt(Prompt(Authorize));
             started.TrySetResult();
             try { await Task.Delay(Timeout.Infinite, token); }
             catch (OperationCanceledException) { Interlocked.Increment(ref canceled); throw; }
@@ -534,6 +535,10 @@ public sealed class McpServersRpcTests
     private const string RemoteUrl = "https://example.invalid/mcp";
     private const string Authorize = "https://auth.example.test/authorize?state=1";
     private const string RemoteAndLocal = """{"mcpServers":{"remote":{"type":"http","url":"https://example.invalid/mcp"},"local":{"command":"npx"}}}""";
+
+    private static readonly DateTimeOffset Expires = new(2026, 1, 2, 3, 9, 5, TimeSpan.Zero);
+
+    private static McpOAuthBrowserPrompt Prompt(string address) => new(new Uri(address, UriKind.Absolute), Expires, TimeSpan.FromMinutes(5));
 
     private static McpManagementToolSnapshot Tool(string name) => new() { Name = name, Alias = "remote_" + name, Availability = "available" };
 

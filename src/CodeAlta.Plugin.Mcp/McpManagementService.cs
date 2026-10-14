@@ -955,11 +955,30 @@ public sealed class McpManagementService
     /// <param name="cancellationToken">A token that cancels the browser login.</param>
     /// <returns>The server test result produced after login/list-tools completes or fails.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="serverKey" /> is empty.</exception>
-    public async Task<McpManagementServerTestResult> LoginOAuthAsync(
+    public Task<McpManagementServerTestResult> LoginOAuthAsync(
         string serverKey,
         Action<string>? reportStatus,
         McpManagementRequest? request = null,
         CancellationToken cancellationToken = default)
+        => LoginOAuthAsync(serverKey, reportStatus, reportPrompt: null, request, cancellationToken);
+
+    /// <summary>
+    /// Runs an explicit browser OAuth login for one MCP HTTP server and updates cached status, reporting the
+    /// authorization address with the time the browser has to come back.
+    /// </summary>
+    /// <param name="serverKey">The MCP server key.</param>
+    /// <param name="reportStatus">An optional callback that receives redacted progress messages and the login URL when available.</param>
+    /// <param name="reportPrompt">An optional callback that receives the authorization address and when the login stops waiting for the browser.</param>
+    /// <param name="request">Optional path request used to resolve config and token-cache paths.</param>
+    /// <param name="cancellationToken">A token that cancels the browser login.</param>
+    /// <returns>The server test result produced after login/list-tools completes or fails.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="serverKey" /> is empty.</exception>
+    public async Task<McpManagementServerTestResult> LoginOAuthAsync(
+        string serverKey,
+        Action<string>? reportStatus,
+        Action<McpOAuthBrowserPrompt>? reportPrompt,
+        McpManagementRequest? request,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
         request ??= _lastRequest;
@@ -996,6 +1015,7 @@ public sealed class McpManagementService
                 AllowOAuthBrowserLogin = true,
                 OpenOAuthBrowser = true,
                 OAuthStatus = reportStatus,
+                OAuthPrompt = reportPrompt,
             },
             serverKey.Trim(),
             cancellationToken).ConfigureAwait(false);
@@ -1188,7 +1208,7 @@ public sealed class McpManagementService
             return McpManagementTestStatus.Unsupported;
         }
 
-        if (diagnostics.Any(static diagnostic => string.Equals(diagnostic.Code, "server_startup_timeout", StringComparison.Ordinal)))
+        if (diagnostics.Any(static diagnostic => diagnostic.Code is "server_startup_timeout" or "oauth_login_timeout"))
         {
             return McpManagementTestStatus.TimedOut;
         }
