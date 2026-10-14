@@ -23,6 +23,7 @@ import { useRowBookmark } from "./bookmarks/timelineBookmarks";
 import { SystemPromptReaderContext } from "./SystemPromptDialog";
 import { promptProblem, promptTokens } from "./systemPrompt";
 import { usePromptChange } from "./systemPromptReader";
+import { TimelineClaudeCli } from "./claudeCli/ClaudeCliFirstUse";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -281,6 +282,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
+      {item.missingCliProvider && <TimelineClaudeCli providerKey={item.missingCliProvider} />}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}
       {branch && branchMenu && article.current && <SessionTabMenu anchor={article.current} at={branchMenu} container={document.body}

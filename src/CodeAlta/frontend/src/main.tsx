@@ -114,6 +114,7 @@ import { AppIcon, type IconName } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
 import { ConfigEditorPanel } from "./ConfigEditorPanel";
 import { ProviderSettings } from "./ProviderSettings";
+import { ClaudeCliEpochContext } from "./claudeCli/ClaudeCliFirstUse";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
 import { OpenProjectDialog } from "./OpenProjectDialog";
@@ -4458,7 +4459,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo} />;
   // A relative link of a message, of the notes or of a tool window of this session starts from the folder it works in.
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  // The error of a Claude Code provider without its CLI proposes the download in an owned host only.
+  const cliEpoch = ownedSession && !demoMode ? status?.hostEpoch ?? null : null;
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><ClaudeCliEpochContext.Provider value={cliEpoch}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
@@ -4536,7 +4539,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></BackgroundCallsContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

@@ -154,6 +154,7 @@ export const speech = Object.freeze({
 // A browser preview downloads nothing: the Claude Code CLI is not known there.
 export const claudeCli = Object.freeze({
   read: async () => ({ status: "unavailable", supported: false, version: "", size: "0", pinnedPath: null, installedPath: null, installedVersion: null, windows: false, home: null }),
+  check: async () => ({ status: "unavailable", providerKey: null, claude: false, executable: null, configDir: null, supported: false, version: "", size: "0", windows: false, home: null }),
   install: async () => ({ status: "unavailable" }), cancelInstall: async () => ({ status: "unavailable" }),
   watch: async () => (async function* (): AsyncGenerator<{ state: string; receivedBytes: string; totalBytes: string; error: string | null }> { })(),
 });

@@ -47,6 +47,40 @@ internal sealed class ClaudeCliService
     internal ConfiguredClaudeCodeCli? Installer => _installer;
 
     /// <summary>
+    /// Gets or initializes what reads a provider of the configuration by its key: null when there is none. Without it,
+    /// <c>check</c> knows no provider.
+    /// </summary>
+    internal Func<string, ClaudeCliProvider?>? FindProvider { get; init; }
+
+    /// <summary>
+    /// Says whether a provider runs Claude Code and, for one, which executable it would run, without starting it: the
+    /// composer and the timeline propose the download where a provider has none.
+    /// </summary>
+    [NeoRpcMethod("check")]
+    public async Task<ClaudeCliCheckResponse> CheckAsync(ClaudeCliCheckRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } status) return ClaudeCliCheckResponse.Refused(status, request.ProviderKey);
+        if (string.IsNullOrWhiteSpace(request.ProviderKey) || request.ProviderKey.Length > 64) return ClaudeCliCheckResponse.Refused("invalid_request", null);
+        var installer = _installer!;
+        return await Task.Run(() =>
+        {
+            ClaudeCliProvider? provider;
+            try { provider = FindProvider?.Invoke(request.ProviderKey.Trim()); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException)
+            {
+                return ClaudeCliCheckResponse.Refused("read_failed", request.ProviderKey);
+            }
+
+            if (provider is null) return ClaudeCliCheckResponse.Refused("unknown_provider", request.ProviderKey);
+            var claude = provider.Type == "claude-code";
+            return new ClaudeCliCheckResponse("ok", request.ProviderKey, claude, claude ? installer.ResolveExecutable(provider.Command) : null,
+                claude ? provider.ConfigDir : null, installer.IsSupported, ConfiguredClaudeCodeCli.PinnedVersion, installer.Size,
+                OperatingSystem.IsWindows(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Reads the pinned version and whether it is in the cache, and the Claude Code the user installed with its version.
     /// </summary>
     [NeoRpcMethod("read")]
@@ -122,6 +156,31 @@ internal sealed class ClaudeCliService
 }
 
 internal sealed record ClaudeCliRequest(string? ExpectedEpoch);
+
+/// <summary>What <c>check</c> reads of a provider of the configuration.</summary>
+/// <param name="Type">Its adapter type.</param>
+/// <param name="Command">Its <c>command</c>, or null.</param>
+/// <param name="ConfigDir">Its <c>config_dir</c> as the file writes it, or null.</param>
+internal sealed record ClaudeCliProvider(string? Type, string? Command, string? ConfigDir);
+
+internal sealed record ClaudeCliCheckRequest(string? ExpectedEpoch, string? ProviderKey);
+
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>, <c>unknown_provider</c> or <c>read_failed</c>.</param>
+/// <param name="ProviderKey">The provider asked about.</param>
+/// <param name="Claude">Whether the provider runs Claude Code.</param>
+/// <param name="Executable">The executable it would run, or null when it has none: the download is to propose.</param>
+/// <param name="ConfigDir">Its account folder as the file writes it, or null.</param>
+/// <param name="Supported">Whether Claude Code has a CLI to download for this platform.</param>
+/// <param name="Version">The version CodeAlta pins.</param>
+/// <param name="Size">The size of its download, in bytes.</param>
+/// <param name="Windows">Whether the commands to copy are for PowerShell; else for a POSIX shell.</param>
+/// <param name="Home">The home folder, which those commands write as <c>$HOME</c>.</param>
+internal sealed record ClaudeCliCheckResponse(string Status, string? ProviderKey, bool Claude, string? Executable, string? ConfigDir, bool Supported, string Version,
+    [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long Size, bool Windows, string? Home)
+{
+    internal static ClaudeCliCheckResponse Refused(string status, string? providerKey)
+        => new(status, providerKey, false, null, null, false, ConfiguredClaudeCodeCli.PinnedVersion, 0, OperatingSystem.IsWindows(), null);
+}
 
 /// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>unsupported</c> or <c>busy</c>.</param>
 internal sealed record ClaudeCliCommandResponse(string Status);

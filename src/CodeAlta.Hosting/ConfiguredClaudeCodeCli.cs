@@ -70,6 +70,24 @@ public sealed class ConfiguredClaudeCodeCli
     /// <returns>The end of the download.</returns>
     public Task CloseAsync() => _installer.CloseAsync();
 
+    /// <summary>
+    /// Finds the executable a <c>claude-code</c> provider runs, without starting it: its <c>command</c>, else the
+    /// pinned version in the cache, else the Claude Code the user installed.
+    /// </summary>
+    /// <param name="command">The <c>command</c> of the provider, or null.</param>
+    /// <returns>The full path of the executable, or null when the provider has none to run.</returns>
+    public string? ResolveExecutable(string? command)
+        => ClaudeCodeInstalledCli.Resolve(command, _installer.Root);
+
+    /// <summary>The kind the window gives an error whose provider has no Claude Code to run.</summary>
+    public const string NotFoundErrorKind = "claude-code-not-found";
+
+    /// <summary>Tells whether an exception, by the full name of its type, says that a provider has no Claude Code to run.</summary>
+    /// <param name="exceptionType">The full name of the type of the exception, as an error of a session records it.</param>
+    /// <returns>True for the exception of a missing Claude Code CLI.</returns>
+    public static bool IsNotFound(string? exceptionType)
+        => string.Equals(exceptionType, ClaudeCodeInstalledCli.NotFoundExceptionType, StringComparison.Ordinal);
+
     /// <summary>Finds the Claude Code the user installed, on <c>PATH</c> or in the folders of its installers.</summary>
     /// <returns>Its full path, or null when none that CodeAlta runs was found.</returns>
     public static string? FindUserInstall() => ClaudeCodeInstalledCli.Find();

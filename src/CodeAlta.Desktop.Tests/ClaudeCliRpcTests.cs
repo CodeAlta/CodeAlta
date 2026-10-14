@@ -49,6 +49,40 @@ public sealed class ClaudeCliRpcTests
     }
 
     [TestMethod]
+    public async Task Check_SaysWhichExecutableAProviderWouldRun()
+    {
+        using var fixture = new Fixture("win-x64");
+        var missing = Path.Combine(fixture.Root, "nowhere", "claude.exe");
+        var existing = Path.Combine(fixture.Root, "tools", "claude.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(existing)!);
+        File.WriteAllText(existing, "");
+        var service = new ClaudeCliService(fixture.Service.Installer!, "host", static () => null, static (_, _) => Task.FromResult<string?>(null))
+        {
+            FindProvider = key => key switch
+            {
+                "claude-missing" => new ClaudeCliProvider("claude-code", missing, "~/.claude-work"),
+                "claude-tools" => new ClaudeCliProvider("claude-code", existing, null),
+                "codex" => new ClaudeCliProvider("codex", null, null),
+                "broken" => throw new InvalidDataException("The configuration cannot be read."),
+                _ => null,
+            },
+        };
+
+        var none = await service.CheckAsync(new("host", "claude-missing"), default);
+        Assert.AreEqual(("ok", true, null, "~/.claude-work", true), (none.Status, none.Claude, none.Executable, none.ConfigDir, none.Supported));
+        Assert.AreEqual(ClaudeCodePinnedCli.Version, none.Version);
+        Assert.AreEqual(existing, (await service.CheckAsync(new("host", "claude-tools"), default)).Executable);
+        var other = await service.CheckAsync(new("host", "codex"), default);
+        Assert.AreEqual(("ok", false, null), (other.Status, other.Claude, other.Executable));
+        Assert.AreEqual("unknown_provider", (await service.CheckAsync(new("host", "missing"), default)).Status);
+        Assert.AreEqual("read_failed", (await service.CheckAsync(new("host", "broken"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.CheckAsync(new("host", " "), default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.CheckAsync(new("old", "claude-missing"), default)).Status);
+        Assert.AreEqual("unavailable", (await new ClaudeCliService().CheckAsync(new(null, "claude-missing"), default)).Status);
+        await fixture.Service.CloseAsync();
+    }
+
+    [TestMethod]
     public async Task Install_OfAPlatformWithoutCli_IsRefused()
     {
         using var fixture = new Fixture("freebsd-x64");

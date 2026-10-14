@@ -147,6 +147,9 @@ internal sealed partial class WorkspaceService
                 case AgentNotesEvent notes: type = "notes"; kind = notes.Kind.ToString(); text = notes.Markdown; break;
                 case AgentErrorEvent error:
                     type = "error"; text = error.Message;
+                    // A provider without a Claude Code CLI: the card of the error proposes its download.
+                    for (var info = error.ExceptionInfo; info is not null; info = info.InnerException)
+                        if (CodeAlta.Hosting.ConfiguredClaudeCodeCli.IsNotFound(info.Type)) { kind = CodeAlta.Hosting.ConfiguredClaudeCodeCli.NotFoundErrorKind; break; }
                     details = error.ExceptionInfo is null ? null : $"{error.ExceptionInfo.Type}: {error.ExceptionInfo.Message}";
                     omitted = error.ExceptionInfo?.StackTrace is not null || error.ExceptionInfo?.InnerException is not null;
                     break;

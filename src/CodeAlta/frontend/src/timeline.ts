@@ -58,6 +58,8 @@ export type TimelineItem = Readonly<{
   jobResult?: JobResult;
   /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
   providerPrompt?: boolean;
+  /** The provider of an error that says it has no Claude Code CLI to run: the card proposes its download. */
+  missingCliProvider?: string;
   /** What a system prompt record says: its row is one line, and its texts are read by its window. */
   prompt?: PromptRow;
 }>;
@@ -343,6 +345,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,
     providerPrompt: category === "user" && entry.contentId?.startsWith("provider:") ? true : undefined,
+    missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
   };

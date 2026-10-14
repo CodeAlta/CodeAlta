@@ -1844,6 +1844,12 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .provider-account-copy > code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .provider-claude-cli p { margin: 0; font-size: 12.5px; overflow-wrap: anywhere; }
 .provider-claude-cli-progress { display: grid; gap: 6px; font-size: 12.5px; }
+/* The first use of a Claude Code provider without its CLI, above the composer or under the error of a turn. */
+.claude-cli-first-use { display: grid; gap: 6px; margin: 4px 0; font-size: 12.5px; }
+.claude-cli-first-use p { margin: 0; overflow-wrap: anywhere; }
+.claude-cli-first-use-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.claude-cli-first-use-head > strong { flex: 1 1 auto; min-width: 0; }
+.claude-cli-first-use .provider-account-copy > code { white-space: normal; overflow-wrap: anywhere; }
 /* The login command is read and copied whole: it wraps instead of being cut. */
 .provider-claude-cli .provider-account-copy > code { white-space: normal; overflow-wrap: anywhere; }
 .provider-account-code > code { padding: 4px 10px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 18px; font-weight: 700; letter-spacing: .12em; background: var(--panel); }

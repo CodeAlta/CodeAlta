@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { Button, Callout, ProgressBar, Tag } from "@blueprintjs/core";
+import { useEffect, useState } from "react";
+import { Callout, Tag } from "@blueprintjs/core";
 import { claudeCli as ClaudeCliClient, type ClaudeCliStatusResponse } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { Copyable } from "../ProviderAccount";
 import { useShellLanguage } from "../shellLanguage";
-import { storageSize } from "../storage/storage";
-import { claudeLoginCommand, cliBytes, cliInstallFailure, cliInstalling, cliInstallView, type CliInstallView } from "./claudeCli";
+import { claudeLoginCommand } from "./claudeCli";
+import { CliDownloadButton, CliDownloadProgress, useClaudeCliDownload } from "./cliDownload";
 
 export type ClaudeCliApi = Pick<typeof ClaudeCliClient, "read" | "install" | "cancelInstall" | "watch">;
 
@@ -22,11 +22,10 @@ export function ClaudeCodeCli({ epoch, api = ClaudeCliClient, configDir, command
   /** The executable the provider names in the configuration file, or null. */
   command: string | null;
 }) {
-  const { t, locale } = useShellLanguage();
+  const { t } = useShellLanguage();
   const [status, setStatus] = useState<ClaudeCliStatusResponse | null>();
-  const [install, setInstall] = useState<CliInstallView | null>(null);
   const [generation, setGeneration] = useState(0);
-  const previous = useRef<CliInstallView | null>(null);
+  const download = useClaudeCliDownload(api, epoch, () => setGeneration(value => value + 1));
 
   useEffect(() => {
     const abort = new AbortController();
@@ -36,39 +35,13 @@ export function ClaudeCodeCli({ epoch, api = ClaudeCliClient, configDir, command
     return () => abort.abort();
   }, [api, epoch, generation]);
 
-  // The download belongs to the application: the page follows it, and another window may have started it.
-  useEffect(() => {
-    const abort = new AbortController();
-    void (async () => {
-      try {
-        const events = await api.watch({ expectedEpoch: epoch }, { signal: abort.signal });
-        for await (const event of events) {
-          if (abort.signal.aborted) return;
-          const view = cliInstallView(event);
-          if (view.state === "done" && cliInstalling(previous.current)) setGeneration(value => value + 1);
-          previous.current = view;
-          setInstall(view);
-        }
-      } catch { /* The page keeps what it read: the download goes on without it. */ }
-    })();
-    return () => abort.abort();
-  }, [api, epoch]);
-
-  async function download() {
-    const reply = await api.install({ expectedEpoch: epoch }, { timeoutMilliseconds: 15000 }).catch(() => null);
-    if (reply?.status === "ok") setInstall({ state: "downloading", received: 0, total: cliBytes(status?.size), error: null });
-  }
-
   if (status === undefined) return <div className="provider-account provider-settings-wide"><ActivitySpinner size={14} /></div>;
   if (status === null) return <Callout compact className="provider-settings-wide" intent="warning">{t("The state of the Claude Code CLI could not be read.")}</Callout>;
 
-  const running = cliInstalling(install);
   const configured = command?.trim() || null;
   const differs = status.installedVersion !== null && status.installedVersion !== status.version;
   const executable = configured ?? status.pinnedPath ?? status.installedPath;
   const offer = !configured && !status.pinnedPath && status.supported;
-  const size = storageSize(cliBytes(status.size), locale);
-  const known = install?.state === "downloading" && install.total > 0;
   return <div className="provider-account provider-claude-cli provider-settings-wide">
     <div className="provider-account-status">
       <AppIcon name="terminal" size={16} />
@@ -78,17 +51,10 @@ export function ClaudeCodeCli({ epoch, api = ClaudeCliClient, configDir, command
         : status.installedPath ? <Tag minimal intent={differs ? "warning" : "none"}>{status.installedVersion ? t("Your version {version}", { version: status.installedVersion }) : t("Your version")}</Tag>
         : <Tag minimal intent="danger">{t("Not installed")}</Tag>}
       <span className="provider-settings-spacer" />
-      {offer && !running && <Button size="small" intent={status.installedPath && !differs ? "none" : "primary"} icon={<AppIcon name="download" size={14} />}
-        onClick={() => void download()}>{t("Download {version} ({size})", { version: status.version, size })}</Button>}
-      {running && <Button size="small" onClick={() => void api.cancelInstall({ expectedEpoch: epoch }, { timeoutMilliseconds: 15000 }).catch(() => null)}>{t("Cancel")}</Button>}
+      {(offer || download.running) && <CliDownloadButton running={download.running} version={status.version} size={status.size}
+        primary={!status.installedPath || differs} onStart={() => void download.start(status.size)} onCancel={download.cancel} />}
     </div>
-    {running && <div className="provider-claude-cli-progress" role="status">
-      <span>{install!.state === "installing" ? t("Installing Claude Code {version}…", { version: status.version })
-        : t("Downloading Claude Code {version} — {received} of {total}", { version: status.version,
-          received: storageSize(Math.min(install!.received, install!.total), locale), total: storageSize(install!.total, locale) })}</span>
-      <ProgressBar intent="primary" stripes={!known} animate={!known} value={known ? Math.min(1, install!.received / install!.total) : undefined} />
-    </div>}
-    {install?.state === "failed" && <Callout compact intent="danger" role="alert">{t(cliInstallFailure(install.error))}</Callout>}
+    <CliDownloadProgress install={download.install} version={status.version} />
     <p className="bp6-text-muted">{configured ? t("This provider runs {command}, set in the configuration file.", { command: configured })
       : status.pinnedPath ? t("CodeAlta runs Claude Code {version}, the version it is tested with.", { version: status.version })
       : !status.supported ? t("Claude Code has no version for this system.")

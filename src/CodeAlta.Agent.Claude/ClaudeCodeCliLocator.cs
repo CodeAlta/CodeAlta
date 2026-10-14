@@ -40,6 +40,22 @@ public static class ClaudeCodeInstalledCli
     /// <returns>The full path of the executable, or null when none that CodeAlta runs was found.</returns>
     public static string? Find()
         => ClaudeCodeCliLocator.Resolve(null, ClaudeCodeCliEnvironment.Current(pinnedRoot: null)) is { Source: ClaudeCodeCliSource.Installed, Path: { } path } ? path : null;
+
+    /// <summary>
+    /// Finds the executable a provider runs, as a session would: its <c>command</c>, else the pinned version in the
+    /// cache, else the Claude Code the user installed. Nothing is started.
+    /// </summary>
+    /// <param name="command">The <c>command</c> of the provider, or null.</param>
+    /// <param name="pinnedRoot">The folder of Claude Code in the cache of CodeAlta, or null.</param>
+    /// <returns>The full path of the executable, or null when the provider has none to run.</returns>
+    public static string? Resolve(string? command, string? pinnedRoot)
+        => ClaudeCodeCliLocator.Resolve(command, pinnedRoot).Path;
+
+    /// <summary>
+    /// Gets the full name of the type of the exception a turn fails with when its provider has no Claude Code to
+    /// run, as the error of the session records it.
+    /// </summary>
+    public static string NotFoundExceptionType { get; } = typeof(ClaudeCodeNotFoundException).FullName!;
 }
 
 /// <summary>

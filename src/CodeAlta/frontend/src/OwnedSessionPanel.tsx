@@ -49,6 +49,7 @@ import type { createReminderActions } from "./reminderActions";
 import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
 import { ComposerQueueStrip } from "./ComposerQueueStrip";
+import { ClaudeCliFirstUse } from "./claudeCli/ClaudeCliFirstUse";
 import { queuePreview, type ComposerQueueItem } from "./composerQueue";
 import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
@@ -1122,6 +1123,8 @@ ${value}` : value);
     {pendingQueue &&
       <div className="composer-queue-row"><AppIcon name="queue" size={15} /><span className="composer-queue-preview">{pendingQueue.request.text}</span>
         <Button icon={<AppIcon name="refresh" size={14} />} aria-label={t("Retry exact request")} disabled={invalidEpoch || pendingQueue.inFlight} onClick={() => queueTextInHost(false)} /></div>}
+    {/* A Claude Code provider without a CLI proposes its download where it is chosen. */}
+    <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
       <span className="composer-foreground-status">

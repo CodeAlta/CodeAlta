@@ -405,7 +405,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         var resolution = _options.ResolveExecutable();
         if (resolution.Path is null)
         {
-            throw new InvalidOperationException(resolution.Error ?? "Claude Code was not found.");
+            // Its type tells the window to propose the download of the CLI where the error shows.
+            throw new ClaudeCodeNotFoundException(resolution.Error ?? "Claude Code was not found.");
         }
 
         // Started here, the CLI would use an API key of the environment without asking: nothing starts until the

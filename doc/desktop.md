@@ -2504,11 +2504,24 @@ answer Claude Code saved for the key (blank), ignore it and use the Claude login
   account of the provider: the executable it runs and `CLAUDE_CONFIG_DIR` from the form, for PowerShell on Windows
   and a POSIX shell elsewhere, with the home folder written `$HOME` (`claudeCli/claudeCli.ts`).
 
+**First use.** A `claude-code` provider that has no CLI to run (no `command`, no download, no Claude Code of the
+user) proposes the download where it is used (`claudeCli/ClaudeCliFirstUse.tsx`): above the composer of a session whose
+provider it is, and under the error of a turn that failed for it. The composer asks `claudeCli.check` (the executable
+the provider would run, found without starting anything) when its provider changes. The error is recognized by the
+type of its exception: `WorkspaceService.ProjectHistory` gives an error row the kind `claude-code-not-found` when its
+exception (or an inner one) is the not-found exception of the provider (`ConfiguredClaudeCodeCli.IsNotFound`), and the
+row names its provider (`TimelineItem.missingCliProvider`). The card shows **Download &lt;version&gt; (&lt;size&gt;)**, the
+progress and **Cancel**, the reason of a failure, then tests the provider once (`modelCatalog.probe`): a CLI that is
+signed out gets the login command, with the account folder of the provider. The download and its progress are those of
+Settings (`claudeCli/cliDownload.tsx`). The timeline shows the card in an owned host only (`ClaudeCliEpochContext`).
+
 **The `claudeCli` RPC** (`Desktop/Rpc/ClaudeCliRpc.cs`) serves that box, through `ConfiguredClaudeCodeCli` of
 `CodeAlta.Hosting`: the desktop assembly names no provider package. `read` gives the pinned `version`, the
 `size` of its archive, `supported` (Claude Code has a CLI for this platform), `pinnedPath` once it is in the cache,
 the user's own `installedPath` and `installedVersion` (`claude --version`, read once per file), and `windows` and
-`home` for the command. `install` starts the download (`ok`, `busy`, `unsupported`), `cancelInstall` stops it, and
+`home` for the command. `check` takes a provider key and answers whether it runs Claude Code, the executable it would
+run (null when it has none), its `config_dir`, and the same version, size, `windows` and `home` (`unknown_provider`,
+`read_failed`, `invalid_request` otherwise). `install` starts the download (`ok`, `busy`, `unsupported`), `cancelInstall` stops it, and
 `watch` replays and follows its state (`idle`, `downloading`, `installing`, `done`, `failed`, `canceled`, with the
 bytes and the reason of a failure). The download belongs to the application: closing the page does not stop it,
 closing the window does. An instance on explicit roots registers the service unavailable and downloads nothing. The

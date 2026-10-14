@@ -231,7 +231,7 @@ For a recognized reasoning model through `openai-responses` against the official
 
 The `claude-code` provider runs your sessions through the [Claude Code](https://code.claude.com/docs/en/overview) CLI, with the account that CLI is signed in to. This is how a Claude subscription is used from CodeAlta: Anthropic does not let other applications sign in to a Claude account, so CodeAlta does not. It starts the `claude` program and talks to it.
 
-1. In CodeAlta Desktop, open **Settings > Providers** and select **Claude Code**. The **Claude Code CLI** box says which CLI the provider runs. Choose **Download** to get the version CodeAlta is tested with (about 110 MB, once for all your Claude providers); the box shows its progress.
+1. In CodeAlta Desktop, open **Settings > Providers** and select **Claude Code**. The **Claude Code CLI** box says which CLI the provider runs. Choose **Download** to get the version CodeAlta is tested with (about 110 MB, once for all your Claude providers); the box shows its progress. When you choose a Claude Code provider that has no CLI yet for a session, the same download is proposed above the prompt, and under the error of a turn that could not start; once it is done, it gives the command that signs in.
 2. Sign in: copy the command the box gives, run it in a terminal, then type `/login` (an API key or a cloud provider configured for the CLI works too).
 3. Enable the provider and use **Test**. The test asks the CLI for its models; it does not call a model.
 4. Start a session with it. The models are the ones the CLI offers for your account, each under its own name. The first one is the model Claude Code recommends for the account.

@@ -261,6 +261,28 @@ public sealed class DesktopHistoryTests
     }
 
     [TestMethod]
+    public void Projection_MarksTheErrorOfAMissingClaudeCodeCli()
+    {
+        var missing = new AgentExceptionInfo(CodeAlta.Agent.Claude.ClaudeCodeInstalledCli.NotFoundExceptionType, "Claude Code was not found.");
+        var events = new AgentEvent[]
+        {
+            new AgentErrorEvent(new("claude-code"), "runtime-session", DateTimeOffset.UnixEpoch, "Claude Code was not found.") { ExceptionInfo = missing },
+            new AgentErrorEvent(new("claude-code"), "runtime-session", DateTimeOffset.UnixEpoch, "wrapped")
+            {
+                ExceptionInfo = new AgentExceptionInfo(typeof(InvalidOperationException).FullName!, "wrapped", InnerException: missing),
+            },
+            new AgentErrorEvent(new("claude-code"), "runtime-session", DateTimeOffset.UnixEpoch, "other")
+            {
+                ExceptionInfo = new AgentExceptionInfo(typeof(InvalidOperationException).FullName!, "other"),
+            },
+        };
+
+        var result = WorkspaceService.ProjectHistory(new(events.Select((value, i) => new AgentSessionHistoryEntry(i, value)).ToArray(), null, false));
+
+        CollectionAssert.AreEqual(new[] { "claude-code-not-found", "claude-code-not-found", null }, result.Entries.Select(static value => value.Kind).ToArray());
+    }
+
+    [TestMethod]
     public void Projection_RejectsMissingRequiredEventIdentities()
     {
         foreach (var value in new AgentEvent[]

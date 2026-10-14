@@ -987,6 +987,32 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task MissingCli_FailsTheTurnWithTheErrorTheWindowProposesTheDownloadFor()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var options = cli.CreateOptions();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            TransportFactory = cli,
+            GetEnvironmentVariable = options.GetEnvironmentVariable,
+            ResolveCli = static () => new ClaudeCodeCliResolution(null, "Claude Code was not found: no `claude` executable is on PATH."),
+        });
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        await Assert.ThrowsExactlyAsync<ClaudeCodeNotFoundException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout));
+
+        // The error the session records names the type the window recognizes.
+        var error = events.Snapshot().OfType<AgentErrorEvent>().Single();
+        Assert.AreEqual(ClaudeCodeInstalledCli.NotFoundExceptionType, error.ExceptionInfo?.Type);
+        StringAssert.Contains(error.Message, "was not found");
+        Assert.AreEqual(0, cli.Processes.Count);
+    }
+
+    [TestMethod]
     public async Task ApiKeyWithoutAnAnswer_StopsTheTurnBeforeTheCliStarts()
     {
         using var directory = TestTempDirectory.Create();

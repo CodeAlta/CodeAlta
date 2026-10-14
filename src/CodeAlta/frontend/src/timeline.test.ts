@@ -45,6 +45,15 @@ test("a prompt delivered by another session is shown as an agent message without
   assert.equal(buildTimelineItems([entry({ eventType: "contentCompleted", kind: "Assistant", text: "Done.", sourceSessionId: "01a105f5-60d1" })])[0].delegated, undefined);
 });
 
+test("the error of a Claude Code provider without its CLI names the provider whose download the card proposes", () => {
+  const [missing, other] = buildTimelineItems([
+    entry({ offset: "1", eventType: "error", kind: "claude-code-not-found", providerId: "claude-work", text: "Claude Code was not found." }),
+    entry({ offset: "2", eventType: "error", kind: null, providerId: "claude-work", text: "Another failure." }),
+  ]);
+  assert.deepEqual([missing.category, missing.missingCliProvider], ["error", "claude-work"]);
+  assert.equal(other.missingCliProvider, undefined);
+});
+
 test("TUI status-only updates do not become timeline cards", () => {
   assert.deepEqual(buildTimelineItems(["Idle", "UsageUpdated", "Shutdown"].map(kind => entry({ eventType: "sessionUpdate", kind }))), []);
 });
