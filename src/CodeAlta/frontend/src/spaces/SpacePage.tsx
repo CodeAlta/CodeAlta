@@ -19,10 +19,12 @@ import type { SpaceOutcome, SpacesHub } from "./spacesHub";
  * The page of one space in Settings > Spaces: what it is (General), its projects, and what it sets up for its
  * sessions, each section a component of its own. Back returns to the cards of every space.
  */
-export function SpacePage({ hub, space, spaces, projects, shown, activity, canEdit, onBack, onShow, onDeleted }: {
+export function SpacePage({ hub, space, spaces, projects, chats, shown, activity, canEdit, onBack, onShow, onDeleted }: {
   hub: SpacesHub; space: Space; spaces: readonly Space[];
   /** Every project of the catalog. */
   projects: readonly SpaceProject[];
+  /** How many chats the space has: deleting it moves them to the default space. */
+  chats: number;
   /** Whether the window shows this space. */
   shown: boolean;
   activity: SpaceActivity | undefined;
@@ -73,7 +75,9 @@ export function SpacePage({ hub, space, spaces, projects, shown, activity, canEd
         <Button className="space-show" variant={shown ? "minimal" : "outlined"} intent={shown ? "primary" : undefined} disabled={shown}
           icon={<AppIcon name={shown ? "check" : "eye"} size={14} />} text={t(shown ? "Shown" : "Show")} onClick={onShow} />
         {!space.isDefault && <PopoverNext placement="bottom-end" content={<div className="provider-settings-confirm">
-          <p>{t("Delete {name}? Its projects stay in the other spaces they are in.", { name: space.name })}</p>
+          <p>{chats === 0 ? t("Delete {name}? Its projects stay in the other spaces they are in.", { name: space.name })
+            : chats === 1 ? t("Delete {name}? Its chat goes to the Default space, and its projects stay in their other spaces.", { name: space.name })
+            : t("Delete {name}? Its {count} chats go to the Default space, and its projects stay in their other spaces.", { name: space.name, count: chats })}</p>
           <Button className="bp6-popover-dismiss" intent="danger" disabled={!canEdit || busy} onClick={() => void remove()}>{t("Delete")}</Button></div>}>
           <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={!canEdit || busy} text={t("Delete")} />
         </PopoverNext>}

@@ -73,40 +73,89 @@ export function findSpace(spaces: readonly Space[], id: string | null | undefine
   return spaces.find(space => space.id === id) ?? spaces.find(space => space.isDefault) ?? defaultSpace;
 }
 
-/** The projects a space shows: null for the default space, which shows every project. */
-export function spaceMembers(spaces: readonly Space[], id: string | null | undefined): ReadonlySet<string> | null {
+/** Where the page keeps whether the default space shows what belongs to other spaces too. */
+export const showOthersKey = "codealta.desktop.space.showOthers.v1";
+/** Where the page keeps that it said once what the default space shows now. */
+export const toldDefaultKey = "codealta.desktop.space.toldDefault.v1";
+
+/**
+ * What one space shows of the catalog. The default space shows the projects that are in no other space and the
+ * sessions of the default space, unless it is asked to show what belongs to the other spaces too (`showOthers`):
+ * then it shows the whole catalog.
+ */
+export type SpaceView = Readonly<{
+  space: Space;
+  /** The projects it shows; null for every project. */
+  projects: Readonly<{ has: (projectId: string) => boolean }> | null;
+  /** Whether it shows every session, whatever space it belongs to. */
+  everything: boolean;
+  spaces: readonly Space[];
+}>;
+
+/** What a space shows: see {@link SpaceView}. */
+export function spaceView(spaces: readonly Space[], id: string | null | undefined, showOthers: boolean): SpaceView {
   const space = findSpace(spaces, id);
-  return space.isDefault ? null : new Set(space.projectIds);
+  if (space.isDefault && (showOthers || spaces.every(other => other.isDefault))) return { space, projects: null, everything: true, spaces };
+  if (!space.isDefault) return { space, projects: new Set(space.projectIds), everything: false, spaces };
+  const elsewhere = new Set(spaces.filter(other => !other.isDefault).flatMap(other => other.projectIds));
+  return { space, projects: elsewhere.size === 0 ? null : { has: (projectId: string) => !elsewhere.has(projectId) }, everything: false, spaces };
 }
 
-/** Whether two sets of members are the same projects. */
-export function sameMembers(left: ReadonlySet<string> | null, right: ReadonlySet<string> | null): boolean {
-  if (left === right) return true;
-  if (!left || !right || left.size !== right.size) return false;
-  for (const id of left) if (!right.has(id)) return false;
-  return true;
+/** A text that changes when what a view shows does: the window is given the catalog again when it changes. */
+export function spaceViewKey(view: SpaceView): string {
+  return JSON.stringify([view.space.id, view.everything, view.spaces.map(space => [space.id, space.projectIds])]);
 }
 
 /**
- * What a space shows of the catalog: its projects with their sessions, and the chats, which belong to no
- * project. A session of a project that is in another space is left out; a session whose project the catalog
- * no longer has stays where it was, with the chats. The default space shows the catalog as it is.
+ * The spaces a session is listed in. A session that records a space is in that space alone, the default one for a
+ * space that no longer exists. A session created before sessions had a space is in every space of its project, and
+ * in the default space when its project is in no other; such a chat is in the default space.
  */
-export function scopeSnapshot(snapshot: WorkspaceSnapshot, members: ReadonlySet<string> | null): WorkspaceSnapshot {
-  if (!members) return snapshot;
-  const projects = snapshot.projects.filter(project => members.has(project.id));
-  if (projects.length === snapshot.projects.length) return snapshot;
-  const elsewhere = snapshot.projects.filter(project => !members.has(project.id));
+export function sessionSpaces(spaces: readonly Space[], session: Readonly<{ spaceId: string | null; projectId: string | null }>): readonly string[] {
+  if (session.spaceId) return [spaces.some(space => space.id === session.spaceId) ? session.spaceId : defaultSpaceId];
+  if (session.projectId === null) return [defaultSpaceId];
+  const own = spaces.filter(space => !space.isDefault && space.projectIds.includes(session.projectId!)).map(space => space.id);
+  return own.length === 0 ? [defaultSpaceId] : own;
+}
+
+/** The space a session is shown in first: the one it records, else the first of the spaces it is listed in. */
+export function sessionHome(spaces: readonly Space[], session: Readonly<{ spaceId: string | null; projectId: string | null }>): Space {
+  return findSpace(spaces, sessionSpaces(spaces, session)[0]);
+}
+
+/** Whether a view lists a session: its project is shown there (or it is a chat), and the session belongs to that space. */
+export function viewLists(view: SpaceView, session: Readonly<{ spaceId: string | null; projectId: string | null }>): boolean {
+  if (view.everything) return true;
+  if (session.projectId !== null && view.projects && !view.projects.has(session.projectId)) return false;
+  return sessionSpaces(view.spaces, session).includes(view.space.id);
+}
+
+/**
+ * What a space shows of the catalog: its projects with their sessions, and its chats. A chat, and a session of a
+ * project, is in its own space; one created before sessions had a space is in every space of its project, such a
+ * chat in the default space. The default space shows the projects that are in no other space, unless it shows
+ * everything. A session whose project the catalog no longer has stays where it was, with the chats.
+ */
+export function scopeSnapshot(snapshot: WorkspaceSnapshot, view: SpaceView): WorkspaceSnapshot {
+  if (view.everything) return snapshot;
+  const members = view.projects;
+  const projects = members ? snapshot.projects.filter(project => members.has(project.id)) : snapshot.projects;
+  const elsewhere = members ? snapshot.projects.filter(project => !members.has(project.id)) : [];
   const otherIds = new Map(elsewhere.map(project => [project.id, project.path]));
   const otherPaths = new Set(elsewhere.map(project => project.path));
   const keptPaths = new Set(projects.map(project => project.path));
   const sessions = snapshot.sessions.filter(session => {
-    if (session.scopeKind === "global") return true;
-    if (session.scopeKind === "project") return !(session.projectId !== null && otherIds.get(session.projectId) === session.workspacePath);
-    // A session without a recorded scope is listed by its folder.
-    return !session.workspacePath || keptPaths.has(session.workspacePath) || !otherPaths.has(session.workspacePath);
+    if (session.scopeKind === "global") return sessionSpaces(view.spaces, { spaceId: session.spaceId, projectId: null }).includes(view.space.id);
+    if (session.scopeKind === "project") {
+      if (session.projectId !== null && otherIds.get(session.projectId) === session.workspacePath) return false;
+      return sessionSpaces(view.spaces, { spaceId: session.spaceId, projectId: session.projectId }).includes(view.space.id);
+    }
+    // A session without a recorded scope is listed by its folder, and one in no folder of a project as a chat.
+    if (session.workspacePath && keptPaths.has(session.workspacePath)) return true;
+    if (session.workspacePath && otherPaths.has(session.workspacePath)) return false;
+    return sessionSpaces(view.spaces, { spaceId: session.spaceId, projectId: null }).includes(view.space.id);
   });
-  return { ...snapshot, projects, sessions };
+  return projects.length === snapshot.projects.length && sessions.length === snapshot.sessions.length ? snapshot : { ...snapshot, projects, sessions };
 }
 
 /** Where a project that something asks to show is: `space` is null in the shown space, else the space to show for it. */
@@ -220,17 +269,17 @@ export function waitingSubSessions(sessions: readonly SpaceSessionActivity[]): R
 const maximumAncestors = 16;
 
 /**
- * What each space is doing, from what the sessions do: a session counts for every space its project is in,
- * and a chat, which belongs to no project, for the default space alone.
+ * What each space is doing, from what the sessions do: a session counts for the spaces it is listed in (its own
+ * space; for one created before sessions had a space, every space of its project).
  */
 export function spaceActivities(spaces: readonly Space[], sessions: readonly SpaceSessionActivity[]): ReadonlyMap<string, SpaceActivity> {
   const result = new Map<string, SpaceActivity>();
+  const listed = new Map(sessions.map(session => [session.sessionId, sessionSpaces(spaces, session)]));
   for (const space of spaces) {
-    const members = space.isDefault ? null : new Set(space.projectIds);
     let running = 0, background = 0, waiting = 0, failed = 0;
     let attention: SpaceActivity["attention"] = null, attentionWaits = false;
     for (const session of sessions) {
-      if (members && (session.projectId === null || !members.has(session.projectId))) continue;
+      if (!listed.get(session.sessionId)!.includes(space.id)) continue;
       if (session.running) running++; else if (session.backgroundTasks > 0) background++;
       if (session.waiting) waiting++;
       if (session.failed) failed++;
@@ -276,19 +325,17 @@ export type SpaceCall = Readonly<{ space: Space; sessionId: string; projectId: s
 
 /**
  * The sessions that need the user where the user is not looking: one for each space other than the one shown,
- * a session that waits before one that failed. A session the shown space has (its project is in it, or it is a
- * chat, which every space shows) is not one of them: the Explorer and the tabs say it already. A session is
- * named for the first space of its project, and for the default space when its project is in no other.
+ * a session that waits before one that failed. A session the shown space lists is not one of them: the Explorer
+ * and the tabs say it already. A session is named for its own space (see {@link sessionHome}).
  */
-export function spaceCalls(spaces: readonly Space[], shownId: string, sessions: readonly SpaceSessionActivity[]): readonly SpaceCall[] {
-  const shown = findSpace(spaces, shownId);
-  if (shown.isDefault) return [];
-  const visible = new Set(shown.projectIds);
-  const fallback = spaces.find(space => space.isDefault) ?? defaultSpace;
+export function spaceCalls(spaces: readonly Space[], shownId: string, sessions: readonly SpaceSessionActivity[], showOthers = false): readonly SpaceCall[] {
+  const view = spaceView(spaces, shownId, showOthers);
+  if (view.everything) return [];
   const calls = new Map<string, SpaceCall>();
   for (const session of sessions) {
-    if (!session.waiting && !session.failed || session.projectId === null || visible.has(session.projectId)) continue;
-    const space = spaces.find(candidate => !candidate.isDefault && candidate.projectIds.includes(session.projectId!)) ?? fallback;
+    if (!session.waiting && !session.failed || viewLists(view, session)) continue;
+    const space = sessionHome(spaces, session);
+    if (space.id === view.space.id) continue;
     const known = calls.get(space.id);
     if (!known || session.waiting && !known.waiting)
       calls.set(space.id, { space, sessionId: session.sessionId, projectId: session.projectId, title: session.title, waiting: session.waiting });
@@ -300,9 +347,18 @@ export function spaceCalls(spaces: readonly Space[], shownId: string, sessions: 
 export function sameSessions(left: readonly SpaceSessionActivity[], right: readonly SpaceSessionActivity[]): boolean {
   return left === right || left.length === right.length && left.every((session, index) => {
     const other = right[index];
-    return session.sessionId === other.sessionId && session.projectId === other.projectId && session.title === other.title && session.running === other.running
+    return session.sessionId === other.sessionId && session.projectId === other.projectId && session.spaceId === other.spaceId && session.title === other.title && session.running === other.running
       && session.backgroundTasks === other.backgroundTasks && session.failed === other.failed && session.waiting === other.waiting
       && session.fallback?.at === other.fallback?.at
       && session.ancestors.length === other.ancestors.length && session.ancestors.every((id, at) => id === other.ancestors[at]);
   });
+}
+
+/** How many chats record each space: the chats deleting a space moves to the default space. */
+export function spaceChatCounts(sessions: readonly Readonly<{ scopeKind: string | null; spaceId: string | null }>[]): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  for (const session of sessions) {
+    if (session.scopeKind === "global" && session.spaceId) counts.set(session.spaceId, (counts.get(session.spaceId) ?? 0) + 1);
+  }
+  return counts;
 }

@@ -401,6 +401,25 @@ public sealed class SpaceCatalog
     }
 
     /// <summary>
+    /// Tells the spaces a session is listed in. A session that records a space is listed in that space alone (the
+    /// default space for one that names no space). A session created before sessions had a space is listed in every
+    /// space of its project, and in the default space when its project is in no other space; such a chat is in the
+    /// default space.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="project">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="spaces">The spaces that exist.</param>
+    /// <returns>The identifiers of the spaces, never empty.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="spaces"/> is <see langword="null"/>.</exception>
+    public static IReadOnlyList<string> SessionSpaces(string? recordedSpaceId, ProjectDescriptor? project, IReadOnlyList<SpaceDescriptor> spaces)
+    {
+        ArgumentNullException.ThrowIfNull(spaces);
+        if (!string.IsNullOrWhiteSpace(recordedSpaceId) || project is null) return [ResolveSessionSpace(recordedSpaceId, null, spaces)];
+        var own = SpaceDescriptor.NormalizeIds(project.Spaces).Where(id => spaces.Any(space => string.Equals(space.Id, id, StringComparison.Ordinal))).ToArray();
+        return own.Length == 0 ? [SpaceDescriptor.DefaultId] : own;
+    }
+
+    /// <summary>
     /// Tells which space a session is in, reading the spaces and the projects of the catalog. See
     /// <see cref="ResolveSessionSpace(string?, ProjectDescriptor?, IReadOnlyList{SpaceDescriptor})"/>.
     /// </summary>

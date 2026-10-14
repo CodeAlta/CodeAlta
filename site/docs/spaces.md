@@ -14,7 +14,8 @@ A space is a named group of projects that you work on together: your job, your p
 - The **Default** space holds every project. It is always there and cannot be deleted.
 - You create the other spaces. A project can be in several spaces at once.
 - A space has a name, an icon, a color and a line that says what it is for.
-- **Chats**, the sessions that belong to no project, are shown in every space.
+- Every session belongs to one space: the one you created it in. A **chat**, a session that belongs to no project, is listed in its own space only, and so is a session of a project. A session of an earlier version of CodeAlta is listed in every space of its project.
+- The **Default** space shows the projects and the chats that belong to no other space. To see everything there, turn on **Show what belongs to other spaces** in **Settings > Spaces**.
 
 The first time CodeAlta Desktop starts, it creates two empty spaces, **Work** and **Personal**. Fill them, rename them or delete them: a space you delete does not come back.
 
@@ -60,7 +61,7 @@ Add a folder with the `+` button of the Explorer, or with [Open project](workspa
 
 **Settings > Spaces** shows every space with its projects. Open it with **Organize spaces…** in the space switch, or with `/spaces`.
 
-- On the left, the Default space lists every project, each with the icons of the spaces it is in.
+- On the left, the Default space lists every project, each with the icons of the spaces it is in. Its switch **Show what belongs to other spaces** makes the Default space show everything again.
 - On the right, each space has a card: its icon, its name, **What it is for**, and its projects.
 
 <figure class="alta-figure my-4">
@@ -87,7 +88,11 @@ To choose the projects of a space with the mouse, on the cards:
 
 The `×` of a project on a card removes it from that space. A card also has **Show**, and two arrows that move the space before or after its neighbor in the list.
 
-Deleting a space leaves its projects, their folders and their sessions alone. The projects stay in the Default space and in their other spaces.
+Deleting a space leaves its projects, their folders and their sessions alone. The projects stay in the Default space and in their other spaces, and the chats of the space go to the Default space: the question before the deletion says how many.
+
+## Move a session to another space
+
+**Move to space…** in the menu of a session lists the other spaces: choose one and the session goes there, with the sessions it started. Its next turn uses what the new space sets up. A session that is running or waits for an answer cannot move until it is idle.
 
 ## What follows the shown space
 

@@ -350,6 +350,13 @@ public sealed class SpaceCatalogTests
         Assert.AreEqual("default", SpaceCatalog.ResolveSessionSpace("deleted", alone, spaces), "A space that is gone is read as the default one.");
         Assert.AreEqual("default", SpaceCatalog.ResolveSessionSpace("Not An Id", null, spaces));
 
+        // Where a session is listed: where it records, else every space of its project, else the default space.
+        CollectionAssert.AreEqual(new[] { "personal" }, SpaceCatalog.SessionSpaces("personal", alone, spaces).ToArray());
+        CollectionAssert.AreEqual(new[] { "business", "personal" }, SpaceCatalog.SessionSpaces(null, (await fixture.Projects.GetByIdAsync(shared.Id))!, spaces).ToArray());
+        CollectionAssert.AreEqual(new[] { "default" }, SpaceCatalog.SessionSpaces(null, nowhere, spaces).ToArray());
+        CollectionAssert.AreEqual(new[] { "default" }, SpaceCatalog.SessionSpaces(null, null, spaces).ToArray());
+        CollectionAssert.AreEqual(new[] { "default" }, SpaceCatalog.SessionSpaces("deleted", alone, spaces).ToArray());
+
         Assert.AreEqual("business", (await fixture.Spaces.ResolveSessionSpaceAsync(null, alone.Id)).Id);
         Assert.AreEqual("personal", (await fixture.Spaces.ResolveSessionSpaceAsync("personal", null)).Id);
         await fixture.Spaces.DeleteAsync("business");

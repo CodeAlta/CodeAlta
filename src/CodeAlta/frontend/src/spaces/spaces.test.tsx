@@ -5,8 +5,8 @@ import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSessio
 import { SpacePage } from "./SpacePage";
 import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
-import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameMembers, sameSpaces, scopeSnapshot,
-  spaceActivities, spaceBrand, spaceCalls, spaceMembers, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey } from "./spaces";
+import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
+  sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, viewLists } from "./spaces";
 import { activityMilliseconds, createSpacesHub, type SpacesApi, type SpacesHub } from "./spacesHub";
 
 const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem> = {}): SpaceItem =>
@@ -39,27 +39,44 @@ test("the spaces are read as the host lists them, the default one first, and wha
   assert.equal(neighborSpace(spaces, "work", 1).id, "odd");
 });
 
-test("a space shows its projects with their sessions and the chats, and the default space the whole catalog", () => {
+test("a session is listed in its own space, an older one in every space of its project, and the default space hides what belongs elsewhere", () => {
+  const inSpace = (id: string, scopeKind: string | null, projectId: string | null, path: string | null, spaceId: string | null) => ({ ...session(id, scopeKind, projectId, path), spaceId });
   const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
-    projects: [project("a"), project("b"), project("c")],
-    sessions: [session("in-a", "project", "a", "C:\\code\\a"), session("in-b", "project", "b", "C:\\code\\b"), session("chat", "global", null, null),
-      session("old-a", null, null, "C:\\code\\a"), session("old-b", null, null, "C:\\code\\b"), session("lost", "project", "gone", "C:\\code\\gone"),
-      session("nowhere", null, null, "C:\\other"), session("moved", "project", "b", "C:\\code\\elsewhere")] };
-  const spaces = readSpaces([item("default", ["a", "b", "c"]), item("work", ["a", "c"]), item("all", ["a", "b", "c"]), item("empty")]);
-  assert.equal(spaceMembers(spaces, "default"), null);
-  assert.equal(spaceMembers(spaces, "unknown"), null);
-  assert.equal(scopeSnapshot(snapshot, null), snapshot, "The default space is the catalog as it is: nothing is made again for it.");
-  assert.equal(scopeSnapshot(snapshot, spaceMembers(spaces, "all")), snapshot);
-  const work = scopeSnapshot(snapshot, spaceMembers(spaces, "work"));
-  assert.deepEqual(work.projects.map(value => value.id), ["a", "c"]);
-  // The sessions of a project that is elsewhere go with it; what belongs to no project of the catalog stays, as it does in the default space.
-  assert.deepEqual(work.sessions.map(value => value.id), ["in-a", "chat", "old-a", "lost", "nowhere", "moved"]);
-  const empty = scopeSnapshot(snapshot, spaceMembers(spaces, "empty"));
-  assert.deepEqual([empty.projects.length, empty.sessions.map(value => value.id)], [0, ["chat", "lost", "nowhere", "moved"]]);
-  assert.equal(sameMembers(spaceMembers(spaces, "work"), new Set(["c", "a"])), true);
-  assert.equal(sameMembers(spaceMembers(spaces, "work"), new Set(["a"])), false);
-  assert.equal(sameMembers(null, null), true);
-  assert.equal(sameMembers(null, new Set()), false);
+    projects: [project("a"), project("b"), project("c"), project("d")],
+    sessions: [session("in-a", "project", "a", "C:\\code\\a"), session("in-b", "project", "b", "C:\\code\\b"), session("in-d", "project", "d", "C:\\code\\d"),
+      session("chat", "global", null, null), inSpace("chat-work", "global", null, null, "work"), inSpace("chat-gone", "global", null, null, "gone"),
+      inSpace("c-work", "project", "c", "C:\\code\\c", "work"), inSpace("a-personal", "project", "a", "C:\\code\\a", "personal"),
+      inSpace("d-work", "project", "d", "C:\\code\\d", "work"), session("old-a", null, null, "C:\\code\\a"), session("lost", "project", "gone", "C:\\code\\gone"),
+      session("nowhere", null, null, "C:\\other")] };
+  const spaces = readSpaces([item("default"), item("work", ["a", "c"]), item("personal", ["b"]), item("empty")]);
+  const ids = (id: string, showOthers = false) => scopeSnapshot(snapshot, spaceView(spaces, id, showOthers)).sessions.map(value => value.id);
+  const projects = (id: string, showOthers = false) => scopeSnapshot(snapshot, spaceView(spaces, id, showOthers)).projects.map(value => value.id);
+
+  // Work: its projects; their older sessions, the sessions that record Work, and its own chats.
+  assert.deepEqual(projects("work"), ["a", "c"]);
+  assert.deepEqual(ids("work"), ["in-a", "chat-work", "c-work", "old-a"], "A session of Work's project that records Personal is in Personal; one of a project of no space that records Work has no project to be shown under there.");
+  assert.deepEqual(projects("personal"), ["b"]);
+  assert.deepEqual(ids("personal"), ["in-b"], "A session that records Personal is listed under its project, which Personal does not have.");
+  // The default space: the projects of no other space, the chats of no other space, and what records it or a space that is gone.
+  assert.deepEqual(projects("default"), ["d"]);
+  assert.deepEqual(ids("default"), ["in-d", "chat", "chat-gone", "lost", "nowhere"]);
+  // Asked to, it shows everything again: the catalog as it is, made again for nothing.
+  assert.equal(scopeSnapshot(snapshot, spaceView(spaces, "default", true)), snapshot);
+  assert.deepEqual(ids("empty"), []);
+  // With no space but the default one, the default space is the whole catalog.
+  assert.equal(scopeSnapshot(snapshot, spaceView(readSpaces([item("default")]), "default", false)), snapshot);
+
+  assert.deepEqual(sessionSpaces(spaces, { spaceId: null, projectId: "a" }), ["work"]);
+  assert.deepEqual(sessionSpaces(spaces, { spaceId: null, projectId: "d" }), ["default"]);
+  assert.deepEqual(sessionSpaces(spaces, { spaceId: null, projectId: null }), ["default"]);
+  assert.deepEqual(sessionSpaces(spaces, { spaceId: "personal", projectId: "a" }), ["personal"]);
+  assert.deepEqual(sessionSpaces(spaces, { spaceId: "gone", projectId: "a" }), ["default"], "A space that is gone is read as the default one.");
+  assert.equal(sessionHome(spaces, { spaceId: null, projectId: "b" }).id, "personal");
+  assert.equal(viewLists(spaceView(spaces, "work", false), { spaceId: "work", projectId: "b" }), false);
+  assert.equal(viewLists(spaceView(spaces, "default", true), { spaceId: "work", projectId: "b" }), true);
+  assert.notEqual(spaceViewKey(spaceView(spaces, "default", false)), spaceViewKey(spaceView(spaces, "default", true)));
+  assert.equal(spaceViewKey(spaceView(spaces, "work", false)), spaceViewKey(spaceView(readSpaces([item("default"), item("work", ["a", "c"]), item("personal", ["b"]), item("empty")]), "work", false)));
+  assert.deepEqual([...spaceChatCounts(snapshot.sessions)], [["work", 1], ["gone", 1]]);
 });
 
 test("each space keeps its tabs under its own key, and the page remembers the space it shows", () => {
@@ -78,8 +95,11 @@ test("what each space is doing is worked out from what the sessions do", () => {
   const sessions = [doing("s1", "a", { running: true }), doing("s2", "b", { waiting: true, running: true }), doing("s3", "b", { failed: true }),
     doing("s4", "a", { backgroundTasks: 2 }), doing("chat", null, { running: true }), doing("s5", "z", { waiting: true })];
   const activity = spaceActivities(spaces, sessions);
-  assert.deepEqual(activity.get("default"), { running: 3, background: 1, waiting: 2, failed: 1, attention: { sessionId: "s2", projectId: "b", title: "Title of s2" } });
-  // A project in two spaces counts for both; a chat belongs to no project and counts for the default space alone.
+  // The default space counts what is listed there: the chat, and the session of a project of no other space.
+  assert.deepEqual(activity.get("default"), { running: 1, background: 0, waiting: 1, failed: 0, attention: { sessionId: "s5", projectId: "z", title: "Title of s5" } });
+  // A session created before sessions had a space counts in every space of its project; one that records its space, there alone.
+  assert.equal(spaceActivities(spaces, [doing("chat-work", null, { running: true, spaceId: "work" })]).get("work")?.running, 1);
+  assert.equal(spaceQuiet(spaceActivities(spaces, [doing("chat-work", null, { running: true, spaceId: "work" })]).get("default")), true);
   assert.deepEqual(activity.get("work"), { running: 2, background: 1, waiting: 1, failed: 1, attention: { sessionId: "s2", projectId: "b", title: "Title of s2" } });
   assert.deepEqual(activity.get("personal"), { running: 1, background: 0, waiting: 1, failed: 1, attention: { sessionId: "s2", projectId: "b", title: "Title of s2" } });
   assert.equal(spaceQuiet(activity.get("quiet")), true);
@@ -108,21 +128,23 @@ test("a session that needs the user is called out only where the user is not loo
   const spaces = readSpaces([item("default", ["a", "b", "c", "d"]), item("work", ["a", "b"]), item("personal", ["b", "c"])]);
   const sessions = [doing("in-a", "a", { waiting: true }), doing("in-c-failed", "c", { failed: true }), doing("in-c", "c", { waiting: true }), doing("in-d", "d", { failed: true }),
     doing("chat", null, { waiting: true }), doing("busy", "c", { running: true })];
-  // From the default space everything is on screen: nothing is called out.
-  assert.deepEqual(spaceCalls(spaces, "default", sessions), []);
-  // From Work: its own project is on screen and so are the chats; what waits before what failed, one call for each space.
-  assert.deepEqual(spaceCalls(spaces, "work", sessions).map(call => [call.space.id, call.sessionId, call.waiting]), [["personal", "in-c", true], ["default", "in-d", false]]);
-  assert.deepEqual(spaceCalls(spaces, "personal", sessions).map(call => [call.space.id, call.sessionId]), [["work", "in-a"], ["default", "in-d"]]);
+  // From the default space that shows everything, everything is on screen: nothing is called out.
+  assert.deepEqual(spaceCalls(spaces, "default", sessions, true), []);
+  // Otherwise it shows what belongs to no other space: what waits in Work and Personal is called out.
+  assert.deepEqual(spaceCalls(spaces, "default", sessions).map(call => [call.space.id, call.sessionId, call.waiting]), [["work", "in-a", true], ["personal", "in-c", true]]);
+  // From Work: its own project is on screen; the chat is the default space's. What waits before what failed, one call for each space.
+  assert.deepEqual(spaceCalls(spaces, "work", sessions).map(call => [call.space.id, call.sessionId, call.waiting]), [["default", "chat", true], ["personal", "in-c", true]]);
+  assert.deepEqual(spaceCalls(spaces, "personal", sessions).map(call => [call.space.id, call.sessionId]), [["default", "chat"], ["work", "in-a"]]);
   assert.deepEqual(spaceCalls(spaces, "work", [doing("quiet", "c", { running: true })]), []);
 });
 
 test("what is asked of a project is shown where the user is only when the shown space has the project, and its space is offered otherwise", () => {
   const spaces = readSpaces([item("default", ["a", "b", "c", "old"]), item("work", ["a", "b"]), item("personal", ["b", "c"])]);
   const catalog = [project("a"), project("b"), project("c"), project("d"), project("old", true)];
-  const shownIn = (id: string) => scopeSnapshot({ configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false, projects: catalog, sessions: [] },
-    spaceMembers(spaces, id)).projects;
-  const place = (shownId: string, projectId: string) => {
-    const found = placeProject(shownIn(shownId), catalog, spaces, shownId, projectId);
+  const shownIn = (id: string, showOthers: boolean) => scopeSnapshot({ configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false, projects: catalog, sessions: [] },
+    spaceView(spaces, id, showOthers)).projects;
+  const place = (shownId: string, projectId: string, showOthers = false) => {
+    const found = placeProject(shownIn(shownId, showOthers), catalog, spaces, shownId, projectId);
     return found && [found.project.id, found.space?.id ?? null];
   };
   // `alta editor open` from a session of Work while the window shows Personal: nothing opens there, and Work is the space to show.
@@ -131,11 +153,14 @@ test("what is asked of a project is shown where the user is only when the shown 
   // A project the shown space has is shown at once, in whatever other space it also is.
   assert.deepEqual(place("work", "a"), ["a", null]);
   assert.deepEqual(place("personal", "b"), ["b", null]);
-  // A project of no space is in the default one, which has every project and never sends elsewhere.
+  // A project of no space is in the default one. The default one sends a project of another space there, unless it shows everything.
   assert.deepEqual(place("work", "d"), ["d", "default"]);
-  for (const id of ["a", "c", "d"]) assert.deepEqual(place("default", id), [id, null]);
+  assert.deepEqual(place("default", "d"), ["d", null]);
+  assert.deepEqual(place("default", "a"), ["a", "work"]);
+  assert.deepEqual(place("default", "c"), ["c", "personal"]);
+  for (const id of ["a", "c", "d"]) assert.deepEqual(place("default", id, true), [id, null]);
   // A space that is gone shows what the default one does.
-  assert.deepEqual(place("gone", "a"), ["a", null]);
+  assert.deepEqual(place("gone", "a"), ["a", "work"]);
   // Not in this space is not the same as no such project: nothing is offered for a project the catalog does not have, or an archived one.
   assert.equal(place("work", "missing"), null);
   assert.equal(place("work", "old"), null);
@@ -182,13 +207,13 @@ test("the hub lists the spaces once, follows what the host says, and says what e
   let sessions = [doing("s1", "a", { running: true })];
   const calls: string[] = [];
   const events: ((event: { kind: string; spaceId: string | null }) => void)[] = [];
-  const ok = async () => ({ status: "ok", message: null, space: null });
+  const ok = async () => ({ status: "ok", message: null, space: null, movedSessions: 0 });
   const api: SpacesApi = {
     list: async () => { calls.push("list"); return { status: "ok", spaces: listed }; },
     activity: async () => { calls.push("activity"); return { status: "ok", sessions, truncated: false }; },
     watch: async () => { calls.push("watch"); return (async function* () { while (true) yield await new Promise<{ kind: string; spaceId: string | null }>(resolve => events.push(resolve)); })(); },
-    create: async request => { calls.push(`create ${request.name}`); listed = [...listed, item("work", [...(request.projectIds ?? [])])]; return { status: "ok", message: null, space: item("work") }; },
-    update: ok, delete: async () => ({ status: "invalid", message: "The default space holds every project and cannot be deleted.", space: null }),
+    create: async request => { calls.push(`create ${request.name}`); listed = [...listed, item("work", [...(request.projectIds ?? [])])]; return { status: "ok", message: null, space: item("work"), movedSessions: 0 }; },
+    update: ok, delete: async () => ({ status: "invalid", message: "The default space holds every project and cannot be deleted.", space: null, movedSessions: 0 }),
     assign: async request => { calls.push(`assign ${request.projectId} +${request.join} -${request.leave}`); return ok(); }, reorder: ok,
     shown: async request => { calls.push(`shown ${request.id}`); return ok(); },
   };
@@ -321,13 +346,14 @@ test("a card of the overview opens the page of its space, which shows what it is
   const spaces = readSpaces([item("default"), item("work", ["alpha"], { description: "The projects of my job." })]);
   const projects = [project("alpha"), project("beta")];
 
-  const overview = renderToStaticMarkup(<SpaceSettings hub={hub} spaces={spaces} projects={projects} shownId="default" activity={new Map()} canEdit onShow={never} onCreate={never} />);
+  const overview = renderToStaticMarkup(<SpaceSettings hub={hub} spaces={spaces} projects={projects} chats={new Map()} shownId="default" activity={new Map()} canEdit showOthers={false}
+    onShowOthers={never} onShow={never} onCreate={never} />);
   assert.match(overview, /class="space-open" title="Open Work"/);
   assert.match(overview, /class="space-open" title="Open Default"/);
   assert.match(overview, /The projects of my job\./);
   assert.doesNotMatch(overview, /space-name/, "A card is no longer where a space is named: its page is.");
 
-  const page = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[1]} spaces={spaces} projects={projects} shown={false} activity={undefined} canEdit
+  const page = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[1]} spaces={spaces} projects={projects} chats={2} shown={false} activity={undefined} canEdit
     onBack={never} onShow={never} onDeleted={never} />);
   assert.match(page, /<h1>Work<\/h1>/);
   assert.match(page, />Spaces</, "Back leads to the spaces.");
@@ -337,7 +363,7 @@ test("a card of the overview opens the page of its space, which shows what it is
   assert.match(page, />Delete</);
   for (const absent of ["Available here", "New sessions", "Identity"]) assert.doesNotMatch(page, new RegExp(absent), `${absent} has nothing to show yet.`);
 
-  const pool = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[0]} spaces={spaces} projects={projects} shown activity={undefined} canEdit
+  const pool = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[0]} spaces={spaces} projects={projects} chats={0} shown activity={undefined} canEdit
     onBack={never} onShow={never} onDeleted={never} />);
   assert.match(pool, /Every project is in this space\./);
   assert.match(pool, /<h2[^>]*>Projects<span class="space-section-count">2</);

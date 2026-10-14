@@ -81,8 +81,14 @@ test("the window shows one space at a time: its projects, its sessions and its o
     await command("Page.reload");
     assert.equal(await wait("!!document.querySelector('#project-list') && !!document.querySelector('.space-switch-name')"), true, exceptions.join("\n"));
 
-    // The default space: every project, and one icon for each space at the foot of the Explorer.
+    // The default space: the projects of no other space, and one icon for each space at the foot of the Explorer. It
+    // says so once, with Show all, which shows what belongs to the other spaces too.
     assert.equal(await shown(), "Default");
+    assert.equal(await wait("JSON.stringify([...document.querySelectorAll('#project-list .project-action-row > button:first-child')].map(row=>row.textContent.trim()))==='[\"Project\"]'"), true);
+    assert.equal(await wait("[...document.querySelectorAll('.bp6-toast')].some(toast=>toast.textContent.includes('shows what belongs to no other space'))"), true);
+    await evaluate("[...document.querySelectorAll('.bp6-toast')].find(toast=>toast.textContent.includes('shows what belongs to no other space')).querySelector('a').click()");
+    assert.equal(await wait("localStorage.getItem('codealta.desktop.space.showOthers.v1')==='true'"), true);
+    assert.equal(await wait("document.querySelectorAll('#project-list .project-action-row > button:first-child').length===2"), true);
     assert.deepEqual(await projects(), ["Other project", "Project"]);
     assert.equal(await evaluate("document.querySelectorAll('.space-chip').length"), 2);
     assert.equal(await wait("spacesFixture.shown.includes('default')"), true, "The host is told which space the window shows.");

@@ -201,8 +201,10 @@ import { createSpacesHub } from "./spaces/spacesHub";
 import { SpaceActivityBar, SpaceSwitch } from "./spaces/SpaceViews";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
-import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers, spaceShows,
-  spaceStorageKey, waitingSubSessions, type WaitingSubSession } from "./spaces/spaces";
+import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
+import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
+import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
+  spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, type Space, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { composerTierEntries } from "./modelTiers";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
@@ -330,15 +332,20 @@ function App() {
   const spacesState = useSyncExternalStore(spacesHub.subscribe, spacesHub.getSnapshot);
   const [spaceId, writeSpaceId] = useState(() => restoreShownSpace(() => localStorage.getItem(shownSpaceKey)));
   const shownSpace = useRef(spaceId);
+  // Whether the default space shows what belongs to the other spaces too: a choice of this window, kept as the shown space is.
+  const [showOthers, writeShowOthers] = useState(() => { try { return localStorage.getItem(showOthersKey) === "true"; } catch { return false; } });
+  const showingOthers = useRef(showOthers);
   const catalog = useRef<WorkspaceSnapshot | undefined>(undefined);
-  const scopedMembers = useRef<ReadonlySet<string> | null>(null);
+  // What the window was last given of the catalog: it is given the catalog again when that changes.
+  const scopedView = useRef<string | null>(null);
   const [workspace] = useState(() => ({ ...workspaceApi, snapshot: async (...request: Parameters<typeof workspaceApi.snapshot>) => {
     const fresh = await workspaceApi.snapshot(...request);
     // A window that comes back on a space waits for the spaces before it shows the projects of that one alone.
     if (shownSpace.current !== defaultSpaceId) await spacesHub.whenLoaded(6_000);
     catalog.current = fresh;
-    scopedMembers.current = spaceMembers(spacesHub.getSnapshot().spaces, shownSpace.current);
-    return scopeSnapshot(fresh, scopedMembers.current);
+    const view = spaceView(spacesHub.getSnapshot().spaces, shownSpace.current, showingOthers.current);
+    scopedView.current = spaceViewKey(view);
+    return scopeSnapshot(fresh, view);
   } }));
   const [batchDeletion] = useState(() => createSessionBatchDeletion(workspace.deleteSession));
   const batchDeletionState = useSyncExternalStore(batchDeletion.subscribe, batchDeletion.getSnapshot);
@@ -703,6 +710,8 @@ function App() {
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
   // The session whose project is being chosen, with the project it is in when its menu was used.
   const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
+  // The session the window that gives it another space is open for, with the space it is in now.
+  const [movingToSpace, setMovingToSpace] = useState<Readonly<{ id: string; title: string; projectId: string | null; spaceId: string }> | null>(null);
   // The row of a session dragged onto the row of another project, and that project.
   const rowDrag = useSessionRowDrag(id => currentSnapshot.current?.projects.find(project => project.id === id),
     (drag, project) => { if (!movingPending.current) { setMenuTarget(null); void moveSessionTo(drag, project); } });
@@ -915,11 +924,34 @@ function App() {
   useEffect(() => {
     const full = catalog.current;
     if (!full || workspaceState.kind !== "ready" || !spacesState.loaded) return;
-    const members = spaceMembers(spacesState.spaces, shownSpace.current);
-    if (sameMembers(members, scopedMembers.current)) return;
-    scopedMembers.current = members;
-    publishWorkspaceState({ kind: "ready", snapshot: scopeSnapshot(full, members) });
-  }, [spacesState.spaces, spacesState.loaded, workspaceState.kind]);
+    const view = spaceView(spacesState.spaces, shownSpace.current, showOthers);
+    const key = spaceViewKey(view);
+    if (key === scopedView.current) return;
+    scopedView.current = key;
+    publishWorkspaceState({ kind: "ready", snapshot: scopeSnapshot(full, view) });
+  }, [spacesState.spaces, spacesState.loaded, workspaceState.kind, showOthers]);
+  function setShowOthers(value: boolean) {
+    showingOthers.current = value;
+    writeShowOthers(value);
+    try { localStorage.setItem(showOthersKey, value ? "true" : "false"); } catch { /* The choice holds for this run. */ }
+  }
+  // Once, when the window first finds spaces that hold something: the default space shows what belongs to no other
+  // space, and a click shows everything there again.
+  useEffect(() => {
+    if (!spacesState.loaded || !spacesState.available || workspaceState.kind !== "ready") return;
+    try {
+      if (localStorage.getItem(toldDefaultKey)) return;
+      localStorage.setItem(toldDefaultKey, "1");
+    } catch { return; }
+    const full = catalog.current;
+    const others = spacesState.spaces.filter(space => !space.isDefault);
+    const hides = others.some(space => space.projectIds.length > 0)
+      || !!full?.sessions.some(session => session.spaceId !== null && others.some(space => space.id === session.spaceId));
+    if (!hides || showingOthers.current) return;
+    showToast({ intent: "primary", icon: "info-sign", timeout: 20_000,
+      message: translate(shownLocale.current, "The Default space now shows what belongs to no other space."),
+      action: { text: translate(shownLocale.current, "Show all"), onClick: () => { setShowOthers(true); showSpaceLatest.current(defaultSpaceId); } } }, "space:default");
+  }, [spacesState.loaded, spacesState.available, workspaceState.kind]);
   // A space that is gone (removed here, by a command or by another instance) gives its place to the default one,
   // and the tabs the window kept for it are forgotten.
   useEffect(() => {
@@ -1130,9 +1162,9 @@ function App() {
     shownSpace.current = next;
     writeSpaceId(next);
     persistShownSpace(value => localStorage.setItem(shownSpaceKey, value), next);
-    const members = spaceMembers(known, next);
-    scopedMembers.current = members;
-    const scoped = scopeSnapshot(full, members);
+    const view = spaceView(known, next, showingOthers.current);
+    scopedView.current = spaceViewKey(view);
+    const scoped = scopeSnapshot(full, view);
     publishWorkspaceState({ kind: "ready", snapshot: scoped });
     const kept = spaceTabs.current.get(next);
     const entering = shapeTabs(reconcileSessionTabs(kept?.tabs ?? restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, next))) ?? emptySessionTabs(), scoped));
@@ -1162,11 +1194,11 @@ function App() {
     }
     if (creationAlive.current) showSpace(leaving.spaceId, leaving.target, true);
   }
-  // A session of a project that the shown space does not have: the default space, which has every project, is shown first.
+  // A session the shown space does not list: its own space is shown first.
   function revealSession(session: WorkspaceSession) {
     const target = { projectId: session.scopeKind === "project" ? session.projectId : null, sessionId: session.id };
     if (currentSnapshot.current?.sessions.some(candidate => candidate.id === session.id)) selectProject(target.projectId, target.sessionId);
-    else showSpace(defaultSpaceId, target);
+    else showSpace(sessionHome(spacesHub.getSnapshot().spaces, { spaceId: session.spaceId, projectId: target.projectId }).id, target);
   }
   const revealSessionLatest = useRef(revealSession); revealSessionLatest.current = revealSession;
   // Shows a space on one of its sessions: the one that waits for the user there. A session that just started is read first.
@@ -1195,7 +1227,7 @@ function App() {
   useEffect(() => { spacesHub.onRequest((kind, id) => spaceRequest.current(kind, id)); }, [spacesHub]);
   // The sessions that need the user in a space that is not shown: listed at the foot of the Explorer, and said
   // once, when a session starts to wait, in a message that leads to it.
-  const calls = useMemo(() => spaceCalls(spacesState.spaces, spaceId, spacesState.sessions), [spacesState.spaces, spacesState.sessions, spaceId]);
+  const calls = useMemo(() => spaceCalls(spacesState.spaces, spaceId, spacesState.sessions, showOthers), [spacesState.spaces, spacesState.sessions, spaceId, showOthers]);
   const saidCalls = useRef<{ spaceId: string; sessions: ReadonlySet<string> } | null>(null);
   useEffect(() => {
     const said = saidCalls.current;
@@ -1224,7 +1256,7 @@ function App() {
     for (const session of spacesState.sessions) {
       // The session on screen, or one under it, whose pane already shows it waits, is not said again.
       if (!session.waiting || said.has(session.sessionId) || session.sessionId === sessionId || (sessionId !== null && session.ancestors.includes(sessionId))
-        || !spaceShows(spacesState.spaces, spaceId, session.projectId)) continue;
+        || !viewLists(spaceView(spacesState.spaces, spaceId, showOthers), session)) continue;
       showToast({ intent: "warning", icon: "help", timeout: 12_000,
         message: translate(shownLocale.current, "{title} waits for you", { title: session.title || translate(shownLocale.current, "A session") }),
         action: { text: translate(shownLocale.current, "Show"), onClick: () => { selectProject(session.projectId, session.sessionId); focusPromptSoon(); } } });
@@ -2716,6 +2748,7 @@ function App() {
     if (!access[pending.action]) return;
     if (pending.action === "fork") { branchHost.requests.open(pending.sessionId, "fork"); return; }
     if (pending.action === "move") { beginSessionMove(rows[0]); return; }
+    if (pending.action === "space") { beginSpaceMove(rows[0]); return; }
     if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
@@ -2744,6 +2777,7 @@ function App() {
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
       onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={sessionBookmarkEntries} deleteAsks={confirms.sessionDelete}
+      spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
   }
@@ -2809,7 +2843,7 @@ function App() {
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access.open) return;
     if (action === "rename" && !access.rename || action === "delete" && !access.delete || action === "fork" && !access.fork
-      || action === "move" && !access.move) return;
+      || action === "move" && !access.move || action === "space" && !access.space) return;
     const switching = selectedSessionId.current !== row.id;
     if (switching) setSessionId(row.id);
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
@@ -2817,6 +2851,7 @@ function App() {
     // The window of the fork is the one of the session's pane: the session is selected, and its pane shows it.
     if (action === "fork") { dismissSessionMenu(false); branchHost.requests.open(row.id, "fork"); return; }
     if (action === "move") { dismissSessionMenu(false); beginSessionMove(row); return; }
+    if (action === "space") { dismissSessionMenu(false); beginSpaceMove(row); return; }
     dismissSessionMenu(false);
     if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
     if (action === "rename") {
@@ -2839,6 +2874,48 @@ function App() {
   }
 
   // The session is the selected one, in the selected project: the window asks which project it goes to.
+  // A session chosen in its menu goes to another space: the space it is in now is not offered.
+  function beginSpaceMove(row: WorkspaceSession) {
+    if (movingPending.current) return;
+    setRenamingId(null);
+    setDeletingId(null);
+    const home = sessionHome(spacesHub.getSnapshot().spaces, { spaceId: row.spaceId, projectId: row.scopeKind === "project" ? row.projectId : null });
+    setMovingToSpace({ id: row.id, title: plainTitle(row.title), projectId: row.scopeKind === "project" ? row.projectId : null, spaceId: home.id });
+  }
+  async function moveSessionToSpaceNow(moving: NonNullable<typeof movingToSpace>, target: Space) {
+    const capability = mutation?.capability;
+    if (movingPending.current || !owned || !capability?.canMutate() || target.id === moving.spaceId) return;
+    movingPending.current = true;
+    setMovingBusy(true);
+    let readAgain = false;
+    try {
+      const result = await moveSessionToSpace(workspace.moveSessionToSpace, status?.hostEpoch, moving.id, target.id);
+      if (!creationAlive.current) return;
+      let fresh: WorkspaceSnapshot | undefined;
+      if (result.kind === "moved" || result.code === "move_unconfirmed" || result.code === "move_partial") {
+        try { fresh = await workspace.snapshot({}, { signal: creationRefresh.current.signal, timeoutMilliseconds: 30_000 }); }
+        catch { fresh = undefined; }
+        if (!creationAlive.current) return;
+      }
+      readAgain = result.kind === "moved" && !fresh?.configured;
+      if (fresh?.configured) publishWorkspaceState({ kind: "ready", snapshot: fresh });
+      setMovingToSpace(null);
+      if (result.kind === "moved") {
+        // The session is in the other space now: a click there shows it.
+        showToast({ message: t("Moved to {space}.", { space: target.name }), intent: "success", icon: "tick", timeout: 6000,
+          action: target.id === shownSpace.current ? undefined : { text: t("Show"), onClick: () => void openSpaceSessionLatest.current(target.id, { projectId: moving.projectId, sessionId: moving.id }) } });
+        if (result.warnings.length > 0)
+          showToast({ message: `${t("The session moved, but:")} ${result.warnings[0]}`, intent: "warning", icon: "warning-sign", timeout: 12000 });
+      } else showToast({ message: t(spaceMoveMessage(result.code)), intent: "danger", icon: "error", timeout: 8000 });
+    } finally {
+      movingPending.current = false;
+      if (creationAlive.current) {
+        setMovingBusy(false);
+        sessionLists.resume(readAgain);
+      }
+    }
+  }
+
   function beginSessionMove(row: WorkspaceSession) {
     const project = selectedProject;
     if (!project || project.archived || row.projectId !== project.id || row.workspacePath !== project.path || movingPending.current) return;
@@ -3785,6 +3862,8 @@ function App() {
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...sessionBookmarkEntries(session),
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
+                  ...(spacesState.available && spacesState.spaces.length > 1
+                    ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
@@ -3977,6 +4056,7 @@ function App() {
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
+        chats={spaceChatCounts(catalog.current?.sessions ?? [])} showOthers={showOthers} onShowOthers={setShowOthers}
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
@@ -4068,6 +4148,8 @@ function App() {
       }} onClose={() => setDialog(null)} />}
     {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
       style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
+    {movingToSpace && <MoveToSpaceDialog title={movingToSpace.title} spaces={spacesState.spaces} currentId={movingToSpace.spaceId} busy={movingBusy}
+      onMove={space => void moveSessionToSpaceNow(movingToSpace, space)} onClose={() => { if (!movingPending.current) setMovingToSpace(null); }} />}
     {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
       projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
       onClose={() => { if (!movingPending.current) setMovingSession(null); }} />}

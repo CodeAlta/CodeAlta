@@ -249,6 +249,7 @@ Useful read commands:
 ```text
 alta session current
 alta session list --project <project> --state all --limit 20
+alta session list --space <space>
 alta session info <session-id>
 alta session status <session-id>
 alta session children <session-id> --recursive
@@ -309,6 +310,11 @@ its first prompt, or the first line of its last message). With `--set` in the sa
 is the given one and only the mode is recorded. The command changes that session only, never the
 `[sessions] title` setting. `alta session info` and `alta session list` print `titleSource`, and
 `titleMode` for a session that has a mode of its own.
+
+`alta session list --space <space>` lists the sessions of a space, as the window lists them: the sessions
+that record it, and those created before sessions had a space in every space of their project (such a chat in
+the default space). The records of a session (`alta.session.item`, `alta.session.info`) name the space it
+records as `spaceId`, absent for one that records none.
 
 `alta session create --project <project> --worktree` creates the session in a new git worktree: a
 checkout of its own, in the folder the user chose for worktrees, on a new branch `alta/<name>`. It starts

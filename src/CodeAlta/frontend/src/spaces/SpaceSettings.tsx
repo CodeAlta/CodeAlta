@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type ReactNode } from "react";
-import { Button, InputGroup } from "@blueprintjs/core";
+import { Button, InputGroup, Switch } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { brandColor } from "../brands";
 import { SettingsPage } from "../SettingsPage";
@@ -49,13 +49,17 @@ export function opensSpace(target: EventTarget | null, card: Element): boolean {
  * onto a space to join it, from a space to another to move (with Ctrl, to be in both), and back to the list to
  * leave. A click on a space opens its page, where it is named, described, given its projects and set up.
  */
-export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdit, onShow, onCreate }: {
+export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity, canEdit, showOthers, onShowOthers, onShow, onCreate }: {
   hub: SpacesHub; spaces: readonly Space[];
   /** Every project of the catalog. */
   projects: readonly SpaceProject[];
+  /** How many chats each space has, by its identifier. */
+  chats: ReadonlyMap<string, number>;
   shownId: string; activity: ReadonlyMap<string, SpaceActivity>;
   /** Whether the host lets spaces be changed. */
   canEdit: boolean;
+  /** Whether the default space shows what belongs to the other spaces too: a choice of the window. */
+  showOthers: boolean; onShowOthers: (value: boolean) => void;
   onShow: (id: string) => void; onCreate: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -124,8 +128,8 @@ export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdi
   // A space deleted elsewhere closes its page.
   useEffect(() => { if (openId !== null && !open) setOpenId(null); }, [openId, open]);
   if (open) {
-    return <SpacePage hub={hub} space={open} spaces={spaces} projects={projects} shown={shownId === open.id} activity={activity.get(open.id)} canEdit={canEdit}
-      onBack={() => setOpenId(null)} onShow={() => onShow(open.id)} onDeleted={() => setOpenId(null)} />;
+    return <SpacePage hub={hub} space={open} spaces={spaces} projects={projects} chats={chats.get(open.id) ?? 0} shown={shownId === open.id} activity={activity.get(open.id)}
+      canEdit={canEdit} onBack={() => setOpenId(null)} onShow={() => onShow(open.id)} onDeleted={() => setOpenId(null)} />;
   }
 
   const opener = (id: string) => ({ onClick: (event: MouseEvent<HTMLElement>) => { if (opensSpace(event.target, event.currentTarget)) setOpenId(id); } });
@@ -137,6 +141,8 @@ export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdi
       <section className="space-pool" aria-label={pool.name} {...dropTarget(null)} {...opener(pool.id)}>
         <SpaceCardHeading space={pool} activity={activity.get(pool.id)} onOpen={() => setOpenId(pool.id)} />
         <p className="space-pool-note">{t("Every project is here. Drag a project onto a space to add it.")}</p>
+        {others.length > 0 && <Switch className="space-show-others" checked={showOthers} label={t("Show what belongs to other spaces")}
+          onChange={event => onShowOthers(event.currentTarget.checked)} />}
         {projects.length > 8 && <InputGroup type="search" size="small" value={filter} placeholder={t("Search")} aria-label={t("Search")}
           leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} onChange={event => setFilter(event.target.value)} />}
         <ul className="space-projects">

@@ -299,6 +299,10 @@ A session belongs to one space for its whole life. The first line of its journal
 
 A session that records no space (one created before sessions had a space, or by the TUI) is in the space of its project when the project is in exactly one, and in the default space otherwise. A `space_id` that names no space (a space deleted, maybe by the other instance) is read as the default space. `SpaceCatalog.ResolveSessionSpace` applies these rules and never throws for what a journal says. Journals are not rewritten.
 
+Where a session is **listed** (`SpaceCatalog.SessionSpaces`, and `sessionSpaces` in the page) is one space for a session that records one; a session that records none is listed in every space of its project, and in the default space when its project is in no other, and such a chat in the default space. `alta session list --space` and the Explorer follow it.
+
+`SessionViewJournalStore.MoveSessionToSpaceAsync` gives an idle chat or project session another space: like a move to another project, the first line of the journal is written again (with the local state after it) in one replacement of the file, and the history, the summary and the provider continuation stay. `SessionRuntimeService` moves the session with the sessions it started, refuses one at work, and retires its attachment; `OwnedSessionCommandService.MoveSessionToSpaceAsync` holds the catalog-mutation reservation while it runs. `MoveSpaceChatsAsync` gives the chats that record a space another one: deleting a space moves its chats to the default space this way.
+
 The Runtime Context of an agent names the space of its session, with what it is for on the same line (the description, joined and cut at 300 characters), as soon as the catalog has a space besides the default one:
 
 ```text

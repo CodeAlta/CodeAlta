@@ -72,7 +72,7 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, onMore, onFewer, tree, drag }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, spaces = false, onMore, onFewer, tree, drag }: {
   /** The sessions listed, and what stands for the sub-agents that are not. */
   entries: readonly SessionListEntry[];
   /** Whether the scope is the global sessions, and not a project. */
@@ -84,7 +84,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
-  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean }>;
+  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean; space?: boolean }>;
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
@@ -96,6 +96,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   actionEntries?: (session: WorkspaceSession) => SessionMenuEntry[];
   /** Whether deleting a session asks first, which its menu says. */
   deleteAsks?: boolean;
+  /** Whether there are spaces other than the default one, which a session can be moved to. */
+  spaces?: boolean;
   onMore: () => void;
   onFewer: () => void;
   /** The sub-agents of a session: hidden or shown, and more or fewer of them listed. */
@@ -151,6 +153,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
             ...(actionEntries?.(session) ?? []),
             ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
+            ...(spaces ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !allowed.space, onSelect: () => onAction(session, "space") }] : []),
             { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
             ...(menuEntries?.(session) ?? []),
             ...pluginEntries,

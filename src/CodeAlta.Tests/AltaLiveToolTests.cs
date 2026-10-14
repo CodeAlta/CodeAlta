@@ -2397,8 +2397,7 @@ public sealed partial class AltaLiveToolTests
             .Add<IAltaSpaceView>(view)
             .Add(sessionCatalog)
             .Add(runtime)
-            .Add<IReadOnlyList<ModelProviderDescriptor>>([descriptor])
-            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+            .Add<IReadOnlyList<ModelProviderDescriptor>>([descriptor]));
 
         async Task<JsonElement> Create(AltaCallerIdentity caller, params string[] more)
         {
@@ -2437,6 +2436,21 @@ public sealed partial class AltaLiveToolTests
         var windowDetail = ReadJsonLines(window.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.space.detail");
         Assert.AreEqual("personal", windowDetail.GetProperty("id").GetString());
         Assert.AreEqual("window", windowDetail.GetProperty("source").GetString());
+        // `alta session list --space` lists the sessions of a space, as the window does.
+        async Task<string?[]> SessionsOf(string space)
+        {
+            var listed = await dispatcher.InvokeAsync(["session", "list", "--space", space, "--state", "all"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Stdout + listed.Stderr);
+            return [.. ReadJsonLines(listed.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.item")
+                .Select(static line => line.GetProperty("spaceId").GetString() + ":" + line.GetProperty("title").GetString()).Order()];
+        }
+
+        var business = await SessionsOf("business").ConfigureAwait(false);
+        Assert.IsTrue(business.Length >= 3 && business.All(static value => value!.StartsWith("business:", StringComparison.Ordinal)), string.Join(", ", business));
+        Assert.AreEqual(1, (await SessionsOf("Personal").ConfigureAwait(false)).Length, "The session created while the window showed Personal.");
+        Assert.AreEqual(0, (await SessionsOf("default").ConfigureAwait(false)).Length);
+        Assert.AreEqual(AltaExitCodes.NotFound, (await dispatcher.InvokeAsync(["session", "list", "--space", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).ExitCode);
+
         var list = await dispatcher.InvokeAsync(["space", "list"], caller: agent).ConfigureAwait(false);
         Assert.AreEqual("business", ReadJsonLines(list.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.space.item"
             && line.GetProperty("current").GetBoolean()).GetProperty("id").GetString());

@@ -910,21 +910,49 @@ a workspace, which here is the catalog of projects and sessions and the main are
   **Work** and **Personal** (`SpaceCatalog.SeedAsync`, called in `DesktopApplication` before the page
   reads the spaces). It does nothing once `~/.alta/spaces/` exists, so what the user deleted does not
   come back.
-- A session belongs to one space for its whole life, recorded in its journal: a session created in the
-  window is in the space the window shows (the page names it in `workspace.createSession`), as are the
-  tasks, issues and questions about the guide started there; one an agent creates is in the space of that
-  agent; an automation's is in the only space of its project, else Default (see "The space of a session"
-  in `doc/catalog-and-config.md`). The agent is told its space in the Runtime Context.
-- Chats, the sessions of no project, are shown in every space.
+- A session belongs to one space for its whole life, recorded in its journal. Which space it gets:
+
+  | Created by | Space |
+  | --- | --- |
+  | The window: a new session or chat, a task or an issue started there, a question about the guide | The space the window shows (the page names it in `workspace.createSession`) |
+  | An agent (`alta session create`) | The space of that agent; it can name no other one |
+  | An automation | The only space of its project, else Default |
+  | A fork, or the session that keeps what a rewind removed | The space of its source |
+
+  See "The space of a session" in `doc/catalog-and-config.md`. The agent is told its space in the
+  Runtime Context.
+- **Where a session is listed** (`sessionSpaces` in `spaces.ts`, `SpaceCatalog.SessionSpaces` in the
+  catalog): a chat or a session of a project is listed in its own space only, under its project there.
+  A session created before sessions had a space (its journal records none) is listed in every space of
+  its project, and in Default when its project is in no other space; such a chat is in Default. A space
+  that no longer exists is read as Default.
+- **The Default space** shows the projects that are in no other space and the sessions that belong to
+  Default. **Show what belongs to other spaces**, a switch in the Default card of **Settings → Spaces**,
+  makes it show the whole catalog again. It is off; it is a choice of the window, kept with the shown
+  space (`codealta.desktop.space.showOthers.v1`). The first time the window finds spaces that hold
+  something, a toast says once that Default now shows what belongs to no other space, with **Show all**,
+  which turns the switch on and shows Default (`codealta.desktop.space.toldDefault.v1`).
+- **Move to space…** in the menu of a session (the Explorer and the tab), when there are other spaces,
+  opens a small window that lists the other spaces (`MoveToSpaceDialog`). The session moves with the
+  sessions it started (`workspace.moveSessionToSpace`, `OwnedSessionCommandService.MoveSessionToSpaceAsync`):
+  only the first line of each journal is written again, with the new `space_id`. A session that runs,
+  waits for an answer or has queued work is refused, as for **Move to project…**. Its attachment is
+  retired, so its next turn uses what the new space sets up; a session with Remote Control on is attached
+  again with it. A toast says where it went, with **Show**.
 - Deleting a space deletes its file, then its id in the file of each of its projects. The projects,
-  their folders and their sessions stay, in the Default space and in their other spaces.
+  their folders and their sessions stay, in the Default space and in their other spaces. Its chats go to
+  Default (`MoveSpaceChatsAsync`: their header records `default`); the confirmation popover of **Delete**
+  on the page of the space says how many. A chat at work is left as it is, and reads as Default anyway.
 
 **What follows the shown space.** Everything the window lists: the Explorer (projects, their sessions,
 terminals and work item badges), the search (projects, sessions, files), Open project, the browser of
 saved sessions, the Work items tab ("All projects" is the projects of the space), the project list of the
 Issues tab, and previous/next project. Automations are the application's: their tab lists every project.
-A session opened from a link, a work item or an automation whose project is not in the shown space
-shows the Default space first (`revealSession`). The code editor or the Changes tab that an agent asks
+A session opened from a link, a work item or an automation that the shown space does not list shows
+its own space first (`revealSession`, `sessionHome`).
+The marks of the spaces (the switch, the foot of the Explorer) and the sessions called out at the foot
+(`spaceCalls`) follow where each session is listed: a session counts in its own space, an older one in
+every space of its project, and a call names its own space. The code editor or the Changes tab that an agent asks
 for (`alta editor open`, `alta diff show`), or that a link to a file opens, is shown at once only for a
 project of the shown space. For a project of another space the window stays where the user is and a
 toast says where it opens ("The editor of CodeAlta opens in Work"), with **Show**: the button shows
@@ -4171,7 +4199,7 @@ prompt) opens **Commands and shortcuts**, a filterable window listing the comman
 One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, with the ranking in
 `searchResults.ts`). It takes the place of the command palette and of the two filters the Explorer had.
 
-- **What it finds.** In the space the window shows (see "Spaces"): the **sessions** of every project and the chats, the **projects**, the **files** of
+- **What it finds.** In the space the window shows (see "Spaces"): the **sessions** it lists, its chats included, the **projects**, the **files** of
   the project in front (the one of the code editor or the Changes tab shown, otherwise the selected
   project), and the **commands**, those of plugins included. Enter opens what is selected: a session in
   its tab, a project with its new-session tab and its sessions shown in the Explorer, a file in the code

@@ -741,19 +741,23 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static Command CreateSessionListCommand(AltaCommandContext context)
     {
         string? project = null;
+        string? space = null;
         string? state = null;
         string? provider = null;
         var limit = 50;
         var includeMetrics = false;
         var command = Leaf("list", "List recoverable/live sessions as JSONL.");
         command.Add("project=", "Filter by project id, slug, or path.", value => project = value);
+        command.Add("space=", "Filter by space: id, start of id, or name. The sessions listed in that space.", value => space = value);
         command.Add("state=", "Filter by running, idle, inactive, archived, or all.", value => state = ValidateState(value));
         command.Add("provider=", "Filter by provider id.", value => provider = value);
         command.Add("backend=", "Compatibility alias for --provider.", value => provider = value);
         command.Add("limit=", "Maximum sessions to return.", (int value) => limit = value);
         command.Add("metrics", "Include compact session metrics for emitted rows. This reads stored session history.", value => includeMetrics = value is not null);
-        command.Add(async (_, _) => await HandleSessionListAsync(context, project, state, provider, limit, includeMetrics).ConfigureAwait(false));
-        AddHelpText(command, "Examples: `alta session list --project CodeAlta --state all --limit 20`; add `--metrics` for compact duration/usage fields.");
+        command.Add(async (_, _) => await HandleSessionListAsync(context, project, space, state, provider, limit, includeMetrics).ConfigureAwait(false));
+        AddHelpText(command,
+            "Examples: `alta session list --project CodeAlta --state all --limit 20`; add `--metrics` for compact duration/usage fields.",
+            "`--space <space>` lists the sessions of a space: the ones that record it, and those created before sessions had a space in every space of their project. `spaceId` is the space a session records.");
         return command;
     }
 
@@ -1905,6 +1909,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static async ValueTask<int> HandleSessionListAsync(
         AltaCommandContext context,
         string? projectFilter,
+        string? spaceFilter,
         string? stateFilter,
         string? providerFilter,
         int limit,
@@ -1936,10 +1941,33 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
         }
 
+        Func<AltaSessionInfo, bool> inSpace = static _ => true;
+        if (!string.IsNullOrWhiteSpace(spaceFilter))
+        {
+            if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaceCatalog))
+            {
+                return AltaExitCodes.ServiceUnavailable;
+            }
+
+            var (space, exitCode) = await ResolveSpaceAsync(context, spaceCatalog, spaceFilter, "alta session list").ConfigureAwait(false);
+            if (space is null)
+            {
+                return exitCode;
+            }
+
+            var spaces = await spaceCatalog.LoadAsync(context.CancellationToken).ConfigureAwait(false);
+            var projects = (await spaceCatalog.Projects.LoadAsync(context.CancellationToken).ConfigureAwait(false))
+                .ToDictionary(static value => value.Id, StringComparer.OrdinalIgnoreCase);
+            inSpace = info => SpaceCatalog.SessionSpaces(info.Session.SpaceId,
+                info.Session.Kind == SessionViewKind.GlobalSession || info.Session.ProjectRef is null ? null : projects.GetValueOrDefault(info.Session.ProjectRef), spaces)
+                .Contains(space.Id, StringComparer.Ordinal);
+        }
+
         var includeArchived = string.Equals(stateFilter, "archived", StringComparison.OrdinalIgnoreCase) ||
                               string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase);
         var filtered = infos
             .Where(info => project is null || string.Equals(info.Session.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase))
+            .Where(inSpace)
             .Where(info => string.IsNullOrWhiteSpace(providerFilter) || string.Equals(info.Session.ProviderId, providerFilter, StringComparison.OrdinalIgnoreCase))
             .Where(info => includeArchived || !string.Equals(info.State, "archived", StringComparison.OrdinalIgnoreCase))
             .Where(info => string.IsNullOrWhiteSpace(stateFilter) || string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase) || string.Equals(info.State, stateFilter, StringComparison.OrdinalIgnoreCase))
@@ -5722,6 +5750,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             providerKey = info.Session.ResolvedProviderKey,
             projectId = info.Session.ProjectRef,
             projectRef = info.Session.ProjectRef,
+            // The space the session records; absent for one created before sessions had a space.
+            spaceId = info.Session.SpaceId,
             parentSessionId = info.Session.ParentSessionId,
             createdBy = info.Session.CreatedBy,
             title = info.Session.Title,
