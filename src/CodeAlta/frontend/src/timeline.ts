@@ -60,6 +60,8 @@ export type TimelineItem = Readonly<{
   providerPrompt?: boolean;
   /** The provider of an error that says it has no Claude Code CLI to run: the card proposes its download. */
   missingCliProvider?: string;
+  /** Where a prompt made outside CodeAlta was made (in VS Code, in a terminal), on the conversation its provider keeps. */
+  madeElsewhere?: ExternalOrigin;
   /** What a system prompt record says: its row is one line, and its texts are read by its window. */
   prompt?: PromptRow;
 }>;
@@ -76,6 +78,20 @@ export type ToolCallIdentity = Readonly<{ providerId: string; runId: string | nu
   images?: ReadonlyArray<TimelineImage> }>;
 
 type JsonObject = Record<string, unknown>;
+
+/** Where a turn made outside CodeAlta was made, as the content identifier of its prompt names it. */
+export type ExternalOrigin = "vscode" | "terminal" | "other" | "unknown";
+
+/** The subtitle of a prompt made outside CodeAlta, by where it was made: an English key of the translations. */
+export const externalOriginSubtitles = Object.freeze({
+  vscode: "in VS Code", terminal: "in a terminal", other: "in another application", unknown: "outside CodeAlta",
+} as const satisfies Record<ExternalOrigin, string>);
+
+/** Reads where a prompt was made outside CodeAlta from its content identifier (`external:<where>:<id>`), or null. */
+export function externalOrigin(contentId: string | null | undefined): ExternalOrigin | null {
+  const match = /^external:(vscode|terminal|other|unknown):/u.exec(contentId ?? "");
+  return match ? match[1] as ExternalOrigin : null;
+}
 
 // A journal record always presents the same way, and a window keeps its record objects when it grows or is
 // refreshed. Remembering the item of a record keeps a long timeline cheap to rebuild and lets its rows
@@ -207,6 +223,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   // The end of a background job is a prompt of the host: it is shown as what it is, without its envelope.
   const job = !fromAgent || delegated ? null : parseJobResult(entry.text);
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
+  const elsewhere = fromAgent && !delegated && !job ? externalOrigin(entry.contentId) : null;
   let prompt: PromptRow | undefined;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
@@ -226,7 +243,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     else if (toolImages) { category = "image"; icon = "fileImage"; title = "Image"; markdown = null; details = null; }
     else if (normalizedKind.endsWith("output")) { category = "tool"; icon = "tool"; title = friendly(kind); }
     else { title = friendly(kind || entry.eventType); }
-    subtitle = streaming ? "Streaming" : delegated
+    subtitle = streaming ? "Streaming" : elsewhere ? externalOriginSubtitles[elsewhere] : delegated
       ? friendly(delegated.kind)
       : job ? [job.title, job.result].filter(part => part).join(" · ")
       : category === "image" ? toolImages!.map(image => image.title).join(", ") : null;
@@ -346,6 +363,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     jobResult: job ?? undefined,
     providerPrompt: category === "user" && entry.contentId?.startsWith("provider:") ? true : undefined,
     missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
+    madeElsewhere: elsewhere ?? undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
   };

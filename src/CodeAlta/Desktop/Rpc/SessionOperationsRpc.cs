@@ -262,6 +262,24 @@ internal sealed class SessionOperationsService
         return new(await _commands.StopBackgroundTaskAsync(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
     }
 
+    // A session opened in the window shows the turns made outside CodeAlta (in VS Code, in a terminal) on the conversation
+    // of its provider: they are added to its journal, which the timeline reads. It leaves no receipt.
+    [NeoRpcMethod("catchUp")]
+    public async Task<SessionCatchUpResult> CatchUpAsync(SessionCatchUpRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId);
+        }
+
+        // Admitted work is not cancelled by the page that asked: what it writes, it writes whole.
+        return new(await _commands.CatchUpExternalTurnsAsync(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
+    }
+
     // The permission mode applies at once, also to a run in progress: it leaves no receipt, and the choices of the
     // session read it afterwards.
     [NeoRpcMethod("setPermissionMode")]

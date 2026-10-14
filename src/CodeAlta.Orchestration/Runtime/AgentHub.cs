@@ -572,6 +572,27 @@ public sealed partial class AgentHub : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Reads the turns made outside CodeAlta on the conversation the provider of a session keeps of it, when the provider
+    /// keeps such a copy that other programs continue. Nothing of the provider is started: the runtime the registry
+    /// keeps is asked, and only reads.
+    /// </summary>
+    /// <returns><see cref="AgentExternalTurns.None"/> when the provider keeps no such copy or is not registered.</returns>
+    /// <remarks>A provider whose descriptor does not say it shares its conversations is not asked: no runtime of it is created.</remarks>
+    internal async Task<AgentExternalTurns> ReadExternalTurnsAsync(AgentSessionState state, string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var providerId = new ModelProviderId(state.ProviderKey);
+        if (!_modelProviderRegistry.TryGetProvider(providerId, out var descriptor) || !descriptor.SharesConversations) return AgentExternalTurns.None;
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.GetOrCreateRuntimeAsync(providerId, cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return AgentExternalTurns.None; }
+        return runtime is IAgentModelProviderRuntime agent && agent.CreateProviderRegistration().TurnExecutor is IAgentProviderExternalTurns external
+            ? await external.ReadExternalTurnsAsync(state, workingDirectory, cancellationToken).ConfigureAwait(false)
+            : AgentExternalTurns.None;
+    }
+
     private async Task<ProviderSessionRuntimeLease> CreateStartedProviderRuntimeAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken)

@@ -267,6 +267,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       .finally(() => { if (!controller.signal.aborted) setLoadingChoices(false); });
     return () => controller.abort();
   }, [epoch, sessionId, capability, selections, choicesRevision, observing]);
+  // A session shown in the window shows the turns made outside CodeAlta (in VS Code, in a terminal) on the conversation
+  // of its provider: the host adds them to its journal, which the timeline then reads. Nothing is read again when
+  // nothing changed, and the next message adds them all the same.
+  useEffect(() => {
+    if (!observing || !capability.canMutate()) return;
+    const controller = new AbortController();
+    void Promise.resolve()
+      .then(() => sessions.catchUp({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 30_000 }))
+      .catch(() => { /* The next message adds them. */ });
+    return () => controller.abort();
+  }, [epoch, sessionId, observing, capability]);
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");

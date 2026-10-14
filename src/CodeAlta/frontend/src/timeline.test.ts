@@ -54,6 +54,23 @@ test("the error of a Claude Code provider without its CLI names the provider who
   assert.equal(other.missingCliProvider, undefined);
 });
 
+test("a prompt made outside CodeAlta says where it was made", () => {
+  const prompt = (contentId: string) => buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text: "Fix it.", contentId })])[0];
+  assert.deepEqual([prompt("external:vscode:01a1").title, prompt("external:vscode:01a1").subtitle, prompt("external:vscode:01a1").madeElsewhere],
+    ["You", "in VS Code", "vscode"]);
+  assert.equal(prompt("external:terminal:01a1").subtitle, "in a terminal");
+  assert.equal(prompt("external:other:01a1").subtitle, "in another application");
+  assert.equal(prompt("external:unknown:01a1").subtitle, "outside CodeAlta");
+  // A prompt of CodeAlta, and the answer of a turn made elsewhere, say nothing of it.
+  assert.deepEqual([prompt("user:01a1").subtitle, prompt("user:01a1").madeElsewhere], [null, undefined]);
+  const [answer] = buildTimelineItems([entry({ eventType: "contentCompleted", kind: "Assistant", text: "Fixed.", contentId: "external:vscode:01a1" })]);
+  assert.equal(answer.madeElsewhere, undefined);
+  // The cannot-follow notice of a catch-up is a warning the timeline shows.
+  const [notice] = buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "Warning",
+    text: "This conversation was changed outside CodeAlta in a way it cannot follow; the model has the full conversation." })]);
+  assert.equal(notice.category, "error");
+});
+
 test("TUI status-only updates do not become timeline cards", () => {
   assert.deepEqual(buildTimelineItems(["Idle", "UsageUpdated", "Shutdown"].map(kind => entry({ eventType: "sessionUpdate", kind }))), []);
 });

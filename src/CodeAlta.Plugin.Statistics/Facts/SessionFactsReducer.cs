@@ -129,6 +129,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             return;
         }
 
+        // A turn made outside CodeAlta (in VS Code, in a terminal) and added to the journal afterwards is no work of
+        // CodeAlta: its provider reported no usage for it, and its run, prompt and tool calls are not counted either.
+        if (record.RunId?.StartsWith(CodeAlta.Agent.Runtime.AgentSessionTurn.ExternalRunPrefix, StringComparison.Ordinal) == true)
+        {
+            return;
+        }
+
         _recordsInBatch = true;
         if (_state.FirstRecord is not { } first || timestamp < first)
         {

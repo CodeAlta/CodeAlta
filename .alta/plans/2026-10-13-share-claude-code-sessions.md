@@ -359,12 +359,87 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
         only under `<id>/tool-results/`, up to 4 MB.
 
 ### Phase 4: catch-up (commit)
-- [ ] Executor interface `ReadExternalTurnsAsync`; `SessionRuntimeService.CatchUpExternalTurnsAsync`
+- [x] Executor interface `ReadExternalTurnsAsync`; `SessionRuntimeService.CatchUpExternalTurnsAsync`
       (actor, idle guards, append, state with counts/leaf/cost, retire attachment).
-- [ ] Call it before an idle prompt, on open in the desktop, after Wait.
-- [ ] Timeline: mark turns made outside CodeAlta ("in VS Code" / "in a terminal").
-- [ ] Tests: counts keep the next turn on `--resume` (no preamble, no re-sent prompts); cost not billed
+      Done: `CodeAlta.Agent/Runtime/AgentExternalTurns.cs` (`IAgentProviderExternalTurns.ReadExternalTurnsAsync(state,
+      workingDirectory)` → `AgentExternalTurns(Status None/Unchanged/Read/CannotFollow/Missing, Turns, ProviderStateAfter(turns,
+      users, assistants))`), implemented by `ClaudeCodeTurnExecutor` with `ClaudeCodeExternalTurns.Read` (transcript only where
+      `--resume` from the working directory looks: `GetProjectFolder(root, wd)/<id>.jsonl`). Reached by
+      `AgentHub.ReadExternalTurnsAsync` on the runtime the registry keeps (nothing started; works for a session that is not
+      attached). Journal shapes in `AgentExternalTurnJournal.PrepareAsync` (the private serializers of `AgentSession` made
+      `internal`): per turn a run `external:<guid>`, `local.userMessage` + `contentCompleted{User, contentId
+      external:<vscode|terminal|other|unknown>:<guid>}`, `local.assistantMessage` + content/`ToolCall Requested`,
+      `ToolCall Started`, `local.toolMessage` + `Completed`/`Failed` + `ToolOutput`, `Idle` without usage, then a
+      `local.sessionState` (counts so far, leaf = last entry of the turn: a fork/rewind at a turn is exact); a turn the CLI
+      started gets a `provider:` prompt from its trigger text; images of prompts are saved with `PromptImageAttachmentStore`
+      (as pasted images), those of tool results with `AgentSessionToolImages`; a compaction is a `CompactionCompleted`
+      notice ("The conversation was compacted in VS Code."). `SessionRuntimeService.CatchUp.cs`: observe on the actor (guards
+      of provider selection + background tasks + held questions; `ProviderBranch` → nothing), read off the actor, commit on
+      the actor only if the state and the journal length are unchanged (`stale` otherwise); one catch-up per session at a
+      time (a send joins one in progress). Outcomes `appended`/`cannot_follow`/`unchanged`/`none`/`busy`/`stale`.
+      Provider state: `ClaudeCodeProviderState` gains `Position` (`transcript` object: offset, length, mtime ticks, first-line
+      hash, leaf, tail, leaf message id, last lines) and `Anchor` (last assistant entry). **Counts** = recorded + exactly what
+      was written. **Cost** = the last `cost-state` read; absent → the recorded cost is kept (a CLI that resumes counts from
+      the last `cost-state` of the transcript, which these turns did not change). Deviations:
+      - The interface is reached through the provider runtime of the registry, like `IAgentSessionRelocationProvider`,
+        not through a live session: the desktop opens sessions that are not attached.
+      - **Position** is recorded only by a catch-up (an answer cannot compute it without reading the file) and then kept by
+        every answer (`ClaudeCodeSession` carries it; dropped for a new or forked conversation). A read that found only
+        CodeAlta's own lines writes the new position only when the session has no attachment (an attached one would write
+        its state over it) and never retires an attachment.
+      - **CannotFollow** writes the notice (a `Warning` update) **and** a state whose leaf/position are the transcript's
+        current leaf (counts unchanged), and retires the attachment: otherwise the notice would be written at every open,
+        and the idle CLI process holds the conversation as it was.
+      - **LeafNotFound**: the reader cannot know where an unwritten leaf hung, so the session now records `Anchor` (the last
+        assistant entry, which the CLI writes); the turns are read after it and the leading tool results of the anchor's
+        calls (which the journal has) are dropped. Without an anchor, or when that read cannot follow either, it is
+        `CannotFollow`. (In practice the leaf is a tool result only when a run ended right after one.)
+      - Turns of an attached idle session are written and the attachment retired; with background tasks running the
+        catch-up is `busy` (retiring would end them).
+- [x] Call it before an idle prompt, on open in the desktop, after Wait.
+      Done: (a) `SendOwnedBodyAsync` before `ResolveCoordinatorEntryAsync` (`CatchUpBeforeSendAsync`, failures never stop the
+      prompt; also the TUI's sends, which share the runtime). (b) RPC `sessions.catchUp({expectedEpoch, sessionId})` →
+      `OwnedSessionCommandService.CatchUpExternalTurnsAsync` (busy while a command of the session is in flight), called by
+      `OwnedSessionPanel` whenever a session becomes visible; the catalog event bumps the display revision, which refreshes
+      the timeline. Unchanged costs a state read and a stat + first-line hash of the transcript. (c) Deviation: the run that
+      waited does **not** catch up (its prompt is already in the journal: turns written after it would be out of order, and
+      once it answered they could never be added). After the release, `RefuseTurnsMadeWhileWaiting` reads the transcript;
+      when the holder added turns the run ends with "Turns were added to the Claude Code conversation <id> in VS Code while
+      this run waited for it. CodeAlta adds them to this session before the next message: send the message again." The next
+      send catches up (the turns follow the failed prompt) and sends only its own prompt.
+- [x] Timeline: mark turns made outside CodeAlta ("in VS Code" / "in a terminal").
+      Done: `timeline.ts` reads `external:<where>:` prompt ids (`externalOrigin`, `madeElsewhere`), subtitle "in VS Code" /
+      "in a terminal" / "in another application" / "outside CodeAlta" (5 languages); the cannot-follow notice is a warning row.
+- [x] Tests: counts keep the next turn on `--resume` (no preamble, no re-sent prompts); cost not billed
       twice; "cannot follow" notice; statistics do not count external turns.
+      Done: `ClaudeCodeExternalTurnsTests` (8: end to end with the fake CLI and a written transcript — resumed, only "third"
+      sent, cost 0.01 not 0.26, turn rendered as made in VS Code, position kept by the next answer; images/compaction; cost
+      kept without `cost-state`; rewound → CannotFollow + state followed and not repeated; CannotFollow journal records;
+      unwritten leaf followed from the anchor; Unchanged/Missing/None; state round trip),
+      `ClaudeCodeHeldConversationTests.HeldConversation_Wait_EndsTheRun_WhenTheHolderAddedTurnsMeanwhile`,
+      `SessionCatchUpTests` (4: appended + attachment retired + next prompt follows; send catches up first; busy while a run;
+      cannot follow notice), `SessionFactsReducerTests.TurnMadeOutsideCodeAlta_IsNotCounted`, `timeline.test.ts`.
+      Statistics: external runs carry no usage record; the reducer also skips every record of an `external:` run (no run,
+      prompt or tool call is counted). A compaction made elsewhere (run-less notice) still counts as a compaction.
+- [x] Fixes of the independent review of Phase 4 (2026-10-14), each with its regression test first:
+      - CodeAlta's own lines read back as external: after a compaction of CodeAlta, and after a turn stopped or failed once
+        its prompt was sent, `ClaudeCodeSession.FollowOwnWrites` reads the transcript (turn gate held, right after the CLI
+        wrote) and moves leaf/anchor/position past the leading turns whose entrypoint is `sdk-cli` (or none);
+        `IAgentProviderStateUpdates.TakeProviderState` gives that state to `AgentSession`, which records it after a turn
+        that threw and after a provider compaction. No general `sdk-cli` net in the catch-up: `claude -p --resume` in a
+        terminal writes `sdk-cli` too.
+      - Re-reads of attached sessions: `ClaudeCodeTranscriptPositions` (owned by the executor) keeps the latest position
+        of each transcript read; reads start from the latest of it and the recorded one, and every answer records it.
+      - The summary is appended with the turns (one append), and the attachment is retired in a `finally` once the append
+        began; images saved for turns that are not written are deleted. Journal appends are one write
+        (`AgentSessionJournalFile.AppendLinesCoreAsync`): a process that ends leaves all the records of an append or none.
+      - A send that joins a catch-up that ended `busy`/`stale`/failed runs once more.
+      - `busy` also while a send or a compaction holds a work use of the attachment (`TryAcquireWorkUse`) and while Remote
+        Control is connecting or connected.
+      - `held` (`AgentExternalTurnsStatus.Held`): nothing is read while another live process holds the conversation and is
+        not `idle`.
+      - The hub asks only providers whose descriptor has `SharesConversations` (Claude Code): no runtime of another
+        provider is created on open.
 
 ### Phase 5: discovery and import (commit)
 - [ ] Discovery RPC + index of known CLI ids; import store method (temp file + rename) + RPC.

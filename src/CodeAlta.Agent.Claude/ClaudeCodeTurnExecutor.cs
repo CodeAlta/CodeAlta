@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.Claude;
@@ -16,6 +17,8 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderRemoteControl,
     IAgentProviderPermissionMode,
     IAgentProviderPromptSuggestions,
+    IAgentProviderExternalTurns,
+    IAgentProviderStateUpdates,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -39,6 +42,9 @@ internal sealed class ClaudeCodeTurnExecutor :
 
     /// <summary>Gets the reader of the registry of live sessions of the CLI, which tells whether another process holds a conversation.</summary>
     internal ClaudeCodeLiveSessions LiveSessions { get; }
+
+    /// <summary>Gets where the reads of the transcripts of the sessions of this executor stopped.</summary>
+    internal ClaudeCodeTranscriptPositions TranscriptPositions { get; } = new();
 
     /// <inheritdoc />
     public Task<AgentTurnResponse> ExecuteTurnAsync(
@@ -152,6 +158,40 @@ internal sealed class ClaudeCodeTurnExecutor :
     public Task<bool> SetRunningPermissionModeAsync(string sessionId, string? permissionMode, CancellationToken cancellationToken)
         => _sessions.TryGetValue(sessionId, out var session) ? session.SetRunningPermissionModeAsync(permissionMode, cancellationToken) : Task.FromResult(false);
 
+    /// <summary>
+    /// Reads the turns VS Code or the CLI in a terminal added to the transcript of the conversation of a session since
+    /// it recorded it. Nothing is started; the transcript is only read.
+    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>
+    /// While another live process holds the conversation and is not idle (VS Code in the middle of a turn, or waiting
+    /// for a permission), nothing is read: <see cref="AgentExternalTurnsStatus.Held"/>. A registry of live sessions that
+    /// cannot be read does not stop the read, as it does not stop a turn.
+    /// </remarks>
+    public Task<AgentExternalTurns> ReadExternalTurnsAsync(AgentSessionState state, string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        var root = ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        // A transcript can be tens of megabytes: it is read on the pool, not on the thread of the caller.
+        return Task.Run(() =>
+        {
+            var persisted = ClaudeCodeProviderState.Read(state);
+            if (persisted is { Leaf: not null } &&
+                LiveSessions.FindHolder(persisted.SessionId) is { Status: ClaudeCodeSessionHoldStatus.Held } hold &&
+                !string.Equals(hold.Holder?.Status, "idle", StringComparison.Ordinal))
+            {
+                return AgentExternalTurns.Held;
+            }
+
+            return ClaudeCodeExternalTurns.Read(root, persisted, workingDirectory, TranscriptPositions, cancellationToken);
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public JsonElement? TakeProviderState(string sessionId)
+        => _sessions.TryGetValue(sessionId, out var session) ? session.TakeUnrecordedState() : null;
+
     /// <inheritdoc />
     public async ValueTask DisposeProviderSessionAsync(string sessionId)
     {
@@ -179,6 +219,6 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        return _sessions.GetOrAdd(sessionId, static (id, executor) => new ClaudeCodeSession(id, executor._options, executor.OwnProcesses, executor.LiveSessions), this);
+        return _sessions.GetOrAdd(sessionId, static (id, executor) => new ClaudeCodeSession(id, executor._options, executor.OwnProcesses, executor.LiveSessions, executor.TranscriptPositions), this);
     }
 }

@@ -2071,6 +2071,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var failures = new List<Exception>();
         AgentRunId result = default;
         var ownedDefaultsRejected = false;
+        // The turns made outside CodeAlta on the conversation of an idle session are written before its prompt: the
+        // prompt follows them, and the provider is not sent what its conversation already holds.
+        await CatchUpBeforeSendAsync(session).ConfigureAwait(false);
         try
         {
             while (true)
@@ -2086,7 +2089,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             || !candidate.Matches(options, NormalizeOptionalText(candidate.PendingAgentPromptId)
                                 ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId)))
                             return default(AgentSessionHandleId);
-                        handleUse = candidate.Attachment.TryAcquireHandleUse();
+                        handleUse = candidate.Attachment.TryAcquireWorkUse();
                         if (handleUse is null) return default(AgentSessionHandleId);
                         // Matches deliberately ignores callbacks. Reject before taking ownership of
                         // any run/start/prompt state; a different caller may already have an active run.
@@ -2645,7 +2648,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     throw new InvalidOperationException("The observed compaction target is stale or is not owned.");
                 if (entry.ActiveRunId is not null || entry.QueueDrainInProgress)
                     return ValueTask.FromResult<AgentSessionHandleId?>(null);
-                handleUse = entry.Attachment.TryAcquireHandleUse()
+                handleUse = entry.Attachment.TryAcquireWorkUse()
                     ?? throw new InvalidOperationException("The observed compaction attachment is retiring.");
                 return ValueTask.FromResult<AgentSessionHandleId?>(entry.SessionHandleId);
             }, CancellationToken.None).ConfigureAwait(false);
