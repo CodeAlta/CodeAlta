@@ -399,6 +399,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 SessionPermissionModes = !options.ReviewOwnedCommandPermissions,
                 // The prompt of a session shows what its provider suggests.
                 ShowsPromptSuggestions = true,
+                // A session works under the Git, GitHub and Jira identity of its space.
+                AppliesSpaceIdentities = true,
                 // A session an agent creates does not ask, unless the user chose that it asks what its creator asks.
                 InheritPermissionModePolicy = () => shell.InheritPermissions,
                 EnableOwnedAsks = true,
@@ -615,7 +617,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     new Automations.AutomationStateStore(Path.Combine(host.CatalogOptions.StateRoot, "automations.json"), pausedByDefault: options.Developer),
                     new Automations.AutomationRunner(host), TimeProvider.System, TimeZoneInfo.Local, new Automations.GitAutomationFeed(),
                     () => [.. (host.PluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueEventSource>()],
-                    new Automations.ShellAutomationCommands());
+                    // A command runs with the identity of the space its runs go to (AutomationRunner): the space of its project.
+                    new Automations.ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment));
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor
                 // give an automation a command to run.
                 // A host that started its plugins builds one again while it runs, and tells the page when it did. Building

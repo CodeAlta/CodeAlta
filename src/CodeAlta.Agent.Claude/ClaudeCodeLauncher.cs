@@ -4,9 +4,11 @@ namespace CodeAlta.Agent.Claude;
 
 /// <summary>
 /// What one CLI process of a session is started with. A change of any of these starts another process, which
-/// resumes the conversation.
+/// resumes the conversation. <paramref name="Environment"/> is the environment of the session (its Git identity),
+/// which the CLI and the commands of its tools inherit.
 /// </summary>
-internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort, bool PromptSuggestions = false);
+internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort, bool PromptSuggestions = false,
+    AgentProcessEnvironment? Environment = null);
 
 /// <summary>
 /// Builds the command line and the environment of a CLI process.
@@ -170,6 +172,8 @@ internal static class ClaudeCodeLauncher
         arguments.AddRange(options.ExtraArguments);
 
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal);
+        // The identity of the session first: what CodeAlta sets below for the CLI itself is not given away.
+        key.Environment?.ApplyTo(environment);
         foreach (var name in InheritedSessionVariables)
         {
             environment[name] = null;

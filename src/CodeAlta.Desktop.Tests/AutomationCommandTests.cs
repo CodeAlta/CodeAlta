@@ -109,6 +109,9 @@ public sealed class AutomationCommandTests
         var watch = fixture.Commands.Single("gh run watch 123 --exit-status");
         Assert.AreEqual(tools, watch.Folder, "A folder is read from the folder of the project.");
         Assert.AreEqual(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), fixture.Commands.Single("wait-for-it").Folder, "Without a project, a command runs in the home folder.");
+        // The project names the space whose identity the command runs with.
+        Assert.AreEqual(alpha.Id, watch.ProjectId);
+        Assert.IsNull(fixture.Commands.Single("wait-for-it").ProjectId);
         Assert.IsTrue(fixture.Service.IsWatching(First) && fixture.Service.IsWatching(Second));
         Assert.IsNull(fixture.Service.NextDue(First), "A command is not a time on the clock.");
 
@@ -484,18 +487,29 @@ public sealed class AutomationCommandTests
     [TestMethod]
     public async Task TheShell_RunsACommand_GivesItsExitCodeAndWhatItPrinted_AndEndsOneThatWaits()
     {
-        var commands = new ShellAutomationCommands();
+        string? asked = null;
+        var commands = new ShellAutomationCommands(projectId =>
+        {
+            asked = projectId;
+            return new CodeAlta.Agent.AgentProcessEnvironment([new("GIT_AUTHOR_EMAIL", "alex@contoso.example")]);
+        });
         var folder = Path.GetTempPath();
         var patience = TimeSpan.FromSeconds(60);
 
-        var said = await commands.Start("echo hello-from-the-command", folder).Completion.WaitAsync(patience);
+        var said = await commands.Start("echo hello-from-the-command", folder, "alpha").Completion.WaitAsync(patience);
         Assert.AreEqual(0, said.ExitCode, said.Output);
         StringAssert.Contains(said.Output, "hello-from-the-command");
 
-        var failed = await commands.Start("exit 3", folder).Completion.WaitAsync(patience);
+        // The command runs with the identity of the space of its project.
+        var identity = await commands.Start(OperatingSystem.IsWindows() ? "Write-Output \"[$env:GIT_AUTHOR_EMAIL]\"" : "echo \"[$GIT_AUTHOR_EMAIL]\"", folder, "alpha")
+            .Completion.WaitAsync(patience);
+        StringAssert.Contains(identity.Output, "[alex@contoso.example]");
+        Assert.AreEqual("alpha", asked);
+
+        var failed = await commands.Start("exit 3", folder, null).Completion.WaitAsync(patience);
         Assert.AreEqual(3, failed.ExitCode, failed.Output);
 
-        var waiting = commands.Start("sleep 120", folder);
+        var waiting = commands.Start("sleep 120", folder, null);
         await Task.Delay(500);
         Assert.IsFalse(waiting.Completion.IsCompleted);
         waiting.Kill();

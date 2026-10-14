@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime.Tools;
 
 namespace CodeAlta.Orchestration.Jobs;
@@ -23,13 +24,14 @@ public interface IShellCommandProcess : IDisposable
 /// <summary>Starts a command for a host that runs it by itself.</summary>
 /// <param name="command">The command line, as a shell tool would take it.</param>
 /// <param name="folder">The folder the command runs in: a full path that exists.</param>
+/// <param name="environment">The variables of the session the command runs for, over the environment of the application; null for none.</param>
 /// <param name="onOutput">
 /// Receives what the command writes, standard output and standard error together, in pieces as they are read. It
 /// is called from the threads that read, possibly from two of them at once.
 /// </param>
 /// <returns>The running command.</returns>
 /// <exception cref="InvalidOperationException">The shell could not be started.</exception>
-public delegate IShellCommandProcess ShellCommandStarter(string command, string folder, Action<string> onOutput);
+public delegate IShellCommandProcess ShellCommandStarter(string command, string folder, AgentProcessEnvironment? environment, Action<string> onOutput);
 
 /// <summary>
 /// A command started in the shell the <c>shell_command</c> tool uses (PowerShell on Windows, the shell of the user
@@ -69,11 +71,23 @@ public sealed class ShellCommandProcess : IShellCommandProcess
     /// <exception cref="ArgumentNullException"><paramref name="onOutput"/> is null.</exception>
     /// <exception cref="InvalidOperationException">The shell could not be started.</exception>
     public static ShellCommandProcess Start(string command, string folder, Action<string> onOutput)
+        => Start(command, folder, null, onOutput);
+
+    /// <summary>Starts a command with the variables of a session, as <c>shell_command</c> runs the commands of that session.</summary>
+    /// <param name="command">The command line, as the <c>shell_command</c> tool would take it.</param>
+    /// <param name="folder">The folder the command runs in: a full path that exists.</param>
+    /// <param name="environment">The variables of the session, over the environment of the application; null for none.</param>
+    /// <param name="onOutput">Receives what the command writes; see <see cref="ShellCommandStarter"/>.</param>
+    /// <returns>The running command.</returns>
+    /// <exception cref="ArgumentException"><paramref name="command"/> or <paramref name="folder"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="onOutput"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The shell could not be started.</exception>
+    public static ShellCommandProcess Start(string command, string folder, AgentProcessEnvironment? environment, Action<string> onOutput)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentNullException.ThrowIfNull(onOutput);
-        var startInfo = AgentBuiltInToolFactory.CreateShellStartInfo(command, folder);
+        var startInfo = AgentBuiltInToolFactory.CreateShellStartInfo(command, folder, environment);
         // Nobody types in a command that runs by itself: one that reads its input gets the end of it at once.
         startInfo.RedirectStandardInput = true;
         var process = new Process { StartInfo = startInfo };

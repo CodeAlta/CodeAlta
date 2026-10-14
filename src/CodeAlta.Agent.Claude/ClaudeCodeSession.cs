@@ -385,7 +385,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             string.IsNullOrWhiteSpace(request.WorkingDirectory) ? null : request.WorkingDirectory,
             ClaudeCodeLauncher.ToModelOption(request.ModelId),
             effort,
-            _options.PromptSuggestions && request.PromptSuggestions && !_promptSuggestionsRefused);
+            _options.PromptSuggestions && request.PromptSuggestions && !_promptSuggestionsRefused,
+            request.Environment is { IsEmpty: false } environment ? environment : null);
         var permissionMode = NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
         lock (_gate)
         {

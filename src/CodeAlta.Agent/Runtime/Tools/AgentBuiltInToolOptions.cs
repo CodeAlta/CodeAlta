@@ -23,6 +23,12 @@ public sealed class AgentBuiltInToolOptions
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
+    /// Gets or initializes the environment variables <c>shell_command</c> sets for the commands it runs, over the
+    /// environment of the application. Null sets none.
+    /// </summary>
+    public AgentProcessEnvironment? Environment { get; init; }
+
+    /// <summary>
     /// Gets or initializes the permission request handler.
     /// </summary>
     public required AgentPermissionRequestHandler OnPermissionRequest { get; init; }

@@ -109,7 +109,7 @@ public sealed class SessionJobService : IAsyncDisposable
         IShellCommandProcess process;
         try
         {
-            process = Starter(request.Command, request.Folder, text => Append(entry, text));
+            process = Starter(request.Command, request.Folder, request.Environment, text => Append(entry, text));
         }
         catch (InvalidOperationException failure)
         {

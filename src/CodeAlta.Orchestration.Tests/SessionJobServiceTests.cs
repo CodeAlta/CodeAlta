@@ -72,7 +72,7 @@ public sealed class SessionJobServiceTests
     [TestMethod]
     public async Task SessionRetention_WhitespaceCannotBypassAdmissionReservation()
     {
-        await using var jobs = new SessionJobService(start: (_, _, _) => throw new AssertFailedException("No process may start."));
+        await using var jobs = new SessionJobService(start: (_, _, _, _) => throw new AssertFailedException("No process may start."));
         using var retirement = jobs.TryReserveRetirement("old");
         Assert.IsNotNull(retirement);
         Assert.AreEqual("session_retiring", jobs.Start(Request(" old ", "fixture")).Status);
@@ -348,6 +348,27 @@ public sealed class SessionJobServiceTests
     }
 
     [TestMethod]
+    public async Task AJob_RunsWithTheEnvironmentOfItsSession()
+    {
+        var shell = new FakeShell();
+        await using var jobs = new SessionJobService(start: shell.Start);
+        var environment = new CodeAlta.Agent.AgentProcessEnvironment([new("GIT_AUTHOR_EMAIL", "alex@contoso.example")]);
+
+        jobs.Start(Request("session-a", "git commit") with { Environment = environment });
+        jobs.Start(Request("session-b", "git commit"));
+
+        Assert.AreSame(environment, shell.Processes[0].Environment);
+        Assert.IsNull(shell.Processes[1].Environment, "A session without identity gives its jobs none.");
+
+        // The shell of the host sets the variables for the command, over its own environment.
+        var written = new System.Text.StringBuilder();
+        using var process = ShellCommandProcess.Start(OperatingSystem.IsWindows() ? "Write-Output \"[$env:GIT_AUTHOR_EMAIL]\"" : "echo \"[$GIT_AUTHOR_EMAIL]\"", Folder, environment,
+            text => { lock (written) written.Append(text); });
+        Assert.AreEqual(0, await process.Completion.WaitAsync(TimeSpan.FromSeconds(60)));
+        lock (written) StringAssert.Contains(written.ToString(), "[alex@contoso.example]");
+    }
+
+    [TestMethod]
     public void ATextIsWrittenOnOneLine_CutToALength()
     {
         Assert.AreEqual("npm run build && npm test", SessionJobService.OneLine("  npm run build  &&\r\n\tnpm test \n", 160));
@@ -371,10 +392,10 @@ public sealed class SessionJobServiceTests
             get { lock (_processes) return [.. _processes]; }
         }
 
-        public IShellCommandProcess Start(string command, string folder, Action<string> onOutput)
+        public IShellCommandProcess Start(string command, string folder, CodeAlta.Agent.AgentProcessEnvironment? environment, Action<string> onOutput)
         {
             if (Failure is { } failure) throw new InvalidOperationException(failure);
-            var process = new FakeProcess(command, folder, onOutput);
+            var process = new FakeProcess(command, folder, onOutput) { Environment = environment };
             lock (_processes) _processes.Add(process);
             return process;
         }
@@ -386,6 +407,7 @@ public sealed class SessionJobServiceTests
 
         public string Command { get; } = command;
         public string Folder { get; } = folder;
+        public CodeAlta.Agent.AgentProcessEnvironment? Environment { get; init; }
         public bool Killed { get; private set; }
         public bool Disposed { get; private set; }
         public int? ProcessId => 4242;

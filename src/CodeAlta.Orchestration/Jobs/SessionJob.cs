@@ -49,6 +49,9 @@ public sealed record SessionJobRequest
     /// <summary>Gets the folder the command runs in: a full path.</summary>
     public required string Folder { get; init; }
 
+    /// <summary>Gets the variables of the session the command runs with, such as its Git identity; null for none.</summary>
+    public CodeAlta.Agent.AgentProcessEnvironment? Environment { get; init; }
+
     /// <summary>Gets what the job is for, in a few words; null to show the command.</summary>
     public string? Title { get; init; }
 

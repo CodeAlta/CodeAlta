@@ -16,7 +16,7 @@ public sealed class SessionRetentionSafetyTests
     [TestMethod]
     public async Task JobAdmissionCannotCrossRetirementReservation()
     {
-        await using var jobs = new SessionJobService(start: (_, _, _) => throw new AssertFailedException("Must not start a process."));
+        await using var jobs = new SessionJobService(start: (_, _, _, _) => throw new AssertFailedException("Must not start a process."));
         using var lease = jobs.TryReserveRetirement(SessionId);
         Assert.IsNotNull(lease);
         Assert.AreEqual("session_retiring", jobs.Start(new SessionJobRequest

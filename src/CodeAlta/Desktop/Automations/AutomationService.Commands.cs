@@ -1,4 +1,5 @@
 using System.Text;
+using CodeAlta.Agent;
 using CodeAlta.Orchestration.Jobs;
 
 namespace CodeAlta.Desktop.Automations;
@@ -24,19 +25,24 @@ internal interface IAutomationCommands
     /// <summary>Starts a command.</summary>
     /// <param name="command">The command line, as a shell tool would take it.</param>
     /// <param name="folder">The folder the command runs in: a full path that exists.</param>
+    /// <param name="projectId">The project of the automation; null for one that runs in no project.</param>
     /// <returns>The running command.</returns>
     /// <exception cref="InvalidOperationException">The shell could not be started.</exception>
-    IAutomationCommand Start(string command, string folder);
+    IAutomationCommand Start(string command, string folder, string? projectId);
 }
 
-/// <summary>The commands of the triggers, in the shell the <c>shell_command</c> tool uses.</summary>
-internal sealed class ShellAutomationCommands : IAutomationCommands
+/// <summary>
+/// The commands of the triggers, in the shell the <c>shell_command</c> tool uses, with the identity of the space
+/// the runs of their automation go to.
+/// </summary>
+/// <param name="environment">Gives the variables of the space of a project (null for no project); null for none.</param>
+internal sealed class ShellAutomationCommands(Func<string?, AgentProcessEnvironment>? environment = null) : IAutomationCommands
 {
     // What is kept of what a command writes while it runs: twice what a prompt is given of it.
     private const int KeptOutputLength = AutomationService.MaximumCommandOutputLength * 2;
 
     /// <inheritdoc />
-    public IAutomationCommand Start(string command, string folder) => new Running(command, folder);
+    public IAutomationCommand Start(string command, string folder, string? projectId) => new Running(command, folder, environment?.Invoke(projectId));
 
     private sealed class Running : IAutomationCommand
     {
@@ -44,9 +50,9 @@ internal sealed class ShellAutomationCommands : IAutomationCommands
         private readonly StringBuilder _output = new();
         private readonly ShellCommandProcess _process;
 
-        internal Running(string command, string folder)
+        internal Running(string command, string folder, AgentProcessEnvironment? environment)
         {
-            _process = ShellCommandProcess.Start(command, folder, Append);
+            _process = ShellCommandProcess.Start(command, folder, environment, Append);
             Completion = WaitAsync(_process);
         }
 
@@ -279,7 +285,7 @@ internal sealed partial class AutomationService
                             watch = null;
                         }
 
-                        if (watch is null) _watches[key] = watch = new(entry.Id, trigger.Command!, folder) { StartAt = now };
+                        if (watch is null) _watches[key] = watch = new(entry.Id, trigger.Command!, folder) { ProjectId = entry.ProjectId, StartAt = now };
                         wanted.Add(key);
                         if (idle && watch.Held.Count > 0)
                         {
@@ -324,7 +330,7 @@ internal sealed partial class AutomationService
                 string? problem = null;
                 try
                 {
-                    if (Directory.Exists(watch.Folder)) command = _commands.Start(watch.Command, watch.Folder);
+                    if (Directory.Exists(watch.Folder)) command = _commands.Start(watch.Command, watch.Folder, watch.ProjectId);
                     else problem = $"The folder of its command does not exist: {watch.Folder}";
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -469,6 +475,9 @@ internal sealed partial class AutomationService
         internal string Command => command;
 
         internal string Folder => folder;
+
+        /// <summary>The project of the automation, whose space gives the command its identity; null for none.</summary>
+        internal string? ProjectId { get; init; }
 
         /// <summary>The process, while one runs.</summary>
         internal IAutomationCommand? Running { get; set; }

@@ -399,6 +399,62 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task ASession_WorksUnderTheIdentityOfItsSpace_AndKeepsItUntilItAttachesAgain()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider, identities: true);
+        Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+        static SpaceSettings Identity(SpaceSettings settings, string email)
+            => settings with { Identity = new SpaceIdentity(new SpaceGitIdentity("A. Mutel", email, SignOff: true), new SpaceGitHubIdentity("~/.config/gh-contoso")) };
+        Assert.IsTrue((await host.SpaceCatalog.UpdateSettingsAsync("business", settings => Identity(settings, "alex@contoso.example"))).Succeeded);
+        var options = Options(temp, provider);
+        var business = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Review", null, null, null, "business", CancellationToken.None);
+        var usual = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Usual", CancellationToken.None);
+        await SendAsync(host, business, options, "one");
+        await SendAsync(host, usual, options, "one");
+
+        var request = provider.Requests.Last(value => value.SessionId == business.SessionId);
+        Assert.AreEqual("alex@contoso.example", request.Environment!.Get("GIT_COMMITTER_EMAIL"));
+        Assert.AreEqual(Path.Join(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".config/gh-contoso"), request.Environment.Get("GH_CONFIG_DIR"));
+        StringAssert.Contains(request.DeveloperInstructions + request.SystemMessage, "- Commit with `git commit --signoff`: Signed-off-by: A. Mutel <alex@contoso.example>");
+        var usualRequest = provider.Requests.Last(value => value.SessionId == usual.SessionId);
+        Assert.IsTrue(usualRequest.Environment is null or { IsEmpty: true }, "A session of a space without identity keeps the usual settings.");
+        Assert.IsFalse((usualRequest.DeveloperInstructions + usualRequest.SystemMessage).Contains("--signoff", StringComparison.Ordinal));
+
+        // A session that runs keeps the identity it attached with, whatever is changed in its space meanwhile.
+        Assert.IsTrue((await host.SpaceCatalog.UpdateSettingsAsync("business", settings => Identity(settings, "a.mutel@contoso.example"))).Succeeded);
+        await SendAsync(host, business, options, "two");
+        Assert.AreEqual("alex@contoso.example", provider.Requests.Last(value => value.SessionId == business.SessionId).Environment!.Get("GIT_AUTHOR_EMAIL"));
+        Assert.AreEqual("alex@contoso.example", (await host.RuntimeService.GetSessionIdentityAsync(business.SessionId)).Environment.Get("GIT_AUTHOR_EMAIL"));
+
+        // Attached again, it takes the identity its space has now.
+        Assert.IsTrue(await host.RuntimeService.DetachRuntimeSessionAsync(business.SessionId));
+        Assert.AreEqual("a.mutel@contoso.example", (await host.RuntimeService.GetSessionIdentityAsync(business.SessionId)).Environment.Get("GIT_AUTHOR_EMAIL"));
+        await SendAsync(host, business, options, "three");
+        Assert.AreEqual("a.mutel@contoso.example", provider.Requests.Last(value => value.SessionId == business.SessionId).Environment!.Get("GIT_AUTHOR_EMAIL"));
+    }
+
+    [TestMethod]
+    public async Task AHostThatDoesNotApplyIdentities_KeepsTheUsualSettingsForEverySession()
+    {
+        // The terminal application shows no spaces: its sessions keep the user's usual Git and GitHub settings.
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        Assert.IsTrue((await host.SpaceCatalog.UpdateSettingsAsync("default",
+            settings => settings with { Identity = new SpaceIdentity(new SpaceGitIdentity("A. Mutel", "alex@contoso.example", SignOff: true)) })).Succeeded);
+        var options = Options(temp, provider);
+        var session = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Usual", CancellationToken.None);
+        await SendAsync(host, session, options, "one");
+
+        var request = provider.Requests.Last(value => value.SessionId == session.SessionId);
+        Assert.IsTrue(request.Environment is null or { IsEmpty: true });
+        Assert.IsFalse((request.DeveloperInstructions + request.SystemMessage).Contains("--signoff", StringComparison.Ordinal));
+        Assert.AreSame(SessionIdentity.Usual, await host.RuntimeService.GetSessionIdentityAsync(session.SessionId));
+    }
+
+    [TestMethod]
     public void BranchTitle_CountsTheForksOfAFork()
     {
         Assert.AreEqual("Review (fork)", SessionRuntimeService.BranchTitle("Review", "fork"));
@@ -449,7 +505,7 @@ public sealed class SessionForkRewindTests
         OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
     };
 
-    private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, RecordingProvider provider)
+    private static Task<CodeAltaHost> CreateHostAsync(TempDirectory temp, RecordingProvider provider, bool identities = false)
         => CodeAltaHost.CreateAsync(
             new CodeAltaHostOptions
             {
@@ -458,6 +514,7 @@ public sealed class SessionForkRewindTests
                 IsHeadless = true,
                 HasInteractiveUi = false,
                 StartPlugins = false,
+                AppliesSpaceIdentities = identities,
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
             },
             CancellationToken.None);

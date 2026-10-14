@@ -603,6 +603,11 @@ public sealed class SystemPromptBuilder
             lines.Add(SpaceLine(space));
         }
 
+        if (SignOffLine(request.GitIdentity) is { } signOff)
+        {
+            lines.Add(signOff);
+        }
+
         // The models the user prefers for each kind of work: an agent asks for a tier instead of naming a model.
         if (!string.IsNullOrWhiteSpace(request.ModelTiers))
         {
@@ -646,6 +651,19 @@ public sealed class SystemPromptBuilder
         }
 
         return $"{line}: {about}";
+    }
+
+    // The commits of a space that signs off carry the line of its author: Git adds it only when asked, at each commit.
+    internal static string? SignOffLine(SpaceGitIdentity? git)
+    {
+        if (git?.SignOff != true)
+        {
+            return null;
+        }
+
+        return git.Name is { } name && git.Email is { } email
+            ? $"- Commit with `git commit --signoff`: Signed-off-by: {name} <{email}>"
+            : "- Commit with `git commit --signoff`.";
     }
 
     private static string? ScratchpadFile(SystemPromptBuildRequest request)
@@ -1279,6 +1297,12 @@ public sealed class SystemPromptBuildRequest
     /// every prompt.
     /// </summary>
     public SpaceFilter? SpaceResources { get; init; }
+
+    /// <summary>
+    /// Gets the Git identity of the space of the session, the default space included: when it signs off commits,
+    /// the Runtime Context says so, since Git has no setting for it.
+    /// </summary>
+    public SpaceGitIdentity? GitIdentity { get; init; }
 }
 
 /// <summary>

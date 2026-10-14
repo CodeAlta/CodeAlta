@@ -97,6 +97,13 @@ public sealed class CodeAltaHostOptions
     public bool ShowsPromptSuggestions { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the sessions of the host work under the identity of their space: the Git
+    /// author, SSH key and signing, and the GitHub profile its file names (<see cref="CodeAlta.Catalog.SpaceIdentity"/>).
+    /// Default false: every session keeps the user's usual settings, as in a host that shows no spaces.
+    /// </summary>
+    public bool AppliesSpaceIdentities { get; init; }
+
+    /// <summary>
     /// Gets a policy read at every creation of a session by another session, for a host with
     /// <see cref="SessionPermissionModes"/>: whether the new session takes the permission mode of its creator.
     /// Null, the default, or false: a session another session creates does not ask.

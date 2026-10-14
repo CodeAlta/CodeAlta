@@ -658,7 +658,7 @@ public static class AgentBuiltInToolFactory
                 return Failure($"Unsupported permission decision '{decision.Kind}'.");
         }
 
-        var processSpec = CreateShellProcessSpec(command, workdir, login);
+        var processSpec = CreateShellProcessSpec(command, workdir, login, options.Environment);
         using var process = new Process
         {
             StartInfo = processSpec.StartInfo,
@@ -1473,11 +1473,12 @@ public static class AgentBuiltInToolFactory
     /// </summary>
     /// <param name="command">The command line.</param>
     /// <param name="workdir">The folder the command runs in.</param>
+    /// <param name="environment">The variables of the session the command is run for; null for none.</param>
     /// <returns>The start information; the caller sets what it needs more (encodings, a closed input).</returns>
-    internal static ProcessStartInfo CreateShellStartInfo(string command, string workdir)
-        => CreateShellProcessSpec(command, workdir, login: false).StartInfo;
+    internal static ProcessStartInfo CreateShellStartInfo(string command, string workdir, AgentProcessEnvironment? environment = null)
+        => CreateShellProcessSpec(command, workdir, login: false, environment).StartInfo;
 
-    private static ShellProcessSpec CreateShellProcessSpec(string command, string workdir, bool login)
+    private static ShellProcessSpec CreateShellProcessSpec(string command, string workdir, bool login, AgentProcessEnvironment? environment = null)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -1489,7 +1490,7 @@ public static class AgentBuiltInToolFactory
             // Wrap the command so a failing final external command can propagate its native exit code
             // instead of PowerShell collapsing it to 1.
             string[] shellArguments = ["-NoProfile", "-Command", WrapWindowsShellCommand(command)];
-            return new ShellProcessSpec(CreateProcessStartInfo(fileName, shellArguments, workdir));
+            return new ShellProcessSpec(CreateProcessStartInfo(fileName, shellArguments, workdir, environment));
         }
 
         var shellPath = Environment.GetEnvironmentVariable("SHELL");
@@ -1509,7 +1510,7 @@ public static class AgentBuiltInToolFactory
             arguments = ["-c", command];
         }
 
-        return new ShellProcessSpec(CreateProcessStartInfo(shellPath, arguments, workdir));
+        return new ShellProcessSpec(CreateProcessStartInfo(shellPath, arguments, workdir, environment));
     }
 
     internal static string ResolveWindowsShellFileName(string? pathValue)
@@ -1568,7 +1569,7 @@ public static class AgentBuiltInToolFactory
         return false;
     }
 
-    private static ProcessStartInfo CreateProcessStartInfo(string fileName, IReadOnlyList<string> arguments, string workdir)
+    private static ProcessStartInfo CreateProcessStartInfo(string fileName, IReadOnlyList<string> arguments, string workdir, AgentProcessEnvironment? environment)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -1586,6 +1587,8 @@ public static class AgentBuiltInToolFactory
             startInfo.ArgumentList.Add(argument);
         }
 
+        // The identity of the session, such as its Git author: over the environment of the application.
+        environment?.ApplyTo(startInfo.Environment);
         startInfo.Environment["NO_COLOR"] = "1";
         startInfo.Environment["CLICOLOR"] = "0";
         startInfo.Environment["CLICOLOR_FORCE"] = "0";

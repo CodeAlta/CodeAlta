@@ -184,7 +184,7 @@ public sealed class DesktopToolCallsTests
         var runtime = new SessionRuntimeEventPublisher();
         Action<string>? write = null;
         var exit = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var jobs = new CodeAlta.Orchestration.Jobs.SessionJobService(start: (_, _, onOutput) => { write = onOutput; return new JobProcess(exit.Task); });
+        await using var jobs = new CodeAlta.Orchestration.Jobs.SessionJobService(start: (_, _, _, onOutput) => { write = onOutput; return new JobProcess(exit.Task); });
         var service = new ToolCallsService((_, _, _) => Task.FromResult<AgentEvent?>(null), runtime.ToolOutput, Epoch, TimeSpan.Zero) { Jobs = jobs };
         var job = jobs.Start(new() { SessionId = "session", Command = "npm test", Folder = Path.GetTempPath() }).Job!;
         write!("12 passing\n");
@@ -210,7 +210,7 @@ public sealed class DesktopToolCallsTests
     [TestMethod]
     public async Task ReadJob_ServesTheCommandOnlyToItsSessionAndCurrentHost()
     {
-        await using var jobs = new CodeAlta.Orchestration.Jobs.SessionJobService(start: (_, _, _) => new JobProcess(Task.FromResult(0)));
+        await using var jobs = new CodeAlta.Orchestration.Jobs.SessionJobService(start: (_, _, _, _) => new JobProcess(Task.FromResult(0)));
         var service = new ToolCallsService((_, _, _) => Task.FromResult<AgentEvent?>(null), null, Epoch) { Jobs = jobs };
         var command = "dotnet test\n  --filter " + new string('x', 4000);
         var job = jobs.Start(new() { SessionId = "session", Command = command, Folder = Path.GetTempPath(), Title = "All tests", Timeout = TimeSpan.FromMinutes(5) }).Job!;

@@ -3569,9 +3569,9 @@ public sealed partial class AltaLiveToolTests
             get { lock (_processes) return [.. _processes]; }
         }
 
-        public CodeAlta.Orchestration.Jobs.IShellCommandProcess Start(string command, string folder, Action<string> onOutput)
+        public CodeAlta.Orchestration.Jobs.IShellCommandProcess Start(string command, string folder, AgentProcessEnvironment? environment, Action<string> onOutput)
         {
-            var process = new JobProcess(command, folder, onOutput);
+            var process = new JobProcess(command, folder, onOutput) { Environment = environment };
             lock (_processes) _processes.Add(process);
             return process;
         }
@@ -3583,6 +3583,7 @@ public sealed partial class AltaLiveToolTests
 
         public string Command { get; } = command;
         public string Folder { get; } = folder;
+        public AgentProcessEnvironment? Environment { get; init; }
         public bool Killed { get; private set; }
         public int? ProcessId => 4242;
         public Task<int> Completion => _exit.Task;
@@ -4212,6 +4213,28 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task JobStart_RunsTheCommandWithTheIdentityOfTheSession()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root, identities: true).ConfigureAwait(false);
+        var shell = new JobShell();
+        fixture.Host.RuntimeService.Jobs.Starter = shell.Start;
+        // The project is in no other space: its sessions are in the default space, which has an identity too.
+        Assert.IsTrue((await fixture.Host.SpaceCatalog.UpdateSettingsAsync("default",
+            settings => settings with { Identity = new SpaceIdentity(new SpaceGitIdentity("A. Mutel", "alex@contoso.example")) }).ConfigureAwait(false)).Succeeded);
+        var session = await fixture.CreateSessionAsync("Build").ConfigureAwait(false);
+        await fixture.SendAsync(session.SessionId, "one").ConfigureAwait(false);
+
+        var start = await fixture.Dispatcher.InvokeAsync(["job", "start", "--command", "git commit", "--notify", "never", "--cwd", root.Path], caller: fixture.Agent(session.SessionId)).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, start.ExitCode, start.Transcript);
+        var process = shell.Processes.Single();
+        Assert.AreEqual("alex@contoso.example", process.Environment!.Get("GIT_AUTHOR_EMAIL"));
+        process.Exit(0);
+        await WaitUntilAsync(() => fixture.Host.RuntimeService.Jobs.CountRunning(session.SessionId) == 0).ConfigureAwait(false);
+    }
+
+    [TestMethod]
     public async Task SessionRewind_RefusesASessionWithBackgroundWorkOrThatIsArchived()
     {
         using var root = TempDirectory.Create();
@@ -4420,7 +4443,7 @@ public sealed partial class AltaLiveToolTests
 
         public SessionExecutionOptions Options { get; } = options;
 
-        public static async Task<BranchFixture> CreateAsync(TempDirectory root)
+        public static async Task<BranchFixture> CreateAsync(TempDirectory root, bool identities = false)
         {
             var projectPath = Path.Combine(root.Path, "project");
             var globalRoot = Path.Combine(root.Path, "global");
@@ -4435,6 +4458,7 @@ public sealed partial class AltaLiveToolTests
                     IsHeadless = true,
                     HasInteractiveUi = false,
                     StartPlugins = false,
+                    AppliesSpaceIdentities = identities,
                     ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
                 },
                 CancellationToken.None).ConfigureAwait(false);

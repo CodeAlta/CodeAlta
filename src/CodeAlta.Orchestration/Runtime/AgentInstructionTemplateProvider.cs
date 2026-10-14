@@ -19,6 +19,12 @@ public sealed class AgentInstructionTemplateProvider
     internal SessionDiscoveryScope? DiscoveryScope { get; }
 
     /// <summary>
+    /// Gets or initializes whether the sessions work under the identity of their space, so that the Runtime Context
+    /// says when its commits are signed off. False, the default: the sessions keep the user's usual settings.
+    /// </summary>
+    public bool AppliesSpaceIdentities { get; init; }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AgentInstructionTemplateProvider"/> class.
     /// </summary>
     /// <param name="skillCatalog">Optional skill catalog used to advertise available skills.</param>
@@ -143,6 +149,7 @@ public sealed class AgentInstructionTemplateProvider
             SpaceResources = spaceResources,
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal)),
+            GitIdentity = AppliesSpaceIdentities ? spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal)).Settings.Identity?.Git : null,
             ModelTiers = ModelTierResolver.DescribeForAgents(models.Tiers),
             ModelFallback = models.Fallback.Enabled,
         });

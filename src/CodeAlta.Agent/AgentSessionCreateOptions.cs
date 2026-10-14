@@ -98,6 +98,13 @@ public class AgentSessionCreateOptions
     public IReadOnlyList<string> ProjectRoots { get; init; } = [];
 
     /// <summary>
+    /// Gets or initializes the environment variables the session gives every process it starts (its shell commands,
+    /// the CLI of its provider), over the environment of the application, such as the Git identity of its space.
+    /// Null or empty sets none. It is fixed for as long as the session stays attached.
+    /// </summary>
+    public AgentProcessEnvironment? Environment { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether streaming is enabled.
     /// </summary>
     public bool Streaming { get; init; }

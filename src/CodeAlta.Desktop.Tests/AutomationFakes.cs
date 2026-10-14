@@ -123,10 +123,10 @@ internal sealed class FakeAutomationCommands : IAutomationCommands
         lock (_gate) return _started.Last(started => started.Command == command);
     }
 
-    public IAutomationCommand Start(string command, string folder)
+    public IAutomationCommand Start(string command, string folder, string? projectId)
     {
         if (Refuse is { } problem) throw new InvalidOperationException(problem);
-        var started = new FakeAutomationCommand(command, folder);
+        var started = new FakeAutomationCommand(command, folder) { ProjectId = projectId };
         lock (_gate) _started.Add(started);
         return started;
     }
@@ -140,6 +140,8 @@ internal sealed class FakeAutomationCommand(string command, string folder) : IAu
     internal string Command => command;
 
     internal string Folder => folder;
+
+    internal string? ProjectId { get; init; }
 
     internal bool Killed => Volatile.Read(ref _killed) != 0;
 

@@ -148,6 +148,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public bool ShowsPromptSuggestions { get; init; }
 
     /// <summary>
+    /// Gets or initializes what gives a session the identity of its space (its Git author, its GitHub profile), read
+    /// when the session attaches and kept while it stays attached. <see cref="SessionIdentityResolver.None"/>, the
+    /// default, keeps the usual settings for every session.
+    /// </summary>
+    public SessionIdentityResolver Identities { get; init; } = SessionIdentityResolver.None;
+
+    /// <summary>
     /// Gets or initializes whether the permission mode of a session decides what the host does with its requests
     /// (<see cref="GetPermissionPolicy"/>). False, the default, leaves every session the one policy of the host.
     /// </summary>
@@ -612,6 +619,24 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return new(entry.SpaceId, entry.ProjectId);
         var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         return session is null ? null : new(session.SpaceId, session.ProjectRef);
+    }
+
+    /// <summary>
+    /// Gets the identity a session works under: the one its attachment was given, for a session that is attached;
+    /// otherwise the one of its space as it is now, which it will be given when it attaches.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The identity; the usual one for a session that is not known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    public async Task<SessionIdentity> GetSessionIdentityAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        if (!Identities.IsEnabled) return SessionIdentity.Usual;
+        if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return entry.Identity;
+        return await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } record
+            ? await Identities.ResolveAsync(record.SpaceId, record.ProjectId, cancellationToken).ConfigureAwait(false)
+            : SessionIdentity.Usual;
     }
 
     internal async Task<SessionViewDescriptor?> ResolveOwnedSessionAsync(string sessionId, CancellationToken cancellationToken)
@@ -1654,6 +1679,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var additionalDeveloperInstructions = AppendPromptPart(AppendPromptPart(AppendPromptPart(BuildParentNotificationGuidance(session), worktreeGone), movedNotice),
             options.AdditionalDeveloperInstructions);
         var tools = options.Tools;
+        // The identity of the space of the session as it is now: the session keeps it until it attaches again,
+        // whatever the window shows and whatever is changed in the space meanwhile.
+        var identity = await Identities.ResolveAsync(session.SpaceId, session.ProjectRef, cancellationToken).ConfigureAwait(false);
 
         AgentSessionHandleId sessionHandleId;
         bool startNewSession;
@@ -1731,6 +1759,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             WorktreeDirectory = worktree,
             LeaveWorktree = worktree is null,
             ProjectRoots = options.ProjectRoots,
+            Environment = identity.Environment,
             SystemMessage = systemMessage,
             DeveloperInstructions = finalDeveloperInstructions,
             InstructionsAlreadyComposed = instructionsAlreadyComposed,
@@ -1840,6 +1869,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             WorktreeDirectory = worktree,
             ForkedFrom = session.ForkedFrom,
             SpaceId = session.SpaceId,
+            Identity = identity,
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
             OwnTitleMode = ownTitleMode,
@@ -4827,6 +4857,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The space the session records, or null for a session that records none.</summary>
         public string? SpaceId { get; init; }
+
+        /// <summary>The identity the attachment runs under, read when it attached.</summary>
+        public SessionIdentity Identity { get; init; } = SessionIdentity.Usual;
 
         /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
         public long ProviderRegistrationVersion { get; init; }

@@ -260,6 +260,12 @@ public sealed record AgentTurnRequest
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
+    /// Gets or initializes the environment variables of the session (<see cref="AgentSessionCreateOptions.Environment"/>),
+    /// for a provider that starts a process of its own, such as a CLI. Null sets none.
+    /// </summary>
+    public AgentProcessEnvironment? Environment { get; init; }
+
+    /// <summary>
     /// Gets or initializes the effective system message.
     /// </summary>
     public string? SystemMessage { get; init; }

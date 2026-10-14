@@ -227,6 +227,28 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task Environment_OfTheSessionIsGivenToItsCli()
+    {
+        // The CLI runs its Bash tool with its own environment: the Git identity of the space reaches the commands too.
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            Environment = new AgentProcessEnvironment([new("GIT_AUTHOR_NAME", "A. Mutel"), new("GH_CONFIG_DIR", "gh-contoso")]),
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+
+        var environment = SessionProcess(cli).Launch.Environment;
+        Assert.AreEqual("A. Mutel", environment["GIT_AUTHOR_NAME"]);
+        Assert.AreEqual("gh-contoso", environment["GH_CONFIG_DIR"]);
+    }
+
+    [TestMethod]
     public async Task PromptSuggestion_IsToldOnlyOnceTheCliIsIdle()
     {
         // The CLI says when it runs and when it is idle: a suggestion is for the turn that ended, never during one.

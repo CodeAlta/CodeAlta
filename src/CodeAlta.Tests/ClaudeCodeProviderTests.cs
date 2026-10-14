@@ -262,6 +262,31 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public void Launcher_GivesTheCliTheEnvironmentOfTheSessionWithoutLosingItsOwn()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "claude-business");
+        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-business", ConfigDirectory = folder };
+        var session = new AgentProcessEnvironment([
+            new("GIT_AUTHOR_EMAIL", "alex@contoso.example"),
+            new("GH_CONFIG_DIR", "/home/alex/.config/gh-contoso"),
+            // A variable CodeAlta sets for the CLI itself is not given away by the identity of a space.
+            new("CLAUDE_CONFIG_DIR", "/elsewhere"),
+        ]);
+
+        var launch = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null, Environment: session), null, null, withTools: true);
+        var plain = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true);
+
+        Assert.AreEqual("alex@contoso.example", launch.Environment["GIT_AUTHOR_EMAIL"]);
+        Assert.AreEqual("/home/alex/.config/gh-contoso", launch.Environment["GH_CONFIG_DIR"]);
+        Assert.AreEqual(folder, launch.Environment["CLAUDE_CONFIG_DIR"]);
+        Assert.IsFalse(plain.Environment.ContainsKey("GIT_AUTHOR_EMAIL"), "Without an identity, the CLI inherits the usual settings.");
+        // Another identity is another process: a session attached again with it does not reuse the CLI.
+        Assert.AreNotEqual(new ClaudeCodeLaunchKey(null, null, null, Environment: session), new ClaudeCodeLaunchKey(null, null, null));
+        Assert.AreEqual(new ClaudeCodeLaunchKey(null, null, null, Environment: session),
+            new ClaudeCodeLaunchKey(null, null, null, Environment: new AgentProcessEnvironment(session.Variables)));
+    }
+
+    [TestMethod]
     [DataRow("use", ClaudeCodeApiKeyPolicy.Use)]
     [DataRow(" ignore ", ClaudeCodeApiKeyPolicy.Ignore)]
     [DataRow(null, ClaudeCodeApiKeyPolicy.FollowClaudeCode)]

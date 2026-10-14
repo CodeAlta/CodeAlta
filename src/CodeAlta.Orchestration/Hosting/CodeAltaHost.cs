@@ -156,6 +156,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
     public SpaceCatalog SpaceCatalog { get; }
 
     /// <summary>
+    /// Gets what gives the sessions of the host the identity of their space; it gives the usual settings in a host
+    /// that does not apply them (<see cref="CodeAltaHostOptions.AppliesSpaceIdentities"/>).
+    /// </summary>
+    public SessionIdentityResolver Identities => RuntimeService.Identities;
+
+    /// <summary>
     /// Gets the session-view catalog.
     /// </summary>
     public SessionViewCatalog SessionViewCatalog { get; }
@@ -395,7 +401,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 builtInSkillRootProvider,
                 new PluginSkillRootProvider(() => pluginRuntime.Adapter.GetResources(pluginRuntime.ActivePlugins, pluginOperationOptions)),
             ]);
-            var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope);
+            var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope)
+            {
+                AppliesSpaceIdentities = options.AppliesSpaceIdentities,
+            };
             modelProviderRegistry = new ModelProviderRegistry();
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);
@@ -437,6 +446,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 SessionPermissionModes = options.SessionPermissionModes,
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
+                Identities = options.AppliesSpaceIdentities ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog)) : SessionIdentityResolver.None,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,

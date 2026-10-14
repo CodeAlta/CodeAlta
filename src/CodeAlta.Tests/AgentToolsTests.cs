@@ -639,6 +639,43 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public async Task ShellCommandTool_RunsWithTheEnvironmentOfTheSession()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var tools = AgentBuiltInToolFactory.CreateDefaultTools(new AgentBuiltInToolOptions
+        {
+            ProviderId = options.ProviderId, SessionId = options.SessionId, WorkingDirectory = temp.Path, OnPermissionRequest = options.OnPermissionRequest,
+            Provider = options.Provider,
+            Environment = new AgentProcessEnvironment([new("GIT_AUTHOR_EMAIL", "alex@contoso.example"), new("GH_CONFIG_DIR", "gh-contoso")]),
+        });
+        var tool = tools.Single(static tool => tool.Spec.Name == "shell_command");
+        var command = OperatingSystem.IsWindows()
+            ? "Write-Output \"[$env:GIT_AUTHOR_EMAIL|$env:GH_CONFIG_DIR|$env:NO_COLOR]\""
+            : "printf '[%s|%s|%s]\\n' \"$GIT_AUTHOR_EMAIL\" \"$GH_CONFIG_DIR\" \"$NO_COLOR\"";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}}}""");
+
+        var result = await tool.Handler(new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        Assert.IsTrue(result.Success);
+        StringAssert.Contains(Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value, "[alex@contoso.example|gh-contoso|1]");
+    }
+
+    [TestMethod]
+    public void ShellStartInfo_SetsNothingMoreWithoutAnEnvironment()
+    {
+        using var temp = TestTempDirectory.Create();
+        var inherited = Environment.GetEnvironmentVariable("GIT_AUTHOR_EMAIL");
+
+        var plain = AgentBuiltInToolFactory.CreateShellStartInfo("echo", temp.Path);
+        var empty = AgentBuiltInToolFactory.CreateShellStartInfo("echo", temp.Path, AgentProcessEnvironment.Empty);
+
+        Assert.AreEqual(inherited, plain.Environment.TryGetValue("GIT_AUTHOR_EMAIL", out var value) ? value : null);
+        CollectionAssert.AreEquivalent(plain.Environment.ToArray(), empty.Environment.ToArray());
+    }
+
+    [TestMethod]
     public async Task ShellCommandTool_PreservesFinalExternalExitCodeOnWindows()
     {
         if (!OperatingSystem.IsWindows())
@@ -1766,7 +1803,7 @@ public sealed class AgentToolsTests
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         Assert.IsNotNull(method);
 
-        var shellProcessSpec = method.Invoke(null, [command, workdir, login]);
+        var shellProcessSpec = method.Invoke(null, [command, workdir, login, null]);
         Assert.IsNotNull(shellProcessSpec);
 
         var startInfoProperty = shellProcessSpec.GetType().GetProperty("StartInfo");
