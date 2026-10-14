@@ -824,6 +824,47 @@ public sealed class OwnedSessionCommandServiceTests
     }, sessionPermissionModes: true);
 
     [TestMethod]
+    public Task SessionPermissionModes_ASessionThatTakesTheModeOfItsCreator_KeepsAModeOfTheProviderItHasToo() => Fixture.RunAsync(async f =>
+    {
+        f.Host.ModelProviderRegistry.RegisterOrReplace(
+            f.Provider.Descriptor with { PermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"] }, f.Provider.CreateRuntime);
+        var other = new ControlledProvider("other-fixture");
+        other.ReleaseAll();
+        f.Host.ModelProviderRegistry.RegisterOrReplace(other.Descriptor, other.CreateRuntime);
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ReleaseAll();
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        var runtime = f.Host.RuntimeService;
+        var provider = choices.Current.ProviderKey;
+        var send = f.Accept(f.AdmitSend(new OwnedTextSendRequest("auto", f.SessionId, "input")
+            { Selection = choices.Current with { PermissionMode = "auto" } }));
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+        f.InheritPermissions = true;
+        f.ReviewByDefault = true;
+
+        // The creator decides in auto: a session of the same provider decides in auto too, not in Ask first.
+        Assert.AreEqual("auto", runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+        // A provider without that mode asks first: the host reviews what it asks, as for its creator.
+        Assert.AreEqual(SessionPermissionModes.Ask, runtime.GetCreatedSessionPermissionMode(f.SessionId, other.Descriptor.ProviderId.Value));
+
+        Assert.AreEqual("ok", (await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, "dontAsk", CancellationToken.None))).Status);
+        Assert.AreEqual("dontAsk", runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+
+        // A mode of the host is given as before.
+        Assert.AreEqual("ok", (await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, SessionPermissionModes.AcceptEdits, CancellationToken.None))).Status);
+        Assert.AreEqual(SessionPermissionModes.AcceptEdits, runtime.GetCreatedSessionPermissionMode(f.SessionId, provider));
+        // And the two still count as asking the same: the creator hands its work to a session in either.
+        SessionViewDescriptor Other(string? permissionMode) => new()
+        {
+            SessionId = "other", ProviderId = provider, ProviderKey = provider, WorkingDirectory = f.ProjectRoot, Kind = SessionViewKind.ProjectSession, PermissionMode = permissionMode,
+        };
+        Assert.AreEqual("ok", (await f.Observe(f.Host.Commands.SetPermissionModeAsync(f.SessionId, "auto", CancellationToken.None))).Status);
+        Assert.IsTrue(runtime.AcceptsPromptFrom(f.SessionId, Other("auto")));
+        Assert.IsTrue(runtime.AcceptsPromptFrom(f.SessionId, Other(SessionPermissionModes.Ask)));
+    }, sessionPermissionModes: true);
+
+    [TestMethod]
     public Task DifferentProviderSelection_IsAdmittedThenFailsPreparationWithoutReplacingSource() => Fixture.RunAsync(async f =>
     {
         // This helper completes a real owned Send and commits the fake idle event; it does not compact.

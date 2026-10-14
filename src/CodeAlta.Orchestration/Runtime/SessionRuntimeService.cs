@@ -193,13 +193,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <summary>
     /// Gets the permission mode a session is given when another session creates it. By default it does not ask:
     /// it bypasses permissions, whatever the policy of the host, unless its provider is configured with a mode.
-    /// With <see cref="InheritPermissionMode"/> it asks what its creator asks.
+    /// With <see cref="InheritPermissionMode"/> it asks what its creator asks: it takes the very mode of its creator
+    /// when its provider offers it (a creator in Claude Code's <c>auto</c> creates a session in <c>auto</c>), else
+    /// the mode of the host that has the policy of its creator.
     /// </summary>
     /// <param name="creatorSessionId">The session that creates it, or null when no session does.</param>
     /// <param name="providerKey">The key of the provider of the new session.</param>
     /// <returns>
-    /// One of <see cref="Runtime.SessionPermissionModes.HostModes"/>, or null to give the session no mode of its
-    /// own: no session creates it, the host has no mode per session, or it does not ask anyway.
+    /// One of <see cref="Runtime.SessionPermissionModes.HostModes"/> or of the modes its provider offers a session,
+    /// or null to give the session no mode of its own: no session creates it, the host has no mode per session, or
+    /// it does not ask anyway.
     /// </returns>
     public string? GetCreatedSessionPermissionMode(string? creatorSessionId, string? providerKey)
     {
@@ -208,6 +211,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var configured = ConfiguredPermissionMode(providerKey);
         if (InheritPermissionMode?.Invoke() != true)
             return configured is null && reviewByDefault ? Runtime.SessionPermissionModes.Bypass : null;
+        // A mode of the provider that reviews (Claude Code's auto, dontAsk) is kept as it is where the new session's
+        // provider has it too: the host reviews it the same way, and the provider decides the rest as for its creator.
+        if (_entries.TryGetValue(creatorSessionId, out var creator)
+            && NormalizeOptionalText(creator.PermissionMode ?? ConfiguredPermissionMode(creator.ProviderKey)) is { } own
+            && !Runtime.SessionPermissionModes.HostModes.Contains(own, StringComparer.Ordinal)
+            && !OwnedSessionCommandService.ProviderOnlyPermissionModes.Contains(own)
+            && OffersPermissionMode(providerKey, own))
+            return own;
         // A mode that asks is saved with the session: it keeps asking when the policy of the host changes.
         return GetPermissionPolicy(creatorSessionId) switch
         {
@@ -254,6 +265,19 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (!_sessionPermissionModes || InheritPermissionMode?.Invoke() != true || string.IsNullOrWhiteSpace(senderSessionId)) return true;
         return _entries.TryGetValue(senderSessionId, out var entry) && !entry.IsTerminated && !entry.Attachment.IsRetiring
             && Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), !_autoApproveOwnedPermissions()) == SessionPermissionPolicy.Approve;
+    }
+
+    // Whether a session of a provider can be given a mode of that provider's own.
+    private bool OffersPermissionMode(string? providerKey, string permissionMode)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey)) return false;
+        foreach (var provider in _agentHub.SelectionProviders)
+        {
+            if (string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase))
+                return provider.PermissionModes.Contains(permissionMode, StringComparer.Ordinal);
+        }
+
+        return false;
     }
 
     private string? ConfiguredPermissionMode(string? providerKey)
