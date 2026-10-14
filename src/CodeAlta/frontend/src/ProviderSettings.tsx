@@ -21,6 +21,7 @@ import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { useShellLanguage } from "./shellLanguage";
 import { ClaudeCodeCli, type ClaudeCliApi } from "./claudeCli/ClaudeCodeCli";
 import { sameConfigDir } from "./claudeCli/claudeCli";
+import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
@@ -43,7 +44,7 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions }: {
+export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   /** The Claude Code CLI CodeAlta pins and its download; the host by default. */
@@ -62,6 +63,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   onOpenFile?: () => void;
   /** Says where the configuration file is and opens it; the host by default. */
   filesApi?: SettingsFilesApi;
+  /** The spaces of the providers, shown and changed beside each of them; null while there is only the default space. */
+  spaceScope?: ResourceSpaces;
 }) {
   const { t } = useShellLanguage();
   const page = useRef<HTMLElement>(null);
@@ -254,7 +257,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color }} /></span>
             <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
             <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
-              <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
+              <Tag minimal round intent={state.intent}>{state.label}</Tag>
+              <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={provider.key} name={provider.effectiveName} disabled={busy} /></span>
           </Card>; })}
           {selected === newProvider && <Card interactive selected><span className="provider-settings-logo">{shownLogo && <Logo brand={shownLogo} size={20} fallback="model" />}</span><span className="provider-settings-name"><strong>{form?.displayName || t("New provider")}</strong>
             <small>{form?.key || "…"} · {form?.type}</small></span><Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
@@ -329,6 +333,9 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               </>}
             {original && original.type === form.type && hasSubscriptionUsage(form.type)
               && <ProviderUsagePanel key={original.key} epoch={epoch} providerKey={original.key} api={usage} />}
+            {/* A provider is assigned to spaces once it is saved: its spaces are a setting of its own section. */}
+            {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
+              <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
           </SectionCard>

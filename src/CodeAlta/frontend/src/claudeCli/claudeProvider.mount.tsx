@@ -1,7 +1,8 @@
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ClaudeCliInstallState, ClaudeCliStatusResponse, GlobalConfigProvider, GlobalConfigSaveProviderRequest } from "#neoastra";
 import { ProviderSettings } from "../ProviderSettings";
+import { readAssignments, readSpaces, type SpaceResourceKind } from "../spaces/spaces";
 
 // A provider of Claude Code with sessions, a CLI that is not downloaded yet, and the Claude Code of the user.
 const provider: GlobalConfigProvider = { key: "claude-code", type: "claude-code", enabled: true, displayName: null, effectiveName: "Claude Code", model: null,
@@ -42,9 +43,24 @@ const cli = {
     })();
   },
 };
-Object.assign(window, { claudeFixture: { state, status } });
-createRoot(document.getElementById("root")!).render(<StrictMode><ProviderSettings epoch="epoch" config={config} cli={cli}
-  readRuntime={async () => ({ status: "ok", epoch: "epoch", providers: [], truncated: false })}
-  probe={async request => ({ status: "ok", epoch: "epoch", providerId: request.providerId, availability: "Ready", reason: null })}
-  filesApi={{ list: async () => ({ status: "ok", platform: "windows", locations: [] }), open: async () => ({ status: "ok" }), reveal: async () => ({ status: "ok" }) }}
-  providerSessions={key => key === "claude-code" ? 2 : 0} onOpenModels={() => {}} onOpenConfiguration={() => {}} /></StrictMode>);
+// Two spaces: the second account works in Work alone.
+const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null },
+  { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null }]);
+const assigned: { kind: string; key: string; spaces: readonly string[] }[] = [];
+Object.assign(window, { claudeFixture: { state, status, assigned } });
+
+function Page() {
+  const [providers, setProviders] = useState<{ key: string; spaces: string[] }[]>([{ key: "claude-tools", spaces: ["work"] }]);
+  const assignments = readAssignments({ status: "ok", providers, mcpServers: [], plugins: [], skills: [], prompts: [] });
+  const spaceScope = { spaces, assignments, assign: async (kind: SpaceResourceKind, key: string, next: readonly string[]) => {
+    assigned.push({ kind, key, spaces: next });
+    setProviders(value => [...value.filter(item => item.key !== key), { key, spaces: [...next] }]);
+    return { ok: true, status: "ok", message: null, space: null };
+  } };
+  return <ProviderSettings epoch="epoch" config={config} cli={cli} spaceScope={spaceScope}
+    readRuntime={async () => ({ status: "ok", epoch: "epoch", providers: [], truncated: false })}
+    probe={async request => ({ status: "ok", epoch: "epoch", providerId: request.providerId, availability: "Ready", reason: null })}
+    filesApi={{ list: async () => ({ status: "ok", platform: "windows", locations: [] }), open: async () => ({ status: "ok" }), reveal: async () => ({ status: "ok" }) }}
+    providerSessions={key => key === "claude-code" ? 2 : 0} onOpenModels={() => {}} onOpenConfiguration={() => {}} />;
+}
+createRoot(document.getElementById("root")!).render(<StrictMode><Page /></StrictMode>);

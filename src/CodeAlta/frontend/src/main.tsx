@@ -108,6 +108,7 @@ import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { useNewSessionChoices } from "./newSessionChoices";
+import { providersInSpace } from "./newSessionPreferences";
 import { resourceSpacesOf } from "./spaces/SpaceChips";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
@@ -3116,10 +3117,11 @@ function App() {
 
   function creationProviderChoice(inPopover = false) {
     const inventory = configurationState.snapshot;
-    const providers = inventory?.providerRuntimeAvailable ? inventory.providers.slice(0, 32).filter(provider => provider.enabled
+    // A new session is in the space shown: only the providers of that space are offered.
+    const providers = inventory?.providerRuntimeAvailable ? providersInSpace(inventory.providers.slice(0, 32).filter(provider => provider.enabled
       && provider.id.length > 0 && provider.id.length <= 256 && provider.id === provider.id.trim()
       && !/[\u0000-\u001f\u007f-\u009f\ud800-\udfff]/u.test(provider.id)
-      && inventory.providers.filter(other => other.id === provider.id).length === 1) : [];
+      && inventory.providers.filter(other => other.id === provider.id).length === 1), spacesState.available ? spaceId : null) : [];
     // The provider in use is named even before the user picks one: the one chosen earlier, else the default provider, else the first enabled one.
     const usedProvider = draftChoices.value.providerKey;
     const change = (field: "providerKey" | "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {
@@ -4098,7 +4100,9 @@ function App() {
           ? async () => ({ status: "unavailable", rows: [], captureOmitted: "0", readOmitted: 0, captureId: null, boundary: "0", grant: "" }) : applicationLogs.read} /></>
       : settingsSection === "providers" ? owned && status?.hostEpoch
         ? <ProviderSettings epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe}
-          onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")} onApplied={() => void refreshConfiguration()}
+          onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")}
+          // A renamed provider keeps its spaces under its new key: the chips read them again.
+          onApplied={() => { void refreshConfiguration(); void spacesHub.refresh(); }} spaceScope={resourceScope}
           onOpenFile={closeSettings} guide={providerGuide} onGuideClosed={() => setProviderGuide(false)}
           providerSessions={key => snapshot?.sessions.filter(session => session.providerKey?.toLowerCase() === key.toLowerCase()).length ?? 0} />
         : <ProvidersPanel epoch={null} read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers}

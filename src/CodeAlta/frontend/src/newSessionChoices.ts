@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogModel, type SessionPromptChoice } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
-import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTierProvider, rememberNewSessionPreference,
+import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
   restoreNewSessionPreferences, tierNewSessionPreference, type NewSessionChoiceField } from "./newSessionPreferences";
 import { useTiers } from "./modelTiers";
 
@@ -9,7 +9,8 @@ import { useTiers } from "./modelTiers";
 export function useNewSessionChoices(epoch: string | undefined | null, projectId: string | null, projectPath: string | null,
   inventory: ConfigurationSnapshot | undefined, enabled: boolean,
   capability: ReturnType<typeof createMutationCapability> | undefined, spaceId: string | null = null) {
-  const providers = inventory?.providerRuntimeAvailable ? inventory.providers.filter(provider => provider.enabled) : [];
+  // A new session is in the space shown: it starts with a provider of that space.
+  const providers = inventory?.providerRuntimeAvailable ? providersInSpace(inventory.providers.filter(provider => provider.enabled), spaceId) : [];
   // What the user chose for the new sessions of this project (or of the chats), kept with the window.
   const scope = JSON.stringify([projectId, projectPath]);
   const [remembered, setRemembered] = useState(() => restoreNewSessionPreferences(() => localStorage.getItem(newSessionPreferencesKey)));

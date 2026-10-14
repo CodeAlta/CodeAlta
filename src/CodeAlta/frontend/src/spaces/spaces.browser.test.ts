@@ -250,7 +250,13 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects", "Available here", "New sessions"],
         "Identity, with nothing to show yet, is left out.");
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-available-tabs .bp6-tab')].map(tab=>tab.firstChild.textContent)"),
-        ["MCP Servers", "Skills", "Agent prompts", "Plugins"]);
+        ["Providers", "MCP Servers", "Skills", "Agent prompts", "Plugins"]);
+      // The providers come first: the account of Work and the one of every space are here, the one of the default space is not.
+      assert.equal(await wait("document.querySelectorAll('.space-available .space-resource-row').length===3"), true);
+      assert.deepEqual(await evaluate(`[...document.querySelectorAll('.space-available .space-resource-row')].map(row=>
+        row.querySelector('.space-resource-name strong').textContent+':'+row.querySelector('.space-resource-switch input').checked)`),
+        ["Claude Business:true", "Claude Home:false", "Codex:true"]);
+      assert.equal(await evaluate("document.querySelector('.space-available-tabs .bp6-tab[aria-selected=\"true\"] .space-section-count').textContent"), "2");
       assert.equal(await evaluate("!!document.querySelector('.space-page .space-agent-prompt select')"), true);
       assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
       await evaluate("document.querySelector('.space-page-back').click()");

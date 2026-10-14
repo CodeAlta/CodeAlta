@@ -68,6 +68,15 @@ export function tierNewSessionPreference(saved: NewSessionPreference | undefined
 type Model = Readonly<{ id: string; efforts: readonly string[]; defaultEffort: string | null }>;
 
 /** The provider new sessions use: the one that was chosen while it is enabled, else the default one, else the first. */
+/**
+ * The providers a new session of a space can start with: those the settings assign to that space, or to no space.
+ * A provider of another space is not offered, and the default one of the settings is not the default there.
+ */
+export function providersInSpace<T extends Readonly<{ spaces?: readonly string[] | null }>>(providers: readonly T[], spaceId: string | null): readonly T[] {
+  const space = spaceId || "default";
+  return providers.filter(provider => !provider.spaces?.length || provider.spaces.includes(space));
+}
+
 export function newSessionProvider(saved: NewSessionPreference | undefined, providers: readonly Readonly<{ id: string; isDefault: boolean }>[]): string {
   return providers.find(candidate => candidate.id === saved?.providerKey)?.id || (providers.find(provider => provider.isDefault) ?? providers[0])?.id || "";
 }

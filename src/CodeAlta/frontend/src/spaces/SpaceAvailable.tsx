@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Button, Card, InputGroup, PopoverNext, Switch, Tab, Tabs, Tag } from "@blueprintjs/core";
-import { agentPrompts, mcpServers, plugins, skills } from "#neoastra";
+import { agentPrompts, globalConfig, mcpServers, plugins, skills } from "#neoastra";
 import { AppIcon } from "../AppIcon";
+import { ProviderIcon } from "../ProviderIcon";
 import { BrandIcon } from "../BrandIcon";
 import { namedBrand, pluginBrand } from "../brands";
 import type { MessageKey } from "../localization";
@@ -23,10 +24,11 @@ export type AvailableResource = Readonly<{
   turnOff?: () => Promise<boolean>;
 }>;
 
-type Tabbed = Exclude<SpaceResourceKind, "provider">;
-/** The tabs of the section; the providers have theirs once they are assigned to spaces. */
+type Tabbed = SpaceResourceKind;
+/** The tabs of the section. */
 export const availableTabs: readonly { kind: Tabbed; title: MessageKey }[] = [
-  { kind: "mcp", title: "MCP Servers" }, { kind: "skill", title: "Skills" }, { kind: "prompt", title: "Agent prompts" }, { kind: "plugin", title: "Plugins" },
+  { kind: "provider", title: "Providers" }, { kind: "mcp", title: "MCP Servers" }, { kind: "skill", title: "Skills" }, { kind: "prompt", title: "Agent prompts" },
+  { kind: "plugin", title: "Plugins" },
 ];
 type Lists = Partial<Record<Tabbed, readonly AvailableResource[] | null>>;
 const options = { timeoutMilliseconds: 15_000 };
@@ -34,7 +36,8 @@ const options = { timeoutMilliseconds: 15_000 };
 // The resources of the user of each kind, from the pages that list them; null for a kind that could not be read.
 async function readResources(epoch: string, t: (key: MessageKey) => string): Promise<Lists> {
   const read = async <T,>(call: () => Promise<T>) => { try { return await call(); } catch { return null; } };
-  const [servers, skillList, prompts, pluginList] = await Promise.all([
+  const [providers, servers, skillList, prompts, pluginList] = await Promise.all([
+    read(() => globalConfig.providers({ expectedEpoch: epoch }, options)),
     read(() => mcpServers.list({ expectedEpoch: epoch, projectId: null }, options)),
     read(() => skills.list({ expectedEpoch: epoch, projectId: null }, options)),
     read(() => agentPrompts.list({ expectedEpoch: epoch, projectId: null }, options)),
@@ -42,6 +45,12 @@ async function readResources(epoch: string, t: (key: MessageKey) => string): Pro
   ]);
   const ok = <T extends { status: string }>(reply: T | null): reply is T => reply?.status === "ok";
   return {
+    // A provider is turned off on its own page, where its sessions are said.
+    provider: !ok(providers) ? null : providers.providers.map(provider => ({
+      key: provider.key, name: provider.effectiveName, detail: `${provider.key} · ${provider.type}`, source: "Global" as MessageKey, enabled: provider.enabled,
+      logo: <ProviderIcon providerKey={provider.key} size={18} fallback="model"
+        known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color }} />,
+    })),
     mcp: !ok(servers) ? null : servers.servers.filter(server => server.scope !== "Project").map(server => ({
       key: server.key, name: server.key, source: "Global" as MessageKey, enabled: server.enabled,
       detail: server.transport === "Http" ? server.url ?? "HTTP" : [server.command, ...server.arguments].filter(Boolean).join(" "),
@@ -66,7 +75,7 @@ async function readResources(epoch: string, t: (key: MessageKey) => string): Pro
 }
 
 /**
- * The section "Available here" of the page of a space: the MCP servers, skills, agent prompts and plugins of the
+ * The section "Available here" of the page of a space: the providers, MCP servers, skills, agent prompts and plugins of the
  * user, each with the spaces it is in and a switch that puts it in this space or takes it out. A resource of a project
  * follows its project and is not listed. Taking a shared resource out of the space asks first beside its switch: the
  * other spaces keep it, and a space created later will not get it.
@@ -78,7 +87,7 @@ export function SpaceAvailable({ space, spaces, hub, canEdit, busy, run, read = 
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const epoch = hub.hostEpoch();
-  const [tab, setTab] = useState<Tabbed>("mcp");
+  const [tab, setTab] = useState<Tabbed>("provider");
   const [lists, setLists] = useState<Lists>({});
   const [revision, setRevision] = useState(0);
   const [filter, setFilter] = useState("");

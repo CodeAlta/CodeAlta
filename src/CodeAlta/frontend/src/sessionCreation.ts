@@ -112,6 +112,7 @@ export function sessionCreationMessage(code: string): string {
     case "busy": return "A session creation is already in progress.";
     case "closed": return "The host is closing; no new creation was admitted.";
     case "space_missing": return "The space this window shows no longer exists. Show another space and create the session there.";
+    case "provider_outside_space": return "This provider is not available in the space this window shows. Choose another provider and create the session again.";
     default: return "Creation may have completed. Refresh and inspect sessions before requesting another; there is no automatic retry.";
   }
 }

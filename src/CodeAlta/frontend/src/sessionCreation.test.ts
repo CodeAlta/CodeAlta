@@ -153,4 +153,5 @@ test("a new session names the space the window shows, which the host may no long
   answer = reply("space_missing");
   assert.deepEqual(await create(epoch, project, null, capability, null, null, "gone"), { kind: "error", code: "space_missing" });
   assert.match(sessionCreationMessage("space_missing"), /no longer exists/);
+  assert.match(sessionCreationMessage("provider_outside_space"), /not available in the space/);
 });

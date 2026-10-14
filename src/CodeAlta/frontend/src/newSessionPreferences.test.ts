@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTierProvider, rememberNewSessionPreference, restoreNewSessionPreferences, tierNewSessionPreference,
+import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTierProvider, providersInSpace, rememberNewSessionPreference, restoreNewSessionPreferences, tierNewSessionPreference,
   type NewSessionPreference } from "./newSessionPreferences";
 
 const chosen: NewSessionPreference = { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" };
@@ -56,6 +56,18 @@ test("only what the user changes is remembered, with what it stands on", () => {
   assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "agentPromptId", ""), { providerKey: "codex", modelId: "model", reasoningEffort: "high" });
   assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "modelId", ""), { agentPromptId: "plan", providerKey: "codex" });
   assert.deepEqual(chosenNewSessionPreference({ agentPromptId: "plan" }, "codex", "agentPromptId", ""), {});
+});
+
+test("a new session of a space is offered the providers of that space only, and starts with one of them", () => {
+  const listed = [{ id: "claude-business", isDefault: true, spaces: ["business"] }, { id: "codex", isDefault: false, spaces: null },
+    { id: "claude-home", isDefault: false, spaces: ["default", "personal"] }];
+  assert.deepEqual(providersInSpace(listed, "business").map(provider => provider.id), ["claude-business", "codex"]);
+  assert.deepEqual(providersInSpace(listed, null).map(provider => provider.id), ["codex", "claude-home"], "no space shown is the default space");
+  assert.deepEqual(providersInSpace(listed, "personal").map(provider => provider.id), ["codex", "claude-home"]);
+  // The default provider of the settings is in another space: the first provider of this one.
+  assert.equal(newSessionProvider(undefined, providersInSpace(listed, "personal")), "codex");
+  // What was chosen in another space is not taken here.
+  assert.equal(newSessionProvider({ providerKey: "claude-business" }, providersInSpace(listed, "personal")), "codex");
 });
 
 test("a new session starts from the defaults of the settings until something was chosen, and follows them when they change", () => {

@@ -36,6 +36,25 @@ test("the Claude Code form offers the pinned CLI, shows its download and gives t
   }, options);
 });
 
+test("each account shows its spaces on its row and in its form, where a click changes them", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const chip = (key: string) => `document.querySelector('[data-provider-key="${key}"] .space-scope')`;
+    await page.until(`${chip("claude-tools")}?.textContent === 'Work'`, "the account of Work");
+    assert.equal(await page.evaluate(`${chip("claude-code")}.textContent`), "All spaces");
+    // The form of the selected provider has the same choice.
+    await page.until(`document.querySelector('.provider-settings-form .space-scope')?.closest('.bp6-form-group')?.querySelector('label')?.textContent.trim() === 'Spaces'`,
+      "the field");
+    await page.click('[data-provider-key="claude-code"] .space-scope-button');
+    await page.until(`!!document.querySelector('.space-scope-menu')`, "the spaces");
+    await page.clickText('.space-scope-menu .bp6-menu-item', 'Work');
+    await page.until(`claudeFixture.assigned.length === 1`, "the change saved at once");
+    assert.equal(await page.evaluate(`JSON.stringify(claudeFixture.assigned[0])`), JSON.stringify({ kind: "provider", key: "claude-code", spaces: ["work"] }));
+    await page.until(`${chip("claude-code")}?.textContent === 'Work'`, "the row says it");
+    assert.equal(await page.evaluate(`document.querySelector('.provider-settings-form .space-scope')?.textContent`), "Work");
+    assert.equal(await page.evaluate(`document.querySelector('[data-provider-key="claude-code"]').getAttribute('aria-current')`), "true", "the click on the chip does not select another row");
+  }, options);
+});
+
 test("changing the folder of a provider that has sessions asks first, and Duplicate adds another account", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-config-dir')`, "the form");
