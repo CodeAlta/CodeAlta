@@ -283,7 +283,7 @@ Projects of the Contoso contract.
 - `identity.git` has `name`, `email`, `ssh_key` (the private key to fetch and push), `sign` (`off`, `ssh` or `gpg`, which needs `signing_key`), `signing_key` and `signoff`; `identity.github.config_dir` is the folder of a GitHub CLI profile; `identity.jira` has `site`, `email` and `token_env`, the **name** of the environment variable that holds the token. Only paths and names of variables are kept, never a secret.
 - `tools.disabled` lists names of tools (letters, digits, `_`, `-`, `.`, `:`), at most 64.
 - A value that is not valid in a file written by hand is left out when the file is read (`SpaceSettings.Sanitized`), and the space is read with the rest. `SpaceCatalog.UpdateSettingsAsync` changes the settings from what the file has now, refuses a value that is not valid with what is wrong (`SpaceChangeStatus.Invalid`), and keeps the name, the icon, the color and the description; a rename keeps the settings.
-- These settings are read and validated; what uses them (new sessions, identity, tools) comes with the work that applies them.
+- The identity is applied to the sessions of the space (see "The identity of a session" below); the other settings are read and validated, and what uses them comes with the work that applies them.
 
 ### The space of a session
 
@@ -308,6 +308,21 @@ The Runtime Context of an agent names the space of its session, with what it is 
 ```text
 - Space: Business (business): Projects of the Contoso contract.
 ```
+
+### The identity of a session
+
+A session of CodeAlta Desktop works under the identity of its space (`CodeAltaHostOptions.AppliesSpaceIdentities`; CodeAlta TUI leaves it off, and its sessions keep the user's usual settings). `SessionIdentityResolver` reads the space of the session (`SpaceCatalog.ResolveSessionSpaceAsync`) when the session attaches, and `SpaceIdentityEnvironment.Create` turns its identity into one `AgentProcessEnvironment`, kept by the attachment (`SessionRuntimeService.GetSessionIdentityAsync`): the session keeps it while it runs, whatever the window shows and whatever is changed in the space, and takes the new one when it attaches again. An identity that sets nothing, the default space's included, sets no variable.
+
+| Identity | Variables |
+| --- | --- |
+| `git.name`, `git.email` | `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_EMAIL` |
+| `git.ssh_key` | `GIT_SSH_COMMAND=ssh -i '<key>' -o IdentitiesOnly=yes`: the path quoted for the POSIX shell Git runs it in (the one it ships with on Windows), with `/` on Windows |
+| `git.sign`, `git.signing_key` | `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`: `user.signingkey`, `gpg.format` (`ssh` or `openpgp`) and `commit.gpgsign` (`false` for `off`), numbered after the `GIT_CONFIG_*` settings the application already has, which the processes inherit |
+| `github.config_dir` | `GH_CONFIG_DIR` |
+
+A path written `~` starts from the folder of the user. The variables are set over the environment of the application for `shell_command`, the Claude Code CLI (and so its Bash tool; they are part of the launch key, so another identity starts another CLI process, and `CLAUDE_CONFIG_DIR` of the provider stays its own), `alta job start`, the commands of the command triggers of automations (the space of the project of the automation), the `gh` tool and `gh auth token` of the Git plugin, and the terminals of the window (the shown space; a terminal a session opens takes the session's). `git.signoff` sets no variable, since Git has no setting for it: the Runtime Context of the session says ``- Commit with `git commit --signoff`: Signed-off-by: <name> <email>``. The Jira part is read by the Jira plugin (see `doc/plugins.md`).
+
+Limits: a repository's own `.git/config` comes before `GIT_CONFIG_*`; an `env` block in the `settings.json` of a Claude Code profile can override the variables of the CLI; a `GITHUB_TOKEN` or `GH_TOKEN` of the environment comes before the GitHub profile; the HTTPS accounts of Git Credential Manager are not switched.
 
 ### The spaces of providers, MCP servers, plugins, skills and prompts
 

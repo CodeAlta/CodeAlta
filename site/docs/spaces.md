@@ -138,6 +138,46 @@ A resource of a project (in its `.alta` folder) follows its project, which is al
 
 In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins.
 
+## Identity
+
+A space can have its own Git, GitHub and Jira identity, so that the sessions of Work commit and sign as you do at work, and those of Personal as you do at home. Open the page of the space in **Settings > Spaces**: its **Identity** section has three cards.
+
+| Card | Fields |
+| --- | --- |
+| **Git** | Name and email of your commits, the SSH key to fetch and push with, how commits are signed (SSH or GPG, with the key), and **Signed-off-by** |
+| **GitHub** | The folder of a profile of the GitHub CLI (`gh`), with the command that signs it in |
+| **Jira** | The site, the email of your account, and the name of the environment variable that holds your API token |
+
+A field you leave empty keeps your usual settings, which it shows in gray: a space without identity changes nothing. The Default space can have an identity too. Each card is saved when you leave a field.
+
+**Check** on a card tries it: who Git commits as and whether the keys exist, which GitHub account the profile is signed in to, and whether Jira accepts your account. For a new GitHub profile, copy the command of the card, run it in a terminal, and follow `gh auth login`.
+
+A session works under the identity of its space: its commands, the Claude Code CLI, its background jobs, the `gh` tool and the Jira commands. A session that runs keeps its identity when you show another space or change the identity; it takes the new one the next time it starts. Terminals take the identity of the space the window shows. **Session info** shows the identity of a session.
+
+In the file of the space, the identity looks like this:
+
+```markdown
+---
+id: work
+kind: space
+name: Work
+identity:
+  git: { name: A. Mutel, email: alex@contoso.example, ssh_key: ~/.ssh/contoso, sign: ssh, signing_key: ~/.ssh/contoso.pub, signoff: true }
+  github: { config_dir: ~/.config/gh-contoso }
+  jira: { site: contoso.atlassian.net, email: alex@contoso.example, token_env: CONTOSO_JIRA_TOKEN }
+---
+```
+
+Only paths and names of variables are kept, never a token. A project that names its Jira in its `.alta/config.toml` keeps what it writes there: the space gives the site, the email and the token variable it leaves out.
+
+What an identity does not change:
+
+- the settings a repository writes in its own `.git/config`;
+- an `env` block in the `settings.json` of a Claude Code profile, which can replace what CodeAlta gives the CLI;
+- a `GITHUB_TOKEN` or `GH_TOKEN` of your environment, which comes before the GitHub profile;
+- the HTTPS accounts of Git Credential Manager;
+- the Atlassian CLI keeps one login for your computer: when two spaces use two Jira accounts, their sessions take turns and the CLI switches between them.
+
 ## What follows the shown space
 
 Everything the window lists is what the shown space has:

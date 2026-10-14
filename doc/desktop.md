@@ -1007,6 +1007,24 @@ the projects. A space created from the title bar is shown at once. An empty spac
 this space yet." with **Add projects…**, which opens the folder picker, just like **+** in the
 Projects header. **Organize spaces…** remains available in the space switch.
 
+**Identity.** The page of a space has an Identity section (`SpaceIdentity.tsx`) with three cards, Git
+(name, email, SSH key for fetch and push, signing off/SSH/GPG with its key, Signed-off-by), GitHub (the
+folder of a profile of the GitHub CLI, with a folder picker and the login command to copy:
+`$env:GH_CONFIG_DIR='…'; gh auth login` on Windows, `GH_CONFIG_DIR='…' gh auth login` elsewhere) and
+Jira (site, email, the **name** of the variable of the token). An empty field keeps the usual setting,
+shown in it: the global `user.name`, `user.email`, `user.signingkey` and `gpg.format` of Git, the usual
+folder of the GitHub CLI, `JIRA_EMAIL`; a card that sets nothing says "Usual settings". A card is saved
+when one of its fields is left, or at once for a choice, through the RPC service `spaceIdentity`
+(`Desktop/Rpc/SpaceIdentityRpc.cs`: `get`, `update` of one part, so that a card never undoes another,
+`check`, `session`). **Check** runs with the card as written (`SpaceIdentityChecks`): `git var
+GIT_AUTHOR_IDENT` with its variables, and whether its keys exist (`gpg --list-secret-keys` for a GPG
+key); `gh auth status` with its `GH_CONFIG_DIR`; for Jira, `GET /rest/api/3/myself` with the email and
+the token of the variable (read for the request only) or, without a token, whether the site answers. A
+tool that is not installed says so. The information window of a session shows the identity it attached
+with (`SessionIdentityInfo.tsx`: author, signing, GitHub profile, Jira site and email), and nothing for
+the usual settings. Tests: `src/CodeAlta.Desktop.Tests/SpaceIdentityRpcTests.cs`,
+`frontend/src/spaces/identityCards.test.ts` and the Identity test of `spaces.browser.test.ts`.
+
 **Implementation.**
 
 - *Catalog* (`src/CodeAlta.Catalog`): `SpaceDescriptor` (the values and their validation),
