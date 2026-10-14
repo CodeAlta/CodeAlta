@@ -1189,8 +1189,8 @@ dialog::backdrop { background: var(--scrim); }
 .settings-dialog-content .model-catalog-providers > :not(h2):not(button), .settings-dialog-content .model-catalog-results > :not(h2) { margin: 12px 14px; }
 .settings-dialog-content .model-catalog-detail { margin-top: 12px; padding-top: 12px; }
 .settings-dialog-content .model-catalog-providers input, .settings-dialog-content .model-catalog-results input:not([type="checkbox"]) { width: 100%; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-2); color: var(--text); }
-.settings-dialog-content :is(.model-catalog-page, .configuration-page) button:not(.bp6-button):not([aria-pressed]):not(.icon-button) { padding: 5px 11px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text); background: var(--panel-2); font: inherit; cursor: pointer; }
-.settings-dialog-content :is(.model-catalog-page, .configuration-page) button:not(.bp6-button):not([aria-pressed]):not(.icon-button):hover:not(:disabled) { background: var(--panel-3); }
+.settings-dialog-content :is(.model-catalog-page, .configuration-page) button:not(.bp6-button):not(.bp6-tag-remove):not([aria-pressed]):not(.icon-button) { padding: 5px 11px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text); background: var(--panel-2); font: inherit; cursor: pointer; }
+.settings-dialog-content :is(.model-catalog-page, .configuration-page) button:not(.bp6-button):not(.bp6-tag-remove):not([aria-pressed]):not(.icon-button):hover:not(:disabled) { background: var(--panel-3); }
 .settings-dialog-content :is(.model-catalog-page, .configuration-page) button:not(.bp6-button):disabled { opacity: .55; cursor: not-allowed; }
 @media (max-width: 900px) { .settings-dialog-content .model-catalog-layout { grid-template-columns: minmax(0, 1fr); } }
 .settings-dialog-content .model-catalog-results > .model-catalog-grid { max-width: calc(100% - 28px); overflow: hidden; border: 1px solid var(--line); border-radius: 4px; }
