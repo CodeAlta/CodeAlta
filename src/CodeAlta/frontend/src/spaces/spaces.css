@@ -132,6 +132,41 @@
 .space-section > .bp6-input-group { margin-bottom: 8px; }
 .space-section > .space-project-checks { max-height: 340px; }
 
+/* The spaces of a resource: a chip on its row, which opens the choice of its spaces beside it. */
+.space-scope { display: inline-flex; align-items: center; gap: 3px; min-width: 0; color: var(--text); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
+.space-scope[data-all="true"] { gap: 4px; color: var(--muted); }
+.space-scope-name { max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
+.space-scope-more { color: var(--muted); font-variant-numeric: tabular-nums; }
+.space-scope-picker { display: inline-flex; }
+.space-scope-button.bp6-button { min-height: 22px; padding: 0 4px 0 7px; border: 1px solid var(--line); border-radius: 11px; gap: 2px; }
+.space-scope-button.bp6-button:hover:not(.bp6-disabled) { border-color: var(--line-strong); }
+.space-scope-button.bp6-button > .bp6-icon:last-child, .space-scope-button.bp6-button > svg:last-child { color: var(--muted); }
+.space-scope-menu { min-width: 190px; }
+
+/* What a space has, by kind of resource: a row per resource with its spaces and the switch of this space. */
+.space-available-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.space-available-bar > .bp6-input-group { width: min(220px, 100%); }
+.space-available-tabs .bp6-tab { display: inline-flex; align-items: center; gap: 6px; }
+.space-resource-list { display: grid; max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.space-resource-list > .bp6-text-muted { margin: 0; padding: 14px 12px; font-size: 12.5px; }
+.space-resource-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 12px; }
+.space-resource-row + .space-resource-row { border-top: 1px solid var(--line); }
+.space-resource-row:not([data-here]) .space-resource-name strong, .space-resource-row:not([data-here]) .space-resource-logo { opacity: .55; }
+.space-resource-logo { display: grid; place-items: center; color: var(--muted); }
+.space-resource-name { display: grid; min-width: 0; }
+.space-resource-name strong { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.space-resource-name small { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.space-resource-tags { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.space-resource-switch.bp6-control { margin: 0; }
+.space-resource-confirm { max-width: 260px; }
+.space-section .space-agent-prompt { min-width: min(260px, 100%); }
+.session-info-resources dd { overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .space-resource-row { grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .space-resource-tags { grid-column: 2 / 3; justify-content: flex-start; }
+}
+
 @media (max-width: 900px) {
   .space-board { grid-template-columns: minmax(0, 1fr); }
   .space-pool { position: static; max-height: 320px; }

@@ -8,6 +8,8 @@ import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
   sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, viewLists } from "./spaces";
 import { activityMilliseconds, createSpacesHub, type SpacesApi, type SpacesHub } from "./spacesHub";
+import { SpaceScopeChip, spaceNames, toggledSpaces } from "./SpaceChips";
+import { inSpace, noAssignments, readAssignments, resourceSpaces, spacesWith, spacesWithout } from "./spaces";
 
 const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem> = {}): SpaceItem =>
   ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, agentPrompt: null, ...changes });
@@ -23,7 +25,7 @@ test("the spaces are read as the host lists them, the default one first, and wha
     item("work", ["z"]), { ...item("bad"), id: "Not An Id" }, { ...item("noname"), name: "" }, null as unknown as SpaceItem,
     item("odd", ["a", 7 as unknown as string, ""], { color: "blue", icon: "" })]);
   assert.deepEqual(spaces.map(space => space.id), ["default", "work", "odd"]);
-  assert.deepEqual(spaces[1], { id: "work", name: "Work", description: "Paid work", icon: "briefcase", color: "#2D72D2", isDefault: false, projectIds: ["a", "b"], file: "C:\\alta\\spaces\\work.md" });
+  assert.deepEqual(spaces[1], { id: "work", name: "Work", description: "Paid work", icon: "briefcase", color: "#2D72D2", isDefault: false, projectIds: ["a", "b"], file: "C:\\alta\\spaces\\work.md", agentPrompt: null });
   assert.deepEqual([spaces[2].projectIds, spaces[2].color, spaces[2].icon], [["a"], null, null]);
   assert.equal(spaces[0].isDefault, true);
   // A list without a default space gets one: the window always has a space that holds every project.
@@ -272,6 +274,13 @@ test("the hub lists the spaces once, follows what the host says, and says what e
   await hub.assign("a", ["personal"], ["work"]);
   hub.shown("work");
   assert.equal(calls.includes("assign a +personal -work"), true);
+  // The hub keeps the spaces of the resources with the spaces, and changes them through the host.
+  assert.deepEqual(resourceSpaces(hub.getSnapshot().assignments, "mcp", "atlassian"), ["work"]);
+  assert.equal((await hub.assignResource("skill", "terraform", ["work", "default"])).ok, true);
+  assert.equal(calls.includes("assignResource skill terraform work,default"), true);
+  assert.equal((await hub.setAgentPrompt("work", null)).ok, true);
+  assert.equal(calls.includes("setAgentPrompt work null"), true);
+  assert.equal((await hub.sessionResources("s1"))?.spaceId, "work");
   assert.equal(calls.includes("shown work"), true);
   unsubscribe();
   disconnect();
@@ -346,10 +355,38 @@ test("the sessions that wait are listed under every session above them, the near
   assert.equal(below.has("busy"), false);
 });
 
-test("a card of the overview opens the page of its space, which shows what it is and its projects, and not the sections that have nothing yet", () => {
+test("the spaces of a resource: none is every space, the default space only when listed, and one that leaves a shared resource lists the others", () => {
+  const assignments = readAssignments({ status: "ok", providers: [], mcpServers: [{ key: "Atlassian", spaces: ["work", "work", "Not An Id", "default"] }],
+    plugins: [{ key: "jira", spaces: [] }], skills: [], prompts: [{ key: "reviewer", spaces: ["work"] }] });
+  assert.deepEqual(resourceSpaces(assignments, "mcp", "atlassian"), ["work", "default"], "keys without case; each space once; what is no space is left out");
+  assert.deepEqual(resourceSpaces(assignments, "plugin", "jira"), [], "an empty list is every space");
+  assert.equal(readAssignments({ status: "unavailable", providers: [], mcpServers: [], plugins: [], skills: [], prompts: [] }), noAssignments);
+  assert.equal(inSpace([], "personal"), true);
+  assert.equal(inSpace(["work"], "default"), false);
+  assert.equal(inSpace(["work", "default"], "default"), true);
+  assert.deepEqual(spacesWith([], "work"), [], "a shared resource stays shared");
+  assert.deepEqual(spacesWith(["work"], "personal"), ["work", "personal"]);
+  assert.deepEqual(spacesWithout([], "work", ["default", "work", "personal"]), ["default", "personal"]);
+  assert.equal(spacesWithout(["work"], "work", ["default", "work"]), null, "no list says 'in no space'");
+  // The popover of a chip: from every space, a space alone; the last one going leaves every space again.
+  assert.deepEqual(toggledSpaces([], "work"), ["work"]);
+  assert.deepEqual(toggledSpaces(["work"], "default"), ["work", "default"]);
+  assert.deepEqual(toggledSpaces(["work", "default"], "work"), ["default"]);
+  assert.deepEqual(toggledSpaces(["work"], "work"), []);
+  const spaces = readSpaces([item("default"), item("work", [], { icon: "briefcase" })]);
+  assert.deepEqual(spaceNames(spaces, ["gone", "work"]), ["Work", "gone"]);
+  const all = renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={[]} />);
+  assert.match(all, /data-all="true"/);
+  assert.match(all, /All spaces/);
+  assert.match(renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={["work"]} />), /class="space-scope-name">Work</);
+  assert.match(renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={["work", "default"]} />), /aria-label="Default, Work"/);
+});
+
+test("a card of the overview opens the page of its space, which shows what it is, its projects, what is available there and its new sessions", () => {
   const never = () => assert.fail("rendering must not act");
-  const hub = {} as SpacesHub;
-  const spaces = readSpaces([item("default"), item("work", ["alpha"], { description: "The projects of my job." })]);
+  const spaces = readSpaces([item("default"), item("work", ["alpha"], { description: "The projects of my job.", agentPrompt: "reviewer" })]);
+  const state = { loaded: true, available: true, spaces, sessions: [], activity: new Map(), assignments: noAssignments };
+  const hub = { subscribe: () => () => { }, getSnapshot: () => state, hostEpoch: () => null } as unknown as SpacesHub;
   const projects = [project("alpha"), project("beta")];
 
   const overview = renderToStaticMarkup(<SpaceSettings hub={hub} spaces={spaces} projects={projects} chats={new Map()} shownId="default" activity={new Map()} canEdit showOthers={false}
@@ -367,7 +404,11 @@ test("a card of the overview opens the page of its space, which shows what it is
   assert.match(page, /<h2[^>]*>Projects<span class="space-section-count">1</);
   assert.match(page, /value="Work"/);
   assert.match(page, />Delete</);
-  for (const absent of ["Available here", "New sessions", "Identity"]) assert.doesNotMatch(page, new RegExp(absent), `${absent} has nothing to show yet.`);
+  assert.match(page, /<h2[^>]*>Available here</);
+  for (const tab of ["MCP Servers", "Skills", "Agent prompts", "Plugins"]) assert.match(page, new RegExp(`>${tab}<`));
+  assert.match(page, /<h2[^>]*>New sessions</);
+  assert.match(page, /<option value="reviewer" selected="">reviewer<\/option>/, "The agent prompt of the space is shown while the prompts are read.");
+  assert.doesNotMatch(page, /Identity/, "Identity has nothing to show yet.");
 
   const pool = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[0]} spaces={spaces} projects={projects} chats={0} shown activity={undefined} canEdit
     onBack={never} onShow={never} onDeleted={never} />);

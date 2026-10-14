@@ -5,6 +5,11 @@ import type { MessageKey } from "./localization";
 import { PromptTags } from "./PromptTags";
 import { scopedKey } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
+import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
+
+/** Whether an agent prompt has spaces of its own: one of a project follows the spaces of its project. */
+export const promptHasSpaces = (entry: Pick<AgentPromptEntry, "kind" | "scope">) =>
+  entry.kind === "Agent" && entry.scope !== "Project" && entry.scope !== "CopilotProject";
 
 /** Stable list identity of a prompt: its kind, where it is kept and its id. */
 export const promptIdentity = (entry: Pick<AgentPromptEntry, "kind" | "scope" | "id">) => scopedKey(`${entry.kind}:${entry.scope}`, entry.id);
@@ -14,8 +19,10 @@ const identity = promptIdentity;
  * The prompts of one kind in the list of the page. A row opens the form of its prompt, and its button opens the file
  * of the prompt in the code editor: to be edited, or to be read for a prompt that ships with CodeAlta.
  */
-export function PromptRows({ prompts, title, selected, disabled = false, onSelect, onOpen }: {
+export function PromptRows({ prompts, title, selected, disabled = false, onSelect, onOpen, spaceScope = null }: {
   prompts: readonly AgentPromptEntry[]; title: MessageKey; selected: string | null; disabled?: boolean;
+  /** The spaces of the agent prompts of the user, which each row shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   onSelect: (prompt: AgentPromptEntry) => void;
   /** Opens the file of a prompt in the code editor; without it the rows have no button. */
   onOpen?: (prompt: AgentPromptEntry) => void;
@@ -29,6 +36,7 @@ export function PromptRows({ prompts, title, selected, disabled = false, onSelec
         onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-button")) onSelect(prompt); }}>
         <span className="settings-editor-name"><strong>{name}</strong><small>{prompt.description || prompt.id}</small></span>
         <PromptTags prompt={prompt}>
+          {promptHasSpaces(prompt) && <ResourceSpaceChip scope={spaceScope} kind="prompt" resourceKey={prompt.id} name={name} disabled={disabled} />}
           {onOpen && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />} disabled={disabled}
             aria-label={view ? `${t("Open in the code editor")}: ${name}` : t("Edit {name}", { name })} title={t(view ? "Open in the code editor" : "Edit in the code editor")}
             onClick={() => onOpen(prompt)} />}

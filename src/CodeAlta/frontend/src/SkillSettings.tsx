@@ -13,9 +13,14 @@ import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettin
 import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
+import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
-const sourceLabels: Record<string, MessageKey> = { ProjectAlta: "Project", ProjectCommon: "Project", ProjectCopilot: "Project", UserAlta: "User", UserCommon: "User", UserCopilot: "User",
+/** Where a skill comes from, as its tag says it. */
+export const skillSourceLabels: Record<string, MessageKey> = { ProjectAlta: "Project", ProjectCommon: "Project", ProjectCopilot: "Project", UserAlta: "User", UserCommon: "User", UserCopilot: "User",
   Plugin: "Plugin", Builtin: "Built-in" };
+
+/** Whether a skill comes from a project, which it follows into the spaces of the project: it has no spaces of its own. */
+export const projectSkillSource = (source: string) => source.startsWith("Project");
 
 /** Whether a skill is removed from here: one of a CodeAlta folder or of the common folder, of the user or of a project. */
 export const skillRemovable = (source: string) => ["UserAlta", "ProjectAlta", "UserCommon", "ProjectCommon"].includes(source);
@@ -33,8 +38,10 @@ export type SkillFolder = Readonly<{ id: string; path: string; name: string }>;
  * What the selected skill is, where it lives and what its SKILL.md tells the agent. Its folder opens in the code
  * editor: to be edited when the skill is one of the user or of a project, to be read otherwise.
  */
-export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled, platform, onReveal }: {
+export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled, platform, onReveal, spaceScope = null }: {
   skill: SkillsEntry; detail: SkillsDetailResponse | undefined; failed: boolean; onEdit?: (folder: SkillFolder) => void;
+  /** The spaces of the skills of the user, which the header shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   /** Removes the skill: its folder goes to the trash. Without it, and for a skill that is not the user's to remove, there is no red button. */
   onDelete?: (skill: SkillsEntry) => void;
   disabled?: boolean;
@@ -54,11 +61,13 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
   const instructions = detail?.content ? skillInstructions(detail.content) : "";
   return <section className="skill-detail" aria-label={t("Details for {name}", { name: skill.title || skill.name })}>
     <header><h2>{skill.title || skill.name}</h2>
-      <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
+      <span className="settings-editor-tags"><Tag minimal round>{t(skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
         <Tag minimal round intent={skill.enabled ? "success" : "none"}>{t(skill.enabled ? "Enabled" : "Disabled")}</Tag>
         {detail && !detail.modelVisible && skill.enabled && <Tag minimal round intent="warning">{t("Not offered to the model")}</Tag>}
         {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
         {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
+        {!projectSkillSource(skill.source) && skillToggleable(skill.name)
+          && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={skill.title || skill.name} disabled={disabled} />}
         {detail?.folder && detail.skillRootPath && onEdit && <Button size="small" icon={<AppIcon name="code" size={15} />}
           aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name: skill.title || skill.name })}
           title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
@@ -88,8 +97,10 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
  * The list of the page: a row per skill with its switch, and the button that opens its folder in the code editor, to
  * be edited when the skill is one of the user or of a project, to be read otherwise.
  */
-export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggle, onEdit, onDelete }: {
+export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggle, onEdit, onDelete, spaceScope = null }: {
   skills: readonly SkillsEntry[];
+  /** The spaces of the skills of the user, which each row shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   /** What the list says when it has no skill. */
   empty: MessageKey;
   selected: SkillsEntry | undefined; disabled: boolean;
@@ -103,13 +114,15 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
       return <Card key={skill.id} interactive selected={skill === selected} aria-current={skill === selected ? "true" : undefined}
         onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-switch, .bp6-button")) onSelect(skill); }}>
         <span className="settings-editor-name"><strong>{name}</strong><small>{skill.description}</small></span>
-        <span className="settings-editor-tags"><Tag minimal round>{t(sourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
+        <span className="settings-editor-tags"><Tag minimal round>{t(skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
           {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
           {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
           {skill.folder && skill.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
             aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name })} title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
             onClick={() => onEdit({ id: skill.folder!, path: skill.path!, name: skill.name })} />}
           {onDelete && skillRemovable(skill.source) && <RemoveButton name={name} disabled={disabled} onRemove={() => onDelete(skill)} />}
+          {!projectSkillSource(skill.source) && skillToggleable(skill.name)
+            && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={name} disabled={disabled} />}
           <Switch checked={skill.enabled} disabled={disabled || !skillToggleable(skill.name)} aria-label={t("Enable {name}", { name })} onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
       </Card>; })}
     {skills.length === 0 && <Card><span className="bp6-text-muted">{t(empty)}</span></Card>}
@@ -120,8 +133,10 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
  * Settings page for skills: one list with an enable switch per skill, the selected skill's details, bulk actions and
  * skill creation. The folder of a skill is opened in the code editor, and so is the one of a skill that was created.
  */
-export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills, reveal = projectFiles.reveal, filesApi }: {
+export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills, reveal = projectFiles.reveal, filesApi, spaceScope = null }: {
   epoch: string | null; project: SettingsProject;
+  /** The spaces of the skills of the user, which each row shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   /** Opens the folder of a skill in the code editor. */
   onEdit?: (folder: SkillFolder) => void;
   /** Called once the code editor was asked to show a folder of skills: the window leaves Settings. */
@@ -212,9 +227,9 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
         <Button size="small" disabled={busy || toggleNames.length === 0} onClick={() => toggleAll(false)}>{t("Disable all")}</Button>
       </div>
       <div className="settings-editor-layout skill-settings-layout">
-        <SkillRows skills={shown} empty={all.length ? "No skill matches the filter." : "No skills were found."} selected={selected} disabled={busy}
+        <SkillRows spaceScope={spaceScope} skills={shown} empty={all.length ? "No skill matches the filter." : "No skills were found."} selected={selected} disabled={busy}
           onSelect={skill => setSelectedId(skill.id)} onToggle={toggle} onEdit={onEdit} onDelete={remove} />
-        {selected ? <SkillDetail key={`${epoch}:${projectId}:${selected.id}`} skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} onDelete={remove} disabled={busy} platform={files.platform} onReveal={revealSkill} />
+        {selected ? <SkillDetail key={`${epoch}:${projectId}:${selected.id}`} spaceScope={spaceScope} skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} onDelete={remove} disabled={busy} platform={files.platform} onReveal={revealSkill} />
           : <NonIdealState icon={<AppIcon name="skill" size={32} />} title={t("No skills were found.")} />}
       </div>
     </>}

@@ -107,6 +107,7 @@ import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
 import { NewSessionWorkspace } from "./NewSessionWorkspace";
 import { useNewSessionChoices } from "./newSessionChoices";
+import { resourceSpacesOf } from "./spaces/SpaceChips";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { validSelection } from "./sessionSelection";
@@ -178,6 +179,7 @@ import { StorageSettings } from "./storage/StorageSettings";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
 import { storage } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
+import type { SpaceSessionResourcesResponse } from "#neoastra";
 import { SpeechContext } from "./speech/speech";
 import { SpeechSettings } from "./speech/SpeechSettings";
 import { speechEnabled } from "./speech/speechStore";
@@ -330,6 +332,11 @@ function App() {
   // The buttons of plugins that the user hid are a view state of this window, as its open tabs are.
   const [hiddenPluginButtons] = useState(() => createHiddenButtons(typeof localStorage === "undefined" ? null : localStorage));
   const spacesState = useSyncExternalStore(spacesHub.subscribe, spacesHub.getSnapshot);
+  // The spaces of the resources, which the pages of Settings show and change beside each row.
+  const resourceScope = useMemo(() => resourceSpacesOf(spacesState, spacesHub), [spacesState, spacesHub]);
+  // The space of a session and what it can use there, for the panel of the session.
+  const sessionSpaces = useMemo(() => spacesState.available ? { spaces: spacesState.spaces, read: spacesHub.sessionResources } : null,
+    [spacesState.available, spacesState.spaces, spacesHub]);
   const [spaceId, writeSpaceId] = useState(() => restoreShownSpace(() => localStorage.getItem(shownSpaceKey)));
   const shownSpace = useRef(spaceId);
   // Whether the default space shows what belongs to the other spaces too: a choice of this window, kept as the shown space is.
@@ -3916,7 +3923,7 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
+              <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
@@ -4061,7 +4068,7 @@ function App() {
         activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
-      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog}
+      : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog} spaceScope={resourceScope}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "sessions" ? <SessionSettings epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
@@ -4078,10 +4085,10 @@ function App() {
       : settingsSection === "speech" ? <SpeechSettings api={speechApi} speech={speech} epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
           maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
-      : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject}
+      : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} spaceScope={resourceScope}
         onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} onOpenFile={owned ? closeSettings : undefined} />
-      : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} />
-      : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} />
+      : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} spaceScope={resourceScope} />
+      : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} spaceScope={resourceScope} />
       : settingsSection === "config" ? <ConfigEditorPanel epoch={owned ? status!.hostEpoch : null} project={settingsProject} onApplied={() => void refreshConfiguration()}
         onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "logs" ? <>
@@ -4338,8 +4345,10 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesToggle, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, sessionSpaces = null }: {
   canAdmit: () => boolean;
+  /** The spaces, and what reads the space of a session and what it can use there; null where the host keeps no spaces. */
+  sessionSpaces?: Readonly<{ spaces: readonly Space[]; read: (sessionId: string) => Promise<SpaceSessionResourcesResponse | null> }> | null;
   /** The number of times the session was rewound: what was read of its journal before a rewind is not what it holds now. */
   rewinds?: number;
   /** The fork and the rewind of this session; null where it cannot be changed. */
@@ -4549,6 +4558,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   return <MarkdownLinkScopeContext.Provider value={linkScope}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
+      spaceResources={sessionSpaces && !demoMode ? { spaces: sessionSpaces.spaces, read: () => sessionSpaces.read(session.id) } : null}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}
     {branchRequest && branchDialogHost && <SessionBranchDialog key={`${branchRequest.mode}:${branchRequest.promptOffset ?? ""}`} title={plainTitle(session.title)} request={branchRequest} host={branchDialogHost}
       facts={{ canMutate: !!mutation?.capability.canMutate(), running: running === true, question: askMode !== "none", background: backgroundRunning, draft: branchDraft }}

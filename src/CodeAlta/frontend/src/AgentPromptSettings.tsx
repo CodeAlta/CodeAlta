@@ -4,7 +4,7 @@ import { agentPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { CopilotTag, copilotPromptScope } from "./CopilotTag";
-import { PromptRows, promptIdentity as identity } from "./PromptRows";
+import { PromptRows, promptHasSpaces, promptIdentity as identity } from "./PromptRows";
 import { CodeEditor } from "./monaco/CodeEditor";
 import { SettingsFileLocation, SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
@@ -12,6 +12,7 @@ import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettin
 import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
+import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
 type Kind = "Agent" | "System";
 type PromptForm = Readonly<{ id: string; kind: Kind; scope: SettingsScope; name: string; description: string; body: string;
@@ -22,8 +23,10 @@ const formOf = (document: AgentPromptDocument): PromptForm => ({ id: document.id
   systemPromptId: document.systemPromptId ?? "", append: document.append, revision: document.revision });
 
 /** Settings page for agent and system prompts: the prompt files on the left, an editor on the right. */
-export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPrompts, filesApi }: {
+export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPrompts, filesApi, spaceScope = null }: {
   epoch: string | null; project: SettingsProject;
+  /** The spaces of the agent prompts of the user, which each row shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   /** Called once the code editor was asked to show a prompt file or a folder of prompts: the window leaves Settings. */
   onOpenFile?: () => void;
   api?: typeof agentPrompts;
@@ -95,7 +98,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     if (await mutate(() => api.delete({ expectedEpoch: epoch, projectId, id: document.id, kind: document.kind, scope: document.scope, expectedRevision: document.revision },
       { timeoutMilliseconds: 30000 }), "Removed.")) setSelected(null);
   }
-  const group = (kind: Kind, title: MessageKey) => <PromptRows prompts={prompts.filter(prompt => prompt.kind === kind)} title={title} selected={selected} disabled={busy}
+  const group = (kind: Kind, title: MessageKey) => <PromptRows spaceScope={spaceScope} prompts={prompts.filter(prompt => prompt.kind === kind)} title={title} selected={selected} disabled={busy}
     onSelect={prompt => { if (!busy) { setNotice(null); setSelected(identity(prompt)); } }}
     onOpen={files.open ? prompt => files.open!({ kind: "prompt", scope: prompt.scope, id: prompt.id, part: prompt.kind }) : undefined} />;
 
@@ -123,6 +126,8 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
             {selected === added && <FormGroup label={t("Name")} labelFor="prompt-id">
               <InputGroup id="prompt-id" value={form.id} disabled={busy} maxLength={128} spellCheck={false} placeholder="my-agent" onChange={event => edit({ id: event.target.value })} /></FormGroup>}
             {selected === added && project && <FormGroup label={t("Stored in")}><ScopeChoice value={form.scope} project={project} disabled={busy} onChange={scope => edit({ scope })} /></FormGroup>}
+            {spaceScope && entry && selected !== added && promptHasSpaces(entry) && <FormGroup label={t("Spaces")}>
+              <ResourceSpaceChip scope={spaceScope} kind="prompt" resourceKey={entry.id} name={entry.name || entry.id} disabled={busy} /></FormGroup>}
             {form.kind === "Agent" && <>
               <FormGroup label={t("Display name")} labelFor="prompt-name">
                 <InputGroup id="prompt-name" value={form.name} disabled={busy || readOnly} placeholder={form.id} onChange={event => edit({ name: event.target.value })} /></FormGroup>

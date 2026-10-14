@@ -6,6 +6,7 @@ import type { SkillsDetailResponse, SkillsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
 import { SkillDetail, SkillRows, skillRemovable, skillToggleable } from "./SkillSettings";
 import { ShellLanguageContext } from "./shellLanguage";
+import { readAssignments, readSpaces } from "./spaces/spaces";
 
 const never = () => assert.fail("rendering must not act");
 const entry = (name: string, source: string): SkillsEntry => ({ id: `${source}-${name}`, name, title: name, description: "What it is for.", source,
@@ -126,4 +127,21 @@ test("invalid or missing names cannot write name-based enablement, but keep thei
     assert.ok(rows[index].includes(`aria-label="Enable ${title}"`));
     assert.ok(rows[index].includes(`aria-label="Remove ${title}"`));
   }
+});
+
+test("a skill of the user shows its spaces beside its switch; a skill of a project follows its project and shows none", () => {
+  const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null },
+    { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null }]);
+  const assignments = readAssignments({ status: "ok", providers: [], mcpServers: [], plugins: [], skills: [{ key: "terraform", spaces: ["work"] }], prompts: [] });
+  const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillRows, { skills: [entry("terraform", "UserAlta"), entry("notes", "UserCommon"), entry("local", "ProjectAlta")], empty: "No skills were found.",
+      selected: undefined, disabled: false, onSelect: never, onToggle: never, spaceScope: { spaces, assignments, assign: never } })));
+  assert.match(html, /aria-label="Spaces of terraform"/);
+  assert.match(html, /class="space-scope-name">Work</);
+  assert.match(html, /aria-label="Spaces of notes"[\s\S]*All spaces/);
+  assert.doesNotMatch(html, /Spaces of local/);
+  // With the default space alone there is nothing to say.
+  const alone = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(SkillRows, { skills: [entry("terraform", "UserAlta")], empty: "No skills were found.", selected: undefined, disabled: false, onSelect: never, onToggle: never, spaceScope: null })));
+  assert.doesNotMatch(alone, /space-scope/);
 });

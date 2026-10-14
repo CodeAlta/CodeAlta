@@ -13,6 +13,7 @@ import { mcpServerEdit, mcpServerForm, mcpServerFormDirty, mcpServerId, mcpServe
 import { CopilotTag } from "./CopilotTag";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
+import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
 const added = "\u0000new";
 
@@ -47,8 +48,10 @@ function NameValueRows({ rows, onChange, disabled, addLabel, namePlaceholder }: 
 }
 
 /** Settings page for MCP servers: the defined servers on the left, an edit form on the right. */
-export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers, filesApi }: {
+export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers, filesApi, spaceScope = null }: {
   epoch: string | null; project: SettingsProject;
+  /** The spaces of the servers of the user, which each row shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   /** Called once the code editor was asked to show a file of servers: the window leaves Settings. */
   onOpenFile?: () => void;
   api?: typeof mcpServers;
@@ -112,7 +115,8 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
               onChange={event => toggle(server, event.currentTarget.checked)} />
             <span className="settings-editor-tags"><Tag minimal round>{server.scope === "Project" ? t("Project") : t("Global")}</Tag>
               <SourceTag server={server} />
-              {server.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}</span>
+              {server.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
+              {server.scope !== "Project" && <ResourceSpaceChip scope={spaceScope} kind="mcp" resourceKey={server.key} name={server.key} disabled={busy} />}</span>
           </Card>; })}
           {selected === added && <Card interactive selected><span className="settings-editor-name"><strong>{form?.key || t("New server")}</strong></span>
             <Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
@@ -132,6 +136,8 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
               <SegmentedControl size="small" disabled={busy} value={form.transport} onValueChange={value => edit({ transport: value as McpServerForm["transport"] })}
                 options={[{ label: t("Local command"), value: "Stdio" }, { label: "HTTP", value: "Http" }]} /></FormGroup>
             {project && <FormGroup label={t("Stored in")} className="settings-editor-wide"><ScopeChoice value={form.scope} project={project} disabled={busy} onChange={scope => edit({ scope })} /></FormGroup>}
+            {spaceScope && original && original.scope !== "Project" && <FormGroup label={t("Spaces")} className="settings-editor-wide">
+              <ResourceSpaceChip scope={spaceScope} kind="mcp" resourceKey={original.key} name={original.key} disabled={busy} /></FormGroup>}
             {form.transport === "Stdio" ? <>
               <FormGroup label={t("Command")} labelFor="mcp-command">
                 <InputGroup id="mcp-command" value={form.command} disabled={busy} spellCheck={false} placeholder="npx" onChange={event => edit({ command: event.target.value })} /></FormGroup>

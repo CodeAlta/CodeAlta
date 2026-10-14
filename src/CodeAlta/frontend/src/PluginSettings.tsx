@@ -13,6 +13,7 @@ import { RemoveButton, ScopeChoice, SettingsPage, SettingsUnavailable, useSettin
 import { settingsFailure, type SettingsNotice, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
+import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
 // The plugins that ship with CodeAlta are enabled unless configuration says otherwise, and the host
 // lists them only once configuration names them.
@@ -103,8 +104,10 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null }: {
   rows: readonly PluginRow[]; disabled: boolean;
+  /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   /** The canvases the running plugins declare: each row lists the ones of its plugin. */
   canvases?: readonly CanvasItem[];
   /** The buttons that running plugins put in the window: each plugin lists its own with a switch. */
@@ -141,6 +144,7 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
           aria-label={t("Edit {name}", { name: row.name })} title={t("Edit in the code editor")}
           onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
         {source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
+        {entry?.scope !== "Project" && <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} />}
         <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked)} /></span>
     </Card>; })}
   </CardList>;
@@ -150,8 +154,10 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
  * Settings page for plugins: one list with an enable switch per plugin. A source plugin is also opened in the
  * code editor, built again in the running application, and created from here.
  */
-export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases }: {
+export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null }: {
   epoch: string | null; project: SettingsProject;
+  /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
+  spaceScope?: ResourceSpaces;
   /** The canvases the running plugins declare, which each row lists. */
   canvases?: readonly CanvasItem[];
   /** Changes when the application started, replaced or stopped plugins: the list is read again. */
@@ -243,7 +249,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} />
+      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} />
     </>}
   </SettingsPage>;
 }

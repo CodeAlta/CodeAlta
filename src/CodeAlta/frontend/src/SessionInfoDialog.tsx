@@ -4,21 +4,37 @@ import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import { copySessionId, dismissSessionInfoOnKey, type SessionInfoView } from "./sessionInfo";
-import { sessionRuntimeState, sessionUsage } from "#neoastra";
+import { sessionRuntimeState, sessionUsage, type SpaceSessionResourcesResponse } from "#neoastra";
 import type { RuntimeTarget } from "./runtimeObservations";
 import { readSessionInfoObservations, unavailableInfoObservations, type InfoField, type InfoObservations } from "./sessionInfoObservations";
 import { canonicalInfoCopy, infoDemoDescription, infoFieldLabel } from "./sessionInfoPresentation";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { lineageDetail } from "./sessionBranch/SessionLineage";
+import { SpaceIcon } from "./spaces/SpaceViews";
+import { findSpace, type Space } from "./spaces/spaces";
+
+/** The space of a session and what it can use there, which the panel reads when it opens; null where the host keeps no spaces. */
+export type SessionSpaceResources = Readonly<{ spaces: readonly Space[]; read: () => Promise<SpaceSessionResourcesResponse | null> }> | null;
 
 export type SessionInfoLifetime = { revision: number; current: () => boolean };
 
-export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime, canRead = () => true }: {
+export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime, canRead = () => true, spaceResources = null }: {
   info: SessionInfoView; demo: boolean; onClose: () => void; target?: RuntimeTarget | null;
   lifetime?: SessionInfoLifetime; canRead?: () => boolean;
+  /** The space of the session and what it can use there. */
+  spaceResources?: SessionSpaceResources;
 }) {
   const { t } = useShellLanguage();
+  const [resources, setResources] = useState<SpaceSessionResourcesResponse | null>(null);
+  const readResources = useRef(spaceResources?.read);
+  readResources.current = spaceResources?.read;
+  useEffect(() => {
+    setResources(null);
+    let alive = true;
+    void readResources.current?.().then(value => { if (alive) setResources(value); });
+    return () => { alive = false; };
+  }, [info.id, lifetime?.revision, !!spaceResources]);
   const dialog = useRef<HTMLDialogElement>(null);
   const alive = useRef(false);
   const copying = useRef(false);
@@ -132,6 +148,8 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       <div><dt>{t("Session ID")}</dt><dd><code>{info.id || t("Not recorded")}</code></dd></div>
       <div><dt>{t("Title")}</dt><dd>{info.title}{info.titleTruncated && <small>{t("Title shortened in the bounded snapshot.")}</small>}</dd></div>
       <div><dt>{t("Scope")}</dt><dd>{info.scope}{info.scopeWarning && <small>{info.scopeWarning}</small>}</dd></div>
+      {resources?.spaceId && spaceResources && (() => { const space = findSpace(spaceResources.spaces, resources.spaceId);
+        return <div><dt>{t("Space")}</dt><dd><span className="with-logo"><SpaceIcon space={space} size={14} />{space.name}</span></dd></div>; })()}
       <div><dt>{t("Recorded working directory")}</dt><dd>{info.path ?? t("Not recorded or unverified")}</dd></div>
       {info.worktree && <div><dt>{t("Git worktree")}</dt><dd>{info.worktree.path}
         {info.worktree.missing && <small>{t("The folder of this worktree is gone: the session continues in the folder of the project.")}</small>}</dd></div>}
@@ -143,6 +161,11 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
         <small><code>{info.lineage.sourceId}</code></small></dd></div>}
     </dl>
     </section>
+    {resources && <section aria-labelledby="session-info-resources"><h3 id="session-info-resources">{t("What it can use")}</h3>
+      <dl className="session-info-fields session-info-resources" tabIndex={0}>
+        {([["MCP Servers", resources.mcpServers], ["Skills", resources.skills], ["Agent prompts", resources.prompts], ["Plugins", resources.plugins]] as const)
+          .map(([label, names]) => <div key={label}><dt>{t(label)}</dt><dd>{names.length ? names.join(", ") : t("None")}</dd></div>)}
+      </dl></section>}
     <section data-info-copy aria-labelledby="session-info-runtime"><h3 id="session-info-runtime">{t("Observed runtime configuration")}</h3>
       {fields(observations.runtime)}</section>
     <section data-info-copy aria-labelledby="session-info-usage"><h3 id="session-info-usage">{t("Last-observed usage")}</h3>
