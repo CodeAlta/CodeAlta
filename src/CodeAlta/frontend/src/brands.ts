@@ -56,6 +56,9 @@ const types: Readonly<Record<string, BrandIconName>> = {
   "google-genai": "gemini", "vertex-ai": "vertexai", "azure-openai": "azure", "openai-responses": "openai", anthropic: "anthropic",
 };
 
+// The adapter types that run one product, whose providers are accounts of it.
+const productTypes: ReadonlySet<string> = new Set(["claude-code", "codex", "copilot"]);
+
 // The model families, by what their ids hold. A family comes before a provider: a model of Anthropic that is
 // reached through another provider is still shown as Claude.
 const families: readonly (readonly [RegExp, BrandIconName])[] = [
@@ -95,8 +98,12 @@ export function providerBrand(source: ProviderBrandSource | null | undefined): B
   const color = brandColor(source.color);
   // A general icon was chosen: no brand is looked for.
   if (isSymbolIcon(written)) return color ? { icon: null, symbol: written, color } : { icon: null, symbol: written };
-  const icon = (isBrandIcon(written) ? written : null) ?? find(words, source.key) ?? find(words, source.name) ?? find(words, host(source.apiUrl))
-    ?? types[source.type?.trim().toLowerCase() ?? ""] ?? null;
+  const type = source.type?.trim().toLowerCase() ?? "";
+  // A type that is one product (its CLI, its subscription) names it, whatever the key of another account of it says:
+  // `claude-work` is Claude Code, not the Claude models.
+  const product = productTypes.has(type) ? types[type] : null;
+  const icon = (isBrandIcon(written) ? written : null) ?? product ?? find(words, source.key) ?? find(words, source.name) ?? find(words, host(source.apiUrl))
+    ?? types[type] ?? null;
   return color ? { icon, color } : { icon };
 }
 

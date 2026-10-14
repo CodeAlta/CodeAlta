@@ -2093,9 +2093,10 @@ packages. The script refuses a file that holds anything but a drawing.
   (`--brand-tint`, and `--brand-tint-dark` on a dark background), else in the color of the text, which is
   how a black mark (OpenAI, GitHub, Anthropic) stays visible in both themes. The gradients of a drawing get
   names of their own for each logo drawn.
-- `brands.ts` chooses the logo. For a provider: the `icon` of its definition, then a brand named by its
-  key, its name or the host of its API URL, then its adapter type; `openai-chat`, the protocol of many,
-  names none. For a model: the family its id names (`claude`, `gpt`, `gemini`...), else the logo of its
+- `brands.ts` chooses the logo. For a provider: the `icon` of its definition; then, for a type that is one
+  product (`claude-code`, `codex`, `copilot`), that product, so that another account (`claude-work`) keeps
+  its logo; then a brand named by its key, its name or the host of its API URL, then its adapter type;
+  `openai-chat`, the protocol of many, names none. For a model: the family its id names (`claude`, `gpt`, `gemini`...), else the logo of its
   provider. For an issue tracker: its service (`github`, `gitlab`, `azure_devops`, `bitbucket`, `jira`).
   For a plugin: its id. `icon` can also name one of the general icons of `symbolIcons.ts`, a list of
   `lucide-react` icons by their names in that set, for a provider of no brand.

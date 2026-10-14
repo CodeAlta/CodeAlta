@@ -311,7 +311,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
             {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
             {runsOwnCli(form.type)
-              ? <ClaudeCodeCli epoch={epoch} api={cli} configDir={form.configDir} command={original?.type === form.type ? original.command : null} />
+              ? <ClaudeCodeCli epoch={epoch} api={cli} providerKey={original?.type === form.type ? original.key : null} configDir={form.configDir}
+                  command={original?.type === form.type ? original.command : null} />
               : usesAccountSignIn(form.type)
               ? original && original.type === form.type
                 ? <ProviderAccount epoch={epoch} providerKey={original.key} api={login} blocked={dirty ? "Save before signing in." : null}

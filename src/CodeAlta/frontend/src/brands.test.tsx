@@ -40,6 +40,10 @@ test("a provider of one's own takes the icon and the color its definition names,
   assert.equal(providerBrand({ key: "local", type: "openai-chat", apiUrl: "http://127.0.0.1:1234/v1" }).icon, "lmstudio");
   assert.equal(providerBrand({ key: "work", type: "anthropic" }).icon, "anthropic");
   assert.equal(providerBrand({ key: "work", type: "vertex-ai" }).icon, "vertexai");
+  // Another account of a product is shown as that product, whatever its key says.
+  assert.equal(providerBrand({ key: "claude-work", name: "Claude Code 2", type: "claude-code" }).icon, "claudecode");
+  assert.equal(providerBrand({ key: "chatgpt-work", type: "codex" }).icon, "codex");
+  assert.equal(providerBrand({ key: "claude-work", type: "claude-code", icon: "rocket" }).symbol, "rocket", "an icon chosen still wins");
   // The protocol of many providers names none of them, and a word is matched whole.
   assert.deepEqual(providerBrand({ key: "work", type: "openai-chat", apiUrl: "http://localhost:8080/v1" }), { icon: null });
   assert.equal(providerBrand({ key: "metadata-proxy", type: "openai-chat" }).icon, null);

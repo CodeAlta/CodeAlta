@@ -55,10 +55,12 @@ export function ClaudeCliFirstUse({ epoch, providerKey, api = ClaudeCliClient, p
   if (!check?.claude) return null;
   const missing = !check.executable;
   if (!missing && after === "none" && !download.running) return null;
-  return <Callout compact className="claude-cli-first-use" intent={after === "ready" ? "success" : "primary"}
-    icon={<AppIcon name={after === "ready" ? "checked" : "terminal"} size={16} />}>
+  // The icon goes in the first line: the callout places only its own icons.
+  const icon = <AppIcon name={after === "ready" ? "checked" : "terminal"} size={16} />;
+  return <Callout compact className="claude-cli-first-use" icon={null} intent={after === "ready" ? "success" : "primary"}><div className="claude-cli-first-use-body">
+    {!missing && <div className="claude-cli-first-use-head">{icon}<strong>{t("Claude Code CLI")}</strong></div>}
     {missing && <div className="claude-cli-first-use-head">
-      <strong>{t("Claude Code CLI {version} is not installed", { version: check.version })}</strong>
+      {icon}<strong>{t("Claude Code CLI {version} is not installed", { version: check.version })}</strong>
       {check.supported && <CliDownloadButton running={download.running} version={check.version} size={check.size}
         onStart={() => void download.start(check.size)} onCancel={download.cancel} />}
     </div>}
@@ -70,14 +72,25 @@ export function ClaudeCliFirstUse({ epoch, providerKey, api = ClaudeCliClient, p
       <Copyable value={claudeLoginCommand({ windows: check.windows, home: check.home }, check.executable, check.configDir ?? "")} label={t("Copy command")} />
     </>}
     {after === "ready" && <p>{t("Claude Code {version} is ready.", { version: check.version })}</p>}
-  </Callout>;
+  </div></Callout>;
 }
 
-/** The epoch of the host whose sessions the timeline shows; null where nothing can be downloaded (a demo, a fixture). */
-export const ClaudeCliEpochContext = createContext<string | null>(null);
+/**
+ * What the timeline of a session needs for the card: the epoch of the host (null where nothing can be downloaded, a
+ * demo or a fixture), and the provider whose card the composer of the session already shows.
+ */
+export const ClaudeCliEpochContext = createContext<Readonly<{ epoch: string; composerProvider: string | null }> | null>(null);
 
-/** The card of an error whose provider has no Claude Code CLI to run, in the timeline of its session. */
+/**
+ * The card of an error whose provider has no Claude Code CLI to run, in the timeline of its session. The composer
+ * shows it for the provider of the session: the error of that provider does not show it twice.
+ */
 export function TimelineClaudeCli({ providerKey }: { providerKey: string }) {
-  const epoch = useContext(ClaudeCliEpochContext);
-  return epoch ? <ClaudeCliFirstUse epoch={epoch} providerKey={providerKey} /> : null;
+  const host = useContext(ClaudeCliEpochContext);
+  return host && showsTimelineCard(host, providerKey) ? <ClaudeCliFirstUse epoch={host.epoch} providerKey={providerKey} /> : null;
+}
+
+/** Whether the error of a provider shows the card in the timeline: not when the composer of the session shows it. */
+export function showsTimelineCard(host: Readonly<{ composerProvider: string | null }>, providerKey: string): boolean {
+  return host.composerProvider?.toLowerCase() !== providerKey.toLowerCase();
 }

@@ -8,13 +8,14 @@ const provider: GlobalConfigProvider = { key: "claude-code", type: "claude-code"
   reasoningEffort: null, apiUrl: null, effectiveApiUrl: null, apiKeyEnv: null, hasApiKey: false,
   defaults: { displayName: "Claude Code", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null,
   permissionMode: null, promptSuggestions: false, configDir: null, command: null };
+const missing: GlobalConfigProvider = { ...provider, key: "claude-tools", effectiveName: "Claude Tools", command: "D:\\nowhere\\claude.exe" };
 const status: ClaudeCliStatusResponse = { status: "ok", supported: true, version: "2.1.292", size: "113796621", pinnedPath: null,
   installedPath: "C:\\Users\\me\\.local\\bin\\claude.exe", installedVersion: "2.1.300", windows: true, home: "C:\\Users\\me" };
 const state = { saved: [] as GlobalConfigSaveProviderRequest[], duplicated: [] as string[], installs: 0, reads: 0,
   tell: (_state: ClaudeCliInstallState) => { } };
 const result = { status: "ok", message: null, revision: "revision", line: null, column: null, providersApplied: 1, key: null as string | null };
 const config = {
-  providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "claude-code", startingProvider: "claude-code", providers: [provider],
+  providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "claude-code", startingProvider: "claude-code", providers: [provider, missing],
     providerTypes: ["claude-code"], reasoningEfforts: [], permissionModes: [], typeDefaults: [], builtIn: [], unsupported: [] }),
   saveProvider: async (request: GlobalConfigSaveProviderRequest) => { state.saved.push(request); return result; },
   deleteProvider: async () => result, addBuiltInProvider: async () => result,
@@ -22,6 +23,9 @@ const config = {
 };
 const cli = {
   read: async () => { state.reads++; return status; },
+  check: async ({ providerKey }: { providerKey: string | null }) => ({ status: "ok", providerKey, claude: true,
+    executable: providerKey === "claude-tools" ? null : status.pinnedPath ?? status.installedPath, configDir: null, supported: true,
+    version: status.version, size: status.size, windows: true, home: status.home }),
   install: async () => { state.installs++; return { status: "ok" }; },
   cancelInstall: async () => ({ status: "ok" }),
   // The states the test tells, as the host streams them.

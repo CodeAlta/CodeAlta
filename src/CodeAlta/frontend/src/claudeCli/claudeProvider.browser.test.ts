@@ -29,6 +29,10 @@ test("the Claude Code form offers the pinned CLI, shows its download and gives t
     await page.until(`${panel}.textContent.includes('Version 2.1.292')`, "the pinned version once downloaded");
     assert.match(await page.evaluate(`${panel}.querySelector('code').textContent`) as string, /& "\$HOME\\\.alta\\cache\\claude-code\\2\.1\.292\\win-x64\\claude\.exe"$/);
     assert.equal(await page.evaluate(`[...${panel}.querySelectorAll('button')].some(button => button.textContent.includes('Download'))`), false);
+
+    // A provider whose command is not there says so.
+    await page.click('[data-provider-key="claude-tools"]');
+    await page.until(`${panel}?.textContent.includes('Not found') && ${panel}.textContent.includes('it is not there')`, "the missing command");
   }, options);
 });
 
