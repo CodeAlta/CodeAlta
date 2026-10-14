@@ -29,7 +29,7 @@ type Check = Readonly<{ running: boolean; lines: readonly IdentityCheckLine[] }>
  * a card of its own. A field left empty keeps the usual setting of the user, shown in it. Each card is saved when a
  * field is left, and checked with the tool it is for.
  */
-export function SpaceIdentity({ space, hub, canEdit, busy, run, api = spaceIdentity }: SpaceSectionProps & Readonly<{ api?: SpaceIdentityApi }>) {
+export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }: SpaceSectionProps & Readonly<{ api?: SpaceIdentityApi }>) {
   const { t } = useShellLanguage();
   const [saved, setSaved] = useState<IdentityCards>(() => readCards(null));
   const [draft, setDraft] = useState<IdentityCards>(() => readCards(null));
@@ -43,7 +43,8 @@ export function SpaceIdentity({ space, hub, canEdit, busy, run, api = spaceIdent
   savedRef.current = saved;
 
   // The identity as the file has it, read again for another space and when the host connects.
-  const epoch = hub.hostEpoch();
+  // A page drawn without a host (its tests, a hub of a window without spaces) has nothing to read.
+  const epoch = hub.hostEpoch?.() ?? null;
   useEffect(() => {
     if (!epoch) { setAvailable(false); return; }
     let current = true;
@@ -58,7 +59,9 @@ export function SpaceIdentity({ space, hub, canEdit, busy, run, api = spaceIdent
   }, [api, epoch, space.id]);
 
   if (!available) return null;
-  const disabled = !canEdit || busy;
+  // The fields stay usable while a card is saved: the next field is typed in while the last one is written, and a
+  // save always carries its whole card.
+  const disabled = !canEdit;
   const id = `space-${space.id}-identity`;
 
   function edit<P extends IdentityPart>(part: P, change: Partial<IdentityCards[P]>) {
