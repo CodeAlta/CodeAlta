@@ -84,7 +84,7 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
     return <li key={session.id} className={depth === 0 ? "session-children-root" : undefined}>
       <button type="button" className="session-children-row" style={{ paddingInlineStart: 10 + depth * 18 }} title={name}
         aria-label={parent ? t("{title}, child of {parent}", { title: name, parent }) : name} onClick={() => onOpen(session)}>
-        <span className="reference-icon"><AppIcon name={depth === 0 ? "tree" : session.scopeKind === "project" ? "folder" : "chat"} size={14} /></span>
+        <span className="reference-icon"><AppIcon name={session.scopeKind === "project" ? "folder" : "chat"} size={14} /></span>
         <span className="session-children-title">{name}</span>
         {working && <Tag minimal round intent="primary" className="session-children-work">{t("At work")}</Tag>}
         {where(session)}
@@ -101,9 +101,7 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
     onKeyDown={event => event.stopPropagation()}
     onOpened={() => document.getElementById("session-children-list")?.querySelector<HTMLButtonElement>("button")?.focus()}
     headerActions={<span className="reference-status" role="status">{(loading || busy) && <ActivitySpinner size={12} />}
-      {tree && <span>{t("{direct} direct · {total} in all", { direct: tree.direct, total: tree.total })}</span>}
-      <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={14} />} aria-label={t("Refresh")} title={t("Refresh")}
-        disabled={loading || busy} onClick={() => { setMessage(null); void load(); }} /></span>}>
+      {tree && <span>{t("{direct} direct · {total} in all", { direct: tree.direct, total: tree.total })}</span>}</span>}>
     {deleting
       ? <Callout className="session-children-note" intent="warning" compact icon={null}>{t("Delete removes this session only, and not while it has child sessions: they would lose their parent. Delete it with all of them, or delete them first.")}</Callout>
       : <p className="session-children-note bp6-text-muted">{t("Delete removes one session only, and not while it has child sessions.")}</p>}

@@ -1,7 +1,9 @@
 import type { WorkspaceSession } from "#neoastra";
 
 /** A row of the list of sessions: `subAgents` is how many sessions it started (its sub-agents), shown under it. */
-export type SessionHierarchyRow = { session: WorkspaceSession; depth: number; diagnostic: string | null; tooltip: string; subAgents?: number };
+export type SessionHierarchyRow = { session: WorkspaceSession; depth: number; diagnostic: string | null; tooltip: string; subAgents?: number;
+  /** Its parent, listed in another project, among the chats or in another space: the row is at the top of its list. */
+  parentElsewhere?: WorkspaceSession };
 
 // Keep the server's bounded order for ties. Resolve only an exact persisted scope; a missing
 // header or a missing/truncated parent can never manufacture a same-scope relationship.
@@ -20,6 +22,7 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
   const known = new Set(visibleScope.map(session => session.id));
   const issue = new Map<string, string | null>();
   const parentOf = new Map<string, WorkspaceSession>();
+  const elsewhere = new Map<string, WorkspaceSession>();
   for (const session of visibleScope) {
     const parentId = session.parentSessionId;
     let diagnostic: string | null = session.lineageIssue === "invalid_parent" ? "Parent identifier is invalid; shown at root." : null;
@@ -31,7 +34,13 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
       else if (session.scopeKind !== parent.scopeKind || session.projectId !== parent.projectId
         || session.workspacePath !== parent.workspacePath || !known.has(parent.id)
         || selectedProjectId !== null && (session.scopeKind !== "project" || session.projectId !== selectedProjectId))
-        diagnostic = `Parent session '${parentId}' belongs to another scope; shown at root.`;
+      {
+        // A child of a session listed elsewhere, as a session of a project started by a chat: nothing is wrong with it.
+        // The same project in another folder is: its headers disagree.
+        if (session.scopeKind === parent.scopeKind && session.projectId === parent.projectId && session.workspacePath !== parent.workspacePath)
+          diagnostic = `Parent session '${parentId}' belongs to another scope; shown at root.`;
+        else elsewhere.set(session.id, parent);
+      }
       else {
         const visited = new Set([session.id.toLowerCase()]);
         let current: WorkspaceSession | undefined = parent;
@@ -78,10 +87,11 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
     seen.add(session.id);
     const diagnostic = issue.get(session.id) ?? null;
     const parent = parentOf.get(session.id);
+    const away = elsewhere.get(session.id);
     const tooltip = [session.fullTitle + (session.fullTitleTruncated ? " [title truncated]" : ""),
-      diagnostic ?? (parent ? `Child of '${parent.fullTitle}'` : null)].filter(Boolean).join(" | ");
+      diagnostic ?? (parent ? `Child of '${parent.fullTitle}'` : away ? `Child of '${away.fullTitle}', listed elsewhere` : null)].filter(Boolean).join(" | ");
     const children = (childrenById.get(session.id) ?? []).sort(order);
-    rows.push({ session, depth, diagnostic, tooltip, subAgents: children.length });
+    rows.push({ session, depth, diagnostic, tooltip, subAgents: children.length, ...(away ? { parentElsewhere: away } : {}) });
     for (const child of children.reverse()) stack.push({ session: child, depth: depth + 1 });
   }
   // A malformed graph must not silently drop a row, even if its parent was excluded.

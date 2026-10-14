@@ -2,6 +2,7 @@
 export const sessionChildrenMessages = {
   // The menu of a session row.
   "Child sessions…": ["Sesiones hijas…", "Sessions enfants…", "Untergeordnete Sitzungen …", "子セッション…", "子会话…"],
+  "Child of {title}": ["Hija de {title}", "Enfant de {title}", "Untergeordnet zu {title}", "{title} の子", "{title} 的子会话"],
   "Open parent session": ["Abrir la sesión principal", "Ouvrir la session parente", "Übergeordnete Sitzung öffnen", "親セッションを開く", "打开父会话"],
   // The window of the child sessions.
   "Child sessions": ["Sesiones hijas", "Sessions enfants", "Untergeordnete Sitzungen", "子セッション", "子会话"],

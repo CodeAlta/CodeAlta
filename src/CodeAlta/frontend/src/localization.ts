@@ -2438,6 +2438,8 @@ export const messages = dictionary({
   "There is no other space.": ["No hay otro espacio.", "Il n'y a pas d'autre espace.", "Es gibt keinen anderen Bereich.", "他のスペースはありません。", "没有其他空间。"],
   "Moved to {space}.": ["Movida a {space}.", "Déplacée vers {space}.", "Nach {space} verschoben.", "{space} に移動しました。", "已移到 {space}。"],
   "The space is gone. Choose another one.": ["El espacio ya no existe. Elige otro.", "L'espace n'existe plus. Choisissez-en un autre.", "Der Bereich existiert nicht mehr. Wählen Sie einen anderen.", "スペースがなくなりました。別のスペースを選んでください。", "该空间已不存在。请选择另一个。"],
+  "Your projects are in other spaces.": ["Tus proyectos están en otros espacios.", "Vos projets sont dans d'autres espaces.", "Deine Projekte sind in anderen Bereichen.", "プロジェクトは他のスペースにあります。", "你的项目在其他空间中。"],
+  "Show them here": ["Mostrarlos aquí", "Les afficher ici", "Hier anzeigen", "ここに表示", "在此显示"],
   "Every project is in this space.": ["Todos los proyectos están en este espacio.", "Tous les projets sont dans cet espace.", "Alle Projekte sind in diesem Bereich.", "すべてのプロジェクトがこのスペースにあります。", "所有项目都在此空间中。"],
   "The agents of the space read it.": ["Los agentes del espacio lo leen.", "Les agents de l'espace le lisent.", "Die Agenten des Bereichs lesen es.", "このスペースのエージェントが読みます。", "此空间的代理会读取它。"],
   "Delete {name}? Its projects stay in the other spaces they are in.": ["¿Eliminar {name}? Sus proyectos siguen en los demás espacios en los que están.", "Supprimer {name} ? Ses projets restent dans les autres espaces où ils sont.", "{name} löschen? Seine Projekte bleiben in den anderen Bereichen, in denen sie sind.", "{name} を削除しますか？プロジェクトは所属する他のスペースに残ります。", "删除 {name}？其项目仍保留在它们所在的其他空间中。"],

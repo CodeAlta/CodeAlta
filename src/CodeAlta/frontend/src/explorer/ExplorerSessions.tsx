@@ -39,7 +39,7 @@ export function sessionTwistKey(event: KeyboardEvent, twist: SessionTwist | unde
  * The icon and the title of a session row: a session started by another one has an icon of its own, and so has a
  * session started by an automation. A session that has sub-agents starts with the twist that hides them.
  */
-export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic" | "subAgents"> & { twist?: SessionTwist }) {
+export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, parentElsewhere }: Pick<SessionHierarchyRow, "session" | "depth" | "diagnostic" | "subAgents" | "parentElsewhere"> & { twist?: SessionTwist }) {
   const { t } = useShellLanguage();
   const automated = !!session.automationId;
   const logo = useProviderBrand(session.providerKey);
@@ -49,8 +49,9 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist }
   return <>{twist && <span className="tree-twist session-twist" title={t(twist.collapsed ? "Show the sub-agents" : "Hide the sub-agents")}
     onClick={event => { event.stopPropagation(); twist.toggle(); }} onDoubleClick={event => event.stopPropagation()}>
     <AppIcon name="chevronDown" size={12} className={twist.collapsed ? "tree-chevron" : "tree-chevron expanded"} /></span>}
-    {(depth > 0 || automated) && <span className="session-icon" data-file-tone={depth > 0 ? "teal" : "gold"} title={automated && depth === 0 ? t("Started by an automation") : undefined}>
-    <AppIcon name={depth > 0 ? "childSession" : "automation"} size={13} /></span>}
+    {(depth > 0 || parentElsewhere || automated) && <span className="session-icon" data-file-tone={depth > 0 || parentElsewhere ? "teal" : "gold"}
+      title={depth === 0 && parentElsewhere ? t("Child of {title}", { title: plainTitle(parentElsewhere.title) }) : automated && depth === 0 ? t("Started by an automation") : undefined}>
+    <AppIcon name={depth > 0 || parentElsewhere ? "childSession" : "automation"} size={13} /></span>}
     <span className="session-icon session-provider" data-file-tone={logo.icon || logo.symbol ? undefined : "purple"} title={provider ?? undefined}>
       <ProviderIcon providerKey={session.providerKey} size={13} fallback="assistant" /></span>
     <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span><SubAgentBadge count={subAgents ?? 0} /></>;
@@ -117,7 +118,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
     {entries.map((entry, index) => {
       if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
         onMore={() => tree.more(entry.parentId)} onFewer={() => tree.fewer(entry.parentId)} />;
-      const { session, depth, diagnostic, tooltip, subAgents } = entry.row;
+      const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere } = entry.row;
       const twist = sessionTwist(entry, tree.toggle);
       const shown = menu?.id === session.id ? menu : null;
       const allowed = shown ? access(session) : null;
@@ -141,7 +142,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
         }}>
         <button type="button" aria-pressed={false} aria-expanded={twist && !twist.collapsed} aria-describedby={`${tipId}-${index}`} title={tooltip} data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }}
           onClick={() => onAction(session, "open")} onDoubleClick={() => onKeep?.(session)} onKeyDown={event => sessionTwistKey(event, twist)}>
-          <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{marks(session)}
+          <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} />{marks(session)}
         </button>
         <span id={`${tipId}-${index}`} role="tooltip" className="session-tooltip">{tooltip}</span>
         <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}

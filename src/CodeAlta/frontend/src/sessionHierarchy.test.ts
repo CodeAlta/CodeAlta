@@ -29,12 +29,15 @@ test("missing, wrong project/path, unverified, self and cyclic parent remain vis
   const rows = sessionHierarchy(sessions, sessions, "p1");
   assert.equal(rows.length, sessions.length);
   assert.deepEqual(new Set(rows.map(item => item.session.id)), new Set(sessions.map(item => item.id)));
-  for (const id of ["missing", "cross", "unverified", "self", "cycle-a", "cycle-b", "wrong-path", "invalid"]) {
+  for (const id of ["missing", "unverified", "self", "cycle-a", "cycle-b", "wrong-path", "invalid"]) {
     const actual = rows.find(item => item.session.id === id)!;
     assert.equal(actual.depth, 0);
     assert.match(actual.tooltip, /root/i);
   }
-  assert.match(rows.find(item => item.session.id === "cross")!.diagnostic!, /another scope/);
+  // A child of a session listed elsewhere is at the top of its list, and nothing is wrong with it: it names its parent.
+  const cross = rows.find(item => item.session.id === "cross")!;
+  assert.deepEqual([cross.depth, cross.diagnostic, cross.parentElsewhere?.id], [0, null, "other"]);
+  assert.match(cross.tooltip, /Child of 'other', listed elsewhere/);
   assert.match(rows.find(item => item.session.id === "self")!.diagnostic!, /cycle/);
   // A header from a different project is not authority even if the on-screen rail path coincides.
   const samePathWrongRef = sessionHierarchy([row("child", "parent"), { ...row("parent"), projectId: "p2" }],

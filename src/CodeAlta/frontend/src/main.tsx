@@ -955,19 +955,19 @@ function App() {
   // space, and a click shows everything there again.
   useEffect(() => {
     if (!spacesState.loaded || !spacesState.available || workspaceState.kind !== "ready") return;
-    try {
-      if (localStorage.getItem(toldDefaultKey)) return;
-      localStorage.setItem(toldDefaultKey, "1");
-    } catch { return; }
+    try { if (localStorage.getItem(toldDefaultKey)) return; } catch { return; }
     const full = catalog.current;
     const others = spacesState.spaces.filter(space => !space.isDefault);
     const hides = others.some(space => space.projectIds.length > 0)
       || !!full?.sessions.some(session => session.spaceId !== null && others.some(space => space.id === session.spaceId));
-    if (!hides || showingOthers.current) return;
+    // Told once, the first time the Default space hides something: spaces that are still empty hide nothing yet.
+    if (!hides) return;
+    try { localStorage.setItem(toldDefaultKey, "1"); } catch { return; }
+    if (showingOthers.current) return;
     showToast({ intent: "primary", icon: "info-sign", timeout: 20_000,
       message: translate(shownLocale.current, "The Default space now shows what belongs to no other space."),
       action: { text: translate(shownLocale.current, "Show all"), onClick: () => { setShowOthers(true); showSpaceLatest.current(defaultSpaceId); } } }, "space:default");
-  }, [spacesState.loaded, spacesState.available, workspaceState.kind]);
+  }, [spacesState.loaded, spacesState.available, spacesState.spaces, workspaceState.kind]);
   // A space that is gone (removed here, by a command or by another instance) gives its place to the default one,
   // and the tabs the window kept for it are forgotten.
   useEffect(() => {
@@ -3786,7 +3786,12 @@ function App() {
           {workspaceState.kind === "loading" && <LoadingRows />}
           {workspaceState.kind === "unconfigured" && <div className="sidebar-empty">{t("No catalog configured. See the launch instructions below.")}</div>}
           {workspaceState.kind === "error" && <div role="alert" className="sidebar-empty error-text">{workspaceState.message}</div>}
-          {snapshot && projectListing?.projects.length === 0 && (spaceId === defaultSpaceId ? <p className="sidebar-empty" role="status">
+          {snapshot && projectListing?.projects.length === 0 && (spaceId === defaultSpaceId
+            // The Default space shows what belongs to no other space: projects that are all in other spaces are offered here.
+            ? !showOthers && catalog.current?.projects.some(project => !project.archived) ? <div className="sidebar-empty space-empty" role="status">
+              <p>{t("Your projects are in other spaces.")}</p>
+              <Button size="small" icon={<AppIcon name="eye" size={14} />} onClick={() => setShowOthers(true)}>{t("Show them here")}</Button>
+            </div> : <p className="sidebar-empty" role="status">
             {t("No projects in this snapshot.")}
             {projectId !== null && ` ${t("The selected project and session remain open.")}`}
           </p> : <div className="sidebar-empty space-empty" role="status">
@@ -3879,7 +3884,7 @@ function App() {
             {selectedList.entries.map((entry, index) => {
               if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
                 onMore={() => sessionTree.more(entry.parentId)} onFewer={() => sessionTree.fewer(entry.parentId)} />;
-              const { session, depth, diagnostic, tooltip, subAgents } = entry.row;
+              const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere } = entry.row;
               const twist = sessionTwist(entry, sessionTree.toggle);
               const menu = activeMenu?.id === session.id ? activeMenu : null;
               const access = sessionActionAccess(session,
@@ -3912,7 +3917,7 @@ function App() {
                 data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
                 onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}
                 onDoubleClick={() => keepSession(projectId, session)}>
-                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{sessionMarks(session, projectId)}
+                <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} />{sessionMarks(session, projectId)}
               </button>
               <span id={`session-tooltip-${index}`} role="tooltip" className="session-tooltip"
                 tabIndex={tooltip.length > 256 ? 0 : undefined}>{tooltip}</span>
