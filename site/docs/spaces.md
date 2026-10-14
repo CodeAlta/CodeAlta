@@ -73,6 +73,8 @@ Click the name of a space, or its card, to open the page of that space. **Spaces
 
 - **General**: its name, its icon, its color and **What it is for**;
 - **Projects**: a checklist of all the projects, to tick the ones the space holds;
+- **Available here**: the MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has));
+- **New sessions**: the agent prompt its new sessions start with;
 - **Show**, to show that space in the window, and **Delete**, which asks before it deletes the space.
 
 The Default space has a page too, with every project in it. Every change is saved at once.
@@ -93,6 +95,40 @@ Deleting a space leaves its projects, their folders and their sessions alone. Th
 ## Move a session to another space
 
 **Move to space…** in the menu of a session lists the other spaces: choose one and the session goes there, with the sessions it started. Its next turn uses what the new space sets up. A session that is running or waits for an answer cannot move until it is idle.
+
+## What a space has
+
+Each session belongs to one space. It uses the MCP servers, skills, agent prompts and plugins of that space, whatever space the window shows. A Business session keeps the tools of Business when you switch to Personal.
+
+A resource is in every space until you choose its spaces. Choose them in either place:
+
+- on its page of Settings (**MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip on its row shows its spaces, or **All spaces**. Click it to pick **All spaces** or some spaces, Default among them;
+- on the page of a space, in **Available here**: one tab per kind, with a switch per resource. Turn it off to take the resource out of this space. For a resource of every space, a small popover asks first: the other spaces keep it, and a space you create later will not get it.
+
+When a resource would be left in no space, the popover offers to turn it off instead.
+
+{.table}
+| Spaces of a resource | Available in |
+|---|---|
+| All spaces | every space, the ones you create later too |
+| Business | Business only, not Default |
+| Business, Default | Business and Default |
+
+What a session cannot use in its space:
+
+- is not in the instructions of its agent: its MCP servers, skills and agent prompts are not listed, and what its plugins add (tools, buttons, prompt text) is left out;
+- cannot be reached by its agent: `alta mcp activate`, `alta skill activate` and `alta session set_agent` refuse it and say why. No `alta` command changes the spaces of a resource: only you do, in the window or in the files;
+- is dropped from the session when you take it out of the space: an MCP server it activated is gone at its next turn.
+
+An agent also forks and sends prompts only to sessions of its own space. You reach every session.
+
+A resource of a project (in its `.alta` folder) follows its project, which is already in its spaces. A project cannot bring into a space what the space does not have: a skill or an MCP server assigned to Business stays out of Personal, also when a project of Personal defines one with the same name.
+
+**Session info** shows the space of a session and what it can use there.
+
+### New sessions
+
+In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins.
 
 ## What follows the shown space
 
@@ -176,12 +212,14 @@ name: Open source
 icon: globe
 color: "#9d3f9d"
 order: 3
+new_sessions:
+  agent_prompt: reviewer
 ---
 
 Libraries I maintain and the projects I contribute to.
 ```
 
-The text under the header is **What it is for**. `order` is the place of the space in the list. The Default space has a file, `default.md`, only once you change its name, its icon, its color or its description.
+The text under the header is **What it is for**. `order` is the place of the space in the list. `new_sessions.agent_prompt` is the agent prompt of **New sessions**. The Default space has a file, `default.md`, only once you change its name, its icon, its color or its description.
 
 The spaces of a project are written in the file of the project, `~/.alta/projects/<name>.md`, as one line of its header that lists the ids of its spaces:
 
@@ -190,6 +228,24 @@ spaces: [work, open-source]
 ```
 
 A project that is only in the Default space has no `spaces` line. An id that no space has is ignored.
+
+The spaces of the MCP servers, skills, agent prompts and plugins are in `~/.alta/config.toml`, beside their settings. A resource without a `spaces` list is in every space:
+
+```toml
+[plugins.mcp.servers.atlassian]
+spaces = ["business"]
+
+[plugins.jira]
+spaces = ["business"]
+
+[skills.spaces]
+terraform = ["business", "default"]
+
+[prompts.spaces]
+reviewer = ["business"]
+```
+
+Only the global `config.toml` assigns spaces: a `spaces` list in the `config.toml` of a project is ignored.
 
 Which space the window shows, and the tabs of each space, are kept with the window, like its theme.
 

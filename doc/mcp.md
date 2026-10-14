@@ -126,6 +126,17 @@ Implemented policy behavior:
 - `discover_in_prompt`, `prompt_max_servers`, and `prompt_max_tools` bound MCP prompt guidance;
 - `direct_exposure`, `direct_tool_threshold`, and per-server `direct_exposure`/`direct_tools` are retained policy controls for non-progressive direct-tool selection paths. Progressive session activation does not activate servers automatically from these settings; after a server is activated, every enabled/config-controlled MCP tool that passes server/tool policy is exposed as a first-class `AgentToolDefinition` using the stable alias described below.
 
+### Spaces
+
+`[plugins.mcp.servers.<server>].spaces` (a list of space ids, or one string) assigns a server to spaces, with the rule of `CodeAlta.Catalog.SpaceScope`: absent or empty is every space, a list is only those spaces, and the default space only when `default` is listed. The plugin references only `CodeAlta.Plugins.Abstractions`, so `McpPolicyOptions.ServerSpaces` reads the same rule itself; a test in `CodeAlta.Tests` checks it against `SpaceAssignments.Parse`.
+
+- Only the **global** `config.toml` assigns spaces: `spaces` in a project `config.toml` is not read, so a repository cannot widen a space. Keys are compared without case, as the host compares them.
+- The space applies to the server in effect for a key, whatever file defines it: a project server with the key of a Business-only server is out of Personal too (its OAuth tokens are cached under the key and the URL).
+- The space comes before the enablement. `McpRuntimeRequest.SpaceId` is checked first in `GetServerStateAsync`, before the cache of connections: `server_not_in_space`. Tool search/describe/call, kept connections and direct tools go through it. Null applies no space (the user in a terminal).
+- The prompt list (`CreatePromptDiscoveryAsync`) leaves out the servers of other spaces, and forgets an activation that is no longer in the space. `OnBeforeAgentRunAsync` drops and forgets such activations.
+- `alta mcp activate` and `alta mcp server enable` refuse a server of another space to a session (`server_not_in_space`, nothing activated or written); `alta mcp list` lists the servers of its space. The space of the caller comes from `PluginAltaCommandContext.ResolveSourceSpaceIdAsync`.
+- No `alta mcp` command writes `spaces`: `McpPolicyWriter` sets `enabled` or `disabled_tools` only and keeps the rest of the table. Only the window writes `spaces` (`spaces.assignResource`).
+
 ## `alta mcp` commands
 
 The MCP plugin contributes the `mcp` root to the in-process `alta` command registry. Commands resolve project scope from the selected workspace/project or invocation working directory and emit the normal finite JSONL transcript.

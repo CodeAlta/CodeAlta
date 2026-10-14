@@ -242,6 +242,26 @@ the command.
 After each command that changes a space or a project, the window is told (`IAltaSpaceView.NotifyChanged`)
 and reads them again.
 
+### What the space of a session has
+
+A calling session reaches only the resources of its own space (`SpaceFilter`, from the global
+`config.toml`; see `doc/catalog-and-config.md`). The user, with no calling session, reaches them all.
+
+- `alta prompt list` and `alta prompt show` list and show the agent prompts of the space;
+  `alta session set_agent`, `alta session send|queue|steer|message|request --prompt-id` and
+  `alta session create --prompt-id` refuse another one with `prompt.notInSpace` (exit code 7), for any
+  caller: a session runs only the prompts of its own space. A prompt that does not exist is still
+  `prompt.notFound`.
+- `alta session create` without `--prompt-id` starts the session with the agent prompt of its space
+  (`new_sessions.agent_prompt`), else `default`.
+- `alta skill list` and `alta skill show` leave out the skills of other spaces; `alta skill activate`
+  refuses one with `skill.notInSpace`.
+- `alta mcp activate`, `alta mcp server enable` and `alta mcp list` do the same for MCP servers
+  (`server_not_in_space`; see `doc/mcp.md`).
+- An agent forks (`alta session fork`), sends, queues, steers, messages, requests and sets reminders only
+  for the sessions of its own space: `space.notOwnSpace` (exit code 7) otherwise.
+- No `alta` command writes the spaces of a resource: only the window does (`spaces.assignResource`).
+
 ## Session commands
 
 Useful read commands:

@@ -278,6 +278,7 @@ tool_timeout_ms = 30000
 | `tool_timeout_ms` | Per-server tool-call timeout override. |
 | `direct_exposure` | Per-server override for the non-progressive direct exposure mode. |
 | `direct_tools` | Explicit raw tool names for the non-progressive direct exposure allowlist/auto path. |
+| `spaces` | The [spaces](../spaces.md#what-a-space-has) whose sessions can use the server; absent for every space. Read from the global `config.toml` only. A session of another space does not see the server, and `alta mcp activate` refuses it with `server_not_in_space`. |
 
 The loader also accepts compatibility/display keys such as `connect_on_startup`, `config_scopes`, `preferred_write_scope`, and per-server `required`. Configuration inspection does not connect to servers, MCP tool discovery connects lazily, and agent tools are exposed through session activation. Once a session calls a server's tools, that server stays connected for the session, so a tool can rely on what an earlier call did (a browser snapshot, an opened document). An unused connection is closed after fifteen minutes and opened again at the next call.
 

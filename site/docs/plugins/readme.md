@@ -58,6 +58,8 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`.
 
 The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A source plugin starts or stops at once; a built-in plugin follows at the next start. A source plugin also has a button to build and reload it while CodeAlta runs, one to edit it in the code editor and a red one to remove it, and **New plugin** creates one. A plugin that failed to build shows the compiler errors there, and a plugin made for the TUI only is marked as not supported.
 
+With more than the Default space, a plugin of the user also has a chip with its [spaces](../spaces.md#what-a-space-has). A plugin adds nothing (tools, buttons, canvases, prompt text) to the sessions of the other spaces; what it does in the background keeps running. A plugin of a project follows its project.
+
 When a configuration file does not parse, or a plugin folder cannot be read, the page names that file or folder in red above the list and still lists the other plugins. A plugin folder whose name is not a plugin id (letters, digits, `.`, `_` and `-`) is named there too.
 
 The TUI dialog shows:

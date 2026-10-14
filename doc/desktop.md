@@ -2388,10 +2388,34 @@ space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSetti
   - **General** (`SpaceGeneral`): name, icon, color and "What it is for", each saved when it changes;
   - **Projects** (`SpaceProjects` in the same file): the checklist of every project, with a search above
     eight; the Default space says that every project is in it;
-  - **Available here** (`SpaceAvailable`), **New sessions** (`SpaceNewSessions`) and **Identity**
-    (`SpaceIdentity`) have their place in the page and render nothing yet: a section shows only once it
-    has something to show.
+  - **Available here** (`SpaceAvailable`): tabs MCP Servers, Skills, Agent prompts and Plugins (the
+    providers get theirs with their own spaces), each with a count of what is in the space. It lists the
+    resources of the user through the list RPC of each page with no project (a resource of a project
+    follows its project and is not listed), a row each with its logo, its name, its source tag, the chip of
+    its spaces and a switch "Available in <space>". Turning it on writes `SpaceScope.With`. Turning off a
+    resource of every space, or one that would be in no space (`spacesWithout` returns null), opens a
+    popover beside the switch: the first says the other spaces keep it and a new space will not get it
+    (**Turn off here**), the second offers **Turn it off**, its own switch of its page, for the kinds that
+    have one;
+  - **New sessions** (`SpaceNewSessions`): the agent prompt the new sessions of the space start with
+    (`spaces.setAgentPrompt`, `new_sessions.agent_prompt`), among the agent prompts of the space;
+    `default` writes none. Model tiers join it later;
+  - **Identity** (`SpaceIdentity`) has its place in the page and renders nothing yet.
 - Every change is saved at once, through the `spaces` RPC service. Nothing is kept by the page.
+- **The spaces of a resource.** `spaces/SpaceChips.tsx` has the chip (`SpaceScopeChip`: the icons of its
+  spaces, the name of one alone, `+N` past three, or "All spaces") and the chip that opens the choice
+  beside it (`SpaceScopePicker`: All spaces, then each space, Default included; from every space a click
+  keeps that space alone, and taking the last one away leaves every space again). `ResourceSpaceChip` saves
+  through `spaces.assignResource` and says a failure in a toast. The pages of MCP servers, skills, agent
+  prompts and plugins show it on the rows of the user and in their editors; `resourceSpacesOf` gives
+  them nothing while the default space is alone. The hub keeps `spaces.assignments` with the spaces and
+  reads them again after a change and on `changed`.
+- **New sessions in a space.** `workspace.draftPrompts` takes the space shown and answers
+  `defaultPromptId`: the agent prompt of that space when it has it, else `default`. The draft starts with
+  it until the user chooses another, which is remembered and wins.
+- **Session info** shows the space of the session and, under "What it can use", the MCP servers, skills,
+  agent prompts and plugins of that space that are turned on (`spaces.sessionResources`, names only,
+  through the filters of its runs).
 
 ### About
 

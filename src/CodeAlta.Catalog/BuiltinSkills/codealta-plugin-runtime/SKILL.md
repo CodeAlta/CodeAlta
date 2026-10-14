@@ -138,6 +138,8 @@ Override only what the plugin needs.
 
 `[Plugin("id", Frontends = PluginFrontends.Desktop)]` (or `Terminal`) starts the plugin in one application only. `Context.Host.Frontend` says which application runs.
 
+The user can assign a plugin to spaces (`[plugins.<id>] spaces` in `~/.alta/config.toml`). CodeAlta then leaves what the plugin adds out of the sessions and panes of the other spaces: commands, tools, buttons, canvases, cards, prompt text, `OnBeforeAgentRunAsync`. `OnAgentEventAsync` and background work keep running for every space. `context.SpaceId` is the space of the operation (the space of its session, else the one the window shows; null at startup), for a plugin that scopes what it offers itself.
+
 ## Commands
 
 ```csharp
@@ -488,6 +490,8 @@ yield return new PluginAltaCommandContribution { Path = "notes list", Descriptio
 ```
 
 The first word of `Path` is the root command. It cannot be a root of CodeAlta: `session`, `project`, `skill`, `plugin`, `tool`, `model`, `provider`, `ask`, `version`. Write one JSON object per line to `context.Stdout`; return 0 for success.
+
+`await context.ResolveSourceSpaceIdAsync?.Invoke(ct)` gives the space of the calling session (null for the user): a command refuses an agent what its space does not have, as `alta mcp activate` does.
 
 ## Text added to the prompt
 

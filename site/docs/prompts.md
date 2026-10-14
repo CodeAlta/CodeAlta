@@ -266,6 +266,8 @@ For advanced workflows, the body can mention CodeAlta live-tool capabilities the
 
 Use the **Agent:** selector below the prompt editor to choose the prompt for the current draft/session. Built-in prompts appear first, followed by global prompts and project prompts.
 
+The selector lists the prompts of the [space](spaces.md#what-a-space-has) of the session. A new session starts with the agent prompt of its space (**New sessions** on the page of the space), else with `default`, until you choose another. On the **Agent prompts** page of Settings, the chip of a prompt shows and changes its spaces.
+
 The prompt manager lists built-in, global, and project prompts, shows shadowed replacements, and lets you create, edit, save, or delete global/project prompt files. Built-in prompt and system prompt files are visible for inspection but read-only; create a global or project file with the same id to replace or append to one.
 
 Agents can also use the `prompt` and `session` live-tool command groups internally when you ask for prompt automation. For example, you can ask:

@@ -61,6 +61,19 @@ disabled = ["ilspy-decompile"]
 
 Global `~/.alta/config.toml` disablement applies everywhere. Project `<project>/.alta/config.toml` disablement is additive for that project; it cannot re-enable a globally disabled skill. Names are normalized case-insensitively, and a disabled name affects every discovered skill with that normalized name across sources.
 
+### Spaces
+
+The global `config.toml` assigns skills to spaces by name:
+
+```toml
+[skills.spaces]
+terraform = ["business", "default"]
+```
+
+A skill that is not listed is in every space. `SkillCatalogQuery.Space` (a `SpaceFilter`) disables a skill the space of the session does not have, before the global and project enablement and whatever folder it comes from: a project skill with the name of a Business-only skill is out of Personal (`SkillDescriptor.IsOutsideSpace`). A null `Space` lists the skills of every space (Settings, the user in a terminal).
+
+`SkillCatalogQuery.ForSession` builds the one query of a session: the runtime activation, the instructions (`AgentInstructionTemplateProvider`, narrowed to model-visible skills) and `alta skill list|show` for a calling session. `alta skill activate` refuses a skill of another space with `skill.notInSpace`.
+
 ## Runtime behavior
 
 For agent-runtime sessions, CodeAlta advertises compact skill metadata in instructions for enabled skills only. The full skill body is loaded only when the user, UI, plugin, or agent activates an enabled skill through the host-owned runtime path.

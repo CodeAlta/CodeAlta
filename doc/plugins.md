@@ -186,6 +186,17 @@ CODEALTA_DISABLE_PLUGINS=1
 
 `CODEALTA_DISABLE_PLUGINS=true` is also accepted by the runtime config parser.
 
+### Spaces
+
+`[plugins.<id>] spaces` in the global `config.toml` assigns a plugin of the user to spaces (`SpaceScope`: absent is every space). Plugins load once for the process, so a space hides what a plugin adds to the sessions and panes of the others:
+
+- `PluginAdapterOperationOptions.SpaceId` and `PluginOperationContext.SpaceId` carry the space of the operation: the space of its session, else the space the window shows. Null applies no space (startup, host work, the TUI).
+- `PluginContributionRegistration.PluginId` is the id the configuration names the plugin by (`PluginContributionRegistry.PluginIdOf`: the folder of a source package, the name after `builtin:`).
+- `PluginContributionAdapterService.IsAvailableInSpace` is checked before the project (`AppliesToProject`) for every contribution kind it filters (prompt parts, tools, before-run hooks, prompt and instruction processors, commands, status items, buttons, UI regions, landing cards) and for `OnPromptSubmittingAsync`, `OnBeforeAgentRunAsync` and the tool hooks. It reads the assignments through `CachedSpaceAssignments`, which `CodeAltaHost` gives the adapter.
+- A plugin of a project follows its project and is not filtered by space.
+- What a plugin observes of the agents (`ObserveAgentEventAsync`), its background tasks and the session-event projections of history are not of one space and keep running.
+- Canvases follow their plugin: `DesktopCanvases.DeclarationsIn` lists and `RequestOpen` opens only the canvases of the plugins of the space.
+
 ## Runtime lifecycle
 
 The plugin runtime:
