@@ -707,6 +707,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
+                        Spaces = host.SpaceCatalog,
+                        SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
                     };
                     builder.AddGlobalConfigService(globalConfig);
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);

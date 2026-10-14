@@ -16,12 +16,15 @@ const dragType = "application/x-codealta-model-tier";
  * The tiers of models on Settings > Models: three ordered lists, a row for each model of a configured provider with its
  * reasoning efforts in order. A change is saved at once; rows move by drag or with Alt+Arrow keys on their handle.
  */
-export function ModelTierSettings({ epoch, providers, models, api = globalConfig, store = tierStore }: {
+export function ModelTierSettings({ epoch, providers, models, spaceId = null, api = globalConfig, store = tierStore }: {
   epoch: string; providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>;
+  /** The space whose own tiers are edited, in its file; null for the global tiers of the settings. */
+  spaceId?: string | null;
   api?: Save; store?: TierStore;
 }) {
   const { t } = useShellLanguage();
-  const read = useTiers(epoch, store);
+  const scope = spaceId ? { spaceId } : null;
+  const read = useTiers(epoch, scope, store);
   const [shown, setShown] = useState<TierState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
@@ -36,10 +39,11 @@ export function ModelTierSettings({ epoch, providers, models, api = globalConfig
     const before = state;
     setShown(next); setNotice(null);
     try {
-      const reply = await api.saveModelTiers({ expectedEpoch: epoch, tiers: tierLists(next), fallback: next.fallback }, { timeoutMilliseconds: 30_000 });
+      const reply = await api.saveModelTiers({ expectedEpoch: epoch, tiers: tierLists(next), fallback: next.fallback, spaceId, useGlobal: false },
+        { timeoutMilliseconds: 30_000 });
       if (turn !== saving.current) return;
       const saved = reply.status === "ok" ? readTierState(reply) : null;
-      if (saved) { store.set(epoch, saved); setShown(saved); return; }
+      if (saved) { store.set(epoch, saved, scope); setShown(saved); return; }
       setShown(before);
       setNotice(reply.message ?? t("The model tiers were not saved ({status}).", { status: reply.status }));
     } catch {
@@ -88,8 +92,10 @@ export function ModelTierSettings({ epoch, providers, models, api = globalConfig
     if (moved) void save(moved);
   }
 
-  return <section className="model-tier-settings" aria-labelledby="model-tiers-title">
-    <header className="model-tier-header">
+  return <section className="model-tier-settings" data-space={spaceId ? "true" : undefined}
+    {...(spaceId ? { "aria-label": t("Model tiers") } : { "aria-labelledby": "model-tiers-title" })}>
+    {/* The tiers of a space are shown under its own heading; the fallback stays one of the settings. */}
+    {!spaceId && <header className="model-tier-header">
       <div>
         <h2 id="model-tiers-title">{t("Model tiers")}</h2>
         <p className="settings-field-help">{t("The models you prefer for complex, standard and quick work, in order.")}</p>
@@ -104,7 +110,7 @@ export function ModelTierSettings({ epoch, providers, models, api = globalConfig
             onChange={event => void save({ ...state, fallback: { ...state.fallback, onUnavailable: event.currentTarget.checked } })} />
         </span>}
       </div>
-    </header>
+    </header>}
     {notice && <p role="alert" className="error-text">{notice}</p>}
     <div className="model-tier-columns">
       {tierNames.map(tier => {

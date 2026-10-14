@@ -25,5 +25,8 @@ export const modelTierMessages = {
   "Tiers": ["Niveles", "Niveaux", "Stufen", "階層", "层级"],
   "No model of the {tier} tier is ready.": ["Ningún modelo del nivel {tier} está listo.", "Aucun modèle du niveau {tier} n’est prêt.", "Kein Modell der Stufe {tier} ist bereit.", "{tier} 階層に使用できるモデルがありません。", "{tier} 层级没有可用模型。"],
   "The tier was not changed ({status}).": ["El nivel no se cambió ({status}).", "Le niveau n’a pas été changé ({status}).", "Die Stufe wurde nicht geändert ({status}).", "階層は変更されませんでした ({status})。", "层级未更改（{status}）。"],
+  // The page of a space: its new sessions.
+  "New sessions": ["Nuevas sesiones", "Nouvelles sessions", "Neue Sitzungen", "新しいセッション", "新会话"],
+  "Use global": ["Usar los globales", "Utiliser les globaux", "Globale verwenden", "グローバルを使用", "使用全局设置"],
   "{tier} tier": ["Nivel {tier}", "Niveau {tier}", "Stufe {tier}", "{tier} 階層", "{tier} 层级"],
 } as const;

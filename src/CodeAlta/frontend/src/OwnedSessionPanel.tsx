@@ -970,7 +970,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     // A model chosen by hand is not the one of a tier any more.
     if (field === "modelId" && activeChoices.tier) void recordTier(null);
   }
-  const tierState = useTiers(epoch);
+  // The tiers of the space of the session: its own, or the global ones.
+  const tierState = useTiers(epoch, { sessionId });
   const composerTiers = composerTierEntries(tierState, t);
   // Records the tier the session runs on, or that its model was chosen by hand; the choices then name it.
   async function recordTier(tier: string | null) {

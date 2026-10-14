@@ -3,6 +3,7 @@ import { Card, HTMLSelect } from "@blueprintjs/core";
 import { agentPrompts, type AgentPromptEntry } from "#neoastra";
 import { SettingsField as Field } from "../SettingsField";
 import { useShellLanguage } from "../shellLanguage";
+import { SpaceModelTiers } from "./SpaceModelTiers";
 import type { SpaceSectionProps } from "./spaceSection";
 import { inSpace, resourceSpaces } from "./spaces";
 
@@ -16,13 +17,14 @@ export async function readAgentPrompts(epoch: string): Promise<readonly AgentPro
 
 /**
  * The section "New sessions" of the page of a space: the agent prompt its new sessions start with when none is
- * chosen, among the agent prompts of the space. The choice of the user in the window, and the prompt an agent or an
- * automation names, still win.
+ * chosen, among the agent prompts of the space, and the model tiers they use. The choice of the user in the window,
+ * and the prompt an agent or an automation names, still win.
  */
-export function SpaceNewSessions({ space, hub, canEdit, busy, run, read = readAgentPrompts }: SpaceSectionProps & Readonly<{
+export function SpaceNewSessions({ read = readAgentPrompts, ...section }: SpaceSectionProps & Readonly<{
   /** Reads the agent prompts; the page of Settings by default. */
   read?: (epoch: string) => Promise<readonly AgentPromptEntry[] | null>;
 }>) {
+  const { space, hub, canEdit, busy, run } = section;
   const { t } = useShellLanguage();
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   const epoch = hub.hostEpoch();
@@ -48,5 +50,7 @@ export function SpaceNewSessions({ space, hub, canEdit, busy, run, read = readAg
         {listed.map(prompt => <option key={prompt.id} value={prompt.id}>{prompt.name || prompt.id}</option>)}
       </HTMLSelect>
     </Field>
+    {/* Each part is a component of its own, so that each can change without the others. */}
+    <SpaceModelTiers {...section} />
   </Card>;
 }

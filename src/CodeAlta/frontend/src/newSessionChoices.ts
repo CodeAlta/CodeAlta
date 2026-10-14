@@ -8,7 +8,9 @@ import { useTiers } from "./modelTiers";
 // Catalogs only. Draft choices are preferences, never send or provider-switch authority.
 export function useNewSessionChoices(epoch: string | undefined | null, projectId: string | null, projectPath: string | null,
   inventory: ConfigurationSnapshot | undefined, enabled: boolean,
-  capability: ReturnType<typeof createMutationCapability> | undefined, spaceId: string | null = null) {
+  capability: ReturnType<typeof createMutationCapability> | undefined,
+  /** The space the new session is created in: its providers, its agent prompts and its tiers are those of the space. */
+  spaceId: string | null = null) {
   // A new session is in the space shown: it starts with a provider of that space.
   const providers = inventory?.providerRuntimeAvailable ? providersInSpace(inventory.providers.filter(provider => provider.enabled), spaceId) : [];
   // What the user chose for the new sessions of this project (or of the chats), kept with the window.
@@ -16,7 +18,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   const [remembered, setRemembered] = useState(() => restoreNewSessionPreferences(() => localStorage.getItem(newSessionPreferencesKey)));
   const saved = remembered.get(scope);
   // With tiers in the settings, a new session the user chose nothing for starts on the standard tier.
-  const tiers = useTiers(epoch);
+  const tiers = useTiers(epoch, spaceId ? { spaceId } : null);
   const standard = tiers?.choices.standard ?? null;
   const provider = newSessionTierProvider(saved, providers, standard) ?? newSessionProvider(saved, providers);
   // A new session is in the space shown: its agent prompts, and the one its new sessions start with.

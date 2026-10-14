@@ -17,6 +17,8 @@ export type TierState = Readonly<{
   tiers: Readonly<Record<TierName, readonly TierTarget[]>>;
   choices: Readonly<Record<TierName, ModelTierChoiceItem | null>>;
   fallback: ModelFallbackSetting;
+  /** Where the tiers come from: the space's own, or the global ones. */
+  source: "global" | "space";
 }>;
 
 export const maximumTierTargets = 16;
@@ -27,13 +29,14 @@ export const emptyTiers: TierState = Object.freeze({
   tiers: Object.freeze({ complex: [], standard: [], quick: [] }),
   choices: Object.freeze({ complex: null, standard: null, quick: null }),
   fallback: Object.freeze({ enabled: false, onQuota: true, onUnavailable: true }),
+  source: "global",
 });
 
 /** Whether the user set no tier: the composer then offers none and new sessions keep the default provider. */
 export const noTiers = (state: TierState | null | undefined) => !state || tierNames.every(tier => state.tiers[tier].length === 0);
 
 /** The tiers a reply of the host gives; null for one that is not such a reading. A tier the host did not list is empty. */
-export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers" | "fallback"> | null | undefined): TierState | null {
+export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers" | "fallback"> & Partial<Pick<GlobalConfigModelTiersResponse, "source">> | null | undefined): TierState | null {
   if (!reply || !Array.isArray(reply.tiers) || !reply.fallback) return null;
   const tiers: Record<TierName, TierTarget[]> = { complex: [], standard: [], quick: [] };
   const choices: Record<TierName, ModelTierChoiceItem | null> = { complex: null, standard: null, quick: null };
@@ -47,7 +50,8 @@ export function readTierState(reply: Pick<GlobalConfigModelTiersResponse, "tiers
     const choice = list.choice;
     choices[tier] = choice && text(choice.providerKey) && text(choice.modelId) ? choice : null;
   }
-  return { tiers, choices, fallback: { enabled: reply.fallback.enabled === true, onQuota: reply.fallback.onQuota !== false, onUnavailable: reply.fallback.onUnavailable !== false } };
+  return { tiers, choices, fallback: { enabled: reply.fallback.enabled === true, onQuota: reply.fallback.onQuota !== false, onUnavailable: reply.fallback.onUnavailable !== false },
+    source: reply.source === "space" ? "space" : "global" };
 }
 
 /** The tiers as the host saves them. */
@@ -136,32 +140,51 @@ export function composerTierEntries(state: TierState | null | undefined, t: (key
   });
 }
 
-type Read = (request: { expectedEpoch: string }, options: { signal?: AbortSignal; timeoutMilliseconds?: number }) => Promise<GlobalConfigModelTiersResponse>;
+/** Whose tiers are read: the global ones, those of a space, or those of the space of a session. */
+export type TierScope = Readonly<{ spaceId?: string | null; sessionId?: string | null }>;
+
+type Read = (request: { expectedEpoch: string; spaceId: string | null; sessionId: string | null },
+  options: { signal?: AbortSignal; timeoutMilliseconds?: number }) => Promise<GlobalConfigModelTiersResponse>;
+
+const scopeKey = (epoch: string, scope?: TierScope | null) => `${epoch}|${scope?.spaceId ?? ""}|${scope?.sessionId ?? ""}`;
 
 /**
- * The tiers of the window, read from the host: Settings and the composers show the same reading, and a save of the
- * settings tells every one of them.
+ * The tiers of the window, read from the host for each scope: Settings, the page of a space and the composers show
+ * the same readings, and a save tells every one of them, after reading again the scopes it may change.
  */
 export function createTierStore(read: Read) {
-  let current: Readonly<{ epoch: string; state: TierState }> | null = null;
-  let loading: string | null = null;
+  let readings: ReadonlyMap<string, TierState> = new Map();
+  const scopes = new Map<string, Readonly<{ epoch: string; scope: TierScope | null }>>();
+  const loading = new Set<string>();
   const listeners = new Set<() => void>();
   const tell = () => { for (const listener of [...listeners]) listener(); };
+  const put = (key: string, state: TierState) => { readings = new Map(readings).set(key, state); tell(); };
+  async function refresh(epoch: string, scope: TierScope | null = null) {
+    const key = scopeKey(epoch, scope);
+    scopes.set(key, { epoch, scope });
+    if (loading.has(key)) return;
+    loading.add(key);
+    try {
+      const reply = await read({ expectedEpoch: epoch, spaceId: scope?.spaceId ?? null, sessionId: scope?.sessionId ?? null },
+        { timeoutMilliseconds: 15_000 });
+      const state = reply.status === "ok" || reply.status === "invalid" ? readTierState(reply) : null;
+      if (state) put(key, state);
+    } catch { /* The reading the window has stays. */ }
+    finally { loading.delete(key); }
+  }
   return Object.freeze({
-    get: () => current,
-    /** Reads the tiers again from the host. */
-    async refresh(epoch: string) {
-      if (loading === epoch) return;
-      loading = epoch;
-      try {
-        const reply = await read({ expectedEpoch: epoch }, { timeoutMilliseconds: 15_000 });
-        const state = reply.status === "ok" || reply.status === "invalid" ? readTierState(reply) : null;
-        if (state) { current = { epoch, state }; tell(); }
-      } catch { /* The reading the window has stays. */ }
-      finally { if (loading === epoch) loading = null; }
+    /** The readings, by scope; a new map each time one changes. */
+    get: () => readings,
+    /** The reading of a scope, or undefined until it is read. */
+    of: (epoch: string, scope?: TierScope | null) => readings.get(scopeKey(epoch, scope)),
+    /** Reads the tiers of a scope again from the host. */
+    refresh,
+    /** What a save answered, for its scope; the other scopes of the host are read again, as the save may change them. */
+    set(epoch: string, state: TierState, scope: TierScope | null = null) {
+      const key = scopeKey(epoch, scope);
+      put(key, state);
+      for (const [other, known] of scopes) if (other !== key && known.epoch === epoch) void refresh(known.epoch, known.scope);
     },
-    /** What a save of the settings answered. */
-    set(epoch: string, state: TierState) { current = { epoch, state }; tell(); },
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   });
 }
@@ -171,9 +194,13 @@ export type TierStore = ReturnType<typeof createTierStore>;
 /** The tiers of this window. */
 export const tierStore = createTierStore((request, options) => globalConfig.modelTiers(request, options));
 
-/** The tiers of a host, read when the host changes; null until they are read, or for another host. */
-export function useTiers(epoch: string | null | undefined, store: TierStore = tierStore): TierState | null {
-  const value = useSyncExternalStore(store.subscribe, store.get, store.get);
-  useEffect(() => { if (epoch) void store.refresh(epoch); }, [epoch, store]);
-  return value && value.epoch === epoch ? value.state : null;
+/**
+ * The tiers of a host for a scope (the global ones without one), read when the host or the scope changes; null until
+ * they are read.
+ */
+export function useTiers(epoch: string | null | undefined, scope: TierScope | null = null, store: TierStore = tierStore): TierState | null {
+  const readings = useSyncExternalStore(store.subscribe, store.get, store.get);
+  const spaceId = scope?.spaceId ?? null, sessionId = scope?.sessionId ?? null;
+  useEffect(() => { if (epoch) void store.refresh(epoch, spaceId || sessionId ? { spaceId, sessionId } : null); }, [epoch, spaceId, sessionId, store]);
+  return epoch ? readings.get(scopeKey(epoch, spaceId || sessionId ? { spaceId, sessionId } : null)) ?? null : null;
 }

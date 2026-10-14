@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -159,7 +160,7 @@ public sealed class GlobalConfigRpcTests
     public async Task ModelTiers_AreReadAndSavedWithTheModelEachGives()
     {
         await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
-        var empty = fixture.Service.ModelTiers(new(Epoch));
+        var empty = ReadTiers(fixture.Service, new(Epoch));
         Assert.AreEqual("ok", empty.Status);
         CollectionAssert.AreEqual(new[] { "complex", "standard", "quick" }, empty.Tiers.Select(static list => list.Tier).ToArray());
         Assert.IsTrue(empty.Tiers.All(static list => list.Targets.Count == 0 && list.Choice is null));
@@ -177,7 +178,7 @@ public sealed class GlobalConfigRpcTests
                 },
             ],
         };
-        var saved = service.SaveModelTiers(new(Epoch,
+        var saved = SaveTiers(service, new(Epoch,
         [
             new("complex", [new("claude-code", "opus", ["High", "XHigh"]), new("codex", "gpt-6.1", ["XHigh"])]),
             new("quick", [new("claude-code", "haiku", [])]),
@@ -190,25 +191,80 @@ public sealed class GlobalConfigRpcTests
         StringAssert.Contains(text, "\"claude-code:opus@high,xhigh\"");
         StringAssert.Contains(text, "on = [\"quota\"]");
         StringAssert.Contains(text, "sk-kept", "The other settings stay.");
-        CollectionAssert.AreEqual(new[] { "High", "XHigh" }, service.ModelTiers(new(Epoch)).Tiers[0].Targets[0].Reasoning.ToArray());
+        CollectionAssert.AreEqual(new[] { "High", "XHigh" }, ReadTiers(service, new(Epoch)).Tiers[0].Targets[0].Reasoning.ToArray());
 
         // What is not a target is refused with what is wrong, and nothing is written.
-        var refused = service.SaveModelTiers(new(Epoch, [new("quick", [new("claude-code", "haiku", ["Huge"])])], new(false, true, true)));
+        var refused = SaveTiers(service, new(Epoch, [new("quick", [new("claude-code", "haiku", ["Huge"])])], new(false, true, true)));
         Assert.AreEqual(("invalid", "'Huge' is not a reasoning effort."), (refused.Status, refused.Message));
-        Assert.AreEqual("invalid", service.SaveModelTiers(new(Epoch, [new("quick", [new("", "haiku", [])])], new(false, true, true))).Status);
-        Assert.AreEqual("invalid", service.SaveModelTiers(new(Epoch, [new("fast", [])], new(false, true, true))).Status);
-        StringAssert.Contains(service.SaveModelTiers(new(Epoch, [new("quick", [new("a", "m", []), new("A", "M", [])])], new(false, true, true))).Message, "listed twice");
+        Assert.AreEqual("invalid", SaveTiers(service, new(Epoch, [new("quick", [new("", "haiku", [])])], new(false, true, true))).Status);
+        Assert.AreEqual("invalid", SaveTiers(service, new(Epoch, [new("fast", [])], new(false, true, true))).Status);
+        StringAssert.Contains(SaveTiers(service, new(Epoch, [new("quick", [new("a", "m", []), new("A", "M", [])])], new(false, true, true))).Message, "listed twice");
         Assert.AreEqual(text, File.ReadAllText(fixture.ConfigPath));
 
         // Tiers the file writes wrong are said, and shown as none.
         File.WriteAllText(fixture.ConfigPath, "[models.tiers]\nquick = [\"haiku\"]\n");
-        var invalid = service.ModelTiers(new(Epoch));
+        var invalid = ReadTiers(service, new(Epoch));
         Assert.AreEqual("invalid", invalid.Status);
         StringAssert.Contains(invalid.Message, "models.tiers.quick[1]");
         Assert.IsTrue(invalid.Tiers.All(static list => list.Targets.Count == 0));
 
-        Assert.AreEqual("stale_epoch", service.ModelTiers(new("another")).Status);
-        Assert.AreEqual("unavailable", new GlobalConfigService().ModelTiers(new(Epoch)).Status);
+        Assert.AreEqual("stale_epoch", ReadTiers(service, new("another")).Status);
+        Assert.AreEqual("unavailable", ReadTiers(new GlobalConfigService(), new(Epoch)).Status);
+    }
+
+    [TestMethod]
+    public async Task ModelTiersOfASpace_ReplaceTheGlobalOnes_AndTakeOnlyTheProvidersOfTheSpace()
+    {
+        await using var fixture = new Fixture("""
+            [providers.codex]
+            type = "codex"
+            spaces = ["personal"]
+
+            [models.tiers]
+            standard = ["codex:gpt-6.1@high", "claude-code:opus@medium"]
+            """);
+        var spaces = new SpaceCatalog(new ProjectCatalog(new CatalogOptions { GlobalRoot = Path.GetDirectoryName(fixture.ConfigPath)! }));
+        Assert.IsTrue((await spaces.CreateAsync("Business")).Succeeded);
+        Assert.IsTrue((await spaces.CreateAsync("Personal")).Succeeded);
+        ModelProviderStateSnapshot Ready(string key, params string[] models) => new()
+        {
+            Descriptor = new ModelProviderDescriptor(new ModelProviderId(key), key),
+            Availability = ModelProviderAvailability.Ready,
+            Models = [.. models.Select(static model => new AgentModelInfo(model))],
+        };
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            ProviderStates = () => [Ready("codex", "gpt-6.1"), Ready("claude-code", "opus", "haiku")],
+            Spaces = spaces,
+            SessionSpace = (sessionId, _) => Task.FromResult<SessionSpaceRecord?>(sessionId == "s1" ? new SessionSpaceRecord("business", null) : null),
+        };
+
+        // Codex is a provider of Personal only: Business takes the next target of the global tier.
+        Assert.AreEqual("codex", ReadTiers(service, new(Epoch)).Tiers[1].Choice?.ProviderKey);
+        var business = ReadTiers(service, new(Epoch) { SpaceId = "business" });
+        Assert.AreEqual(("ok", "global", "business"), (business.Status, business.Source, business.SpaceId));
+        Assert.AreEqual("claude-code", business.Tiers[1].Choice?.ProviderKey);
+        Assert.AreEqual("claude-code", ReadTiers(service, new(Epoch) { SessionId = "s1" }).Tiers[1].Choice?.ProviderKey, "A session is read as its space.");
+        Assert.AreEqual("codex", ReadTiers(service, new(Epoch) { SpaceId = "personal" }).Tiers[1].Choice?.ProviderKey);
+
+        // Tiers of its own, in the file of the space; the settings keep theirs.
+        var global = File.ReadAllText(fixture.ConfigPath);
+        var own = SaveTiers(service, new(Epoch, [new("quick", [new("claude-code", "haiku", ["Low"])])], new(false, true, true)) { SpaceId = "business" });
+        Assert.AreEqual(("ok", "space"), (own.Status, own.Source), own.Message);
+        Assert.AreEqual(0, own.Tiers[1].Targets.Count, "The tiers of a space replace the global ones, also where it sets none.");
+        Assert.AreEqual("haiku", own.Tiers[2].Choice?.ModelId);
+        Assert.AreEqual(global, File.ReadAllText(fixture.ConfigPath));
+        StringAssert.Contains(File.ReadAllText(Path.Combine(Path.GetDirectoryName(fixture.ConfigPath)!, "spaces", "business.md")), "claude-code:haiku@low");
+        Assert.AreEqual("space", ReadTiers(service, new(Epoch) { SessionId = "s1" }).Source);
+
+        // Back to the global tiers.
+        var back = SaveTiers(service, new(Epoch, [], new(false, true, true)) { SpaceId = "business", UseGlobal = true });
+        Assert.AreEqual(("ok", "global"), (back.Status, back.Source));
+        Assert.IsFalse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(fixture.ConfigPath)!, "spaces", "business.md")).Contains("haiku", StringComparison.Ordinal));
+
+        Assert.AreEqual("not_found", ReadTiers(service, new(Epoch) { SpaceId = "nowhere" }).Status);
+        Assert.AreEqual("not_found", ReadTiers(service, new(Epoch) { SessionId = "unknown" }).Status);
+        Assert.AreEqual("not_found", SaveTiers(service, new(Epoch, [new("quick", [])], new(false, true, true)) { SpaceId = "nowhere" }).Status);
     }
 
     [TestMethod]
@@ -700,6 +756,12 @@ public sealed class GlobalConfigRpcTests
         Assert.IsFalse(fixture.Service.Providers(new(Epoch)).Providers.Any(provider => provider.Key == "extra"));
         AssertKept("after deleting a provider");
     }
+
+    private static GlobalConfigModelTiersResponse ReadTiers(GlobalConfigService service, GlobalConfigModelTiersRequest request)
+        => service.ModelTiersAsync(request, CancellationToken.None).GetAwaiter().GetResult();
+
+    private static GlobalConfigModelTiersResponse SaveTiers(GlobalConfigService service, GlobalConfigSaveModelTiersRequest request)
+        => service.SaveModelTiersAsync(request, CancellationToken.None).GetAwaiter().GetResult();
 
     private sealed class Fixture : IAsyncDisposable
     {

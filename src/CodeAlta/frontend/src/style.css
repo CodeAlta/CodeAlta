@@ -1039,6 +1039,8 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .model-picker-rows .bp6-input { width: 58px; text-align: right; }
 /* The tiers of models on Settings > Models: three ordered lists side by side, one under the other in a narrow window. */
 .model-tier-settings { flex: none; display: grid; gap: 8px; margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); container-type: inline-size; }
+.model-tier-settings[data-space="true"] { margin: 8px 0 0; padding-bottom: 0; border-bottom: none; }
+.space-model-tiers .settings-field-help { overflow-wrap: anywhere; }
 .model-tier-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 6px 16px; }
 .model-tier-header h2 { margin: 0; font-size: 14px; }
 .model-tier-header .settings-field-help { margin: 2px 0 0; }

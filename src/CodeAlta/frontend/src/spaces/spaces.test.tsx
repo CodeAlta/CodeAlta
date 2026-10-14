@@ -408,6 +408,7 @@ test("a card of the overview opens the page of its space, which shows what it is
   for (const tab of ["MCP Servers", "Skills", "Agent prompts", "Plugins"]) assert.match(page, new RegExp(`>${tab}<`));
   assert.match(page, /<h2[^>]*>New sessions</);
   assert.match(page, /<option value="reviewer" selected="">reviewer<\/option>/, "The agent prompt of the space is shown while the prompts are read.");
+  assert.match(page, /Model tiers/, "New sessions has the model tiers of the space.");
   assert.doesNotMatch(page, /Identity/, "Identity has nothing to show yet.");
 
   const pool = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[0]} spaces={spaces} projects={projects} chats={0} shown activity={undefined} canEdit

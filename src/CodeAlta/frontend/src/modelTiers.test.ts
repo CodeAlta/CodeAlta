@@ -5,7 +5,7 @@ import { addTierTarget, composerTierEntries, createTierStore, emptyTiers, moveEf
   startingEfforts, tierLists, type TierState } from "./modelTiers";
 
 const reply = (changes: Partial<GlobalConfigModelTiersResponse> = {}): GlobalConfigModelTiersResponse => ({
-  status: "ok", message: null,
+  status: "ok", message: null, source: "global", spaceId: null,
   fallback: { enabled: true, onQuota: true, onUnavailable: false },
   tiers: [
     { tier: "complex", targets: [{ providerKey: "claude-code", modelId: "opus", reasoning: ["High", "XHigh"] }, { providerKey: "codex", modelId: "gpt-6.1", reasoning: ["XHigh"] }],
@@ -82,9 +82,9 @@ test("the store reads the tiers of a host once at a time and tells its listeners
   await Promise.all([store.refresh("e1"), store.refresh("e1")]);
   assert.equal(reads, 1);
   assert.equal(told, 1);
-  assert.equal(store.get()?.epoch, "e1");
+  assert.ok(store.of("e1"));
   await store.refresh("bad");
-  assert.equal(store.get()?.epoch, "e1", "A reading that is not ok keeps the one the window has.");
+  assert.equal(store.of("bad"), undefined, "A reading that is not ok gives none.");
   store.set("e1", emptyTiers);
   assert.equal(told, 2);
   stop();
