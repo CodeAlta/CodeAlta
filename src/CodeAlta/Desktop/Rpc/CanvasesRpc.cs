@@ -46,7 +46,8 @@ internal sealed class CanvasesService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
         try
         {
-            return new("ok", [.. _canvases!.Declarations().Select(Item).Take(PluginUiService.MaximumContributions)]);
+            // The canvases of the plugins of the space the window shows.
+            return new("ok", [.. _canvases!.DeclarationsIn(_canvases.ShownSpaceId).Select(Item).Take(PluginUiService.MaximumContributions)]);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

@@ -769,8 +769,15 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch) { Jobs = host.RuntimeService.Jobs });
-                    builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime));
-                    pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch, canvases);
+                    builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime)
+                    {
+                        SessionSpace = async (sessionId, token) => (await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false)).SpaceId,
+                    });
+                    pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch, canvases)
+                    {
+                        ShownSpace = () => spaceView.ShownSpaceId,
+                        SessionSpace = async (sessionId, token) => (await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false)).SpaceId,
+                    };
                     builder.AddPluginUiService(pluginCommands);
                     builder.AddCanvasesService(canvases is null ? new CanvasesService() : new CanvasesService(canvases, epoch));
                     builder.AddDocumentationService(new DocumentationService(documentation, epoch, documentationView, new DocumentationAsker(host, documentation, () => spaceView.ShownSpaceId), shell.NotifySessionsChanged));

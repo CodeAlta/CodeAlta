@@ -28,7 +28,7 @@ internal sealed partial class PluginUiService
         ArgumentNullException.ThrowIfNull(request);
         PluginUiLandingCardsResponse Failed(string status) => new(status, request.SpaceId, []);
         if (request.SpaceId is { } space && (space.Length is 0 or > MaximumIdUnits || space.Any(char.IsControl))) return Failed("invalid_request");
-        var scope = await ResolveAsync(request.ExpectedEpoch, null, null, cancellationToken).ConfigureAwait(false);
+        var scope = await ResolveAsync(request.ExpectedEpoch, null, null, request.SpaceId, cancellationToken).ConfigureAwait(false);
         if (scope.Status != "ok") return Failed(scope.Status);
         try
         {
@@ -50,7 +50,7 @@ internal sealed partial class PluginUiService
                 if (entry.Context.ProjectId is not null && project is not { Archived: false }) continue;
                 try
                 {
-                    cards.Add(LandingCard(entry, active, project));
+                    cards.Add(LandingCard(entry, active, project, request.SpaceId));
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -59,7 +59,7 @@ internal sealed partial class PluginUiService
                 catch (Exception)
                 {
                     // What a plugin gave could not be read (a list of actions that throws): its card failed, the others are listed.
-                    cards.Add(LandingCard(entry with { Card = null, Failed = true }, active, project));
+                    cards.Add(LandingCard(entry with { Card = null, Failed = true }, active, project, request.SpaceId));
                 }
             }
 
@@ -75,7 +75,7 @@ internal sealed partial class PluginUiService
         }
     }
 
-    private PluginUiLandingCard LandingCard(PluginLandingCardEntry entry, IReadOnlyList<ActivePluginInstance> active, ProjectDescriptor? project)
+    private PluginUiLandingCard LandingCard(PluginLandingCardEntry entry, IReadOnlyList<ActivePluginInstance> active, ProjectDescriptor? project, string? spaceId)
     {
         var registration = entry.Registration;
         var pluginKey = registration.Handle.PluginRuntimeKey;
@@ -87,7 +87,7 @@ internal sealed partial class PluginUiService
         var runnable = new List<PluginUiLandingCardCommand>();
         if (shown is not null)
         {
-            var options = new PluginAdapterOperationOptions { ProjectId = project?.Id, ProjectPath = project?.ProjectPath, HasInteractiveUi = true };
+            var options = new PluginAdapterOperationOptions { ProjectId = project?.Id, ProjectPath = project?.ProjectPath, SpaceId = spaceId, HasInteractiveUi = true };
             var commands = _plugins!.Adapter.GetContributions<PluginCommandContribution>(PluginPoint.Command, options);
             foreach (var action in shown.Actions ?? [])
             {

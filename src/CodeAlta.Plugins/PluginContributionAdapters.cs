@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
+using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
 
@@ -19,6 +20,12 @@ public sealed record PluginAdapterOperationOptions
 
     /// <summary>Gets the current session id, when known.</summary>
     public string? SessionId { get; init; }
+
+    /// <summary>
+    /// Gets the space of the operation: the space of its session, else the space the window shows. A plugin that is
+    /// not assigned to it adds nothing there. <see langword="null"/> applies no space: startup and host work.
+    /// </summary>
+    public string? SpaceId { get; init; }
 
     /// <summary>Gets the current run id, when known.</summary>
     public string? RunId { get; init; }
@@ -212,6 +219,26 @@ public sealed class PluginContributionAdapterService
         _registry = registry;
         _diagnostics = diagnostics;
     }
+
+    /// <summary>
+    /// Gets or sets where the spaces of the plugins are read from, the global configuration: a plugin that is not
+    /// assigned to the space of an operation (<see cref="PluginAdapterOperationOptions.SpaceId"/>) adds nothing there,
+    /// before and whatever its enablement. <see langword="null"/>, the default, assigns every plugin to every space.
+    /// </summary>
+    /// <remarks>
+    /// Only plugins of the user are filtered: a plugin of a project follows its project, which is already assigned
+    /// to spaces. Its background work and what it observes of the agents are not of one space and keep running.
+    /// </remarks>
+    public Func<SpaceAssignments>? SpaceAssignments { get; set; }
+
+    /// <summary>Tells whether a plugin is available in the space of an operation.</summary>
+    /// <param name="pluginId">The id the configuration names the plugin by; <see langword="null"/> when not known.</param>
+    /// <param name="scope">The scope of the plugin.</param>
+    /// <param name="spaceId">The space of the operation; <see langword="null"/> applies no space.</param>
+    /// <returns><see langword="true"/> when the plugin adds what it has to the operation.</returns>
+    public bool IsAvailableInSpace(string? pluginId, PluginScope scope, string? spaceId)
+        => spaceId is null || scope != PluginScope.Global || string.IsNullOrWhiteSpace(pluginId) || SpaceAssignments is not { } read
+           || read().IsAvailable(SpaceResourceKind.Plugin, pluginId, spaceId);
 
     /// <summary>
     /// Gets filtered contribution registrations for a point and project scope.
@@ -884,6 +911,7 @@ public sealed class PluginContributionAdapterService
         foreach (var registration in _registry.GetSnapshot())
         {
             if (registration.Handle.Point != PluginPoint.LandingCard || registration.Contribution is not PluginLandingCardContribution card
+                || !IsAvailableInSpace(registration.PluginId, registration.Scope, spaceId)
                 || !TryGetActivePlugin(activePlugins, registration, out var active))
             {
                 continue;
@@ -1059,6 +1087,7 @@ public sealed class PluginContributionAdapterService
                     ProjectId = options?.ProjectId,
                     ProjectPath = options?.ProjectPath,
                     SessionId = options?.SessionId,
+                    SpaceId = options?.SpaceId,
                     ProviderId = options?.ProviderId,
                     Model = options?.Model,
                     CancellationToken = cancellationToken,
@@ -1134,9 +1163,12 @@ public sealed class PluginContributionAdapterService
             }, cancellationToken);
     }
 
+    // The space first, then the project: a project cannot bring into a space a plugin the space does not have.
     private IReadOnlyList<PluginContributionRegistration> GetRegistrations(PluginPoint point, PluginAdapterOperationOptions? options)
         => _registry.GetSnapshot()
-            .Where(registration => registration.Handle.Point == point && PluginContributionRegistry.AppliesToProject(registration, options?.ProjectId, options?.ProjectPath))
+            .Where(registration => registration.Handle.Point == point
+                && IsAvailableInSpace(registration.PluginId, registration.Scope, options?.SpaceId)
+                && PluginContributionRegistry.AppliesToProject(registration, options?.ProjectId, options?.ProjectPath))
             .ToArray();
 
     private static bool TryGetActivePlugin(IReadOnlyList<ActivePluginInstance> activePlugins, PluginContributionRegistration registration, out ActivePluginInstance active)
@@ -1145,8 +1177,10 @@ public sealed class PluginContributionAdapterService
         return active is not null && active.Instance is not null && active.RuntimeContext.IsValid;
     }
 
-    private static IEnumerable<ActivePluginInstance> GetApplicableActivePlugins(IReadOnlyList<ActivePluginInstance> activePlugins, PluginAdapterOperationOptions? options)
-        => activePlugins.Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid && plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath));
+    private IEnumerable<ActivePluginInstance> GetApplicableActivePlugins(IReadOnlyList<ActivePluginInstance> activePlugins, PluginAdapterOperationOptions? options)
+        => activePlugins.Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid
+            && IsAvailableInSpace(PluginContributionRegistry.PluginIdOf(plugin.Descriptor.RuntimeKey, plugin.SourcePackage?.PackageId), plugin.RuntimeContext.Scope, options?.SpaceId)
+            && plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath));
 
     private static bool ToolApplies(PluginToolActivationPolicy policy, PluginAdapterOperationOptions? options)
     {
@@ -1337,6 +1371,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId,
             ProjectPath = options?.ProjectPath,
             SessionId = options?.SessionId,
+            SpaceId = options?.SpaceId,
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,
@@ -1354,6 +1389,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId,
             ProjectPath = options?.ProjectPath,
             SessionId = options?.SessionId,
+            SpaceId = options?.SpaceId,
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,
@@ -1374,6 +1410,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId,
             ProjectPath = options?.ProjectPath,
             SessionId = options?.SessionId,
+            SpaceId = options?.SpaceId,
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,
@@ -1394,6 +1431,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId,
             ProjectPath = options?.ProjectPath,
             SessionId = options?.SessionId,
+            SpaceId = options?.SpaceId,
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,
@@ -1420,6 +1458,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId ?? template.ProjectId,
             ProjectPath = options?.ProjectPath ?? template.ProjectPath,
             SessionId = options?.SessionId ?? template.SessionId,
+            SpaceId = options?.SpaceId ?? template.SpaceId,
             RunId = options?.RunId ?? template.RunId,
             ProviderId = options?.ProviderId ?? template.ProviderId,
             Model = options?.Model ?? template.Model,
@@ -1445,6 +1484,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId ?? template.ProjectId,
             ProjectPath = options?.ProjectPath ?? template.ProjectPath,
             SessionId = options?.SessionId ?? template.SessionId,
+            SpaceId = options?.SpaceId ?? template.SpaceId,
             RunId = options?.RunId ?? template.RunId,
             ProviderId = options?.ProviderId ?? template.ProviderId,
             Model = options?.Model ?? template.Model,
@@ -1465,6 +1505,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId ?? template.ProjectId,
             ProjectPath = options?.ProjectPath ?? template.ProjectPath,
             SessionId = options?.SessionId ?? template.SessionId,
+            SpaceId = options?.SpaceId ?? template.SpaceId,
             RunId = options?.RunId ?? template.RunId,
             ProviderId = options?.ProviderId ?? template.ProviderId,
             Model = options?.Model ?? template.Model,
@@ -1483,6 +1524,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId ?? template.ProjectId,
             ProjectPath = options?.ProjectPath ?? template.ProjectPath,
             SessionId = options?.SessionId ?? template.SessionId,
+            SpaceId = options?.SpaceId ?? template.SpaceId,
             RunId = options?.RunId ?? template.RunId,
             ProviderId = options?.ProviderId ?? template.ProviderId,
             Model = options?.Model ?? template.Model,
@@ -1502,6 +1544,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId ?? template.ProjectId,
             ProjectPath = options?.ProjectPath ?? template.ProjectPath,
             SessionId = options?.SessionId ?? template.SessionId,
+            SpaceId = options?.SpaceId ?? template.SpaceId,
             RunId = options?.RunId ?? template.RunId,
             ProviderId = options?.ProviderId ?? template.ProviderId,
             Model = options?.Model ?? template.Model,
@@ -1521,6 +1564,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId,
             ProjectPath = options?.ProjectPath,
             SessionId = options?.SessionId,
+            SpaceId = options?.SpaceId,
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,
@@ -1538,6 +1582,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId,
             ProjectPath = options?.ProjectPath,
             SessionId = options?.SessionId,
+            SpaceId = options?.SpaceId,
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,
@@ -1557,6 +1602,7 @@ public sealed class PluginContributionAdapterService
             ProjectId = options?.ProjectId,
             ProjectPath = options?.ProjectPath,
             SessionId = options?.SessionId,
+            SpaceId = options?.SpaceId,
             RunId = options?.RunId,
             ProviderId = options?.ProviderId,
             Model = options?.Model,

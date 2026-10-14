@@ -325,7 +325,10 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
 
         // With what plugins give every run of this scope, so the first send keeps this attachment.
         async Task<SessionViewDescriptor> CreateWithPluginsAsync(PluginOrchestrationBridge plugins, SessionExecutionOptions options)
-            => await Create(await plugins.AugmentNewSessionAsync(options, project?.Id, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
+        {
+            var space = await _runtime.ResolveSpaceAsync(spaceId, project, CancellationToken.None).ConfigureAwait(false);
+            return await Create(await plugins.AugmentNewSessionAsync(options, project?.Id, space.Id, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Renames only an exact catalog session without changing its active run.</summary>
@@ -1012,7 +1015,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             if (Plugins is not null)
             {
                 // Contacts the MCP servers the session activated, so it follows the send's cancellation.
-                var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, operation.Execution.Token).ConfigureAwait(false);
+                var space = await _runtime.ResolveSpaceAsync(session.SpaceId, project, operation.Execution.Token).ConfigureAwait(false);
+                var augmented = await Plugins.AugmentRunAsync(options, input, session.ProjectRef, session.SessionId, space.Id, operation.Execution.Token).ConfigureAwait(false);
                 if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
                 (options, input) = (augmented.ExecutionOptions, augmented.Input);
             }

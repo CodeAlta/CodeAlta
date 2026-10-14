@@ -26,6 +26,12 @@ public sealed record PluginContributionRegistration
 
     /// <summary>Gets the load unit kind that supplied the contribution.</summary>
     public PluginLoadUnitKind LoadUnitKind { get; init; } = PluginLoadUnitKind.Source;
+
+    /// <summary>
+    /// Gets the id the configuration names the plugin by (<c>[plugins.&lt;id&gt;]</c>): the folder of a source package,
+    /// the name of a plugin of the application; <see langword="null"/> when not known, where no space applies.
+    /// </summary>
+    public string? PluginId { get; init; }
 }
 
 /// <summary>
@@ -83,6 +89,30 @@ public sealed class PluginContributionRegistry
         PluginPoint point,
         IEnumerable<object> contributions,
         int activationGeneration)
+        => Register(descriptor, scope, scopeProjectId, scopeProjectPath, point, contributions, activationGeneration, pluginId: null);
+
+    /// <summary>
+    /// Registers contribution instances for a plugin that the configuration names by <paramref name="pluginId"/>.
+    /// </summary>
+    /// <param name="descriptor">The plugin descriptor.</param>
+    /// <param name="scope">The plugin scope.</param>
+    /// <param name="scopeProjectId">The scoped project id, when known.</param>
+    /// <param name="scopeProjectPath">The scoped project path, when known.</param>
+    /// <param name="point">The contribution point.</param>
+    /// <param name="contributions">The contribution instances.</param>
+    /// <param name="activationGeneration">The activation generation.</param>
+    /// <param name="pluginId">The id of the plugin in the configuration, which its spaces are assigned to; <see langword="null"/> when not known.</param>
+    /// <returns>The created contribution registrations.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="descriptor"/> or <paramref name="contributions"/> is <see langword="null"/>.</exception>
+    public IReadOnlyList<PluginContributionRegistration> Register(
+        PluginDescriptor descriptor,
+        PluginScope scope,
+        string? scopeProjectId,
+        string? scopeProjectPath,
+        PluginPoint point,
+        IEnumerable<object> contributions,
+        int activationGeneration,
+        string? pluginId)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(contributions);
@@ -102,6 +132,7 @@ public sealed class PluginContributionRegistry
                 ScopeProjectId = scopeProjectId,
                 ScopeProjectPath = scopeProjectPath,
                 LoadUnitKind = loadUnitKind,
+                PluginId = pluginId,
             })
             .ToArray();
 
@@ -211,6 +242,20 @@ public sealed class PluginContributionRegistry
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Gets the id the configuration names a plugin by: the folder of its source package, else the name after
+    /// <c>builtin:</c> of a plugin of the application, else its runtime key.
+    /// </summary>
+    /// <param name="runtimeKey">The runtime key of the plugin.</param>
+    /// <param name="packageId">The id of its source package, when it has one.</param>
+    /// <returns>The id.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="runtimeKey"/> is <see langword="null"/>.</exception>
+    public static string PluginIdOf(string runtimeKey, string? packageId)
+    {
+        ArgumentNullException.ThrowIfNull(runtimeKey);
+        return packageId ?? (runtimeKey.StartsWith("builtin:", StringComparison.Ordinal) ? runtimeKey["builtin:".Length..] : runtimeKey);
     }
 
     private static void SortRegistrations(List<PluginContributionRegistration> registrations)

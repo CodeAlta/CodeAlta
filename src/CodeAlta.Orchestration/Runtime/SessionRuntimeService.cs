@@ -4461,12 +4461,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }), space);
     }
 
-    /// <summary>Gets the space a new session of a project is in when it is created in <paramref name="spaceId"/>.</summary>
+    /// <summary>Gets the space a session of a project is in when it records <paramref name="spaceId"/>, or when it is created in it.</summary>
     /// <param name="spaceId">The space the session is created in; <see langword="null"/> for none.</param>
     /// <param name="project">The project of the session, or <see langword="null"/> for a chat.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The space, the default one when no other fits.</returns>
-    internal async Task<SpaceDescriptor> ResolveNewSessionSpaceAsync(string? spaceId, ProjectDescriptor? project, CancellationToken cancellationToken)
+    internal async Task<SpaceDescriptor> ResolveSpaceAsync(string? spaceId, ProjectDescriptor? project, CancellationToken cancellationToken)
     {
         var spaces = await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
         var id = SpaceCatalog.ResolveSessionSpace(spaceId, project, spaces);

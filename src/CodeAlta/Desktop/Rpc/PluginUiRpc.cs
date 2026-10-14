@@ -82,7 +82,7 @@ internal sealed partial class PluginUiService
     {
         ArgumentNullException.ThrowIfNull(request);
         PluginUiContributionsResponse Failed(string status) => new(status, request.ProjectId, [], [], false);
-        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, cancellationToken).ConfigureAwait(false);
+        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, null, cancellationToken).ConfigureAwait(false);
         if (scope.Status != "ok") return Failed(scope.Status);
         try
         {
@@ -152,7 +152,7 @@ internal sealed partial class PluginUiService
         }
 
         if (request.SpaceId is { } space && (space.Length is 0 or > MaximumIdUnits || space.Any(char.IsControl))) return Failed("invalid_request");
-        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, cancellationToken).ConfigureAwait(false);
+        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, request.SpaceId, cancellationToken).ConfigureAwait(false);
         if (scope.Status != "ok") return Failed(scope.Status);
         try
         {
@@ -228,7 +228,7 @@ internal sealed partial class PluginUiService
     {
         ArgumentNullException.ThrowIfNull(request);
         PluginUiRegionsResponse Failed(string status) => new(status, request.ProjectId, request.SessionId, []);
-        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, cancellationToken).ConfigureAwait(false);
+        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, null, cancellationToken).ConfigureAwait(false);
         if (scope.Status != "ok") return Failed(scope.Status);
         try
         {
@@ -277,7 +277,7 @@ internal sealed partial class PluginUiService
     public async Task<PluginUiStatusResponse> InvokeCommandAsync(PluginUiInvokeRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, cancellationToken).ConfigureAwait(false);
+        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, request.SpaceId, cancellationToken).ConfigureAwait(false);
         if (scope.Status != "ok") return new(scope.Status);
         if (request.CommandId is not { Length: > 0 and <= MaximumIdUnits } id || request.DraftText is { Length: > DesktopPluginUi.MaximumTextUnits }
             || request.SpaceId is { } space && (space.Length is 0 or > MaximumIdUnits || space.Any(char.IsControl))) return new("invalid_request");
@@ -321,7 +321,7 @@ internal sealed partial class PluginUiService
     {
         ArgumentNullException.ThrowIfNull(request);
         PluginUiPickerResponse Failed(string status) => new(status, request.PickerId, []);
-        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, cancellationToken).ConfigureAwait(false);
+        var scope = await ResolveAsync(request.ExpectedEpoch, request.ProjectId, request.SessionId, null, cancellationToken).ConfigureAwait(false);
         if (scope.Status != "ok") return Failed(scope.Status);
         if (request.PickerId is not { Length: > 0 and <= MaximumIdUnits } id || request.Query is not { Length: <= MaximumQueryUnits } query
             || query.Any(char.IsControl)) return Failed("invalid_request");
@@ -438,15 +438,27 @@ internal sealed partial class PluginUiService
         }
     }
 
-    private async ValueTask<(string Status, PluginAdapterOperationOptions? Options)> ResolveAsync(string? epoch, string? projectId, string? sessionId, CancellationToken cancellationToken)
+    // The space of what a pane shows: the space of its session, which keeps it whatever the window shows, else the
+    // space the window shows. A plugin that is not in it adds nothing to the pane.
+    private async ValueTask<(string Status, PluginAdapterOperationOptions? Options)> ResolveAsync(string? epoch, string? projectId, string? sessionId,
+        string? shownSpaceId, CancellationToken cancellationToken)
     {
         if (_projects is null || _plugins is null || _ui is null) return ("unavailable", null);
         if (!string.Equals(epoch, _epoch, StringComparison.Ordinal)) return ("stale_epoch", null);
         if (sessionId is { } session && (session.Length is 0 or > ComposerStatusService.MaximumSessionIdUnits || session.Any(char.IsControl))) return ("invalid_request", null);
         var project = await SettingsProjectScope.ResolveAsync(_projects, projectId, allowArchived: true, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return (project.Status, null);
-        return ("ok", new PluginAdapterOperationOptions { ProjectId = projectId, ProjectPath = project.Root, HasInteractiveUi = true });
+        var space = sessionId is not null && SessionSpace is { } ofSession
+            ? await ofSession(sessionId, cancellationToken).ConfigureAwait(false)
+            : shownSpaceId ?? ShownSpace?.Invoke();
+        return ("ok", new PluginAdapterOperationOptions { ProjectId = projectId, ProjectPath = project.Root, SpaceId = space, HasInteractiveUi = true });
     }
+
+    /// <summary>Gets the space the window shows; null where the window says none.</summary>
+    internal Func<string?>? ShownSpace { get; init; }
+
+    /// <summary>Gets the space of a session, which the plugins of a pane that shows it are filtered by.</summary>
+    internal Func<string, CancellationToken, Task<string?>>? SessionSpace { get; init; }
 
     private static string PluginName(IReadOnlyList<ActivePluginInstance> active, PluginContributionRegistration registration)
     {

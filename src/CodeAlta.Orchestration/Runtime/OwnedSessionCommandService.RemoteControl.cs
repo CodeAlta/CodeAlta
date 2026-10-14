@@ -57,7 +57,8 @@ public sealed partial class OwnedSessionCommandService
                 // With what plugins give every run of the session, as a send has it: the next send keeps this
                 // attachment, and the process whose bridge it connects.
                 if (Plugins is not null)
-                    options = await Plugins.AugmentAttachmentAsync(options, session.ProjectRef, session.SessionId, cancellationToken).ConfigureAwait(false);
+                    options = await Plugins.AugmentAttachmentAsync(options, session.ProjectRef, session.SessionId,
+                        (await _runtime.ResolveSpaceAsync(session.SpaceId, project, cancellationToken).ConfigureAwait(false)).Id, cancellationToken).ConfigureAwait(false);
                 await _runtime.EnsureOwnedCoordinatorSessionAsync(session, options).ConfigureAwait(false);
                 remoteControl = await _runtime.SetRemoteControlAsync(session.SessionId, enabled, RemoteName(session), cancellationToken).ConfigureAwait(false);
             }

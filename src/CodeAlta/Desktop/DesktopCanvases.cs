@@ -201,6 +201,29 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         return found;
     }
 
+    /// <summary>Gets the space the window shows; null where it says none.</summary>
+    internal string? ShownSpaceId
+    {
+        get { lock (_gate) return _shownSpace(); }
+    }
+
+    /// <summary>
+    /// Gets the canvases that the plugins of a space declare: a canvas follows its plugin, which a space that does not
+    /// have it leaves out.
+    /// </summary>
+    /// <param name="spaceId">The space; <see langword="null"/> for every canvas.</param>
+    /// <returns>The canvases, in the order of their contributions.</returns>
+    internal IReadOnlyList<CanvasDeclaration> DeclarationsIn(string? spaceId)
+    {
+        PluginRuntimeManager? runtime;
+        lock (_gate) runtime = _runtime;
+        return runtime is null ? [] : [.. Declarations().Where(declaration => InSpace(runtime, declaration.Plugin, spaceId))];
+    }
+
+    private static bool InSpace(PluginRuntimeManager runtime, ActivePluginInstance plugin, string? spaceId)
+        => runtime.Adapter.IsAvailableInSpace(PluginContributionRegistry.PluginIdOf(plugin.Descriptor.RuntimeKey, plugin.SourcePackage?.PackageId),
+            plugin.RuntimeContext.Scope, spaceId);
+
     /// <summary>Finds a canvas that an active plugin declares.</summary>
     internal CanvasDeclaration? Find(string pluginKey, string canvasId)
         => Declarations().FirstOrDefault(declaration => string.Equals(declaration.PluginKey, pluginKey, StringComparison.Ordinal)
@@ -685,10 +708,12 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
     internal PluginCanvasOpenResult RequestOpen(string pluginKey, string canvasId, PluginCanvasOpenOptions? options, bool fromPane = true)
     {
         string? shown;
+        PluginRuntimeManager runtime;
         lock (_gate)
         {
             if (_disposed || _runtime is null) return new(PluginCanvasOpenStatus.Unavailable, null, null, false);
             shown = _shownSpace();
+            runtime = _runtime;
         }
 
         if (!ValidCanvasId(canvasId)) return new(PluginCanvasOpenStatus.Invalid, null, null, false);
@@ -697,6 +722,8 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         var pane = fromPane ? _ui?.Scope : null;
         var operation = fromPane ? PluginOrchestrationBridge.CurrentToolOperation : null;
         var space = options?.SpaceId ?? shown;
+        // A space that does not have the plugin has none of its canvases.
+        if (!InSpace(runtime, declaration.Plugin, space)) return new(PluginCanvasOpenStatus.UnknownCanvas, null, null, false);
         var (projectId, sessionId) = declaration.Canvas.Scope == PluginCanvasScope.Session
             ? SessionContext(options, (operation?.ProjectId, operation?.SessionId), (pane?.ProjectId, pane?.SessionId))
             : (options?.ProjectId ?? operation?.ProjectId ?? pane?.ProjectId, null);

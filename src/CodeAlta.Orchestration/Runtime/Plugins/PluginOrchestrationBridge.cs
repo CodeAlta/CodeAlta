@@ -218,15 +218,36 @@ public sealed class PluginOrchestrationBridge
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The options and input to run with, or the reason a plugin cancelled the run.</returns>
     /// <exception cref="ArgumentNullException">Thrown when the options or the input are <see langword="null" />.</exception>
-    public async Task<PluginAugmentedRun> AugmentRunAsync(
+    public Task<PluginAugmentedRun> AugmentRunAsync(
         SessionExecutionOptions executionOptions,
         AgentInput input,
         string? projectId,
         string? sessionId,
         CancellationToken cancellationToken = default)
+        => AugmentRunAsync(executionOptions, input, projectId, sessionId, spaceId: null, cancellationToken);
+
+    /// <summary>
+    /// Builds the plugin augmentation of a session run in its space and applies it to the run's execution options:
+    /// a plugin the space does not have adds nothing.
+    /// </summary>
+    /// <param name="executionOptions">The execution options of the run, before plugins.</param>
+    /// <param name="input">The input of the run.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a global session.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="spaceId">The space of the session; <see langword="null"/> applies no space.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The options and input to run with, or the reason a plugin cancelled the run.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when the options or the input are <see langword="null" />.</exception>
+    public async Task<PluginAugmentedRun> AugmentRunAsync(
+        SessionExecutionOptions executionOptions,
+        AgentInput input,
+        string? projectId,
+        string? sessionId,
+        string? spaceId,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
-        var augmentation = await BuildAugmentationAsync(executionOptions, input, ScopeOf(executionOptions, projectId, sessionId), isRun: true, cancellationToken).ConfigureAwait(false);
+        var augmentation = await BuildAugmentationAsync(executionOptions, input, ScopeOf(executionOptions, projectId, sessionId, spaceId), isRun: true, cancellationToken).ConfigureAwait(false);
         return string.IsNullOrWhiteSpace(augmentation.CancelReason)
             ? new PluginAugmentedRun(augmentation.ApplyTo(executionOptions), augmentation.Input ?? input)
             : new PluginAugmentedRun(executionOptions, input, augmentation.CancelReason);
@@ -243,13 +264,30 @@ public sealed class PluginOrchestrationBridge
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The options to create the session with.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="executionOptions"/> is <see langword="null" />.</exception>
-    public async Task<SessionExecutionOptions> AugmentNewSessionAsync(
+    public Task<SessionExecutionOptions> AugmentNewSessionAsync(
         SessionExecutionOptions executionOptions,
         string? projectId,
         CancellationToken cancellationToken = default)
+        => AugmentNewSessionAsync(executionOptions, projectId, spaceId: null, cancellationToken);
+
+    /// <summary>
+    /// Returns the execution options of a session that is being created in a space, with what the plugins of that
+    /// space contribute to every run of its scope.
+    /// </summary>
+    /// <param name="executionOptions">The execution options of the new session, before plugins.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a global session.</param>
+    /// <param name="spaceId">The space of the session; <see langword="null"/> applies no space.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The options to create the session with.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="executionOptions"/> is <see langword="null" />.</exception>
+    public async Task<SessionExecutionOptions> AugmentNewSessionAsync(
+        SessionExecutionOptions executionOptions,
+        string? projectId,
+        string? spaceId,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
-        var augmentation = await BuildAugmentationAsync(executionOptions, new AgentInput([]), ScopeOf(executionOptions, projectId, sessionId: null), isRun: false, cancellationToken).ConfigureAwait(false);
+        var augmentation = await BuildAugmentationAsync(executionOptions, new AgentInput([]), ScopeOf(executionOptions, projectId, sessionId: null, spaceId), isRun: false, cancellationToken).ConfigureAwait(false);
         return augmentation.ApplyTo(executionOptions);
     }
 
@@ -265,23 +303,43 @@ public sealed class PluginOrchestrationBridge
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The options to attach the session with.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="executionOptions"/> is <see langword="null" />.</exception>
-    public async Task<SessionExecutionOptions> AugmentAttachmentAsync(
+    public Task<SessionExecutionOptions> AugmentAttachmentAsync(
         SessionExecutionOptions executionOptions,
         string? projectId,
         string sessionId,
         CancellationToken cancellationToken = default)
+        => AugmentAttachmentAsync(executionOptions, projectId, sessionId, spaceId: null, cancellationToken);
+
+    /// <summary>
+    /// Returns the execution options of an existing session that is attached without a run, with what the plugins
+    /// of its space contribute to every run of its scope.
+    /// </summary>
+    /// <param name="executionOptions">The execution options of the session, before plugins.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a global session.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="spaceId">The space of the session; <see langword="null"/> applies no space.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The options to attach the session with.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="executionOptions"/> is <see langword="null" />.</exception>
+    public async Task<SessionExecutionOptions> AugmentAttachmentAsync(
+        SessionExecutionOptions executionOptions,
+        string? projectId,
+        string sessionId,
+        string? spaceId,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(executionOptions);
-        var augmentation = await BuildAugmentationAsync(executionOptions, new AgentInput([]), ScopeOf(executionOptions, projectId, sessionId), isRun: false, cancellationToken).ConfigureAwait(false);
+        var augmentation = await BuildAugmentationAsync(executionOptions, new AgentInput([]), ScopeOf(executionOptions, projectId, sessionId, spaceId), isRun: false, cancellationToken).ConfigureAwait(false);
         return augmentation.ApplyTo(executionOptions);
     }
 
-    private static PluginAdapterOperationOptions ScopeOf(SessionExecutionOptions executionOptions, string? projectId, string? sessionId)
+    private static PluginAdapterOperationOptions ScopeOf(SessionExecutionOptions executionOptions, string? projectId, string? sessionId, string? spaceId)
         => new()
         {
             ProjectId = projectId,
             ProjectPath = executionOptions.WorkingDirectory,
             SessionId = sessionId,
+            SpaceId = spaceId,
             ProviderId = executionOptions.ProviderId.Value,
             Model = executionOptions.Model,
             IsCodeAltaManagedProvider = IsCodeAltaManagedProvider(executionOptions.ProviderId),
@@ -513,6 +571,7 @@ public sealed class PluginOrchestrationBridge
             ProjectId = options.ProjectId,
             ProjectPath = options.ProjectPath,
             SessionId = options.SessionId,
+            SpaceId = options.SpaceId,
             RunId = options.RunId,
             ProviderId = options.ProviderId,
             Model = options.Model,
@@ -583,6 +642,7 @@ public static class PluginInstructionProcessingRunner
             ProjectId = request.ProjectId ?? options.ProjectId,
             ProjectPath = request.ProjectPath ?? options.ProjectPath,
             SessionId = request.SessionId ?? options.SessionId,
+            SpaceId = options.SpaceId,
             ProviderId = request.ProviderId ?? options.ProviderId,
             Model = request.Model ?? options.Model,
             Stage = PluginInstructionProcessingStages.FinalBeforeProviderRequest,

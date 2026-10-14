@@ -190,6 +190,13 @@ public abstract class PluginOperationContext
     /// <summary>Gets the session identifier, when known.</summary>
     public string? SessionId { get; init; }
 
+    /// <summary>
+    /// Gets the space the operation is for: the space of its session, or the space the window shows for what is not
+    /// of a session; <see langword="null"/> when no space applies (startup, background work). The host already leaves
+    /// a plugin out of the spaces it is not assigned to; a plugin reads this to scope what it offers itself.
+    /// </summary>
+    public string? SpaceId { get; init; }
+
     /// <summary>Gets the run identifier, when known.</summary>
     public string? RunId { get; init; }
 

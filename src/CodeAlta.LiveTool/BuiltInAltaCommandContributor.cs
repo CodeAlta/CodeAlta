@@ -4580,8 +4580,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         SessionExecutionOptions executionOptions,
         AgentInput input)
         => context.Services.Get<PluginOrchestrationBridge>() is { } pluginBridge
-            ? await context.ObserveOriginalAsync(pluginBridge.AugmentRunAsync(executionOptions, input, info.Session.ProjectRef, info.Session.SessionId, context.CancellationToken)).ConfigureAwait(false)
+            ? await context.ObserveOriginalAsync(pluginBridge.AugmentRunAsync(executionOptions, input, info.Session.ProjectRef, info.Session.SessionId,
+                await SessionSpaceIdAsync(context, info.Session.SessionId).ConfigureAwait(false), context.CancellationToken)).ConfigureAwait(false)
             : new PluginAugmentedRun(executionOptions, input);
+
+    // The space of a session, as the host resolves it for its own sends; null where the host keeps no runtime.
+    private static async Task<string?> SessionSpaceIdAsync(AltaCommandContext context, string sessionId)
+        => context.Services.Get<SessionRuntimeService>() is { } runtime
+            ? (await runtime.GetSessionSpaceFilterAsync(sessionId, context.CancellationToken).ConfigureAwait(false)).SpaceId
+            : null;
 
     private static IReadOnlyList<AgentToolDefinition>? CreateAltaSessionTools(
         AltaCommandContext context,

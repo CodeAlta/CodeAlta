@@ -39,6 +39,9 @@ internal sealed class ComposerStatusService
     private readonly McpManagementService _mcp = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
 
+    /// <summary>Gets the space of a session, which the status items of its plugins are filtered by.</summary>
+    internal Func<string, CancellationToken, Task<string?>>? SessionSpace { get; init; }
+
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal ComposerStatusService()
     {
@@ -88,6 +91,8 @@ internal sealed class ComposerStatusService
                 var options = new PluginAdapterOperationOptions
                 {
                     ProjectId = request.ProjectId, ProjectPath = project.Root, SessionId = request.SessionId, HasInteractiveUi = true,
+                    // The plugins of the session's space only.
+                    SpaceId = request.SessionId is { } sessionId && SessionSpace is { } space ? await space(sessionId, cancellationToken).ConfigureAwait(false) : null,
                 };
                 var statuses = _plugins.Adapter.GetStatusEntries(active, PluginUiRegion.SessionStatus, options);
                 var commands = _plugins.Adapter.GetContributions<PluginCommandContribution>(PluginPoint.Command, options);

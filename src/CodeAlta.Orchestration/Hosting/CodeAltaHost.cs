@@ -66,6 +66,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         RuntimeService = runtimeService;
         ProjectFileSearchService = projectFileSearchService;
         PluginRuntime = pluginRuntime;
+        // A plugin assigned to some spaces adds nothing to the sessions of the others.
+        pluginRuntime.Adapter.SpaceAssignments ??= new CachedSpaceAssignments(new CodeAltaConfigStore(catalogOptions)).Current;
         ApplicationDatabase = applicationDatabase;
         CurrentProject = currentProject;
         Commands = new OwnedSessionCommandService(runtimeService, projectCatalog, catalogOptions, ownedCommandReceiptCapacity, reviewOwnedCommandPermissions, enableOwnedAsks, enableOwnedUserInput)

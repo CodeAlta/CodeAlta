@@ -83,7 +83,7 @@ public sealed partial class OwnedSessionCommandService
         lock (_gate) { if (_closed || _retained) return null; }
         var project = scope is null ? null : await ResolveReferenceProjectAsync(scope, cancellationToken).ConfigureAwait(false);
         if (scope is not null && !ReferenceScopeMatches(scope, project)) return null;
-        var space = await _runtime.ResolveNewSessionSpaceAsync(spaceId, project, cancellationToken).ConfigureAwait(false);
+        var space = await _runtime.ResolveSpaceAsync(spaceId, project, cancellationToken).ConfigureAwait(false);
         lock (_gate) { if (_closed || _retained) return null; }
         cancellationToken.ThrowIfCancellationRequested();
         var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, _runtime.LoadSpaceFilter(space.Id)).Where(p => p.PromptName.Length <= 256).Take(64)

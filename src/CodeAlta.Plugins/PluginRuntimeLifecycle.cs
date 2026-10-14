@@ -267,7 +267,8 @@ public sealed class PluginRuntimeActivator
             dependencies.Add(initialization);
             try { await initialization.ConfigureAwait(false); }
             catch when (initialization.Exception is { } failure && PluginDependencyRetention.Contains(failure)) { throw failure; }
-            var contributions = CollectContributions(discoveredType.Descriptor, context, instance, options.ActivationGeneration, diagnostics);
+            var contributions = CollectContributions(discoveredType.Descriptor, context, instance, options.ActivationGeneration, diagnostics,
+                PluginContributionRegistry.PluginIdOf(discoveredType.Descriptor.RuntimeKey, sourcePackage?.PackageId));
             dependencies.Add(contributions);
             var original = activationOriginal = instance.OnActivatedAsync(cancellationToken).AsTask();
             dependencies.Add(original);
@@ -335,7 +336,8 @@ public sealed class PluginRuntimeActivator
         PluginRuntimeContext context,
         PluginBase instance,
         int activationGeneration,
-        List<PluginRuntimeDiagnostic> diagnostics)
+        List<PluginRuntimeDiagnostic> diagnostics,
+        string pluginId)
     {
         var registrations = new List<PluginContributionRegistration>();
         Add(PluginPoint.Startup, instance.GetStartupContributions());
@@ -365,7 +367,8 @@ public sealed class PluginRuntimeActivator
                 context.ScopeProjectPath,
                 point,
                 contributions,
-                activationGeneration));
+                activationGeneration,
+                pluginId));
         }
     }
 }
