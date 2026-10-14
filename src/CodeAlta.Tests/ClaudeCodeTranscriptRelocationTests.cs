@@ -421,6 +421,50 @@ public sealed class ClaudeCodeTranscriptRelocationTests
         Assert.IsFalse(File.Exists(elsewhere));
     }
 
+    [TestMethod]
+    public void Locate_FindsTheTranscriptInTheFolderOfTheWorkingDirectory()
+    {
+        WriteTranscript(OldDirectory, "content");
+
+        Assert.AreEqual(ClaudeCodeTranscriptPresence.Present, ClaudeCodeTranscriptRelocation.LocateTranscript(_root, OldDirectory, SessionId));
+    }
+
+    [TestMethod]
+    public void Locate_FindsTheTranscriptInAnotherFolder_AsTheCliAcceptsIt()
+    {
+        WriteTranscript(@"C:\elsewhere", "content");
+        Directory.CreateDirectory(ClaudeCodeProjectFolders.GetProjectFolder(_root, OldDirectory));
+
+        Assert.AreEqual(ClaudeCodeTranscriptPresence.Present, ClaudeCodeTranscriptRelocation.LocateTranscript(_root, OldDirectory, SessionId));
+    }
+
+    [TestMethod]
+    public void Locate_FindsTheTranscriptThroughALinkedFolder()
+    {
+        var elsewhere = WriteTranscript(@"C:\elsewhere", "content");
+        LinkFolder(ClaudeCodeProjectFolders.GetProjectFolder(_root, OldDirectory), Path.GetDirectoryName(elsewhere)!);
+
+        Assert.AreEqual(ClaudeCodeTranscriptPresence.Present, ClaudeCodeTranscriptRelocation.LocateTranscript(_root, OldDirectory, SessionId));
+    }
+
+    [TestMethod]
+    public void Locate_ReportsATranscriptNoFolderHasAsMissing()
+    {
+        var withoutProjects = ClaudeCodeTranscriptRelocation.LocateTranscript(_root, OldDirectory, SessionId);
+        WriteTranscript(OldDirectory, "another conversation", sessionId: "other");
+        // Not a transcript: a copy a sync tool left beside one.
+        WriteFile(Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(_root, @"C:\one"), SessionId + "_HOST_Conflict.jsonl"), "copy");
+
+        Assert.AreEqual(ClaudeCodeTranscriptPresence.Missing, withoutProjects);
+        Assert.AreEqual(ClaudeCodeTranscriptPresence.Missing, ClaudeCodeTranscriptRelocation.LocateTranscript(_root, OldDirectory, SessionId));
+    }
+
+    [TestMethod]
+    [DataRow("../escape")]
+    [DataRow(" padded ")]
+    public void Locate_DoesNotLookForAnIdentifierThatIsNotAFileName(string sessionId)
+        => Assert.AreEqual(ClaudeCodeTranscriptPresence.Unknown, ClaudeCodeTranscriptRelocation.LocateTranscript(_root, OldDirectory, sessionId));
+
     // A junction on Windows, which needs no privilege and is what users make there; a symbolic link elsewhere.
     private static void LinkFolder(string link, string target)
     {

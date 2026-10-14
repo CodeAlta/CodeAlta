@@ -15,6 +15,7 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
 {
     private readonly ConcurrentQueue<ClaudeCodeFakeProcess> _processes = new();
     private readonly ConcurrentDictionary<string, double> _totalCosts = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _transcripts = new(StringComparer.Ordinal);
 
     /// <summary>Gets or sets the turn run for each user message. The default answers "ok".</summary>
     public Func<ClaudeCodeFakeProcess, JsonElement, Task> OnUserMessage { get; set; } = static (process, message) =>
@@ -56,6 +57,15 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets what the CLI waits for before it answers <c>initialize</c>; <see langword="null"/> to answer at once.</summary>
     public Task? InitializeAnswer { get; set; }
 
+    /// <summary>Gets or sets what a process that resumes a conversation waits for before it answers <c>initialize</c>; <see langword="null"/> to answer at once.</summary>
+    public Task? ResumeInitializeAnswer { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a background session of Claude Code holds every conversation: the CLI
+    /// refuses to resume one (without <c>--fork-session</c>) as Claude Code 2.1.296 does.
+    /// </summary>
+    public bool HeldByBackground { get; set; }
+
     /// <summary>Gets or sets what a process waits for before it stops when the host stops it; <see langword="null"/> to stop at once.</summary>
     public Task? StopHeldUntil { get; set; }
 
@@ -65,6 +75,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     internal int NextBridge() => Interlocked.Increment(ref _bridges);
 
     private int _bridges;
+
+    /// <summary>Gets or sets what gives each process started an identifier; <see langword="null"/> for none, as no process runs.</summary>
+    public Func<int?>? AssignProcessId { get; set; }
 
     /// <summary>Gets or sets the permission mode the settings of the user give a process started without one.</summary>
     public string SettingsPermissionMode { get; set; } = "default";
@@ -83,6 +96,16 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     public void CopyCost(string sourceConversationId, string conversationId)
         => _totalCosts[conversationId] = _totalCosts.GetValueOrDefault(sourceConversationId);
 
+    /// <summary>Records that a conversation has a transcript: the CLI writes it with the first message it is sent.</summary>
+    public void WriteTranscript(string conversationId) => _transcripts[conversationId] = true;
+
+    /// <summary>Removes the transcripts, as a cleaned profile or another machine has none.</summary>
+    public void ForgetTranscripts() => _transcripts.Clear();
+
+    /// <summary>Tells whether the CLI finds the transcript of a conversation, as the provider asks it before it resumes one.</summary>
+    public ClaudeCodeTranscriptPresence LocateTranscript(string workingDirectory, string conversationId)
+        => _transcripts.ContainsKey(conversationId) ? ClaudeCodeTranscriptPresence.Present : ClaudeCodeTranscriptPresence.Missing;
+
     /// <summary>Gets the processes that were started, in order.</summary>
     public IReadOnlyList<ClaudeCodeFakeProcess> Processes => [.. _processes];
 
@@ -96,7 +119,7 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     }
 
     /// <summary>The options of a provider that runs this CLI.</summary>
-    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", bool promptSuggestions = false, string? configDirectory = null)
+    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", bool promptSuggestions = false, string? configDirectory = null, TimeSpan? startupTimeout = null)
         => new()
         {
             ProviderKey = providerKey,
@@ -104,11 +127,12 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
             ConfigDirectory = configDirectory,
             DisplayName = "Claude Code",
             TransportFactory = this,
+            LocateTranscript = LocateTranscript,
             ResolveCli = static () => new ClaudeCodeCliResolution("/fake/bin/claude", null),
             // Not the environment of the machine that runs the tests, where an API key may wait for an answer.
             GetEnvironmentVariable = static _ => null,
             IdleTimeout = TimeSpan.Zero,
-            StartupTimeout = TimeSpan.FromSeconds(10),
+            StartupTimeout = startupTimeout ?? TimeSpan.FromSeconds(10),
             InterruptTimeout = TimeSpan.FromSeconds(2),
         };
 }
@@ -128,6 +152,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
     {
         _cli = cli;
         Launch = launch;
+        ProcessId = cli.AssignProcessId?.Invoke();
         // A fork is another conversation, which the CLI names itself.
         ForksSession = launch.Arguments.Contains("--fork-session") && FindOption("--resume=") is not null;
         ResumedAt = launch.Arguments.SkipWhile(static argument => argument != "--resume-session-at").Skip(1).FirstOrDefault();
@@ -154,6 +179,28 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         else if (cli.FailResume && FindOption("--resume=") is { } missing)
         {
             StandardErrorTail = $"No conversation found with session ID: {missing}";
+            ExitCode = 1;
+            _output.Writer.TryComplete();
+        }
+        else if (cli.HeldByBackground && !ForksSession && FindOption("--resume=") is { } held)
+        {
+            // What Claude Code 2.1.296 writes before it reads its input: the error on its error output, and with
+            // CLAUDE_CODE_STARTUP_FAILURE_RESULTS a zeroed result that names the reason.
+            var error = "Error: That session is running in the background (job-1). Run `claude attach job-1` to open it, or `claude stop job-1` first to resume it here. Add --fork-session to branch off a copy instead.";
+            if (launch.Environment.TryGetValue("CLAUDE_CODE_STARTUP_FAILURE_RESULTS", out var results) && results == "1")
+            {
+                Emit(new JsonObject
+                {
+                    ["type"] = "result",
+                    ["subtype"] = "error_during_execution",
+                    ["is_error"] = true,
+                    ["session_id"] = held,
+                    ["errors"] = new JsonArray(error),
+                    ["startup_failure_reason"] = "session_held_by_background",
+                });
+            }
+
+            StandardErrorTail = error;
             ExitCode = 1;
             _output.Writer.TryComplete();
         }
@@ -224,6 +271,9 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
 
     public int? ExitCode { get; private set; }
 
+    /// <summary>Gets the identifier the scripted process is given (see <see cref="ClaudeCodeFakeCli.AssignProcessId"/>); <see langword="null"/> by default, as no process runs.</summary>
+    public int? ProcessId { get; }
+
     public ValueTask WriteLineAsync(ReadOnlyMemory<byte> utf8Line, CancellationToken cancellationToken)
     {
         if (IsDisposed || ExitCode is not null)
@@ -248,6 +298,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
 
                 break;
             case "user":
+                _cli.WriteTranscript(SessionId);
                 Emit(new JsonObject { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = "running", ["session_id"] = SessionId });
                 Emit(Clone(message, replay =>
                 {
@@ -594,7 +645,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                         Respond(requestId, initialized);
                     });
                 }
-                else if (_cli.InitializeAnswer is { } held)
+                else if (((ResumedSessionId is not null ? _cli.ResumeInitializeAnswer : null) ?? _cli.InitializeAnswer) is { } held)
                 {
                     _ = held.ContinueWith(_ => Respond(requestId, initialized), TaskScheduler.Default);
                 }

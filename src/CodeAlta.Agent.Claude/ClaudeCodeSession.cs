@@ -29,6 +29,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private const string PlanModeHookMatcher = "EnterPlanMode";
     private const string ReasoningDisplayOption = "--thinking-display";
     private const string NothingLeftOfOwnTurn = "Claude Code had nothing more to show for this turn.";
+    // The startup_failure_reason of a resume refused because a background session of Claude Code runs the conversation.
+    private const string BackgroundHoldReason = "session_held_by_background";
     private const int PreToolHookTimeoutSeconds = 600;
     private static readonly TimeSpan HookGateTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan UnresolvedHookGateTimeout = TimeSpan.FromMinutes(5);
@@ -36,6 +38,10 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
     private readonly IClaudeCodeTransportFactory _transportFactory;
+    // The CLI processes of the provider, which the registry of live sessions does not count as holders, and that
+    // registry, which tells whether another process holds the conversation.
+    private readonly ClaudeCodeOwnProcesses _ownProcesses;
+    private readonly ClaudeCodeLiveSessions _liveSessions;
     private readonly string _sessionId;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
@@ -43,6 +49,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
     // The process of the session and what it was started with.
     private ClaudeCodeConnection? _connection;
+    private IDisposable? _ownProcess;
     private ChannelWriter<TurnEvent>? _eventWriter;
     private ChannelReader<TurnEvent>? _eventReader;
     private ClaudeCodeLaunchKey? _launchKey;
@@ -98,13 +105,18 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private bool _withoutApiKey;
     private int _disposed;
 
-    public ClaudeCodeSession(string sessionId, ClaudeCodeModelProviderRuntimeOptions options)
+    public ClaudeCodeSession(string sessionId, ClaudeCodeModelProviderRuntimeOptions options, ClaudeCodeOwnProcesses ownProcesses, ClaudeCodeLiveSessions liveSessions)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         _sessionId = sessionId;
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _ownProcesses = ownProcesses ?? throw new ArgumentNullException(nameof(ownProcesses));
+        _liveSessions = liveSessions ?? throw new ArgumentNullException(nameof(liveSessions));
         _transportFactory = options.TransportFactory ?? ClaudeCodeProcessTransportFactory.Instance;
     }
+
+    /// <summary>Gets the registry of live sessions of the CLI, which tells whether another process holds the conversation.</summary>
+    internal ClaudeCodeLiveSessions LiveSessions => _liveSessions;
 
     /// <summary>Gives the handlers of a run before its first turn, and forgets what the previous run left.</summary>
     public void AttachRun(AgentProviderRunContext context)
@@ -440,22 +452,48 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         var appendSystemPrompt = CreateAppendSystemPrompt(request);
         if ((_branchPending ? _branchSource : _claudeSessionId) is { } resumeSessionId)
         {
-            try
+            // A transcript that is gone (another folder, another machine, a cleaned profile) is not resumed: the
+            // conversation starts again in the CLI at once, with what CodeAlta recorded of it as context.
+            if (LocateTranscript(key.WorkingDirectory, resumeSessionId) != ClaudeCodeTranscriptPresence.Missing)
             {
-                await StartConnectionAsync(resolution.Path, key, newSessionId: null, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
-                return;
+                try
+                {
+                    await StartConnectionAsync(resolution.Path, key, newSessionId: null, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+                catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
+                {
+                    var failed = _connection;
+                    var detail = failed?.DescribeExit() ?? ex.Message;
+                    // Closed first: what the process wrote before it exited is read to the end.
+                    await CloseConnectionAsync().ConfigureAwait(false);
+                    if (failed is not null && IsHeldByBackground(failed))
+                    {
+                        // A background session of Claude Code runs the conversation: it is not a missing one.
+                        ForgetBinding();
+                        throw new InvalidOperationException(
+                            $"Claude Code refused to resume the conversation {resumeSessionId}: a background session of Claude Code is running it. " +
+                            $"Continue it there, or stop it, then send the message again. {detail}", ex);
+                    }
+
+                    if (ex is TimeoutException)
+                    {
+                        // A CLI that is slow to start has the transcript all the same: the conversation is kept for the
+                        // next try, not started again in the CLI with only its text.
+                        ForgetBinding();
+                        throw new InvalidOperationException(
+                            $"Claude Code did not start in time to resume the conversation {resumeSessionId}. The conversation is kept: send the message again to retry. {ex.Message}", ex);
+                    }
+
+                    // The CLI could not open the transcript that was found, or does not resume it at the entry it was
+                    // given: the conversation starts again, as for a transcript that is gone.
+                }
             }
-            catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
-            {
-                // The transcript is gone (another folder, another machine, a cleaned profile), or the CLI does not
-                // resume it at the entry it was given: the conversation starts again in the CLI, with what CodeAlta
-                // recorded of it as context.
-                await CloseConnectionAsync().ConfigureAwait(false);
-                _claudeSessionId = null;
-                _leaf = null;
-                _branchPending = false;
-                _pendingPreamble = ClaudeCodePrompts.CreateHistoryPreamble(WithoutTrailingUsers(request.Conversation));
-            }
+
+            _claudeSessionId = null;
+            _leaf = null;
+            _branchPending = false;
+            _pendingPreamble = ClaudeCodePrompts.CreateHistoryPreamble(WithoutTrailingUsers(request.Conversation));
         }
 
         var newSessionId = Guid.NewGuid().ToString();
@@ -477,6 +515,33 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _instructions = appendSystemPrompt;
         _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
         _costTotal = 0;
+    }
+
+    // Whether the CLI started in the working directory finds the transcript of the conversation: one started without a
+    // working directory runs in the one of this process.
+    private ClaudeCodeTranscriptPresence LocateTranscript(string? workingDirectory, string cliSessionId)
+    {
+        var directory = workingDirectory ?? Environment.CurrentDirectory;
+        return _options.LocateTranscript is { } locate
+            ? locate(directory, cliSessionId)
+            : ClaudeCodeTranscriptRelocation.LocateTranscript(
+                ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable),
+                directory,
+                cliSessionId);
+    }
+
+    // The CLI refused to resume a conversation a background session of Claude Code runs: it names the reason in the
+    // result it writes before it exits, and an older CLI only in its error output.
+    private static bool IsHeldByBackground(ClaudeCodeConnection connection)
+        => string.Equals(connection.StartupFailureReason, BackgroundHoldReason, StringComparison.Ordinal) ||
+           connection.DescribeExit().Contains("is running in the background", StringComparison.Ordinal);
+
+    // The next turn binds the conversation again from the state the session recorded, which still names the conversation
+    // of the CLI: the messages of the turn that failed are sent again with it.
+    private void ForgetBinding()
+    {
+        _conversationBound = false;
+        _pendingPreamble = null;
     }
 
     // Puts the running CLI in a new permission mode now, during a turn or between turns (a turn it starts by itself
@@ -655,8 +720,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         var generation = Interlocked.Increment(ref _generation);
         var transport = _transportFactory.Start(launch);
         var connection = new ClaudeCodeConnection(transport, new ConnectionHandler(this, generation, channel.Writer));
+        // The entry this process writes in the registry of live sessions is CodeAlta's own, until it is closed.
+        var ownProcess = _ownProcesses.Track(transport.ProcessId);
         lock (_gate)
         {
+            _ownProcess = ownProcess;
             _connection = connection;
             _eventWriter = channel.Writer;
             _eventReader = channel.Reader;
@@ -745,10 +813,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private async Task CloseConnectionAsync()
     {
         ClaudeCodeConnection? connection;
+        IDisposable? ownProcess;
         lock (_gate)
         {
             connection = _connection;
+            ownProcess = _ownProcess;
             _connection = null;
+            _ownProcess = null;
             _eventWriter = null;
             _eventReader = null;
             _launchKey = null;
@@ -767,6 +838,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             await connection.DisposeAsync().ConfigureAwait(false);
             NoteRemoteControlProcessEnded();
         }
+
+        // Once the process exited: an entry it left behind is not taken for another holder meanwhile.
+        ownProcess?.Dispose();
     }
 
     private async Task SendUserMessagesAsync(IReadOnlyList<AgentConversationMessage> messages, CancellationToken cancellationToken)
