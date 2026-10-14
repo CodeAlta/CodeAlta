@@ -236,8 +236,8 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
 
 ### Discovered tasks
 
-- [ ] 12. **H — Ask answers shown as not confirmed** (found 2026-10-14 during this plan's review): after the user answers the questions of an `alta ask` in a Claude Code provider session, the cards stay "Answer not confirmed · submitting" and "Answer not confirmed", although the answers reached the session as the next prompt. Regression test first, then fix (`alta/ask-confirmation`).
-  - Cause: the host settled an answer only when the run it started ended, and the page gave up after 8 s and never took the later outcome of its ask list. Fixed on `alta/sleek-linnet-gzqs` (admitted when the carrying run starts; the page reads `latest`); UI check running.
+- [x] 12. **H — Ask answers shown as not confirmed** (found 2026-10-14 during this plan's review): after the user answers the questions of an `alta ask` in a Claude Code provider session, the cards stay "Answer not confirmed · submitting" and "Answer not confirmed", although the answers reached the session as the next prompt. Regression test first, then fix (`alta/ask-confirmation`).
+  - Cause: the host settled an answer only when the run it started ended, and the page gave up after 8 s and never took the later outcome of its ask list. Fixed (admitted when the carrying run starts; the page reads `latest`), merged as `4c6db51c`. Checked in an isolated window with Claude Code Haiku: no warning row during a 30 s answered run, with a second ask carrying a file, nor after a reload.
 - [ ] 13. **I — Test stability** (after the spaces workstreams, to avoid conflicts): the pending tasks under `.alta/tasks/` about flaky tests, so that 1.9.0 ships with a quiet suite:
   - `2026-10-14-fix-the-landing-card-invalidation-test-racing-its-event-watc-n8jp` (found by G: the fixture registers its watcher on a `Task.Run`, the event is dropped);
   - `2026-10-10-stabilize-orchestration-lifecycle-tests-under-full-suite-loa-thb2`, `2026-10-13-find-why-orchestration-tests-time-out-when-the-whole-net-sui-6zqz`, `2026-10-13-stabilize-the-system-prompt-dialog-browser-test-under-load-9k4x`.
