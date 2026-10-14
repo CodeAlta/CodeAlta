@@ -26,12 +26,20 @@ public sealed record OwnedAskDisposition(Guid ActionId, OwnedAskHandle Handle, s
 // Only the private ask owner creates this context and the command owner preserves its reference identity.
 internal sealed class OwnedAskSubmission(Guid actionId, string askId)
 {
+    private readonly TaskCompletionSource _delivered = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private string? _positiveRunId;
     internal Guid ActionId { get; } = actionId;
     internal string AskId { get; } = askId;
     internal string? PositiveRunId => Volatile.Read(ref _positiveRunId);
-    internal void RecordRunReturned(AgentRunId runId)
+    /// <summary>Completes with the first positive run identity: the session has the answer from then on.</summary>
+    internal Task Delivered => _delivered.Task;
+    /// <summary>The provider activated the run that carries the answer as its input; the run goes on.</summary>
+    internal void RecordRunStarted(AgentRunId runId) => Record(runId);
+    internal void RecordRunReturned(AgentRunId runId) => Record(runId);
+    private void Record(AgentRunId runId)
     {
-        if (OwnedSessionAskTool.Identity(runId.Value)) Interlocked.CompareExchange(ref _positiveRunId, runId.Value, null);
+        if (!OwnedSessionAskTool.Identity(runId.Value)) return;
+        Interlocked.CompareExchange(ref _positiveRunId, runId.Value, null);
+        _delivered.TrySetResult();
     }
 }

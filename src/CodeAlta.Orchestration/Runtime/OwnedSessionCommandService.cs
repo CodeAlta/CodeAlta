@@ -876,7 +876,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     }
                     else
                     {
-                        if (Asks.Enabled) operation.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId, operation.Execution.Token);
+                        if (Asks.Enabled) operation.AskExecution = Asks.CreateExecution(operation.Receipt.OperationId, prepared.Session.SessionId,
+                            operation.Execution.Token, operation.AskSubmission);
                         var sendOptions = new AgentSendOptions
                         {
                             Input = prepared.Input,

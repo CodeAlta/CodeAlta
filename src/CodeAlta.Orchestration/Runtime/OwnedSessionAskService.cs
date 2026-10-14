@@ -29,9 +29,10 @@ public sealed class OwnedSessionAskService
     /// <summary>Validates a bounded exact session identity without performing lookup.</summary>
     public static bool IsValidSessionId(string? sessionId) => OwnedSessionAskTool.Identity(sessionId);
 
-    internal OwnedSessionAskExecution CreateExecution(Guid operation, string session, CancellationToken token)
+    // A send that answers an ask gives its submission: the start of its run is the delivery of that answer.
+    internal OwnedSessionAskExecution CreateExecution(Guid operation, string session, CancellationToken token, OwnedAskSubmission? answer = null)
     {
-        var execution = new OwnedSessionAskExecution(this, operation, session, token);
+        var execution = new OwnedSessionAskExecution(this, operation, session, token, answer);
         lock (_gate)
         {
             if (_closed || !Enabled) execution.Close();
@@ -197,7 +198,9 @@ public sealed class OwnedSessionAskService
             if (admission.Kind != OwnedSessionCommandAdmissionKind.Accepted || admission.Receipt is null)
                 return SessionPromptResponseResult.NotAdmitted();
             work.Receipt = admission.Receipt;
-            await work.Receipt.Completion.ConfigureAwait(false);
+            // The session has the answer once the run that carries it starts, and that run can last minutes: the
+            // answer is settled then. A send that ends without starting it settles at its end, as before.
+            await Task.WhenAny(context.Delivered, work.Receipt.Completion).ConfigureAwait(false);
         }
         catch (Exception) { /* Retain positive return evidence even when later cleanup/publication fails. */ }
         return context.PositiveRunId is { } run ? SessionPromptResponseResult.Admitted(run) : SessionPromptResponseResult.Indeterminate();

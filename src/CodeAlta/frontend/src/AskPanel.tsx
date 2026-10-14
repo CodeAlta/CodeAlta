@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { sessionAsks } from "#neoastra";
-import { askWireHandle, captureAskAction, type AskHandle, type AskPage, type AskQuestion, type createAskActions } from "./sessionAsks";
+import { askActionUnconfirmed, askWireHandle, captureAskAction, type AskHandle, type AskPage, type AskQuestion, type createAskActions } from "./sessionAsks";
 import type { createMutationCapability } from "./sessionOperations";
 import { showAskDetails } from "./workspacePresentation";
 import { useShellLanguage } from "./shellLanguage";
@@ -265,9 +265,9 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     }
   };
   const retained = actions.forSession(sessionId).filter(entry => entry.request.expectedHostEpoch === epoch);
-  // An action that went through needs no row: the ask leaves the panel and its answer is in the timeline.
-  const unsettled = retained.filter(entry => entry.transport === "uncertain"
-    || (entry.transport === "settled" && entry.result?.status !== "admitted" && entry.result?.status !== "cancelled"));
+  // An action that went through needs no row: the ask leaves the panel and its answer is in the timeline. The
+  // reads of this panel bring the host's later outcome of an action whose reply came too late.
+  const unsettled = retained.filter(askActionUnconfirmed);
   const refresh = () => { const version = ++readVersion.current; setReadPending({ epoch, sessionId, version }); setRevision(value => value + 1); };
   useLayoutEffect(() => {
     if (!refreshTrigger) return;

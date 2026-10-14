@@ -204,21 +204,31 @@ public sealed class OwnedSessionAskRuntimeTests
                 CollectionAssert.AreEqual(new[] { "session" }, _host.Commands.Asks.ListWaitingSessions().ToArray());
                 var action = new OwnedAskAction(Guid.NewGuid(), head.Handle, [new() { QuestionIndex = 0, FreeformText = "yes" }]);
                 var answer = Keep(_host.Commands.Asks.AnswerAsync(action, default));
-                await Keep(Task.WhenAny(_provider.AnswerEntered.Task, answer));
-                Assert.IsTrue(_provider.AnswerEntered.Task.IsCompletedSuccessfully, "Answer settled before reaching the fake send.");
+                await Keep(_provider.AnswerEntered.Task);
                 Assert.AreEqual(head.Handle.AskId, _provider.AnswerOptions!.AskId);
+                // The run that carries the answer has started and goes on: the answer is admitted all the same,
+                // where it was "submitting" until that run ended (a page waits 8 seconds for it).
+                Assert.AreEqual("admitted", (await Keep(answer.WaitAsync(TimeSpan.FromSeconds(10)))).Status);
+                Assert.IsFalse(_provider.ReleaseAnswer.Task.IsCompleted);
+                Assert.AreEqual("fake-2", _host.Commands.Asks.Observe(action.ActionId, head.Handle)!.RunId);
                 var formatted = AltaAskAnswerMarkdownFormatter.Format(head.Request, action.Answers);
                 Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict,
                     _host.Commands.AdmitSend(new(action.ActionId.ToString("D"), "session", formatted)).Kind);
                 Assert.AreEqual(1, _provider.Attachments);
                 Assert.IsFalse((await Keep(_provider.FirstTool!.Handler(OwnedSessionAskServiceTests.Invocation(), default))).Success);
-                _provider.ReleaseAnswer.TrySetResult();
-                Assert.AreEqual("admitted", (await answer).Status);
-                Assert.AreEqual("fake-2", _host.Commands.Asks.Observe(action.ActionId, head.Handle)!.RunId);
-                // Reverse collision: a public send reserves the exact key and text before the ask action.
+                // The run of the answer asked again: that ask is the head now.
                 var next = _host.Commands.Asks.List("session").Head!;
+                Assert.AreNotEqual(head.Handle.AskId, next.Handle.AskId);
+                _provider.ReleaseAnswer.TrySetResult();
+                // Reverse collision: a public send reserves the exact key and text before the ask action. The send of the
+                // answer leaves the session once its released run has returned.
                 var second = new OwnedAskAction(Guid.NewGuid(), next.Handle, [new() { QuestionIndex = 0, FreeformText = "next" }]);
-                var plain = _host.Commands.AdmitSend(new(second.ActionId.ToString("D"), "session", AltaAskAnswerMarkdownFormatter.Format(next.Request, second.Answers)));
+                var nextText = AltaAskAnswerMarkdownFormatter.Format(next.Request, second.Answers);
+                var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+                OwnedSessionCommandAdmission plain;
+                while ((plain = _host.Commands.AdmitSend(new(second.ActionId.ToString("D"), "session", nextText))).Kind == OwnedSessionCommandAdmissionKind.Busy
+                    && DateTimeOffset.UtcNow < deadline)
+                    await Keep(Task.Delay(10));
                 Assert.IsNotNull(plain.Receipt);
                 await Keep(plain.Receipt.Completion);
                 Assert.AreEqual("not_admitted", (await Keep(_host.Commands.Asks.AnswerAsync(second, default))).Status);

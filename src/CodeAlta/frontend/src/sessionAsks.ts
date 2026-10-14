@@ -75,6 +75,17 @@ function disposition(value: unknown): AskDisposition | null {
   return Object.freeze({ actionId: value.actionId, handle: Object.freeze(askWireHandle(value.handle)), status: value.status, runId: value.runId as string | null });
 }
 
+/**
+ * Whether a retained action is shown as not confirmed: its wait failed or its outcome is not a success. The host's
+ * later evidence comes first: an answer the session received or a cancel the host made needs no row, even after the
+ * page stopped waiting for its reply.
+ */
+export function askActionUnconfirmed(entry: Readonly<{ transport: "pending" | "settled" | "uncertain"; result: AskDisposition | null; observed: AskDisposition | null }>): boolean {
+  if (entry.transport === "pending") return false;
+  const status = (entry.observed ?? entry.result)?.status;
+  return status !== "admitted" && status !== "cancelled";
+}
+
 export const maximumFileComments = 200, maximumFileCommentLength = 4000, maximumFileCommentsLength = 16384;
 
 /** Copies a file review within the host's limits: at most 200 nonblank comments, in line order. */
@@ -182,6 +193,15 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
     try { invalidateCapability(); } catch { /* Local revocation remains permanent. */ }
     publish();
   };
+  // The host settles an action once. A list read runs every second and can end after the action's reply or a later
+  // read: its "submitting" never takes a known outcome back.
+  const observe = (id: string, value: unknown, listed = false) => {
+    const entry = entries.get(id); const observed = disposition(value);
+    if (!entry || !observed || observed.actionId !== id || !same(observed.handle, entry.request.action.handle)) return;
+    const known = entry.observed ?? entry.result;
+    if (listed && observed.status === "submitting" && known && known.status !== "submitting") return;
+    entry.observed = observed; publish();
+  };
   const observeEpoch = (value: unknown, epoch: string, invalidateCapability: () => void): boolean => {
     if (!object(value) || !guid(value.hostEpoch) || !text(value.status, 64)) return false;
     if (value.status === "stale_epoch" || value.status === "stale_runtime" || value.hostEpoch !== epoch) invalidate(invalidateCapability);
@@ -198,7 +218,10 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
       const currentEpoch = observeEpoch(value, epoch, invalidateCapability);
       if (!isCurrent()) return undefined;
       if (!currentEpoch) throw new Error("Invalid ask page identity");
-      return parseAskPage(value, epoch, session);
+      const page = parseAskPage(value, epoch, session);
+      // The latest outcome of the session is the evidence an answer whose reply the page stopped waiting for needs.
+      if (page.latest) observe(page.latest.actionId, page.latest, true);
+      return page;
     },
     submit(kind: "answer" | "cancel", request: AskActionRequest, allowed: () => boolean, invalidateCapability: () => void = () => {}): Promise<void> {
       const existing = entries.get(request.action.actionId);
@@ -227,10 +250,7 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
       })();
       release(); publish(); return entry.work;
     },
-    observe(id: string, value: unknown) {
-      const entry = entries.get(id); const observed = disposition(value);
-      if (entry && observed && observed.actionId === id && same(observed.handle, entry.request.action.handle)) { entry.observed = observed; publish(); }
-    },
+    observe(id: string, value: unknown) { observe(id, value); },
     observeRemote(id: string, rpc: (request: AskActionRequest) => Promise<unknown>, invalidateCapability: () => void = () => {}): Promise<void> {
       const entry = entries.get(id);
       if (!entry) return Promise.resolve();

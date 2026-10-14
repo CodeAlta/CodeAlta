@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { setTimeout as deadlineTimer, clearTimeout as clearDeadlineTimer } from "node:timers";
-import { askWireHandle, askWireRequest, captureAskAction, createAskActions, parseAskPage, validAskHandle } from "./sessionAsks";
+import { askActionUnconfirmed, askWireHandle, askWireRequest, captureAskAction, createAskActions, parseAskPage, validAskHandle } from "./sessionAsks";
 import { createMutationCapability } from "./sessionOperations";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
@@ -72,6 +72,64 @@ test("eight-second deadline permanently latches uncertainty despite late success
     try { await join(Promise.all([work, ...(observation ? [observation] : [])]), owner); }
     finally { context.mock.timers.reset(); }
   }
+});
+
+test("an answer whose wait timed out is confirmed by the host's later disposition in the ask list", async context => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  let release!: (value: unknown) => void;
+  let entered!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const original = new Promise<unknown>(resolve => { release = resolve; });
+  const owner = createAskActions(() => { entered(); return original; }, async () => { throw Error("No cancel"); });
+  const action = captureAskAction(epoch, handle, [{ questionIndex: 0, freeformText: "yes" }], epoch);
+  const work = owner.submit("answer", action, () => true);
+  const list = (status: string, runId: string | null) => ({ status: "ok", hostEpoch: epoch, sessionId: "session", head: null,
+    latest: { actionId: epoch, handle, status, runId }, hasMore: false });
+  try {
+    await join(ready, owner);
+    // The answered run goes on for longer than the page waits for the answer.
+    context.mock.timers.tick(8000);
+    assert.equal(owner.get(epoch)?.transport, "uncertain");
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), true);
+    owner.readPage(list("submitting", null), epoch, "session", () => true, () => {});
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), true);
+    owner.readPage(list("admitted", "run"), epoch, "session", () => true, () => {});
+    assert.equal(owner.get(epoch)?.observed?.status, "admitted");
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
+    // A read that started earlier and ends later does not take the confirmation back.
+    owner.readPage(list("submitting", null), epoch, "session", () => true, () => {});
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
+  } finally {
+    release({});
+    try { await join(work, owner); }
+    finally { context.mock.timers.reset(); }
+  }
+});
+
+test("a list read that ends after the answer's reply does not take its admission back", async () => {
+  const admitted = { actionId: epoch, handle, status: "admitted", runId: "run" };
+  const owner = createAskActions(async () => ({ status: "ok", hostEpoch: epoch, disposition: admitted }), async () => { throw Error("No cancel"); });
+  await join(owner.submit("answer", captureAskAction(epoch, handle, [], epoch), () => true), owner);
+  assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
+  owner.readPage({ status: "ok", hostEpoch: epoch, sessionId: "session", head: null,
+    latest: { actionId: epoch, handle, status: "submitting", runId: null }, hasMore: false }, epoch, "session", () => true, () => {});
+  assert.equal(owner.get(epoch)?.observed, null);
+  assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
+});
+
+test("only a failed or unknown outcome of a settled action is unconfirmed", () => {
+  const view = (transport: "pending" | "settled" | "uncertain", result: string | null, observed: string | null = null) => ({ transport,
+    result: result === null ? null : { actionId: epoch, handle, status: result, runId: result === "admitted" ? "run" : null },
+    observed: observed === null ? null : { actionId: epoch, handle, status: observed, runId: observed === "admitted" ? "run" : null } });
+  assert.equal(askActionUnconfirmed(view("pending", null)), false);
+  assert.equal(askActionUnconfirmed(view("settled", "admitted")), false);
+  assert.equal(askActionUnconfirmed(view("settled", "cancelled")), false);
+  assert.equal(askActionUnconfirmed(view("settled", "indeterminate")), true);
+  assert.equal(askActionUnconfirmed(view("settled", "not_admitted")), true);
+  assert.equal(askActionUnconfirmed(view("uncertain", null)), true);
+  assert.equal(askActionUnconfirmed(view("uncertain", null, "submitting")), true);
+  assert.equal(askActionUnconfirmed(view("uncertain", null, "admitted")), false);
+  assert.equal(askActionUnconfirmed(view("uncertain", null, "rejected")), true);
 });
 
 test("reload recovers only same-epoch backend facts, not missing-action acknowledgment", () => {

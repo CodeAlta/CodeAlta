@@ -15,6 +15,7 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     private readonly Guid _operation;
     private readonly string _session;
     private readonly CancellationToken _operationToken;
+    private readonly OwnedAskSubmission? _answer;
     private CancellationToken _runToken;
     private Guid _runtime;
     private long _attachment;
@@ -26,9 +27,10 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     // Producer work is entirely synchronous and bounded. Retain its original completed task before return.
     private Task<AgentToolResult>? _committedInvocation;
 
-    internal OwnedSessionAskExecution(OwnedSessionAskService owner, Guid operation, string session, CancellationToken token)
+    internal OwnedSessionAskExecution(OwnedSessionAskService owner, Guid operation, string session, CancellationToken token,
+        OwnedAskSubmission? answer = null)
     {
-        _owner = owner; _operation = operation; _session = session; _operationToken = token;
+        _owner = owner; _operation = operation; _session = session; _operationToken = token; _answer = answer;
         Tool = OwnedSessionAskTool.Create(Invoke);
     }
 
@@ -55,6 +57,8 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
             _runToken = executionToken;
             _run = runId.Value;
         }
+        // This send's run is the one whose input is the answer: the session has it.
+        _answer?.RecordRunStarted(runId);
         return Task.CompletedTask;
     }
 

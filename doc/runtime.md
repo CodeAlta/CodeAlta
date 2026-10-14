@@ -835,8 +835,11 @@ strings: attachment 1..9007199254740991, response 0..256. Reject noncanonical sp
 fields, wrong JSON types and overflow without numeric coercion in the frontend.
 
 An answer validates/formats the original request through `RespondAsync`, then makes a new ordinary
-owned text submission with the original `AskId`. The early accepted receipt is not admission proof;
-actual successful `RunCapturedAsync` return is retained before later publication/cleanup. Definite
+owned text submission with the original `AskId`. The early accepted receipt is not admission proof.
+The proof is the run that carries the answer: the ask execution of that send records the actual run
+its `StartedAsync` binds, and the answer is admitted then, while that run goes on (it can last
+minutes, past the page's eight-second wait). A successful `RunCapturedAsync` return is the same proof
+for a send whose run never reported its start; a send that ends without either is uncertain. Definite
 non-admission rotates the response generation; uncertainty retains the claimed head and blocks
 replay/cancel. Cancel removes only the original unclaimed pending ask, never the producer run or an
 admitted answer. A committed ask survives producer closure. Producer close joins producer work,
@@ -853,7 +856,10 @@ respectively; these are transport measurements, not heap/latency/rendering guara
 
 App-owned frozen actions and observations survive selection/remount. Synchronous exclusion precedes
 launch; exact-ID reuse retains the original. An eight-second deadline permanently latches local
-uncertainty. Explicit observation is separate backend evidence, not redispatch or acknowledgment.
+uncertainty. Explicit observation is separate backend evidence, not redispatch or acknowledgment;
+the ask list read every second brings the session's latest disposition as the same evidence, so an
+answer the session received shows no "not confirmed" row even when its reply came too late. A
+`submitting` from a list read never replaces an outcome already known.
 Epoch evidence is processed before obsolete-read presentation fences and revokes shared mutation
 capability. Same-host reload reads retained facts only; missing action/head is not non-commit proof,
 and restart restores no authority. Attachments, general LiveTool parity and provider input remain

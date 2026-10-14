@@ -55,6 +55,48 @@ public sealed class OwnedSessionAskServiceTests
     }
 
     [TestMethod]
+    public async Task Answer_IsAdmittedOnceItsRunStarts_WhileThatRunGoesOn()
+    {
+        var receipt = new OwnedSessionCommandReceipt("answer", OwnedSessionCommandKind.Send, "session");
+        OwnedAskSubmission? submission = null;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var owner = new OwnedSessionAskService(true, (_, context) =>
+        {
+            submission = context;
+            entered.TrySetResult();
+            return new(OwnedSessionCommandAdmissionKind.Accepted, receipt);
+        });
+        var execution = await Produce(owner);
+        var handle = owner.List("session").Head!.Handle;
+        var action = new OwnedAskAction(Guid.NewGuid(), handle, [new AltaAskAnswer { QuestionIndex = 0, FreeformText = "answer" }]);
+        var answer = owner.AnswerAsync(action, default);
+        OwnedSessionAskExecution? send = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.AreEqual("submitting", owner.Observe(action.ActionId, handle)!.Status);
+            // The send of the answer starts the run that carries it: the session has the answer, and its run
+            // can go on for minutes. The answer is settled then, not when that run ends.
+            send = owner.CreateExecution(Guid.NewGuid(), "session", default, submission);
+            send.Bind(Guid.NewGuid(), 1, new("fixture"));
+            await send.StartedAsync(new("run-answer"), default);
+            var result = await answer.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.AreEqual("admitted", result.Status);
+            Assert.AreEqual("run-answer", result.RunId);
+            Assert.AreEqual("admitted", owner.Observe(action.ActionId, handle)!.Status);
+            Assert.IsFalse(receipt.Completion.IsCompleted);
+            Assert.IsNull(owner.List("session").Head);
+            Assert.AreEqual(0, owner.ListWaitingSessions().Count);
+        }
+        finally
+        {
+            receipt.Complete(new(OwnedSessionCommandOutcome.Cancelled));
+            send?.Close(); execution.Close(); owner.CloseAdmission();
+            await Join(owner, answer);
+        }
+    }
+
+    [TestMethod]
     public async Task NonAdmission_RotatesHandleAndCancelCannotUseOldGeneration()
     {
         var owner = new OwnedSessionAskService(true, static (_, _) => new(OwnedSessionCommandAdmissionKind.Busy));
