@@ -273,10 +273,35 @@ from `origin/main` 4a34f104 (which has the permission-mode change #119), in the 
       (`SessionPermissionRequestCoordinator`); test.
 
 ### Phase 3: transcript reader (commit)
-- [ ] `ClaudeCodeTranscriptReader` with synthetic fixture transcripts (no real content): repeated
+- [x] `ClaudeCodeTranscriptReader` with synthetic fixture transcripts (no real content): repeated
       `message.id`, parallel tool calls (sibling results), a rewind branch (newest leaf wins), tool results
       in `tool-results/`, image, thinking, compaction with a preserved segment, a subagent call, unknown
       entry and block types, a truncated last line, incremental read from an offset, leaf not an ancestor.
+      Done: `ClaudeCodeTranscriptReader` (`Read`, `ReadAfter`, `ReadHeader`) produces `AgentConversationMessage`s
+      directly; 67 tests; opt-in smoke test (`CODEALTA_TEST_CLAUDE_TRANSCRIPTS=1`) over 1,399 local files:
+      21,021 turns, 0 failures, 0 differences between incremental and full reads (713 of 1,028 stayed
+      incremental). Reviewed independently. Deviations from this plan:
+      - **Unwritten parents.** The CLI often names a `parentUuid` it never wrote (146 of 300 recent files,
+        mostly after `tool_use` lines in VS Code files): such a line is bridged to the last line of the
+        same writer (same side, same `entrypoint`), unless that line already has a child written after it.
+        Without it the chain loses the first prompt (4,683 turns found instead of 21,021). Two writers with
+        the same entrypoint (two VS Code windows) cannot be told apart.
+      - **Incremental position** = offset, length, mtime, first-line hash, leaf, `Tail` (the next prompt
+        hangs from the last system/attachment line, not from the leaf), the leaf's `message.id`, and the
+        last line of each writer. The read falls back to a full read when it cannot be exact.
+      - **Statuses** `Read`, `Unchanged`, `CannotFollow` (recorded leaf not an ancestor), `LeafNotFound`
+        (the recorded leaf was never written and nothing names it: the reducer records tool-result uuids
+        as the leaf, which the CLI often does not write), `Missing`.
+      - **Not user prompts:** `isMeta`, `isCompactSummary`, tool-result-only lines, and turns the CLI
+        started (`origin.kind` other than `human`, task notifications: no user message, `TriggerText`).
+      - **Commands** map as CodeAlta records them: `/name args` a user message, the CLI's own command output
+        an assistant message, `!cmd` and its output one user message.
+      - **Counts** of a turn are those of the messages the reader returns; they must never be recomputed
+        from the transcript for CodeAlta's own turns (they differ in rare cases: steered messages, the
+        empty closing assistant message, an unknown block).
+      - **Cost** (`cost-state`) is often absent: catch-up needs a fallback. Images are `Data` parts: saving
+        them as attachment files is left to the import/catch-up. Persisted outputs are resolved by file name
+        only under `<id>/tool-results/`, up to 4 MB.
 
 ### Phase 4: catch-up (commit)
 - [ ] Executor interface `ReadExternalTurnsAsync`; `SessionRuntimeService.CatchUpExternalTurnsAsync`
