@@ -140,8 +140,6 @@
 @keyframes work-pulse { 50% { opacity: .35; transform: scale(.7); } }
 @media (prefers-reduced-motion: reduce) { .work-badge.work-badge > .work-badge-pulse { animation: none; } }
 .session-work-mark { display: inline-flex; align-items: center; margin-left: 4px; color: var(--work-tone); flex: none; }
-.activity-work { position: relative; }
-.activity-work-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); pointer-events: none; }
 
 /* The settings page. */
 .work-settings-group { display: grid; gap: 4px; max-width: 760px; margin-bottom: 22px; }

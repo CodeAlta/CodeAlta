@@ -43,6 +43,7 @@ import { SystemPromptDiff } from "./SystemPromptDiff";
 import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
+import { ActivityRail } from "./ActivityRail";
 import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
@@ -3669,23 +3670,24 @@ function App() {
           "--explorer-width": `${ideWidth.width}px`,
         } as CSSProperties}>
         <WindowBrand developer={status?.developerMode ?? false}>
-          <nav className="activity-rail" aria-label={t("Workspace navigation")}>
-            <Button ref={projectRailToggle} variant="minimal" size="small" active={railVisible} icon={<AppIcon name="folder" size={16} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="search" size={16} />} aria-label={t("Search")} aria-haspopup="dialog" title={`${t("Search")} (Ctrl+P)`} onClick={() => openSearch()} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="automation" size={16} />} className="activity-automations" disabled={!owned}
-              active={!!fileTabs.active && isAutomationsTab(fileTabs.active)} aria-label={t("Automations")} title={`${t("Automations")} (Ctrl+G, Ctrl+M)`} onClick={() => openAutomations()} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="task" size={16} />} className="activity-work" disabled={!owned}
-              active={!!fileTabs.active && isWorkItemsTab(fileTabs.active)} aria-label={t("Work items")} title={`${t("Work items")} (Ctrl+G, Ctrl+I)`} onClick={() => openWorkItems()}>
-              {work.some(item => item.stage === "todo") && <span className="activity-work-dot" aria-hidden="true" />}</Button>
-            <Button variant="minimal" size="small" icon={<AppIcon name="issueOpen" size={16} />} className="activity-issues" disabled={!owned}
-              active={!!fileTabs.active && isIssuesTab(fileTabs.active)} aria-label={t("Issues")} title={`${t("Issues")} (Ctrl+G, Ctrl+B)`} onClick={() => openFile(issuesTab)} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="canvases" size={16} />} className="activity-canvases" disabled={!owned}
-              active={!!fileTabs.active && isCanvasesTab(fileTabs.active)} aria-label={t("Canvases")} title={t("Canvases")} onClick={() => openFile(canvasesTab)} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="bookmark" size={16} />} className="activity-bookmarks" disabled={!owned}
-              active={!!fileTabs.active && isBookmarksTab(fileTabs.active)} aria-label={t("Bookmarks")} title={`${t("Bookmarks")} (Ctrl+G, Ctrl+F)`} onClick={() => openFile(bookmarksTab)} />
-            <PluginButtons place="Rail" context={pluginButtonContext} />
-            <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={t("Settings & extensions")} onClick={() => navigate("appearance")} />
-          </nav>
+          {/* What the title bar has no room for folds into a menu: the Explorer and Settings always show. */}
+          <ActivityRail label={t("Workspace navigation")} moreLabel={t("More")}
+            first={<Button ref={projectRailToggle} variant="minimal" size="small" active={railVisible} icon={<AppIcon name="folder" size={16} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />}
+            items={[
+              { key: "search", icon: "search", className: "activity-search", label: t("Search"), title: `${t("Search")} (Ctrl+P)`, onClick: () => openSearch() },
+              { key: "automations", icon: "automation", className: "activity-automations", disabled: !owned, active: !!fileTabs.active && isAutomationsTab(fileTabs.active),
+                label: t("Automations"), title: `${t("Automations")} (Ctrl+G, Ctrl+M)`, onClick: () => openAutomations() },
+              { key: "work", icon: "task", className: "activity-work", disabled: !owned, active: !!fileTabs.active && isWorkItemsTab(fileTabs.active), dot: work.some(item => item.stage === "todo"),
+                label: t("Work items"), title: `${t("Work items")} (Ctrl+G, Ctrl+I)`, onClick: () => openWorkItems() },
+              { key: "issues", icon: "issueOpen", className: "activity-issues", disabled: !owned, active: !!fileTabs.active && isIssuesTab(fileTabs.active),
+                label: t("Issues"), title: `${t("Issues")} (Ctrl+G, Ctrl+B)`, onClick: () => openFile(issuesTab) },
+              { key: "canvases", icon: "canvases", className: "activity-canvases", disabled: !owned, active: !!fileTabs.active && isCanvasesTab(fileTabs.active),
+                label: t("Canvases"), title: t("Canvases"), onClick: () => openFile(canvasesTab) },
+              { key: "bookmarks", icon: "bookmark", className: "activity-bookmarks", disabled: !owned, active: !!fileTabs.active && isBookmarksTab(fileTabs.active),
+                label: t("Bookmarks"), title: `${t("Bookmarks")} (Ctrl+G, Ctrl+F)`, onClick: () => openFile(bookmarksTab) },
+            ]}
+            last={<><PluginButtons place="Rail" context={pluginButtonContext} />
+              <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={`${t("Settings & extensions")} (Ctrl+,)`} onClick={() => navigate("appearance")} /></>} />
         </WindowBrand>
         <div className="window-actions">
           <PluginButtons place="TitleBar" context={pluginButtonContext} />
