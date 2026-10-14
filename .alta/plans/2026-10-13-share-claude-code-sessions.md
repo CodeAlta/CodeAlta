@@ -24,11 +24,9 @@ User decisions (2026-10-13): CodeAlta's journal stays the source of truth (the C
 synced at known moments); CodeAlta sessions are **not** forced into VS Code's session list (no honest way:
 see "Facts"); one-click open in VS Code / CLI instead. Desktop only (AGENTS.md: no TUI feature), except
 the held-elsewhere question, which the TUI gets too so that this change does not turn its resume into a
-failed run. Plan approved 2026-10-14 with the choices below. Implemented on `feat/share-claude-sessions`
-from `origin/main` 4a34f104 (which has the permission-mode change #119), in the worktree
-`C:\dev2\CodeAlta-share-claude`. `feat/child-permission-on-parent` (in progress elsewhere) also changes
-`SessionRuntimeService.cs`, `main.tsx`, `OwnedSessionPanel.tsx`, `localization.ts`, `doc/desktop.md` and
-`site/docs/workspace.md`: phases 0 and 3 come first; the branch that lands second is rebased.
+failed run. Plan approved 2026-10-14 with the choices below. Implemented on `feat/share-claude-sessions`,
+first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `origin/main` 81d29945 (with
+#120, the sub-session waiting on its parent) and continued in `C:\dev2\CodeAlta`.
 
 ## Non-goals
 
@@ -281,15 +279,35 @@ from `origin/main` 4a34f104 (which has the permission-mode change #119), in the 
       conversation with the preamble, as before.
 
 ### Phase 2: held-elsewhere prompt (commit)
-- [ ] `AgentConversationHeldRequest` on `AgentProviderRunContext`; hosts without a handler fail the run
-      with the explanatory message.
-- [ ] `ClaudeCodeSession`: check in `EnsureConnectionAsync`; Wait (poll, cancellable), Copy (fork path),
+- [x] `AgentConversationHeldRequest` on `AgentProviderRunContext`; hosts without a handler fail the run
+      with the explanatory message. Done: `CodeAlta.Agent/AgentConversationHeldRequest.cs` (request, holder with
+      origin `VsCode`/`Terminal`/`OtherApplication`/`BackgroundSession`/`Unknown`, choices `Wait`/`ContinueAsCopy`/
+      `OpenAnyway`/`Cancel`, delegate `AgentConversationHeldHandler`); `OnConversationHeld` on
+      `AgentSessionCreateOptions` (session default) and `AgentSendOptions` (per send), passed to the run context.
+- [x] `ClaudeCodeSession`: check in `EnsureConnectionAsync`; Wait (poll, cancellable), Copy (fork path),
       Anyway; no check for forks and CLI-started turns. Tests with `ClaudeCodeFakeCli` + fixture registry.
-- [ ] Orchestration: pending table + RPC (list/resolve) modelled on `SessionPermissionService`.
+      Done: `ClaudeCodeSession.Held.cs`; `ClaudeCodeHeldConversationTests` (13). Also not checked while the process
+      of the session runs. The wait is shown with transient `Info` session updates whose details carry
+      `conversationHeld: {state: waiting|released, ...}` (`AgentConversationHeldUpdates`); Stop ends it. Cancel, a
+      run with nobody to ask, and a cancelled wait end the run (Cancel as a stopped run: `OperationCanceledException`)
+      and rebind the conversation from the recorded state, so the next turn sends the prompt of that run again with
+      its own. The background refusal asks Wait/Copy (Wait retries the start every 2 s without asking again); a `bg`/
+      daemon holder already in the registry gets the same two choices. Compaction and Remote Control have no run to
+      ask: they fail with the message. Deviation: the fake CLI now reads a per-test registry folder
+      (`CLAUDE_CONFIG_DIR`), not the real `~/.claude`.
+- [x] Orchestration: pending table + RPC (list/resolve) modelled on `SessionPermissionService`. Done:
+      `SessionConversationHeldService` (`SessionRuntimeService.ConversationHolds`, on with
+      `AskWhenConversationHeld` / `CodeAltaHostOptions.AskWhenConversationHeld`, set by the desktop): its own mailbox,
+      handle = runtime + attachment ordinal + session + run + request + fresh attempt; a question ends with its run
+      and with its attachment; counted in the waiting sessions of `spaces.activity`. RPC `sessionConversationHeld`
+      (`ConversationHeldService`: `list`, `resolve`; typed client `conversationHeld`). Tests:
+      `SessionConversationHeldServiceTests` (8), `ConversationHeldRpcTests` (4).
 - [ ] Desktop card in the timeline notices (3 buttons, then the waiting state with Stop); strings in 5
       languages; frontend test + browser mount test.
 - [ ] TUI: a dialog with the same three choices, through its permission-request flow
-      (`SessionPermissionRequestCoordinator`); test.
+      (`SessionPermissionRequestCoordinator`); test. Until then the TUI host leaves `AskWhenConversationHeld` off:
+      a held conversation fails the run with the message (wait until released, or continue from CodeAlta Desktop as
+      a copy / open anyway).
 
 ### Phase 3: transcript reader (commit)
 - [x] `ClaudeCodeTranscriptReader` with synthetic fixture transcripts (no real content): repeated

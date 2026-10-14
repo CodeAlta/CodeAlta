@@ -151,6 +151,12 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public TimeSpan InterruptTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Gets or initializes how often a run that waits for another Claude process to release a conversation looks again
+    /// at the registry of live sessions of the CLI.
+    /// </summary>
+    internal TimeSpan HeldConversationPollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
     /// Gets or initializes the catalog of models.dev the models of the CLI are looked up in; null when there is none.
     /// </summary>
     public CodeAlta.Agent.ModelCatalog.ModelsDevCatalogService? ModelCatalog { get; init; }

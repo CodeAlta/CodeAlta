@@ -469,6 +469,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 Identities = options.AppliesSpaceIdentities
                     ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog), projectProfiles: new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
                     : SessionIdentityResolver.None,
+                AskWhenConversationHeld = options.AskWhenConversationHeld,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,

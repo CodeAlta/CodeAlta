@@ -442,6 +442,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 InheritPermissionModePolicy = () => shell.InheritPermissions,
                 EnableOwnedAsks = true,
                 EnableOwnedUserInput = options.EnableOwnedUserInput,
+                // A Claude Code conversation open in VS Code or a terminal: the window asks what to do.
+                AskWhenConversationHeld = true,
                 // Source plugins are the same build as in the terminal application; the start-up screen
                 // names the ones being built.
                 StartPlugins = pluginAlta is not null, OwnsLogging = false, IsHeadless = false, HasInteractiveUi = true,
@@ -842,9 +844,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () =>
                     {
-                        // A question a session asked, a command to review, a form to fill.
+                        // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
                         var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
-                        return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews];
+                        var held = await host.RuntimeService.ConversationHolds.ListWaitingSessionsAsync();
+                        return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews, .. held];
                     }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
@@ -934,6 +937,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // A request exists only for a send that was reviewed: it stays readable and answerable after the
                     // setting is turned off, until that send ends.
                     builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, static () => true));
+                    // A Claude Code conversation open in VS Code or a terminal: what the run waits for the user to choose.
+                    builder.AddConversationHeldService(new ConversationHeldService(host.RuntimeService.ConversationHolds, epoch));
                     var rpc = builder.Build();
                     rpcLifetime = rpc;
                     // All session-work producers now share the original admission registry. This does
