@@ -8,7 +8,13 @@ file upload or a promise that a provider has read file contents.
 
 Interact with an `@` token to search. Quoted references support spaces, for example
 `@"src/my file.cs"`; a trailing slash denotes a directory suggestion. Arrow keys
-select, Enter/Tab insert, and Escape dismisses. Popup Enter cannot fall through to
+select, Enter/Tab insert, and Escape or the close button dismisses. A dismissed
+token stays closed while typing continues after it; it opens again once its `@`
+is deleted and typed again, or with Ctrl+Space while the caret is in the token
+(the word right after `@`), with the text after `@` up to the caret as query.
+Ctrl+Space is captured before Monaco only when a token is found, and the shared
+`usePromptPicker` gives `#` and plugin pickers the same behavior. A new `@` token
+opens normally. Popup Enter cannot fall through to
 Send, including while loading or when no match exists. Composition, repeats and
 modified keys retain editor ownership. The same picker serves the regular and
 expanded editor and local prompt draft. Insertion preserves an existing range.
