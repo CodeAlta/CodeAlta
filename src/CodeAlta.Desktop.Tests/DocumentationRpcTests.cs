@@ -151,6 +151,20 @@ public sealed class DocumentationRpcTests
     }
 
     [TestMethod]
+    public async Task Ask_StartsTheChatWithTheAgentPromptOfTheSpace()
+    {
+        using var fixture = Fixture.Create();
+        fixture.SpaceDefaultPrompt = "reviewer";
+        var service = fixture.Service(asker: fixture.Asker());
+
+        Assert.AreEqual("ok", (await service.AskAsync(new(Epoch, "How do I queue a prompt?", null), default)).Status);
+        Assert.AreEqual("reviewer", fixture.Sent.Single().Selection!.AgentPromptId);
+
+        fixture.SpaceDefaultPrompt = "gone";
+        Assert.AreEqual(new DocumentationAskResponse("failed", null, "There is no agent prompt 'gone'."), await service.AskAsync(new(Epoch, "Why?", null), default));
+    }
+
+    [TestMethod]
     public async Task Ask_CreatesAChatWithTheDefaultProvider_AndSendsTheQuestionWithWhereTheGuideIs()
     {
         using var fixture = Fixture.Create();
@@ -396,6 +410,8 @@ public sealed class DocumentationRpcTests
 
         public bool? HasDefaultPrompt { get; set; } = true;
 
+        public string SpaceDefaultPrompt { get; set; } = "default";
+
         public Task<bool?>? PromptGate { get; set; }
 
         public bool HasCapacity { get; set; } = true;
@@ -430,7 +446,9 @@ public sealed class DocumentationRpcTests
         public DocumentationAsker Asker() => new(Documentation, new DocumentationAskOperations(
             () => Providers,
             () => Configured,
-            _ => PromptGate ?? Task.FromResult(HasDefaultPrompt),
+            async _ => (await (PromptGate ?? Task.FromResult(HasDefaultPrompt)).ConfigureAwait(false)) is { } has
+                ? new OwnedDraftPrompts(has ? [new("default", "Default"), new("reviewer", "Reviewer")] : [], SpaceDefaultPrompt, "default")
+                : null,
             () => HasCapacity,
             (provider, title) =>
             {

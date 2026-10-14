@@ -34,6 +34,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private readonly CatalogOptions _catalogOptions;
     private readonly CodeAltaConfigStore _configStore;
     private readonly SkillCatalog _skillCatalog;
+    private readonly SpaceCatalog _spaceCatalog;
     private readonly SessionRuntimeEventPublisher _events = new();
     private readonly Guid _runtimeInstanceId = Guid.NewGuid();
     private readonly SessionActorRegistry _sessionActors = new(mailboxCapacity: 128);
@@ -131,6 +132,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _catalogOptions = catalogOptions;
         _configStore = new CodeAltaConfigStore(catalogOptions);
         _skillCatalog = skillCatalog ?? new SkillCatalog();
+        _spaceCatalog = new SpaceCatalog(projectCatalog);
         _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
         Permissions = new SessionPermissionService(autoApproveOwnedPermissions);
         Jobs = new SessionJobService(DeliverJobResultAsync);
@@ -2351,9 +2353,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             ValidateDiscoveryPaths(session, options);
             var project = await AwaitRetentionAwareAsync(ResolveProjectAsync(session, cancellationToken)).ConfigureAwait(false);
-            var query = BuildSkillCatalogQuery(project, options.ProjectRoots);
-            return await AwaitRetentionAwareAsync(_skillCatalog.ActivateAsync(query, skillName, cancellationToken)).ConfigureAwait(false)
-                ?? throw new KeyNotFoundException($"Skill '{skillName}' was not found or is not activatable for this session.");
+            var space = await AwaitRetentionAwareAsync(GetSpaceFilterAsync(session.SpaceId, project, cancellationToken)).ConfigureAwait(false);
+            var query = BuildSkillCatalogQuery(project, options.ProjectRoots, space);
+            if (await AwaitRetentionAwareAsync(_skillCatalog.ActivateAsync(query, skillName, cancellationToken)).ConfigureAwait(false) is { } activation)
+            {
+                return activation;
+            }
+
+            // A skill of another space is refused for what it is, so that the agent can tell the user.
+            var document = await AwaitRetentionAwareAsync(_skillCatalog.GetAsync(query with { IncludeDisabled = true }, skillName, cancellationToken)).ConfigureAwait(false);
+            throw document?.Descriptor.IsOutsideSpace == true
+                ? new ResourceNotInSpaceException(SpaceResourceKind.Skill, document.Descriptor.Name, space.SpaceId)
+                : new KeyNotFoundException($"Skill '{skillName}' was not found or is not activatable for this session.");
         }, session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId).ConfigureAwait(false);
     }
 
@@ -3046,7 +3057,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
     }
 
-    private SkillCatalogQuery BuildSkillCatalogQuery(ProjectDescriptor? project, IReadOnlyList<string> projectRoots)
+    private SkillCatalogQuery BuildSkillCatalogQuery(ProjectDescriptor? project, IReadOnlyList<string> projectRoots, SpaceFilter space)
     {
         if (_discoveryScope is not null)
         {
@@ -3057,35 +3068,54 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             }
         }
 
-        var resolvedProjectRoots = new List<string>();
-        if (!string.IsNullOrWhiteSpace(project?.ProjectPath))
+        return SkillCatalogQuery.ForSession(
+            _configStore,
+            _catalogOptions.GlobalRoot,
+            _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            project?.ProjectPath,
+            projectRoots,
+            space);
+    }
+
+    /// <summary>
+    /// Gets what the space of a session has: the space it records, else the only space of its project, else the
+    /// default space (see <see cref="SpaceCatalog.ResolveSessionSpace"/>), with the assignments of the global
+    /// configuration. Every resource a session is offered goes through it before its enablement.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the session records, or <see langword="null"/>.</param>
+    /// <param name="project">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the space of the session has.</returns>
+    /// <exception cref="InvalidDataException">The global configuration cannot be parsed.</exception>
+    /// <exception cref="IOException">The global configuration cannot be read.</exception>
+    public async Task<SpaceFilter> GetSpaceFilterAsync(string? recordedSpaceId, ProjectDescriptor? project, CancellationToken cancellationToken = default)
+    {
+        var spaces = await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        return SpaceFilter.Load(_configStore, SpaceCatalog.ResolveSessionSpace(recordedSpaceId, project, spaces));
+    }
+
+    /// <summary>
+    /// Gets what the space of a session has, by its id: see
+    /// <see cref="GetSpaceFilterAsync(string?, ProjectDescriptor?, CancellationToken)"/>. A session that is not known is
+    /// read as in the default space.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the space of the session has.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The global configuration cannot be parsed.</exception>
+    /// <exception cref="IOException">The global configuration cannot be read.</exception>
+    public async Task<SpaceFilter> GetSessionSpaceFilterAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        var record = await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        ProjectDescriptor? project = null;
+        if (string.IsNullOrWhiteSpace(record?.SpaceId) && !string.IsNullOrWhiteSpace(record?.ProjectId))
         {
-            resolvedProjectRoots.Add(Path.GetFullPath(project.ProjectPath));
+            project = (await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(candidate => string.Equals(candidate.Id, record.ProjectId, StringComparison.OrdinalIgnoreCase));
         }
 
-        foreach (var projectRoot in projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)))
-        {
-            var fullPath = Path.GetFullPath(projectRoot);
-            if (!resolvedProjectRoots.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
-            {
-                resolvedProjectRoots.Add(fullPath);
-            }
-        }
-
-        return new SkillCatalogQuery
-        {
-            Discovery = new SkillDiscoveryContext
-            {
-                ProjectRoots = resolvedProjectRoots,
-                UserCodeAltaRoot = _catalogOptions.GlobalRoot,
-                UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            },
-            GlobalDisabledSkillNames = _configStore.LoadGlobalDisabledSkillNames(),
-            ProjectDisabledSkillNames = _configStore.LoadProjectDisabledSkillNames(project?.ProjectPath ?? resolvedProjectRoots.FirstOrDefault()),
-            IncludeInvalid = true,
-            IncludeShadowed = true,
-            IncludeUntrusted = true,
-        };
+        return await GetSpaceFilterAsync(record?.SpaceId, project, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -4419,17 +4449,34 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         };
     }
 
-    internal IReadOnlyList<AgentPromptDescriptor> ListOwnedPrompts(string? projectRoot)
+    internal IReadOnlyList<AgentPromptDescriptor> ListOwnedPrompts(string? projectRoot, SpaceFilter? space)
     {
         ValidateDiscoveryProjectRoot(projectRoot);
-        return (PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(new AgentPromptCatalogQuery
+        return AgentPromptCatalog.InSpace((PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(new AgentPromptCatalogQuery
         {
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
             UserCodeAltaRoot = _catalogOptions.GlobalRoot,
             UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        });
+        }), space);
     }
+
+    /// <summary>Gets the space a new session of a project is in when it is created in <paramref name="spaceId"/>.</summary>
+    /// <param name="spaceId">The space the session is created in; <see langword="null"/> for none.</param>
+    /// <param name="project">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The space, the default one when no other fits.</returns>
+    internal async Task<SpaceDescriptor> ResolveNewSessionSpaceAsync(string? spaceId, ProjectDescriptor? project, CancellationToken cancellationToken)
+    {
+        var spaces = await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var id = SpaceCatalog.ResolveSessionSpace(spaceId, project, spaces);
+        return spaces.First(space => string.Equals(space.Id, id, StringComparison.Ordinal));
+    }
+
+    /// <summary>Reads the global configuration's assignments for a space.</summary>
+    /// <exception cref="InvalidDataException">The global configuration cannot be parsed.</exception>
+    /// <exception cref="IOException">The global configuration cannot be read.</exception>
+    internal SpaceFilter LoadSpaceFilter(string spaceId) => SpaceFilter.Load(_configStore, spaceId);
 
     private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot)
     {

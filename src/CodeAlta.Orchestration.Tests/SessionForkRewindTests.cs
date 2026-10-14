@@ -355,6 +355,50 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task ASession_IsOfferedTheAgentPromptsAndSkillsOfItsOwnSpace()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+        Assert.AreEqual(SpaceChangeStatus.Ok, (await host.SpaceCatalog.UpdateSettingsAsync("business", settings => settings with { NewSessions = new SpaceNewSessions("plan") })).Status);
+        File.WriteAllText(Path.Combine(temp.GlobalRoot, "config.toml"), "[prompts.spaces]\nplan = [\"business\"]\n\n[skills.spaces]\nterraform = [\"business\"]\n");
+        foreach (var name in new[] { "terraform", "notes" })
+        {
+            Directory.CreateDirectory(Path.Combine(temp.GlobalRoot, "skills", name));
+            File.WriteAllText(Path.Combine(temp.GlobalRoot, "skills", name, "SKILL.md"), $"---\nname: {name}\ndescription: The {name} skill.\n---\n# {name}\n");
+        }
+
+        var options = Options(temp, provider);
+        var business = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Business", null, null, null, "business", CancellationToken.None);
+        var inDefault = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Default", null, null, null, "default", CancellationToken.None);
+        await SendAsync(host, business, options, "one");
+        await SendAsync(host, inDefault, options, "one");
+
+        // The instructions list what the space has.
+        var businessRequest = provider.Requests.Last(value => value.SessionId == business.SessionId);
+        var defaultRequest = provider.Requests.Last(value => value.SessionId == inDefault.SessionId);
+        StringAssert.Contains(businessRequest.DeveloperInstructions + businessRequest.SystemMessage, "<skill name=\"terraform\"");
+        StringAssert.Contains(businessRequest.DeveloperInstructions + businessRequest.SystemMessage, "`plan`");
+        Assert.IsFalse((defaultRequest.DeveloperInstructions + defaultRequest.SystemMessage).Contains("<skill name=\"terraform\"", StringComparison.Ordinal));
+        StringAssert.Contains(defaultRequest.DeveloperInstructions + defaultRequest.SystemMessage, "<skill name=\"notes\"");
+        Assert.IsFalse((defaultRequest.DeveloperInstructions + defaultRequest.SystemMessage).Contains("`plan`", StringComparison.Ordinal));
+
+        // The composer offers the prompts of the session's own space, whatever the window shows.
+        CollectionAssert.Contains((await host.Commands.GetSelectionChoicesAsync(business.SessionId))!.Prompts.Select(static prompt => prompt.Id).ToArray(), "plan");
+        CollectionAssert.DoesNotContain((await host.Commands.GetSelectionChoicesAsync(inDefault.SessionId))!.Prompts.Select(static prompt => prompt.Id).ToArray(), "plan");
+
+        // A new session starts with the agent of its space.
+        var scope = new OwnedProjectReferenceScope(host.CurrentProject.Id, host.CurrentProject.ProjectPath);
+        var businessDrafts = (await host.Commands.GetDraftPromptsAsync(scope, "business"))!;
+        Assert.AreEqual("plan", businessDrafts.DefaultPromptId);
+        Assert.AreEqual("business", businessDrafts.SpaceId);
+        var defaultDrafts = (await host.Commands.GetDraftPromptsAsync(scope, null))!;
+        Assert.AreEqual("default", defaultDrafts.DefaultPromptId);
+        CollectionAssert.DoesNotContain(defaultDrafts.Prompts.Select(static prompt => prompt.Id).ToArray(), "plan");
+    }
+
+    [TestMethod]
     public void BranchTitle_CountsTheForksOfAFork()
     {
         Assert.AreEqual("Review (fork)", SessionRuntimeService.BranchTitle("Review", "fork"));

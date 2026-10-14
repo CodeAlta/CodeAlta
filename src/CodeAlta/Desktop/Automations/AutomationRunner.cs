@@ -93,17 +93,19 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (definition.Model.Effort is { } effort && model.SupportedReasoningEfforts is { } supported && !supported.Contains(effort))
                 return Refuse($"The model '{model.Id}' has no reasoning effort '{effort.ToString().ToLowerInvariant()}'.");
 
-            var agent = definition.Agent ?? AgentPromptCatalog.DefaultPromptName;
-            var prompts = await _host.Commands.GetDraftPromptChoicesAsync(project is null ? null : new(project.Id, project.ProjectPath), cancellationToken).ConfigureAwait(false);
-            if (prompts is null) return Refuse("The application is closing.");
-            if (!prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}'.");
+            // Nothing of the window decides where a run goes: the space of its project when the project is in
+            // exactly one, the default space otherwise.
+            var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
+            // The agent the automation names, else the one its space starts its new sessions with; one the space does
+            // not have is refused, as for any session of that space.
+            var drafts = await _host.Commands.GetDraftPromptsAsync(project is null ? null : new(project.Id, project.ProjectPath), spaceId, cancellationToken).ConfigureAwait(false);
+            if (drafts is null) return Refuse("The application is closing.");
+            var agent = definition.Agent ?? drafts.DefaultPromptId;
+            if (!drafts.Prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}' in the space '{spaceId}'.");
 
             cancellationToken.ThrowIfCancellationRequested();
             // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
             if (!_host.Commands.HasCapacity) return Refuse(NoCapacity);
-            // Nothing of the window decides where a run goes: the space of its project when the project is in
-            // exactly one, the default space otherwise.
-            var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
             var session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
             {
                 Kind = AltaActorProvenance.AutomationKind,

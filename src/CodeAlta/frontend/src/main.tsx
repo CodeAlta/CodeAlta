@@ -2193,7 +2193,8 @@ function App() {
   }, [reminderEpoch, reminderActions]);
   const draftChoices = useNewSessionChoices(status?.hostEpoch, projectId, selectedProject?.path ?? null,
     configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
-      && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability);
+      && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability,
+    spacesState.available ? spaceId : null);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
   const projectRenaming = !!projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch;

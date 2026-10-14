@@ -19,14 +19,17 @@ internal sealed record DocumentationAskResult(string Status, string? SessionId =
 /// <summary>The operations behind <see cref="DocumentationAsker"/>; tests supply literal callbacks.</summary>
 /// <param name="Providers">Lists the enabled providers, in the order they are listed.</param>
 /// <param name="DefaultProvider">Gives the default provider the configuration of the user names; null when it names none.</param>
-/// <param name="HasDefaultPrompt">Whether the default agent prompt is there; null when the application is closing.</param>
+/// <param name="DraftPrompts">
+/// The agent prompts a new chat of the space the window shows can start with, and the one it starts with (the agent
+/// prompt of the space, else <c>default</c>); null when the application is closing.
+/// </param>
 /// <param name="HasCapacity">Whether the host takes one more command.</param>
 /// <param name="CreateChat">Creates a chat, a session of no project, with a provider and a title.</param>
 /// <param name="Send">Sends the first prompt of the chat; returns null when it was accepted, else a word for the refusal.</param>
 internal sealed record DocumentationAskOperations(
     Func<IReadOnlyList<ModelProviderDescriptor>> Providers,
     Func<string?> DefaultProvider,
-    Func<CancellationToken, Task<bool?>> HasDefaultPrompt,
+    Func<CancellationToken, Task<OwnedDraftPrompts?>> DraftPrompts,
     Func<bool> HasCapacity,
     Func<ModelProviderDescriptor, string, Task<string>> CreateChat,
     Func<OwnedTextSendRequest, string?> Send);
@@ -90,17 +93,16 @@ internal sealed class DocumentationAsker
         try
         {
             if (DesktopDefaultProvider.Pick(_operations.Providers(), _operations.DefaultProvider()) is not { } provider) return new("no_provider");
-            switch (await _operations.HasDefaultPrompt(cancellationToken).ConfigureAwait(false))
-            {
-                case null: return new("closing");
-                case false: return new("failed", Problem: $"There is no agent prompt '{AgentPromptCatalog.DefaultPromptName}'.");
-            }
+            // The agent the space starts its new sessions with, else the default one.
+            if (await _operations.DraftPrompts(cancellationToken).ConfigureAwait(false) is not { } drafts) return new("closing");
+            var agent = drafts.DefaultPromptId;
+            if (!drafts.Prompts.Any(prompt => prompt.Id == agent)) return new("failed", Problem: $"There is no agent prompt '{agent}'.");
 
             if (!_operations.HasCapacity()) return new("busy");
             cancellationToken.ThrowIfCancellationRequested();
             sessionId = await _operations.CreateChat(provider, Title(question)).ConfigureAwait(false);
             // No model: the chat starts with the one its provider is configured with, as any new chat does.
-            var selection = new OwnedSessionSelection(provider.ProviderId.Value, AgentPromptCatalog.DefaultPromptName, null, null);
+            var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, null, null);
             var refusal = _operations.Send(new OwnedTextSendRequest("documentation:" + Guid.NewGuid().ToString("N"), sessionId, Prompt(question, page, title)) { Selection = selection });
             return refusal is null ? new("ok", sessionId) : new("not_sent", sessionId, refusal);
         }
@@ -142,11 +144,7 @@ internal sealed class DocumentationAsker
         return new(
             () => [.. host.ModelProviderRegistry.ListProviders().Where(static provider => provider.IsEnabled)],
             () => defaults.Configured(),
-            async token =>
-            {
-                var prompts = await host.Commands.GetDraftPromptChoicesAsync(null, token).ConfigureAwait(false);
-                return prompts is null ? null : prompts.Any(static prompt => prompt.Id == AgentPromptCatalog.DefaultPromptName);
-            },
+            token => host.Commands.GetDraftPromptsAsync(null, shownSpace(), token),
             () => host.Commands.HasCapacity,
             // The question is asked from the window: the chat is in the space it shows.
             async (provider, title) => (await host.Commands.CreateDraftSessionAsync(null, provider, title, spaceId: shownSpace()).ConfigureAwait(false)).SessionId,

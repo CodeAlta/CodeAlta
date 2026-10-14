@@ -71,6 +71,14 @@ test("a new session starts from the defaults of the settings until something was
     { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" });
 });
 
+test("a new session starts with the agent prompt of its space, unless the user chose one", () => {
+  assert.equal(newSessionSelection(undefined, "codex", prompts, models, providers[0], null, "plan").agentPromptId, "plan");
+  assert.equal(newSessionSelection({ agentPromptId: "default" }, "codex", prompts, models, providers[0], null, "plan").agentPromptId, "default",
+    "the choice of the user wins");
+  assert.equal(newSessionSelection(undefined, "codex", [prompts[0]], models, providers[0], null, "plan").agentPromptId, "default",
+    "an agent the space no longer has");
+});
+
 test("what was chosen is used only while the catalogs offer it", () => {
   assert.equal(newSessionProvider(chosen, providers), "codex");
   assert.equal(newSessionProvider({ providerKey: "gone" }, providers), "claude", "a provider that is disabled or removed");

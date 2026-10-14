@@ -700,6 +700,10 @@ public sealed class SystemPromptBuilder
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = projectRoot is not null,
         });
+        // The prompts of the session's space, and the one it runs with, which it keeps.
+        prompts = [.. prompts.Where(prompt => request.SpaceResources is not { } space
+            || space.Allows(SpaceResourceKind.Prompt, prompt.PromptName)
+            || string.Equals(prompt.PromptName, currentPromptName, StringComparison.OrdinalIgnoreCase))];
         if (prompts.Count == 0)
         {
             return null;
@@ -1269,6 +1273,12 @@ public sealed class SystemPromptBuildRequest
     /// but the default one.
     /// </summary>
     public SpaceDescriptor? Space { get; init; }
+
+    /// <summary>
+    /// Gets what the space of the session has, which narrows the agent prompts the instructions list; null to list
+    /// every prompt.
+    /// </summary>
+    public SpaceFilter? SpaceResources { get; init; }
 }
 
 /// <summary>

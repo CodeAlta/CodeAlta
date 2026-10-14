@@ -673,7 +673,7 @@ public sealed class SkillCatalog
     {
         var globallyDisabled = CreateDisabledSet(query.GlobalDisabledSkillNames);
         var projectDisabled = CreateDisabledSet(query.ProjectDisabledSkillNames);
-        if (globallyDisabled.Count == 0 && projectDisabled.Count == 0)
+        if (globallyDisabled.Count == 0 && projectDisabled.Count == 0 && query.Space is null)
         {
             return descriptors;
         }
@@ -682,11 +682,14 @@ public sealed class SkillCatalog
             .Select(descriptor =>
             {
                 var key = Normalize(descriptor.NormalizedName) ?? Normalize(descriptor.Name) ?? string.Empty;
+                // The space comes first: a skill of the same name in a project folder is the same skill to the space.
+                var outsideSpace = query.Space is { } space && key.Length > 0 && !space.Allows(SpaceResourceKind.Skill, key);
                 var disabledGlobally = globallyDisabled.Contains(key);
                 var disabledForProject = projectDisabled.Contains(key);
-                var isEnabled = !disabledGlobally && !disabledForProject;
+                var isEnabled = !outsideSpace && !disabledGlobally && !disabledForProject;
                 return descriptor with
                 {
+                    IsOutsideSpace = outsideSpace,
                     IsDisabledGlobally = disabledGlobally,
                     IsDisabledForProject = disabledForProject,
                     IsEnabled = isEnabled,

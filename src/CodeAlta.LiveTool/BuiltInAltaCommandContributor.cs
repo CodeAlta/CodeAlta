@@ -2685,12 +2685,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         // The invocation retains preparation and parent claims through original-fault
         // classification, including unconfirmed dependencies during creation.
 
-        var promptId = NormalizeOptionalText(options.Model.PromptId) ?? AgentPromptCatalog.DefaultPromptName;
-        var promptValidationExitCode = await ValidateAgentPromptIdAsync(context, project, promptId).ConfigureAwait(false);
-        if (promptValidationExitCode != AltaExitCodes.Success)
+        // The prompt asked for, else the one the space of the new session starts its sessions with.
+        var newSessionSpace = await ResolveNewSessionSpaceDescriptorAsync(context, space.SpaceId, project).ConfigureAwait(false);
+        var promptChoice = ResolveNewSessionPrompt(context, project?.ProjectPath, options.Model.PromptId, newSessionSpace);
+        if (promptChoice.ExitCode != AltaExitCodes.Success)
         {
-            return promptValidationExitCode;
+            return promptChoice.ExitCode;
         }
+
+        var promptId = promptChoice.PromptId!;
 
         var workingDirectory = project?.ProjectPath ?? GetGlobalRootOrCwd(context);
         // Where a project session works: a worktree of its own, the worktree of the session that creates it, or
@@ -3696,9 +3699,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var catalog = new AgentPromptCatalog();
+        // A session lists the agent prompts of its own space.
+        var space = options.System ? null : await CallerSpaceFilterAsync(context).ConfigureAwait(false);
         var records = options.System
             ? catalog.ListSystemPrompts(queryResult.Query!).Where(prompt => ScopeMatches(options.Scope, prompt.SourceKind)).Select(prompt => CreateSystemPromptRecord(context, prompt, options.Verbose))
-            : catalog.ListPrompts(queryResult.Query!).Where(prompt => ScopeMatches(options.Scope, prompt.SourceKind)).Select(prompt => CreateAgentPromptRecord(context, prompt, options.Verbose));
+            : AgentPromptCatalog.InSpace(catalog.ListPrompts(queryResult.Query!), space).Where(prompt => ScopeMatches(options.Scope, prompt.SourceKind)).Select(prompt => CreateAgentPromptRecord(context, prompt, options.Verbose));
         var count = 0;
         foreach (var record in records)
         {
@@ -3740,6 +3745,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (agentPrompt is null)
         {
             return NotFound(context, "prompt.notFound", $"Agent prompt '{promptId}' was not found in scope '{options.Scope}'.");
+        }
+
+        if (RefuseOutsideCallerSpace(context, await CallerSpaceFilterAsync(context).ConfigureAwait(false), SpaceResourceKind.Prompt, agentPrompt.PromptName, "prompt.notInSpace", out var refused))
+        {
+            return refused;
         }
 
         AltaJsonlWriter.WriteRecord(context.Stdout, CreateAgentPromptRecord(context, agentPrompt, includeContent: true));
@@ -4037,6 +4047,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         catch (KeyNotFoundException ex)
         {
             return NotFound(context, "skill.notFound", ex.Message);
+        }
+        catch (ResourceNotInSpaceException ex)
+        {
+            return Unsupported(context, "skill.notInSpace", ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -5015,24 +5029,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
         }
 
-        var roots = project is null ? [] : new[] { project.ProjectPath };
         var catalogOptions = context.Services.Get<CatalogOptions>();
         var globalRoot = catalogOptions?.GlobalRoot ?? GetGlobalRootOrCwd(context);
         var configStore = context.Services.Get<CodeAltaConfigStore>() ?? new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = globalRoot });
-        var query = new SkillCatalogQuery
-        {
-            Discovery = new SkillDiscoveryContext
-            {
-                ProjectRoots = roots,
-                UserCodeAltaRoot = globalRoot,
-                UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            },
-            GlobalDisabledSkillNames = configStore.LoadGlobalDisabledSkillNames(),
-            ProjectDisabledSkillNames = configStore.LoadProjectDisabledSkillNames(project?.ProjectPath),
-            IncludeInvalid = true,
-            IncludeShadowed = true,
-            IncludeUntrusted = true,
-        };
+        // A session sees the skills of its own space; the user, outside any session, sees every skill.
+        var space = await CallerSpaceFilterAsync(context).ConfigureAwait(false);
+        var query = SkillCatalogQuery.ForSession(
+            configStore,
+            globalRoot,
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            project?.ProjectPath,
+            otherProjectRoots: null,
+            space);
         return SkillQueryResult.Success(query);
     }
 
@@ -5124,33 +5132,46 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return AltaExitCodes.Success;
         }
 
-        var exists = new AgentPromptCatalog()
-            .ListEffectivePrompts(queryResult.Query!)
-            .Any(prompt => string.Equals(prompt.PromptName, normalized, StringComparison.OrdinalIgnoreCase));
-        return exists
-            ? AltaExitCodes.Success
-            : NotFound(context, "prompt.notFound", $"Agent prompt '{normalized}' was not found. Use `alta prompt list` to discover prompt ids.");
+        // A session runs only the prompts of its own space, whoever asks for one.
+        var space = context.Services.Get<SessionRuntimeService>() is { } runtime
+            ? await runtime.GetSessionSpaceFilterAsync(info.Session.SessionId, context.CancellationToken).ConfigureAwait(false)
+            : null;
+        return ValidateAgentPromptId(context, new AgentPromptCatalog().ListEffectivePrompts(queryResult.Query!), normalized, space);
     }
 
-    private static Task<int> ValidateAgentPromptIdAsync(AltaCommandContext context, ProjectDescriptor? project, string? promptId)
-        => ValidateAgentPromptIdAsync(context, project?.ProjectPath, promptId);
-
-    private static async Task<int> ValidateAgentPromptIdAsync(AltaCommandContext context, string? projectRoot, string? promptId)
+    // The prompt of a new session: the one asked for, which must exist in the space of the session, else the one the
+    // space starts its sessions with, else `default`.
+    private static (string? PromptId, int ExitCode) ResolveNewSessionPrompt(
+        AltaCommandContext context, string? projectRoot, string? requested, SpaceDescriptor? space)
     {
-        var normalized = NormalizeOptionalText(promptId) ?? AgentPromptCatalog.DefaultPromptName;
+        var globalRoot = context.Services.Get<CatalogOptions>()?.GlobalRoot ?? GetGlobalRootOrCwd(context);
         var query = new AgentPromptCatalogQuery
         {
             ProjectRoot = projectRoot,
             ProjectPromptResourcesTrusted = !string.IsNullOrWhiteSpace(projectRoot),
-            UserCodeAltaRoot = context.Services.Get<CatalogOptions>()?.GlobalRoot ?? GetGlobalRootOrCwd(context),
+            UserCodeAltaRoot = globalRoot,
             UserProfileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
-        var exists = new AgentPromptCatalog()
-            .ListEffectivePrompts(query)
-            .Any(prompt => string.Equals(prompt.PromptName, normalized, StringComparison.OrdinalIgnoreCase));
-        return exists
+        var resources = SpaceFilter.Load(context.Services.Get<CodeAltaConfigStore>() ?? new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = globalRoot }), space?.Id);
+        var prompts = new AgentPromptCatalog().ListEffectivePrompts(query);
+        var available = AgentPromptCatalog.InSpace(prompts, resources).Select(static prompt => prompt.PromptName).ToArray();
+        var promptId = AgentPromptCatalog.ResolveNewSessionPromptId(requested, available, space);
+        var exitCode = ValidateAgentPromptId(context, prompts, promptId, resources);
+        return exitCode == AltaExitCodes.Success ? (promptId, exitCode) : (null, exitCode);
+    }
+
+    // Refuses a prompt that does not exist (prompt.notFound) or that the space does not have (prompt.notInSpace).
+    private static int ValidateAgentPromptId(AltaCommandContext context, IReadOnlyList<AgentPromptDescriptor> prompts, string promptId, SpaceFilter? space)
+    {
+        var prompt = prompts.FirstOrDefault(candidate => string.Equals(candidate.PromptName, promptId, StringComparison.OrdinalIgnoreCase));
+        if (prompt is null)
+        {
+            return NotFound(context, "prompt.notFound", $"Agent prompt '{promptId}' was not found. Use `alta prompt list` to discover prompt ids.");
+        }
+
+        return space is null || space.Allows(SpaceResourceKind.Prompt, prompt.PromptName)
             ? AltaExitCodes.Success
-            : NotFound(context, "prompt.notFound", $"Agent prompt '{normalized}' was not found. Use `alta prompt list` to discover prompt ids.");
+            : Unsupported(context, "prompt.notInSpace", ResourceNotInSpaceException.MessageOf(SpaceResourceKind.Prompt, prompt.PromptName, space.SpaceId));
     }
 
     private static Dictionary<string, object?> CreateAgentPromptRecord(AltaCommandContext context, AgentPromptDescriptor prompt, bool includeContent)

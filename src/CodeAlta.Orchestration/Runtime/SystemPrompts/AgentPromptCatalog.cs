@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 
@@ -109,6 +110,42 @@ public sealed class AgentPromptCatalog
             .ThenBy(static prompt => prompt.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Keeps the prompts a space has. A prompt is assigned to spaces by its id, whatever folder it comes from: a
+    /// project cannot bring into a space a prompt the space does not have.
+    /// </summary>
+    /// <param name="prompts">The prompts.</param>
+    /// <param name="space">What the space of the session has; <see langword="null"/> to keep every prompt.</param>
+    /// <returns>The prompts available in the space, in their order.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="prompts"/> is <see langword="null"/>.</exception>
+    public static IReadOnlyList<AgentPromptDescriptor> InSpace(IReadOnlyList<AgentPromptDescriptor> prompts, SpaceFilter? space)
+    {
+        ArgumentNullException.ThrowIfNull(prompts);
+        return space is null ? prompts : [.. prompts.Where(prompt => space.Allows(SpaceResourceKind.Prompt, prompt.PromptName))];
+    }
+
+    /// <summary>
+    /// Chooses the agent prompt of a new session: the one asked for, else the one its space starts new sessions with
+    /// when the space has it, else <see cref="DefaultPromptName"/> when the space has it, else the first one it has.
+    /// </summary>
+    /// <param name="requested">The prompt the user or the caller chose; <see langword="null"/> when none was chosen.</param>
+    /// <param name="available">The ids of the prompts available in the space, in their order.</param>
+    /// <param name="space">The space of the new session; <see langword="null"/> when it is not known.</param>
+    /// <returns>The id of the prompt; <see cref="DefaultPromptName"/> when nothing else fits. A chosen prompt is returned as it is: its caller checks it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="available"/> is <see langword="null"/>.</exception>
+    public static string ResolveNewSessionPromptId(string? requested, IReadOnlyList<string> available, SpaceDescriptor? space)
+    {
+        ArgumentNullException.ThrowIfNull(available);
+        if (NormalizePromptName(requested) is { } chosen)
+        {
+            return chosen;
+        }
+
+        string? Find(string? id)
+            => id is null ? null : available.FirstOrDefault(candidate => string.Equals(candidate, id, StringComparison.OrdinalIgnoreCase));
+        return Find(space?.Settings.NewSessions?.AgentPrompt) ?? Find(DefaultPromptName) ?? available.FirstOrDefault() ?? DefaultPromptName;
     }
 
     /// <summary>

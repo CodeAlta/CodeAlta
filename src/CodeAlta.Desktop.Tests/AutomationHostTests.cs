@@ -650,7 +650,7 @@ public sealed class AutomationHostTests
                          (Entry(new(Id, "x") { Model = new("missing", null, null) }), "The provider 'missing' is not enabled."),
                          (Entry(new(Id, "x") { Model = new(provider.Descriptor.ProviderId.Value, "other-model", null) }), "The provider 'automation-fixture' does not offer the model 'other-model'."),
                          (Entry(new(Id, "x") { Model = new(provider.Descriptor.ProviderId.Value, "fixture-model", AgentReasoningEffort.XHigh) }), "The model 'fixture-model' has no reasoning effort 'xhigh'."),
-                         (Entry(new(Id, "x") { Agent = "nobody" }), "There is no agent prompt 'nobody'."),
+                         (Entry(new(Id, "x") { Agent = "nobody" }), "There is no agent prompt 'nobody' in the space 'business'."),
                          (new(new(Id, "x"), source, "unknown-project", projectPath, null), "Its project is no longer one of the projects of CodeAlta."),
                      })
             {

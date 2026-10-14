@@ -74,17 +74,20 @@ export function newSessionProvider(saved: NewSessionPreference | undefined, prov
 
 /**
  * The choices a new session starts with: what the user chose where the catalogs still offer it, and for the rest
- * what the terminal would pick, the configured model of the provider and its effort.
+ * what the terminal would pick, the configured model of the provider and its effort. The agent prompt is the one the
+ * user chose, else the one the space starts its new sessions with, else the default one.
  */
 export function newSessionSelection(saved: NewSessionPreference | undefined, provider: string, prompts: readonly Readonly<{ id: string }>[],
   models: readonly Model[], configured?: Readonly<{ defaultModel?: string | null; defaultReasoning?: string | null }>,
-  tier?: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }> | null): SessionSelection {
+  tier?: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }> | null, spaceDefaultPromptId?: string | null): SessionSelection {
   // The model of the standard tier, when the user chose no model of this provider and the provider lists it.
   const tierModel = tier?.providerKey === provider && models.some(model => model.id === tier.modelId) ? tier : null;
   const modelId = saved?.providerKey === provider && models.some(model => model.id === saved.modelId) ? saved.modelId!
     : tierModel?.modelId ?? defaultModelId(models, configured?.defaultModel);
   const model = models.find(value => value.id === modelId);
-  return { providerKey: provider, agentPromptId: prompts.find(prompt => prompt.id === saved?.agentPromptId)?.id ?? "default", modelId,
+  const agentPromptId = prompts.find(prompt => prompt.id === saved?.agentPromptId)?.id
+    ?? prompts.find(prompt => prompt.id === spaceDefaultPromptId)?.id ?? "default";
+  return { providerKey: provider, agentPromptId, modelId,
     reasoningEffort: model?.efforts.find(effort => effort === saved?.reasoningEffort)
       ?? (tierModel && modelId === tierModel.modelId ? model?.efforts.find(effort => effort === tierModel.reasoning) : undefined)
       ?? defaultReasoningEffort(model, configured?.defaultReasoning) };

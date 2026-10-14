@@ -121,6 +121,9 @@ public sealed class AgentInstructionTemplateProvider
             ? Array.Empty<string>()
             : [project.ProjectPath];
         var models = LoadModelSettings();
+        var spaces = LoadSpaces();
+        var spaceId = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
+        var spaceResources = SpaceFilter.Load(_configStore, spaceId);
         return _promptBuilder.Build(new SystemPromptBuildRequest
         {
             ProviderKey = session.ResolvedProviderKey,
@@ -136,30 +139,24 @@ public sealed class AgentInstructionTemplateProvider
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
             InstanceStateRoot = _catalogOptions?.StateRoot,
             DiscoveryScope = DiscoveryScope,
-            AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project),
-            Space = ResolveSpace(session, project),
+            AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources),
+            SpaceResources = spaceResources,
+            // The Runtime Context names the space only when there is another one than the default, where it tells something.
+            Space = spaces.Count < 2 ? null : spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal)),
             ModelTiers = ModelTierResolver.DescribeForAgents(models.Tiers),
             ModelFallback = models.Fallback.Enabled,
         });
     }
 
-    // The space of the session, for the Runtime Context; null while the catalog has no space but the default one,
-    // where saying it would tell nothing.
-    private SpaceDescriptor? ResolveSpace(SessionViewDescriptor session, ProjectDescriptor? project)
+    // The spaces of the catalog; the default one alone while the catalog keeps no space.
+    private IReadOnlyList<SpaceDescriptor> LoadSpaces()
     {
         if (_catalogOptions is null || string.IsNullOrWhiteSpace(_catalogOptions.GlobalRoot) || !Directory.Exists(_catalogOptions.SpacesRoot))
         {
-            return null;
+            return [SpaceDescriptor.CreateDefault()];
         }
 
-        var spaces = new SpaceCatalog(new ProjectCatalog(_catalogOptions)).LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
-        if (spaces.Count < 2)
-        {
-            return null;
-        }
-
-        var id = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
-        return spaces.First(space => string.Equals(space.Id, id, StringComparison.Ordinal));
+        return new SpaceCatalog(new ProjectCatalog(_catalogOptions)).LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
     }
 
     // The tiers of the settings; a file that cannot be read, or whose tiers are not valid, gives none.
@@ -194,7 +191,7 @@ public sealed class AgentInstructionTemplateProvider
     private string? BuildSkillsDeveloperInstructions(
         SessionViewDescriptor session,
         ProjectDescriptor? project,
-        string? model = null)
+        SpaceFilter space)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (_skillCatalog is null || _catalogOptions is null)
@@ -202,12 +199,16 @@ public sealed class AgentInstructionTemplateProvider
             return null;
         }
 
+        var query = SkillCatalogQuery.ForSession(
+            _configStore,
+            _catalogOptions.GlobalRoot,
+            DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            project?.ProjectPath,
+            otherProjectRoots: null,
+            space);
         var descriptors = _skillCatalog.ListAsync(
-                new SkillCatalogQuery
+                query with
                 {
-                    Discovery = CreateDiscoveryContext(session, project),
-                    GlobalDisabledSkillNames = _configStore?.LoadGlobalDisabledSkillNames() ?? (IReadOnlyCollection<string>)Array.Empty<string>(),
-                    ProjectDisabledSkillNames = _configStore?.LoadProjectDisabledSkillNames(project?.ProjectPath) ?? (IReadOnlyCollection<string>)Array.Empty<string>(),
                     IncludeInvalid = false,
                     IncludeShadowed = false,
                     IncludeUntrusted = false,
@@ -254,22 +255,6 @@ public sealed class AgentInstructionTemplateProvider
 
         builder.Append("</available_skills>");
         return builder.ToString();
-    }
-
-    private SkillDiscoveryContext CreateDiscoveryContext(SessionViewDescriptor session, ProjectDescriptor? project)
-    {
-        var projectRoots = new List<string>();
-        if (!string.IsNullOrWhiteSpace(project?.ProjectPath))
-        {
-            projectRoots.Add(project.ProjectPath);
-        }
-
-        return new SkillDiscoveryContext
-        {
-            ProjectRoots = projectRoots,
-            UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
-            UserProfileRoot = DiscoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        };
     }
 
     private static string ToLocationLabel(SkillSourceKind sourceKind)

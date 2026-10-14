@@ -8,7 +8,7 @@ import { useTiers } from "./modelTiers";
 // Catalogs only. Draft choices are preferences, never send or provider-switch authority.
 export function useNewSessionChoices(epoch: string | undefined | null, projectId: string | null, projectPath: string | null,
   inventory: ConfigurationSnapshot | undefined, enabled: boolean,
-  capability: ReturnType<typeof createMutationCapability> | undefined) {
+  capability: ReturnType<typeof createMutationCapability> | undefined, spaceId: string | null = null) {
   const providers = inventory?.providerRuntimeAvailable ? inventory.providers.filter(provider => provider.enabled) : [];
   // What the user chose for the new sessions of this project (or of the chats), kept with the window.
   const scope = JSON.stringify([projectId, projectPath]);
@@ -18,23 +18,24 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   const tiers = useTiers(epoch);
   const standard = tiers?.choices.standard ?? null;
   const provider = newSessionTierProvider(saved, providers, standard) ?? newSessionProvider(saved, providers);
-  const key = JSON.stringify([epoch, projectId, projectPath, provider]);
+  // A new session is in the space shown: its agent prompts, and the one its new sessions start with.
+  const key = JSON.stringify([epoch, projectId, projectPath, provider, spaceId]);
   const [revision, setRevision] = useState(0);
-  const [prompts, setPrompts] = useState<{ key: string; rows: readonly SessionPromptChoice[]; loading: boolean; failed: boolean }>();
+  const [prompts, setPrompts] = useState<{ key: string; rows: readonly SessionPromptChoice[]; defaultId: string | null; loading: boolean; failed: boolean }>();
   const [models, setModels] = useState<{ key: string; rows: readonly ModelCatalogModel[]; loading: boolean; failed: boolean }>();
   useEffect(() => {
     if (!enabled || !epoch || !capability?.canMutate()) return;
     const controller = new AbortController();
-    setPrompts({ key, rows: [], loading: true, failed: false });
-    void workspace.draftPrompts({ expectedHostEpoch: epoch, projectId, projectPath }, { signal: controller.signal, timeoutMilliseconds: 15000 })
+    setPrompts({ key, rows: [], defaultId: null, loading: true, failed: false });
+    void workspace.draftPrompts({ expectedHostEpoch: epoch, projectId, projectPath, spaceId }, { signal: controller.signal, timeoutMilliseconds: 15000 })
       .then(reply => {
         capability.observe({ status: reply.status, epoch: reply.hostEpoch });
         if (controller.signal.aborted || !capability.canMutate()) return;
         const valid = reply.status === "ok" && reply.hostEpoch === epoch && reply.projectId === projectId && reply.projectPath === projectPath;
-        setPrompts({ key, rows: valid ? reply.prompts : [], loading: false, failed: !valid });
-      }).catch(() => { if (!controller.signal.aborted) setPrompts({ key, rows: [], loading: false, failed: true }); });
+        setPrompts({ key, rows: valid ? reply.prompts : [], defaultId: valid ? reply.defaultPromptId : null, loading: false, failed: !valid });
+      }).catch(() => { if (!controller.signal.aborted) setPrompts({ key, rows: [], defaultId: null, loading: false, failed: true }); });
     return () => controller.abort();
-  }, [epoch, projectId, projectPath, key, enabled, capability, revision]);
+  }, [epoch, projectId, projectPath, spaceId, key, enabled, capability, revision]);
   useEffect(() => {
     if (!enabled || !epoch || !provider || !capability?.canMutate()) return;
     const controller = new AbortController();
@@ -51,7 +52,8 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   // Until the user chooses, the draft names what the terminal would pick: the provider's model and its effort.
   // What was chosen is used while the catalogs still offer it.
   const configured = providers.find(candidate => candidate.id === provider);
-  const value = newSessionSelection(saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard);
+  const value = newSessionSelection(saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard,
+    prompts?.key === key ? prompts.defaultId : null);
   // The session runs on the tier chosen with its model, else on the standard tier when it starts with the model that tier gives.
   const tier = saved?.tier && saved.providerKey === value.providerKey && saved.modelId === value.modelId ? saved.tier
     : !saved?.providerKey && standard && value.providerKey === standard.providerKey && value.modelId === standard.modelId ? "standard" : null;

@@ -263,6 +263,49 @@ internal sealed partial class BuiltInAltaCommandContributor
             context.CancellationToken).ConfigureAwait(false);
     }
 
+    // What the space of the calling session has; null when no session calls (the user sees every resource). A session
+    // whose space cannot be read is in the default space.
+    private static async Task<SpaceFilter?> CallerSpaceFilterAsync(AltaCommandContext context)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is null)
+        {
+            return null;
+        }
+
+        var catalogOptions = context.Services.Get<CatalogOptions>();
+        var configStore = context.Services.Get<CodeAltaConfigStore>()
+            ?? (catalogOptions is not null ? new CodeAltaConfigStore(catalogOptions) : null);
+        var space = context.Services.Get<SpaceCatalog>() is { } spaces ? await CallerSpaceAsync(context, spaces).ConfigureAwait(false) : null;
+        return SpaceFilter.Load(configStore, space?.Id);
+    }
+
+    // The space a new session created in `spaceId` is in: that space, else the only space of its project, else the
+    // default one; null when the host keeps no spaces.
+    private static async Task<SpaceDescriptor?> ResolveNewSessionSpaceDescriptorAsync(AltaCommandContext context, string? spaceId, ProjectDescriptor? project)
+    {
+        if (context.Services.Get<SpaceCatalog>() is not { } spaces)
+        {
+            return null;
+        }
+
+        var all = await spaces.LoadAsync(context.CancellationToken).ConfigureAwait(false);
+        var id = SpaceCatalog.ResolveSessionSpace(spaceId, project, all);
+        return all.First(space => string.Equals(space.Id, id, StringComparison.Ordinal));
+    }
+
+    // Refuses, for an agent, a resource that its own space does not have. True when it was refused (written to stderr).
+    private static bool RefuseOutsideCallerSpace(AltaCommandContext context, SpaceFilter? space, SpaceResourceKind kind, string key, string code, out int exitCode)
+    {
+        if (space is null || space.Allows(kind, key))
+        {
+            exitCode = AltaExitCodes.Success;
+            return false;
+        }
+
+        exitCode = Unsupported(context, code, ResourceNotInSpaceException.MessageOf(kind, key, space.SpaceId));
+        return true;
+    }
+
     // The space a new session goes to. A session that creates one creates it in its own space and can name no other
     // one: what it cannot reach in its own space it does not reach through a session it creates. Without a calling
     // session, the space named, else the one the window shows; null when there is neither (the session then records

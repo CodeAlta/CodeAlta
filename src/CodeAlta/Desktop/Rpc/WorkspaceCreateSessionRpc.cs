@@ -20,7 +20,7 @@ internal sealed partial class WorkspaceService
     // A session that works in a worktree: the worktree is created first, and removed again when no session comes of it.
     private readonly GitWorktreeService? _worktrees;
     private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string?, string, string?, Task<SessionViewDescriptor>>? _createInWorktree;
-    private readonly Func<OwnedProjectReferenceScope?, CancellationToken, Task<IReadOnlyList<OwnedPromptChoice>?>>? _draftPrompts;
+    private readonly Func<OwnedProjectReferenceScope?, string?, CancellationToken, Task<OwnedDraftPrompts?>>? _draftPrompts;
     private readonly Func<string, string?, string, string, Task<bool>>? _renameSession;
     private readonly Func<string, string?, string, string, Task<string>>? _deleteSession;
     private readonly Func<string, string, string, string, string, Task<OwnedSessionMoveResult>>? _moveSession;
@@ -41,7 +41,7 @@ internal sealed partial class WorkspaceService
         _sessionSpaces = host.SpaceCatalog;
         _worktrees = worktrees;
         _createInWorktree = (project, provider, title, folder, space) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space);
-        _draftPrompts = host.Commands.GetDraftPromptChoicesAsync;
+        _draftPrompts = host.Commands.GetDraftPromptsAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
         _deleteProject = host.Commands.DeleteCatalogProjectAsync;
@@ -57,19 +57,23 @@ internal sealed partial class WorkspaceService
     [NeoRpcMethod("draftPrompts")]
     public async Task<WorkspaceDraftPromptsResponse> DraftPromptsAsync(WorkspaceDraftPromptsRequest request, CancellationToken cancellationToken)
     {
-        WorkspaceDraftPromptsResponse Reply(string status, IReadOnlyList<OwnedPromptChoice>? prompts = null)
+        WorkspaceDraftPromptsResponse Reply(string status, OwnedDraftPrompts? drafts = null)
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath,
-                prompts?.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray() ?? []);
+                drafts?.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray() ?? [])
+            {
+                DefaultPromptId = drafts?.DefaultPromptId,
+            };
         if (_draftPrompts is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch)
             || (request.ProjectId is null) != (request.ProjectPath is null)
-            || request.ProjectId is not null && (!ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)))
+            || request.ProjectId is not null && (!ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096))
+            || request.SpaceId is not null && !SpaceDescriptor.IsValidId(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         try
         {
-            var prompts = await _draftPrompts(request.ProjectId is null ? null : new(request.ProjectId, request.ProjectPath!), cancellationToken).ConfigureAwait(false);
-            return Reply(prompts is null ? "unavailable" : "ok", prompts);
+            var drafts = await _draftPrompts(request.ProjectId is null ? null : new(request.ProjectId, request.ProjectPath!), request.SpaceId, cancellationToken).ConfigureAwait(false);
+            return Reply(drafts is null ? "unavailable" : "ok", drafts);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception) { return Reply("read_failed"); }
@@ -268,6 +272,11 @@ internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, s
 /// <param name="Message">With <c>worktree_failed</c>: what git said.</param>
 internal sealed record WorkspaceCreateSessionResponse(string Status, string? HostEpoch, string? Scope, string? ProjectId, string? ProjectPath,
     string? SessionId, string? WorkspacePath, string? ProviderId = null, string? WorktreePath = null, string? Reason = null, string? Message = null);
-internal sealed record WorkspaceDraftPromptsRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath);
+/// <param name="SpaceId">The space the page shows, which a new session belongs to; null for none.</param>
+internal sealed record WorkspaceDraftPromptsRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath, string? SpaceId = null);
 internal sealed record WorkspaceDraftPromptsResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath,
-    IReadOnlyList<SessionPromptChoice> Prompts);
+    IReadOnlyList<SessionPromptChoice> Prompts)
+{
+    /// <summary>Gets the prompt a new session starts with when the user chooses none: the agent prompt of its space, else <c>default</c>.</summary>
+    public string? DefaultPromptId { get; init; }
+}

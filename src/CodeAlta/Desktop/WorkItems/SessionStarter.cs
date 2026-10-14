@@ -79,10 +79,12 @@ internal sealed class SessionStarter : ISessionStarter
                 .ConfigureAwait(false);
             if (choice.Provider is not { } provider) return Refuse(choice.Problem ?? "No model provider is enabled.");
 
-            var agent = AgentPromptCatalog.DefaultPromptName;
-            var prompts = await _host.Commands.GetDraftPromptChoicesAsync(new(project.Id, project.ProjectPath), CancellationToken.None).ConfigureAwait(false);
-            if (prompts is null) return Refuse("The application is closing.");
-            if (!prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}'.");
+            // The agent the space of the session starts its new sessions with, else the default one.
+            var space = _shownSpace();
+            var drafts = await _host.Commands.GetDraftPromptsAsync(new(project.Id, project.ProjectPath), space, CancellationToken.None).ConfigureAwait(false);
+            if (drafts is null) return Refuse("The application is closing.");
+            var agent = drafts.DefaultPromptId;
+            if (!drafts.Prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}'.");
             if (!_host.Commands.HasCapacity) return Refuse("Too many commands are pending in CodeAlta. Try again in a moment.");
 
             if (worktree)
@@ -91,7 +93,7 @@ internal sealed class SessionStarter : ISessionStarter
                 if (!created.Succeeded) return new(null, created.Message ?? "The worktree could not be created.", "worktree_" + created.Status);
             }
 
-            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, created?.Folder, _shownSpace()).ConfigureAwait(false);
+            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, created?.Folder, space).ConfigureAwait(false);
             sessionId = session.SessionId;
             // The host completes what the choice leaves to the provider and to the model.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, choice.ModelId, choice.ModelId is null ? null : choice.Effort);

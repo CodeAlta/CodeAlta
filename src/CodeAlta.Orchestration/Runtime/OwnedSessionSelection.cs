@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using CodeAlta.Agent;
+using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -7,6 +8,12 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="Id">Effective prompt identifier.</param>
 /// <param name="Name">Display name.</param>
 public sealed record OwnedPromptChoice(string Id, string Name);
+
+/// <summary>The prompts a new session can start with in its space.</summary>
+/// <param name="Prompts">The prompts available in the space.</param>
+/// <param name="DefaultPromptId">The one a new session starts with when none is chosen: the agent prompt of its space, else <c>default</c>.</param>
+/// <param name="SpaceId">The space the session is in.</param>
+public sealed record OwnedDraftPrompts(IReadOnlyList<OwnedPromptChoice> Prompts, string DefaultPromptId, string SpaceId);
 
 /// <summary>Selectable model metadata.</summary>
 /// <param name="Id">Provider model identifier.</param>
@@ -55,14 +62,33 @@ public sealed partial class OwnedSessionCommandService
     /// <exception cref="OperationCanceledException">The caller cancels the read.</exception>
     public async Task<IReadOnlyList<OwnedPromptChoice>?> GetDraftPromptChoicesAsync(OwnedProjectReferenceScope? scope,
         CancellationToken cancellationToken = default)
+        => (await GetDraftPromptsAsync(scope, spaceId: null, cancellationToken).ConfigureAwait(false))?.Prompts;
+
+    /// <summary>
+    /// Reads the prompts a new session can start with, in the space it is created in, and the one it starts with when
+    /// none is chosen: the agent prompt the space starts its new sessions with, else <c>default</c>.
+    /// </summary>
+    /// <param name="scope">Exact project identity/path, or null for a global draft.</param>
+    /// <param name="spaceId">
+    /// The space the session is created in; null for none, where the session is in the only space of its project,
+    /// else in the default space.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the catalog read.</param>
+    /// <returns>Bounded choices and the default one, or null when the scope or host is unavailable.</returns>
+    /// <exception cref="OperationCanceledException">The caller cancels the read.</exception>
+    /// <exception cref="InvalidDataException">The global configuration cannot be parsed.</exception>
+    public async Task<OwnedDraftPrompts?> GetDraftPromptsAsync(OwnedProjectReferenceScope? scope, string? spaceId,
+        CancellationToken cancellationToken = default)
     {
         lock (_gate) { if (_closed || _retained) return null; }
         var project = scope is null ? null : await ResolveReferenceProjectAsync(scope, cancellationToken).ConfigureAwait(false);
         if (scope is not null && !ReferenceScopeMatches(scope, project)) return null;
+        var space = await _runtime.ResolveNewSessionSpaceAsync(spaceId, project, cancellationToken).ConfigureAwait(false);
         lock (_gate) { if (_closed || _retained) return null; }
         cancellationToken.ThrowIfCancellationRequested();
-        return _runtime.ListOwnedPrompts(project?.ProjectPath).Where(p => p.PromptName.Length <= 256).Take(64)
+        var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, _runtime.LoadSpaceFilter(space.Id)).Where(p => p.PromptName.Length <= 256).Take(64)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
+        return new(prompts, AgentPromptCatalog.ResolveNewSessionPromptId(null, [.. prompts.Select(static p => p.Id)], space), space.Id);
     }
 
     /// <summary>Reads bounded choices for an existing session, probing its configured provider if needed.</summary>
@@ -85,7 +111,9 @@ public sealed partial class OwnedSessionCommandService
         if (session is null) return null;
         var project = string.IsNullOrWhiteSpace(session.ProjectRef) ? null
             : await _projects.GetByIdAsync(session.ProjectRef, cancellationToken).ConfigureAwait(false);
-        var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath)
+        // The prompts of the session's own space, whatever space the window shows.
+        var space = await _runtime.GetSpaceFilterAsync(session.SpaceId, project, cancellationToken).ConfigureAwait(false);
+        var prompts = _runtime.ListOwnedPrompts(project?.ProjectPath, space)
             .Where(p => p.PromptName.Length <= 256).Take(64)
             .Select(p => new OwnedPromptChoice(p.PromptName, Bound(p.DisplayName))).ToArray();
         var provider = session.ResolvedProviderKey;

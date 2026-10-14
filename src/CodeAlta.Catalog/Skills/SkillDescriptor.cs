@@ -101,6 +101,12 @@ public sealed record SkillDescriptor
     public bool IsDisabledForProject { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the space of the session does not have this skill, which disables it whatever
+    /// the global and project configuration says.
+    /// </summary>
+    public bool IsOutsideSpace { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the skill should be advertised to the model.
     /// </summary>
     public bool IsModelVisible { get; init; }

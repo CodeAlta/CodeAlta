@@ -135,7 +135,8 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
     setPrompts([]);
     if (!epoch) return;
     const abort = new AbortController();
-    void workspace.draftPrompts({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null }, { signal: abort.signal, timeoutMilliseconds: 15000 })
+    // An automation runs in the space of its project when it is in one, else in the default space: the host reads its prompts there.
+    void workspace.draftPrompts({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, spaceId: null }, { signal: abort.signal, timeoutMilliseconds: 15000 })
       .then(reply => { if (!abort.signal.aborted && reply.status === "ok") setPrompts(reply.prompts); }).catch(() => { /* Only the default prompt is offered. */ });
     return () => abort.abort();
   }, [epoch, project?.id, project?.path]);
