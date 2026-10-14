@@ -75,6 +75,7 @@ Click the name of a space, or its card, to open the page of that space. **Spaces
 - **Projects**: a checklist of all the projects, to tick the ones the space holds;
 - **Available here**: the providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has));
 - **New sessions**: the agent prompt its new sessions start with;
+- **Tools**: the built-in tools its sessions do without;
 - **Identity**: the Git, GitHub and Jira identity of its sessions (see [Identity](#identity));
 - **Show**, to show that space in the window, and **Delete**, which asks before it deletes the space.
 
@@ -138,6 +139,10 @@ A resource of a project (in its `.alta` folder) follows its project, which is al
 ### New sessions
 
 In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins.
+
+### Tools
+
+In **Tools**, turn off built-in tools for the sessions of the space, such as `shell_command`. What Settings > Permissions turns off for every session is shown beside them. See [Tools turned off](workspace.md#tools-turned-off).
 
 ## Identity
 
@@ -264,12 +269,14 @@ color: "#9d3f9d"
 order: 3
 new_sessions:
   agent_prompt: reviewer
+tools:
+  disabled: [shell_command]
 ---
 
 Libraries I maintain and the projects I contribute to.
 ```
 
-The text under the header is **What it is for**. `order` is the place of the space in the list. `new_sessions.agent_prompt` is the agent prompt of **New sessions**. The Default space has a file, `default.md`, only once you change its name, its icon, its color or its description.
+The text under the header is **What it is for**. `order` is the place of the space in the list. `new_sessions.agent_prompt` is the agent prompt of **New sessions**, and `tools.disabled` the tools of **Tools**. The Default space has a file, `default.md`, only once you change its name, its icon, its color or its description.
 
 The spaces of a project are written in the file of the project, `~/.alta/projects/<name>.md`, as one line of its header that lists the ids of its spaces:
 

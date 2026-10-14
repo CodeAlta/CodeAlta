@@ -687,7 +687,7 @@ The **General** page contains:
 - **Welcome page**: **Show the welcome page at startup** and **Animate the welcome page**, the same two switches as on the [welcome page](#welcome-page-desktop).
 - **Startup and closing**: turn Remote Control back on at startup, and choose what closing the window does—ask, keep CodeAlta running in the notification area, or exit.
 
-The **Permissions** page keeps the agent permission modes and adds **Confirmations**: **Ask before deleting a session** and **Ask before archiving a project**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
+The **Permissions** page keeps the agent permission modes, the [tools every session does without](#tools-turned-off), and **Confirmations**: **Ask before deleting a session** and **Ask before archiving a project**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
 
 The zoom of the window is in the title bar, as a percentage before the theme switch. Click it to zoom out, to zoom in, or to go back to 100% with a click on the percentage. `Ctrl+-`, `Ctrl+=` and `Ctrl+0` do the same, and the zoom is kept for the next start.
 
@@ -799,6 +799,27 @@ The Workspace Settings dialog covers the navigator and the UI theme, and is sepa
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-workspace-settings-with-language.png" alt="CodeAlta Workspace Settings dialog showing theme, recent sessions, language, and auto-approve options" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Workspace Settings dialog includes the language selector and a restart notice for fully applying language changes.</figcaption>
 </figure>
+
+### Tools turned off
+
+A session can do without some built-in tools, such as `shell_command` when you prefer to give the agent specific tools through MCP servers or plugins. It does without the tools turned off in any of three places, added together:
+
+{.table}
+| Where | For | File |
+|---|---|---|
+| Settings > Permissions, **Tools** | every session | `[tools] disabled = ["shell_command"]` in `~/.alta/config.toml` |
+| The page of a space, **Tools** | the sessions of that space | `tools: { disabled: [...] }` in the file of the space |
+| The editor of an agent prompt, **Tools turned off** | the sessions of that agent | `disabled_tools: [...]` in the front matter of the prompt |
+
+Click **Turn off a tool** to choose one of the built-in tools, or type the name of another tool. A change applies from the next turn of each session.
+
+Without `shell_command`, a session:
+
+- is not offered the tool, and its instructions do not mention it;
+- cannot start a command with `alta job start`, nor create or turn on an automation that runs a command;
+- in a Claude Code session, the CLI is started without its own shell tools, and a command it asks to run is refused.
+
+An agent can still change files with its file tools: turning off the shell is not a sandbox.
 
 ### Tool permissions
 

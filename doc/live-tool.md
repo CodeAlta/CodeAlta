@@ -266,6 +266,7 @@ A calling session reaches only the resources of its own space (`SpaceFilter`, fr
 - An agent forks (`alta session fork`), sends, queues, steers, messages, requests and sets reminders only
   for the sessions of its own space: `space.notOwnSpace` (exit code 7) otherwise.
 - No `alta` command writes the spaces of a resource: only the window does (`spaces.assignResource`).
+- A session that does without `shell_command` (see `doc/runtime.md`, "Built-in local tools") cannot start a command with `alta job start` (`job.shellDisabled`), nor create or enable an automation with a `command@` trigger (`automation.shellDisabled`), whether it calls or the job is for it. Both are `PolicyDenied`.
 
 ## Session commands
 

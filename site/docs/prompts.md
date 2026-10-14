@@ -206,6 +206,7 @@ Agent prompt frontmatter is the user-facing entry point for prompt composition. 
 | `project_context` | No | Include repository instruction files such as `AGENTS.md`. |
 | `runtime_context` | No | Include current date, platform, working directory, project root, how to write a link to a file, and session kind. |
 | `tool_guidance` | No | Include generated host-tool guidance and available agent-prompt discovery. |
+| `disabled_tools` | No | Built-in tools a session of this prompt does without, such as `[shell_command, webget]`. See [Tools turned off](workspace.md#tools-turned-off). |
 
 Do not restate defaults in every prompt. When generated-section boolean fields are omitted, CodeAlta uses its normal defaults, which currently include all generated sections when content is available. Add one of those booleans only when a workflow intentionally needs a different composition.
 

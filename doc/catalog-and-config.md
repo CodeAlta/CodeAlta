@@ -300,6 +300,8 @@ Projects of the Contoso contract.
 - `identity.git` has `name`, `email`, `ssh_key` (the private key to fetch and push), `sign` (`off`, `ssh` or `gpg`, which needs `signing_key`), `signing_key` and `signoff`; `identity.github.config_dir` is the folder of a GitHub CLI profile; `identity.jira` has `site`, `email` and `token_env`, the **name** of the environment variable that holds the token. Only paths and names of variables are kept, never a secret.
 - `tools.disabled` lists names of tools (letters, digits, `_`, `-`, `.`, `:`), at most 64.
 - A value that is not valid in a file written by hand is left out when the file is read (`SpaceSettings.Sanitized`), and the space is read with the rest. `SpaceCatalog.UpdateSettingsAsync` changes the settings from what the file has now, refuses a value that is not valid with what is wrong (`SpaceChangeStatus.Invalid`), and keeps the name, the icon, the color and the description; a rename keeps the settings.
+- `new_sessions.agent_prompt` is the agent prompt of new sessions of the space, and `tools.disabled` adds to the tools its sessions do without (see `doc/runtime.md`, "Built-in local tools").
+- The global `config.toml` has the same list for every session, `[tools] disabled = ["shell_command"]` (`CodeAltaConfigStore.LoadGlobalDisabledTools`/`SaveGlobalDisabledTools`), read from the user's file only.
 - The identity is applied to the sessions of the space (see "The identity of a session" below); the other settings are read and validated, and what uses them comes with the work that applies them.
 
 ### The space of a session
