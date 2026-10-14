@@ -214,6 +214,16 @@ internal sealed class SpacesService
         }, cancellationToken));
     }
 
+    /// <summary>Sets the built-in tools the sessions of a space do without; an empty list for none.</summary>
+    [NeoRpcMethod("setDisabledTools")]
+    public Task<SpaceChangeResponse> SetDisabledToolsAsync(SpaceDisabledToolsRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var names = (request.Tools ?? []).Select(static name => name?.Trim() ?? string.Empty).Distinct(StringComparer.Ordinal).ToArray();
+        return ChangeAsync(request.ExpectedEpoch, () => _catalog!.UpdateSettingsAsync(request.Id ?? string.Empty,
+            settings => settings with { Tools = names.Length == 0 ? null : new SpaceTools(names) }, cancellationToken));
+    }
+
     /// <summary>What a session can use: the space it belongs to and the resources of that space that are turned on.</summary>
     [NeoRpcMethod("sessionResources")]
     public async Task<SpaceSessionResourcesResponse> SessionResourcesAsync(SpaceSessionResourcesRequest request, CancellationToken cancellationToken)
@@ -382,6 +392,7 @@ internal sealed class SpacesService
             [.. members.ProjectIds], members.Space.SourcePath)
         {
             AgentPrompt = members.Space.Settings.NewSessions?.AgentPrompt,
+            DisabledTools = members.Space.Settings.Tools?.Disabled ?? [],
         };
 
     private static string Cut(string value, int maximum)
@@ -409,6 +420,9 @@ internal sealed record SpaceItem(string Id, string Name, string? Description, st
 {
     /// <summary>Gets the agent prompt the new sessions of the space start with when none is chosen; null for the default one.</summary>
     public string? AgentPrompt { get; init; }
+
+    /// <summary>Gets the built-in tools the sessions of the space do without.</summary>
+    public IReadOnlyList<string> DisabledTools { get; init; } = [];
 }
 
 /// <summary>The spaces of the resources that list some; a resource that is not listed is in every space.</summary>
@@ -435,6 +449,12 @@ internal sealed record SpaceResourceAssignment(string Key, IReadOnlyList<string>
 /// <param name="Key">Its key, name or id.</param>
 /// <param name="Spaces">The identifiers of its spaces; empty for every space.</param>
 internal sealed record SpaceResourceAssignRequest(string ExpectedEpoch, string? Kind, string? Key, IReadOnlyList<string>? Spaces);
+
+/// <summary>Sets the built-in tools the sessions of a space do without.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="Id">The space.</param>
+/// <param name="Tools">The names of the tools; empty for none.</param>
+internal sealed record SpaceDisabledToolsRequest(string ExpectedEpoch, string? Id, IReadOnlyList<string>? Tools);
 
 /// <summary>Names a session whose resources are read.</summary>
 internal sealed record SpaceSessionResourcesRequest(string ExpectedEpoch, string? SessionId);

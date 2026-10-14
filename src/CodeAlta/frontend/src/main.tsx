@@ -4130,7 +4130,7 @@ function App() {
       : settingsSection === "general" ? <GeneralSettings
         remoteControl={owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null}
         closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null} />
-      : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }}
+      : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }} epoch={owned ? status!.hostEpoch : null}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}

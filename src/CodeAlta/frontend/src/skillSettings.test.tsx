@@ -130,8 +130,8 @@ test("invalid or missing names cannot write name-based enablement, but keep thei
 });
 
 test("a skill of the user shows its spaces beside its switch; a skill of a project follows its project and shows none", () => {
-  const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null },
-    { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null }]);
+  const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [] },
+    { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [] }]);
   const assignments = readAssignments({ status: "ok", providers: [], mcpServers: [], plugins: [], skills: [{ key: "terraform", spaces: ["work"] }], prompts: [] });
   const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
     createElement(SkillRows, { skills: [entry("terraform", "UserAlta"), entry("notes", "UserCommon"), entry("local", "ProjectAlta")], empty: "No skills were found.",

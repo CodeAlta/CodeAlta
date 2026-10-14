@@ -31,8 +31,8 @@ test("a session is given another space through the host, which says what moved",
 
 test("the space a session is in is not offered as the one to move it to", () => {
   const spaces = readSpaces([
-    { id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null },
-    { id: "work", name: "Work", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null },
+    { id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [] },
+    { id: "work", name: "Work", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [] },
   ]);
   assert.deepEqual(spaceMoveTargets(spaces, "work").map(space => space.id), ["default"]);
   assert.deepEqual(spaceMoveTargets(spaces, "default").map(space => space.id), ["work"]);

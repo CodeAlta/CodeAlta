@@ -157,6 +157,49 @@ internal sealed partial class GlobalConfigService
         return new("ok", CodeAlta.Agent.AgentSessionTitles.NameOf(mode));
     }
 
+    /// <summary>Reads the tools every session does without (<c>[tools] disabled</c>), and the names of the built-in tools.</summary>
+    [NeoRpcMethod("disabledTools")]
+    public GlobalConfigDisabledToolsResponse DisabledTools(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        IReadOnlyList<string> known = CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.BuiltInToolNames;
+        if (_store is null) return new("unavailable", [], known);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", [], known);
+        try
+        {
+            lock (_gate) return new("ok", [.. _store.LoadGlobalDisabledTools().Order(StringComparer.Ordinal)], known);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new("config_invalid", [], known);
+        }
+    }
+
+    /// <summary>Saves the tools every session does without; a session runs without them from its next turn.</summary>
+    [NeoRpcMethod("saveDisabledTools")]
+    public GlobalConfigDisabledToolsResponse SaveDisabledTools(GlobalConfigSaveDisabledToolsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        IReadOnlyList<string> known = CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.BuiltInToolNames;
+        if (_store is null) return new("unavailable", [], known);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", [], known);
+        var names = (request.Tools ?? []).Select(static name => name?.Trim() ?? string.Empty).Distinct(StringComparer.Ordinal).ToArray();
+        if (names.Length > SpaceTools.MaximumTools || names.Any(static name => !SpaceTools.IsToolName(name))) return new("invalid", [], known);
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveGlobalDisabledTools(names);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+            {
+                return new("write_failed", [], known);
+            }
+        }
+
+        return new("ok", [.. names.Order(StringComparer.Ordinal)], known);
+    }
+
     /// <summary>Lists the configured provider definitions, including disabled ones, without their secrets.</summary>
     [NeoRpcMethod("providers")]
     public GlobalConfigProvidersResponse Providers(GlobalConfigProvidersRequest request)
@@ -581,6 +624,20 @@ internal sealed record GlobalConfigSaveSessionTitlesRequest(string? ExpectedEpoc
 /// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c> or <c>write_failed</c>.</param>
 /// <param name="Mode">The mode in the settings; null unless <c>ok</c>.</param>
 internal sealed record GlobalConfigSessionTitlesResponse(string Status, string? Mode);
+
+/// <summary>The tools every session does without.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="Tools">The names of the tools.</param>
+internal sealed record GlobalConfigSaveDisabledToolsRequest(string? ExpectedEpoch, IReadOnlyList<string>? Tools);
+
+/// <summary>
+/// The tools every session does without. Status is <c>ok</c>, <c>invalid</c>, <c>config_invalid</c>, <c>write_failed</c>,
+/// <c>unavailable</c> or <c>stale_epoch</c>.
+/// </summary>
+/// <param name="Status">How the call ended.</param>
+/// <param name="Tools">The names of the tools turned off.</param>
+/// <param name="Known">The names of the built-in tools, which the page offers.</param>
+internal sealed record GlobalConfigDisabledToolsResponse(string Status, IReadOnlyList<string> Tools, IReadOnlyList<string> Known);
 internal sealed record GlobalConfigProvidersResponse(string Status, string? Revision, string? DefaultProvider,
     IReadOnlyList<GlobalConfigProvider> Providers, IReadOnlyList<string> ProviderTypes, IReadOnlyList<string> ReasoningEfforts,
     IReadOnlyList<GlobalConfigProviderTypeDefaults> TypeDefaults, IReadOnlyList<GlobalConfigBuiltInProvider> BuiltIn)

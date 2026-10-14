@@ -182,7 +182,7 @@ export const spaceIdentity = Object.freeze({ get: async () => ({ status: "unavai
 export const spaces = Object.freeze({ list: async () => ({ status: "unavailable", spaces: [] }), activity: async () => ({ status: "unavailable", sessions: [], truncated: false }),
   create: unavailable, update: unavailable, delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable,
   watch: unavailable, assignments: async () => ({ status: "unavailable", providers: [], mcpServers: [], plugins: [], skills: [], prompts: [] }),
-  assignResource: unavailable, setAgentPrompt: unavailable,
+  assignResource: unavailable, setAgentPrompt: unavailable, setDisabledTools: unavailable,
   sessionResources: async () => ({ status: "unavailable", spaceId: null, mcpServers: [], skills: [], prompts: [], plugins: [] }) });
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
@@ -244,6 +244,8 @@ export const globalConfig = Object.freeze({
   addBuiltInProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   sessionTitles: async () => ({ status: "unavailable", mode: null }),
   saveSessionTitles: async () => ({ status: "unavailable", mode: null }),
+  disabledTools: async () => ({ status: "unavailable", tools: [], known: [] }),
+  saveDisabledTools: async () => ({ status: "unavailable", tools: [], known: [] }),
 });
 
 // The demo has no host to edit: every Settings editor reports itself unavailable.

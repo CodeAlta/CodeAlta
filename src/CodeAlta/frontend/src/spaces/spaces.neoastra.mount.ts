@@ -8,7 +8,7 @@ export { projectFiles, projectGit } from "../demo-api";
 import { globalConfig as demoConfig } from "../demo-api";
 
 const space = (id: string, name: string, projectIds: string[], look: Partial<SpaceItem> = {}): SpaceItem =>
-  ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, agentPrompt: null, ...look });
+  ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, agentPrompt: null, disabledTools: [], ...look });
 // The default space holds both projects of the fixture; Work has the second one.
 const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work",
   localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" })];
@@ -62,7 +62,7 @@ export const spaces = {
   shown: async (request: SpaceShownRequest) => { fixture.shown.push(request.id ?? ""); return done(); },
   assignments: async () => ({ status: "ok", providers: [{ key: "claude-business", spaces: ["work"] }, { key: "claude-home", spaces: ["default"] }],
     mcpServers: [], plugins: [], skills: [], prompts: [] }),
-  assignResource: done, setAgentPrompt: done,
+  assignResource: done, setAgentPrompt: done, setDisabledTools: done,
   sessionResources: async () => ({ status: "unavailable", spaceId: null, mcpServers: [], skills: [], prompts: [], plugins: [] }),
   watch: async (_request: object, options?: { signal?: AbortSignal }) => {
     const waiting: SpacesEvent[] = [];

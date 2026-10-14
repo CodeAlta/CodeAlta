@@ -38,4 +38,15 @@ public sealed class DisabledToolsConfigTests
         CollectionAssert.AreEqual(new[] { "a", "b" }, Read("a, b, not a tool").ToArray());
         Assert.AreEqual(0, PromptFileFormat.ParseDisabledTools(new Dictionary<string, string>()).Count);
     }
+
+    [TestMethod]
+    public void TheToolsAnAgentPromptTurnsOff_SurviveASaveOfItsFile()
+    {
+        var content = new PromptFileContent("Reader", null, null, "Read only.", false) { DisabledTools = ["shell_command", "write_file"] };
+        var text = PromptFileFormat.Serialize(PromptResourceKind.Agent, content);
+        StringAssert.Contains(text, "disabled_tools: [shell_command, write_file]");
+        CollectionAssert.AreEqual(new[] { "shell_command", "write_file" }, PromptFileFormat.Parse(PromptResourceKind.Agent, text).DisabledTools.ToArray());
+        Assert.IsFalse(PromptFileFormat.Serialize(PromptResourceKind.Agent, content with { DisabledTools = [] }).Contains("disabled_tools", StringComparison.Ordinal));
+        Assert.ThrowsExactly<ArgumentException>(() => PromptFileFormat.Validate(PromptResourceKind.Agent, content with { DisabledTools = ["rm -rf"] }));
+    }
 }

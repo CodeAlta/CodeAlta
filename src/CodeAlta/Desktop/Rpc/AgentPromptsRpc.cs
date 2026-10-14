@@ -118,7 +118,10 @@ internal sealed class AgentPromptsService
                 return new("too_large", null, null);
             return new("ok", new(identity.Id, identity.Kind.ToString(), identity.Scope.ToString(), identity.Scope == PromptResourceScope.BuiltIn,
                 content.Name, content.Description, identity.Kind == PromptResourceKind.Agent ? content.SystemPromptName : null,
-                content.Body, content.Append, snapshot.File.Revision.ContentHash!, store.GetPath(identity)), null);
+                content.Body, content.Append, snapshot.File.Revision.ContentHash!, store.GetPath(identity))
+            {
+                DisabledTools = identity.Kind == PromptResourceKind.Agent ? content.DisabledTools : [],
+            }, null);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -152,8 +155,12 @@ internal sealed class AgentPromptsService
         if (request.Body.Length > MaximumBodyLength) return new("too_large", null, null);
         if (!Line(request.Name, MaximumNameLength) || !Line(request.Description, MaximumDescriptionLength) || !Line(request.SystemPromptId, MaximumIdLength))
             return new("invalid", null, "The name, description or system prompt id is too long or contains control characters.");
+        if ((request.DisabledTools ?? []).Count > SpaceTools.MaximumTools) return new("invalid", null, $"An agent prompt turns off at most {SpaceTools.MaximumTools} tools.");
         var content = new PromptFileContent(Optional(request.Name), Optional(request.Description),
-            identity.Kind == PromptResourceKind.Agent ? Optional(request.SystemPromptId) : null, request.Body.Trim(), request.Append);
+            identity.Kind == PromptResourceKind.Agent ? Optional(request.SystemPromptId) : null, request.Body.Trim(), request.Append)
+        {
+            DisabledTools = identity.Kind == PromptResourceKind.Agent ? [.. (request.DisabledTools ?? []).Select(static name => name.Trim()).Distinct(StringComparer.Ordinal)] : [],
+        };
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return new(project.Status, null, null);
         if (project.Root is null && identity.Scope == PromptResourceScope.Project) return new("invalid", null, ProjectRequired);
@@ -388,10 +395,15 @@ internal sealed record AgentPromptReadResponse(string Status, AgentPromptDocumen
 
 /// <summary>The values written in one prompt file (null where the file leaves them unset), its revision and its path.</summary>
 internal sealed record AgentPromptDocument(string Id, string Kind, string Scope, bool ReadOnly, string? Name, string? Description,
-    string? SystemPromptId, string Body, bool Append, string Revision, string? File = null);
+    string? SystemPromptId, string Body, bool Append, string Revision, string? File = null)
+{
+    /// <summary>Gets the built-in tools a session of the agent prompt does without (<c>disabled_tools</c>).</summary>
+    public IReadOnlyList<string> DisabledTools { get; init; } = [];
+}
 
 /// <summary>A prompt to write; a null expected revision creates the file and refuses an existing one.</summary>
+/// <param name="DisabledTools">The built-in tools a session of an agent prompt does without; null or empty for none.</param>
 internal sealed record AgentPromptSaveRequest(string? ExpectedEpoch, string? ProjectId, string? Kind, string? Scope, string? Id,
-    string? ExpectedRevision, string? Name, string? Description, string? SystemPromptId, string? Body, bool Append);
+    string? ExpectedRevision, string? Name, string? Description, string? SystemPromptId, string? Body, bool Append, IReadOnlyList<string>? DisabledTools = null);
 internal sealed record AgentPromptDeleteRequest(string? ExpectedEpoch, string? ProjectId, string? Kind, string? Scope, string? Id, string? ExpectedRevision);
 internal sealed record AgentPromptMutationResponse(string Status, string? Revision, string? Message);

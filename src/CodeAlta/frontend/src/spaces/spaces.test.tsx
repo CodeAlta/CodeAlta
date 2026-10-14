@@ -12,7 +12,7 @@ import { SpaceScopeChip, spaceNames, toggledSpaces } from "./SpaceChips";
 import { inSpace, noAssignments, readAssignments, resourceSpaces, spacesWith, spacesWithout } from "./spaces";
 
 const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem> = {}): SpaceItem =>
-  ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, agentPrompt: null, ...changes });
+  ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, agentPrompt: null, disabledTools: [], ...changes });
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `C:\\code\\${id}`, archived });
 const session = (id: string, scopeKind: string | null, projectId: string | null, workspacePath: string | null): WorkspaceSession => ({ id, title: id, workspacePath, providerKey: "codex",
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
@@ -25,7 +25,7 @@ test("the spaces are read as the host lists them, the default one first, and wha
     item("work", ["z"]), { ...item("bad"), id: "Not An Id" }, { ...item("noname"), name: "" }, null as unknown as SpaceItem,
     item("odd", ["a", 7 as unknown as string, ""], { color: "blue", icon: "" })]);
   assert.deepEqual(spaces.map(space => space.id), ["default", "work", "odd"]);
-  assert.deepEqual(spaces[1], { id: "work", name: "Work", description: "Paid work", icon: "briefcase", color: "#2D72D2", isDefault: false, projectIds: ["a", "b"], file: "C:\\alta\\spaces\\work.md", agentPrompt: null });
+  assert.deepEqual(spaces[1], { id: "work", name: "Work", description: "Paid work", icon: "briefcase", color: "#2D72D2", isDefault: false, projectIds: ["a", "b"], file: "C:\\alta\\spaces\\work.md", agentPrompt: null, disabledTools: [] });
   assert.deepEqual([spaces[2].projectIds, spaces[2].color, spaces[2].icon], [["a"], null, null]);
   assert.equal(spaces[0].isDefault, true);
   // A list without a default space gets one: the window always has a space that holds every project.
@@ -222,6 +222,7 @@ test("the hub lists the spaces once, follows what the host says, and says what e
     assignResource: async request => { calls.push(`assignResource ${request.kind} ${request.key} ${request.spaces}`); return ok(); },
     setAgentPrompt: async request => { calls.push(`setAgentPrompt ${request.id} ${request.agentPrompt}`); return ok(); },
     sessionResources: async () => ({ status: "ok", spaceId: "work", mcpServers: [], skills: [], prompts: [], plugins: [] }),
+    setDisabledTools: async request => { calls.push(`setDisabledTools ${request.id} ${request.tools}`); return ok(); },
   };
   const timers: { run: () => void; milliseconds: number }[] = [];
   const hub = createSpacesHub(api, { set: (run, milliseconds) => { const timer = { run, milliseconds }; timers.push(timer); return timer; }, clear: timer => { timers.splice(timers.indexOf(timer as never), 1); } });
@@ -280,6 +281,8 @@ test("the hub lists the spaces once, follows what the host says, and says what e
   assert.equal(calls.includes("assignResource skill terraform work,default"), true);
   assert.equal((await hub.setAgentPrompt("work", null)).ok, true);
   assert.equal(calls.includes("setAgentPrompt work null"), true);
+  assert.equal((await hub.setDisabledTools("work", ["shell_command"])).ok, true);
+  assert.equal(calls.includes("setDisabledTools work shell_command"), true);
   assert.equal((await hub.sessionResources("s1"))?.spaceId, "work");
   assert.equal(calls.includes("shown work"), true);
   unsubscribe();
@@ -292,7 +295,7 @@ test("a host that keeps no spaces leaves the window with the default one, and no
   const unavailable = async () => { throw new Error("no host"); };
   const hub = createSpacesHub({ list: async () => ({ status: "unavailable", spaces: [] }), activity: unavailable, watch: unavailable, create: unavailable, update: unavailable,
     delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable, assignments: unavailable, assignResource: unavailable, setAgentPrompt: unavailable,
-    sessionResources: unavailable });
+    sessionResources: unavailable, setDisabledTools: unavailable });
   let done = false;
   const waited = hub.whenLoaded(60_000).then(() => { done = true; });
   hub.unavailable();
@@ -301,7 +304,7 @@ test("a host that keeps no spaces leaves the window with the default one, and no
   assert.deepEqual([hub.getSnapshot().loaded, hub.getSnapshot().available], [true, false]);
   const other = createSpacesHub({ list: async () => ({ status: "unavailable", spaces: [] }), activity: unavailable, watch: unavailable, create: unavailable, update: unavailable,
     delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable, assignments: unavailable, assignResource: unavailable, setAgentPrompt: unavailable,
-    sessionResources: unavailable });
+    sessionResources: unavailable, setDisabledTools: unavailable });
   const disconnect = other.connect("epoch");
   await other.whenLoaded(60_000);
   assert.deepEqual([other.getSnapshot().loaded, other.getSnapshot().available], [true, false]);
@@ -409,6 +412,7 @@ test("a card of the overview opens the page of its space, which shows what it is
   assert.match(page, /<h2[^>]*>New sessions</);
   assert.match(page, /<option value="reviewer" selected="">reviewer<\/option>/, "The agent prompt of the space is shown while the prompts are read.");
   assert.match(page, /Model tiers/, "New sessions has the model tiers of the space.");
+  assert.match(page, /<h2[^>]*>Tools</);
   assert.doesNotMatch(page, /Identity/, "Identity has nothing to show yet.");
 
   const pool = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[0]} spaces={spaces} projects={projects} chats={0} shown activity={undefined} canEdit

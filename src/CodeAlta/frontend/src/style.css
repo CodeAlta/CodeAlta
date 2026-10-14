@@ -1414,6 +1414,16 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-editor-rows .settings-editor-name small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
 .settings-editor-name small { color: var(--muted); }
 .settings-editor-tags { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+/* The tools a session does without: a tag each, then the button that turns off another one. */
+.disabled-tools { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+.disabled-tools .disabled-tool code { font-size: 11.5px; background: none; padding: 0; box-shadow: none; }
+.disabled-tools .disabled-tool[data-inherited] { opacity: .7; }
+.disabled-tools-none { color: var(--muted); font-size: 12px; }
+.disabled-tools-add.bp6-button { min-height: 22px; color: var(--muted); }
+.disabled-tools-add.bp6-button:hover:not(.bp6-disabled) { color: var(--text); }
+.disabled-tools-menu { min-width: 220px; max-height: 360px; overflow: auto; }
+.disabled-tools-menu code { font-size: 12px; background: none; padding: 0; box-shadow: none; }
+.disabled-tools-other { list-style: none; padding: 4px 6px; }
 .settings-editor-tags .bp6-switch { margin: 0; }
 /* A server shows where it is kept, the file of another tool it is read from and whether it is overridden: its tags have a row of their own. */
 .mcp-settings .settings-editor-list.bp6-card-list > .bp6-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; }

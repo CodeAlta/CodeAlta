@@ -13,14 +13,15 @@ import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
+import { DisabledToolsField } from "./DisabledToolsField";
 
 type Kind = "Agent" | "System";
 type PromptForm = Readonly<{ id: string; kind: Kind; scope: SettingsScope; name: string; description: string; body: string;
-  systemPromptId: string; append: boolean; revision: string | null }>;
+  systemPromptId: string; append: boolean; disabledTools: readonly string[]; revision: string | null }>;
 const added = "\u0000new";
 const formOf = (document: AgentPromptDocument): PromptForm => ({ id: document.id, kind: document.kind === "System" ? "System" : "Agent",
   scope: document.scope === "Project" ? "Project" : "Global", name: document.name ?? "", description: document.description ?? "", body: document.body,
-  systemPromptId: document.systemPromptId ?? "", append: document.append, revision: document.revision });
+  systemPromptId: document.systemPromptId ?? "", append: document.append, disabledTools: document.disabledTools ?? [], revision: document.revision });
 
 /** Settings page for agent and system prompts: the prompt files on the left, an editor on the right. */
 export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPrompts, filesApi, spaceScope = null }: {
@@ -81,7 +82,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     if (busy) return;
     setNotice(null); setSelected(added); setDocument(null);
     setForm({ id: from?.id ?? "", kind, scope: "Global", name: from?.name ?? "", description: from?.description ?? "", body: from?.body ?? "",
-      systemPromptId: from?.systemPromptId ?? "", append: from?.append ?? kind === "Agent", revision: null });
+      systemPromptId: from?.systemPromptId ?? "", append: from?.append ?? kind === "Agent", disabledTools: from?.disabledTools ?? [], revision: null });
   }
   async function save() {
     if (!form || problem || busy || readOnly) return;
@@ -90,7 +91,8 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     const agent = form.kind === "Agent";
     if (await mutate(() => api.save({ expectedEpoch: epoch, projectId, id, kind: form.kind, scope: form.scope, expectedRevision: form.revision,
       name: agent ? form.name.trim() || id : document?.name ?? null, description: agent ? form.description.trim() || null : document?.description ?? null,
-      body: form.body, systemPromptId: agent && form.systemPromptId ? form.systemPromptId : null, append: agent && form.append }, { timeoutMilliseconds: 30000 }), "Saved."))
+      body: form.body, systemPromptId: agent && form.systemPromptId ? form.systemPromptId : null, append: agent && form.append,
+      disabledTools: agent ? form.disabledTools : [] }, { timeoutMilliseconds: 30000 }), "Saved."))
       setSelected(identity({ kind: form.kind, scope: form.scope, id }));
   }
   async function remove() {
@@ -138,6 +140,9 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
                 </HTMLSelect></FormGroup>
               <FormGroup label={t("Description")} labelFor="prompt-description" className="settings-editor-wide">
                 <InputGroup id="prompt-description" value={form.description} disabled={busy || readOnly} onChange={event => edit({ description: event.target.value })} /></FormGroup>
+              <FormGroup label={t("Tools turned off")} className="settings-editor-wide" helperText={t("A session of this agent does without them.")}>
+                <DisabledToolsField tools={form.disabledTools} disabled={busy || readOnly} label={t("Tools turned off")} onChange={disabledTools => edit({ disabledTools })} />
+              </FormGroup>
               <Checkbox className="settings-editor-wide" checked={form.append} disabled={busy || readOnly} label={t("Add to the system prompt instead of replacing it")}
                 onChange={event => edit({ append: event.currentTarget.checked })} />
             </>}

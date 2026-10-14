@@ -23,6 +23,8 @@ export type Space = Readonly<{
   file: string | null;
   /** The agent prompt its new sessions start with when none is chosen; null for the default one. */
   agentPrompt: string | null;
+  /** The built-in tools its sessions do without. */
+  disabledTools: readonly string[];
 }>;
 
 /** The identifier of the default space, which holds every project and is always there. */
@@ -39,7 +41,7 @@ const identifier = (value: unknown): value is string => typeof value === "string
 
 /** The default space of a window whose host lists none: it holds every project. */
 export const defaultSpace: Space = Object.freeze({ id: defaultSpaceId, name: "Default", description: null, icon: null, color: null, isDefault: true,
-  projectIds: Object.freeze([]) as readonly string[], file: null, agentPrompt: null });
+  projectIds: Object.freeze([]) as readonly string[], file: null, agentPrompt: null, disabledTools: Object.freeze([]) as readonly string[] });
 
 /**
  * The spaces as the host lists them: the default one first, each once. What is not a space is left out, and a
@@ -54,11 +56,19 @@ export function readSpaces(items: readonly SpaceItem[] | null | undefined): read
     spaces.push({ id: item.id, name: item.name, description: text(item.description, 4096) ? item.description : null,
       icon: text(item.icon, 64) ? item.icon : null, color: brandColor(item.color) ?? null, isDefault: item.id === defaultSpaceId,
       projectIds: Array.isArray(item.projectIds) ? item.projectIds.filter((id: unknown) => text(id, 256)) : [], file: text(item.file, 4096) ? item.file : null,
-      agentPrompt: text(item.agentPrompt, 128) ? item.agentPrompt : null });
+      agentPrompt: text(item.agentPrompt, 128) ? item.agentPrompt : null,
+      disabledTools: toolNames(item.disabledTools) });
   }
   const first = spaces.findIndex(space => space.isDefault);
   if (first < 0) return [defaultSpace, ...spaces];
   return first === 0 ? spaces : [spaces[first], ...spaces.slice(0, first), ...spaces.slice(first + 1)];
+}
+
+// The names of tools a space turns off, each once.
+function toolNames(value: unknown): readonly string[] {
+  const names: string[] = [];
+  for (const name of Array.isArray(value) ? (value as readonly unknown[]).slice(0, 64) : []) if (text(name, 128) && !names.includes(name)) names.push(name);
+  return names;
 }
 
 /** Whether two readings list the same spaces with the same projects: a reading that changes nothing is not shown again. */
@@ -66,7 +76,8 @@ export function sameSpaces(left: readonly Space[], right: readonly Space[]): boo
   return left === right || left.length === right.length && left.every((space, index) => {
     const other = right[index];
     return space.id === other.id && space.name === other.name && space.description === other.description && space.icon === other.icon
-      && space.color === other.color && space.file === other.file && space.agentPrompt === other.agentPrompt && space.projectIds.length === other.projectIds.length
+      && space.color === other.color && space.file === other.file && space.agentPrompt === other.agentPrompt && space.disabledTools.join("\n") === other.disabledTools.join("\n")
+      && space.projectIds.length === other.projectIds.length
       && space.projectIds.every((id, at) => id === other.projectIds[at]);
   });
 }

@@ -247,7 +247,7 @@ test("the window shows one space at a time: its projects, its sessions and its o
 
       await evaluate("document.querySelector('.space-card .space-open').click()");
       assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work'"), true);
-      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects", "Available here", "New sessions", "Identity"]);
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects", "Available here", "New sessions", "Tools", "Identity"]);
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-available-tabs .bp6-tab')].map(tab=>tab.firstChild.textContent)"),
         ["Providers", "MCP Servers", "Skills", "Agent prompts", "Plugins"]);
       // The providers come first: the account of Work and the one of every space are here, the one of the default space is not.

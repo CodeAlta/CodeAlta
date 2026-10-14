@@ -225,6 +225,14 @@ public sealed class SpacesRpcTests
         Assert.AreEqual("ok", (await fixture.Service.SetAgentPromptAsync(new(Epoch, "business", null), default)).Status);
         Assert.IsNull((await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "business").AgentPrompt);
         Assert.AreEqual("not_found", (await fixture.Service.SetAgentPromptAsync(new(Epoch, "missing", "reviewer"), default)).Status);
+
+        // The tools the sessions of a space do without.
+        Assert.AreEqual("ok", (await fixture.Service.SetDisabledToolsAsync(new(Epoch, "business", ["shell_command", "shell_command", "webget"]), default)).Status);
+        CollectionAssert.AreEqual(new[] { "shell_command", "webget" },
+            (await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "business").DisabledTools.ToArray());
+        Assert.AreEqual("invalid", (await fixture.Service.SetDisabledToolsAsync(new(Epoch, "business", ["rm -rf"]), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.SetDisabledToolsAsync(new(Epoch, "business", []), default)).Status);
+        Assert.AreEqual(0, (await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "business").DisabledTools.Count);
         events.Dispose();
     }
 

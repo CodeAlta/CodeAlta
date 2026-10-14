@@ -157,6 +157,16 @@ public static class AgentBuiltInToolFactory
         """);
 
     /// <summary>
+    /// Gets the names of the built-in tools, in the order a session is given them: what a session, a space or an
+    /// agent prompt can turn off.
+    /// </summary>
+    public static IReadOnlyList<string> BuiltInToolNames { get; } =
+    [
+        "read_file", "view_image", "list_dir", "grep", "webget", "shell_command", "write_file", "replace_in_file",
+        "delete_file_or_dir", "rename_file_or_dir", "apply_patch", "request_user_input",
+    ];
+
+    /// <summary>
     /// Creates the default built-in tools.
     /// </summary>
     /// <param name="options">Tool options.</param>

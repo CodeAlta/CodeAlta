@@ -9,7 +9,11 @@ namespace CodeAlta.Catalog;
 /// <param name="SystemPromptName">Optional system id; absence inherits or defaults to default.</param>
 /// <param name="Body">Markdown body.</param>
 /// <param name="Append">Whether the resource appends to lower-precedence resources.</param>
-public sealed record PromptFileContent(string? Name, string? Description, string? SystemPromptName, string Body, bool Append);
+public sealed record PromptFileContent(string? Name, string? Description, string? SystemPromptName, string Body, bool Append)
+{
+    /// <summary>Gets the built-in tools a session of the agent prompt does without (<c>disabled_tools</c>); empty for none.</summary>
+    public IReadOnlyList<string> DisabledTools { get; init; } = [];
+}
 
 /// <summary>Shared flat prompt frontmatter parsing and management serialization.</summary>
 public static class PromptFileFormat
@@ -63,7 +67,10 @@ public static class PromptFileFormat
     {
         var (metadata, body) = SplitFrontmatter(text);
         var append = ParseAppend(metadata) ?? throw new ArgumentException("Invalid prompt composition mode.", nameof(text));
-        var content = new PromptFileContent(Normalize(metadata.GetValueOrDefault("name")), Normalize(metadata.GetValueOrDefault("description")), Normalize(metadata.GetValueOrDefault("system")), body.Trim(), append);
+        var content = new PromptFileContent(Normalize(metadata.GetValueOrDefault("name")), Normalize(metadata.GetValueOrDefault("description")), Normalize(metadata.GetValueOrDefault("system")), body.Trim(), append)
+        {
+            DisabledTools = kind == PromptResourceKind.Agent ? ParseDisabledTools(metadata) : [],
+        };
         Validate(kind, content);
         return content;
     }
@@ -80,6 +87,8 @@ public static class PromptFileFormat
         {
             if (!content.Append && string.IsNullOrWhiteSpace(content.Name)) throw new ArgumentException("Prompt name is required.", nameof(content));
             if (Normalize(content.SystemPromptName) is { } system) PromptResourceStore.ValidateId(system);
+            if (content.DisabledTools.FirstOrDefault(static name => !SpaceTools.IsToolName(name)) is { } wrong)
+                throw new ArgumentException($"'{wrong}' is not the name of a tool.", nameof(content));
         }
     }
 
@@ -110,6 +119,8 @@ public static class PromptFileFormat
                 if (content.Append || !string.Equals(Normalize(content.SystemPromptName), "default", StringComparison.OrdinalIgnoreCase))
                     AddScalar(builder, "system", content.SystemPromptName);
             }
+            if (kind == PromptResourceKind.Agent && content.DisabledTools.Count > 0)
+                builder.Append("disabled_tools: [").Append(string.Join(", ", content.DisabledTools.Distinct(StringComparer.Ordinal))).AppendLine("]");
             if (content.Append) builder.AppendLine("mode: append");
             builder.AppendLine("---");
         }

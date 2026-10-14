@@ -4,7 +4,7 @@ import { defaultSpace, noAssignments, readAssignments, readSessionActivity, read
   type Space, type SpaceActivity, type SpaceResourceKind } from "./spaces";
 
 export type SpacesApi = Pick<typeof spacesService, "list" | "create" | "update" | "delete" | "assign" | "reorder" | "shown" | "activity" | "watch"
-  | "assignments" | "assignResource" | "setAgentPrompt" | "sessionResources">;
+  | "assignments" | "assignResource" | "setAgentPrompt" | "sessionResources" | "setDisabledTools">;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** What the page shows of the spaces. `loaded` is false until the host answered once. */
@@ -197,6 +197,9 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
     /** Sets the agent prompt the new sessions of a space start with; null for the default one. */
     setAgentPrompt: (id: string, agentPrompt: string | null) =>
       change(host => api.setAgentPrompt({ expectedEpoch: host, id, agentPrompt }, { timeoutMilliseconds: 30_000 })),
+    /** Sets the built-in tools the sessions of a space do without; an empty list for none. */
+    setDisabledTools: (id: string, tools: readonly string[]) =>
+      change(host => api.setDisabledTools({ expectedEpoch: host, id, tools }, { timeoutMilliseconds: 30_000 })),
     /** Reads what a session can use: its space and the resources of that space that are turned on. Null when the host cannot say. */
     async sessionResources(sessionId: string): Promise<SpaceSessionResourcesResponse | null> {
       const host = epoch;

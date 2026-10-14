@@ -10,6 +10,7 @@ import type { SpaceProject } from "./SpaceDialog";
 import { SpaceGeneral, SpaceProjects } from "./SpaceGeneral";
 import { SpaceIdentity } from "./SpaceIdentity";
 import { SpaceNewSessions } from "./SpaceNewSessions";
+import { SpaceTools } from "./SpaceTools";
 import type { SpaceSectionProps } from "./spaceSection";
 import { SpaceActivityMarks, SpaceIcon } from "./SpaceViews";
 import type { Space, SpaceActivity } from "./spaces";
@@ -90,6 +91,7 @@ export function SpacePage({ hub, space, spaces, projects, chats, shown, activity
       <SpaceProjects {...section} projects={projects} />
       <SpaceAvailable {...section} />
       <SpaceNewSessions {...section} />
+      <SpaceTools {...section} />
       <SpaceIdentity {...section} />
     </div>
   </main>;

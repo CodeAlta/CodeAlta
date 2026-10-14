@@ -24,21 +24,7 @@ internal static class ClaudeCodePrompts
     /// <summary>
     /// The tools of CodeAlta that Claude Code has its own version of: they are not offered to it a second time.
     /// </summary>
-    public static FrozenSet<string> ReplacedTools { get; } = new[]
-    {
-        "read_file",
-        "view_image",
-        "list_dir",
-        "grep",
-        "webget",
-        "shell_command",
-        "write_file",
-        "replace_in_file",
-        "delete_file_or_dir",
-        "rename_file_or_dir",
-        "apply_patch",
-        "request_user_input",
-    }.ToFrozenSet(StringComparer.Ordinal);
+    public static FrozenSet<string> ReplacedTools { get; } = CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.BuiltInToolNames.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
     /// Creates the text added to the system prompt of Claude Code, which stays its own: how the instructions
