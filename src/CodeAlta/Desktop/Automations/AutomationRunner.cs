@@ -68,16 +68,26 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             var definition = entry.Definition;
-            var providers = _host.ModelProviderRegistry.ListProviders();
+            // Nothing of the window decides where a run goes: the space of its project when the project is in
+            // exactly one, the default space otherwise.
+            var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
+            // A run starts with a provider of its space: the one the automation names, which must be there, else the
+            // default provider of the configuration when it is, else the first enabled provider of the space.
+            var inSpace = new SpaceFilter(new CachedSpaceAssignments(new CodeAltaConfigStore(_host.CatalogOptions)).Current(), spaceId);
+            if (definition.Model.Provider is { Length: > 0 } named && !inSpace.Allows(SpaceResourceKind.Provider, named))
+                return Refuse($"The provider '{named}' is not available in the space '{spaceId}'.");
+            var providers = _host.ModelProviderRegistry.ListProviders().Where(candidate => inSpace.Allows(SpaceResourceKind.Provider, candidate.ProviderId.Value)).ToArray();
             var providerKey = definition.Model.Provider
                 ?? new CodeAltaConfigStore(_host.CatalogOptions).GetEffectiveDefaultProvider(project?.ProjectPath)
                 ?? providers.FirstOrDefault()?.ProviderId.Value;
             if (providerKey is null) return Refuse("No model provider is enabled.");
-            if (!_host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(providerKey), out var provider) || !provider.IsEnabled)
+            if (!_host.ModelProviderRegistry.TryGetProvider(new ModelProviderId(providerKey), out var provider) || !provider.IsEnabled
+                || !inSpace.Allows(SpaceResourceKind.Provider, provider.ProviderId.Value))
             {
-                // The default provider of the configuration may be one that is not enabled: the first enabled one then.
-                provider = definition.Model.Provider is null ? providers.FirstOrDefault() : null;
-                if (provider is null) return Refuse($"The provider '{providerKey}' is not enabled.");
+                // The default provider of the configuration may be one that is not enabled, or not in the space: the
+                // first enabled provider of the space then.
+                provider = definition.Model.Provider is null ? providers.FirstOrDefault(static candidate => candidate.IsEnabled) : null;
+                if (provider is null) return Refuse(definition.Model.Provider is null ? $"No model provider is enabled in the space '{spaceId}'." : $"The provider '{providerKey}' is not enabled.");
             }
 
             var models = await _host.ModelProviderInitializationService.GetModelsAsync(provider.ProviderId, cancellationToken).ConfigureAwait(false);
@@ -93,9 +103,6 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (definition.Model.Effort is { } effort && model.SupportedReasoningEfforts is { } supported && !supported.Contains(effort))
                 return Refuse($"The model '{model.Id}' has no reasoning effort '{effort.ToString().ToLowerInvariant()}'.");
 
-            // Nothing of the window decides where a run goes: the space of its project when the project is in
-            // exactly one, the default space otherwise.
-            var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
             // The agent the automation names, else the one its space starts its new sessions with; one the space does
             // not have is refused, as for any session of that space.
             var drafts = await _host.Commands.GetDraftPromptsAsync(project is null ? null : new(project.Id, project.ProjectPath), spaceId, cancellationToken).ConfigureAwait(false);

@@ -69,8 +69,15 @@ internal sealed class SessionStarter : ISessionStarter
                 like = new(current.ProviderKey, current.ModelId, current.ModelId is null ? null : current.ReasoningEffort?.ToString().ToLowerInvariant());
             }
 
+            // The session is in the space the window shows: it starts with a provider of that space. One the user
+            // chose there is refused; the provider of a session of another space gives way to one of this space.
+            var space = _shownSpace();
+            var spaceId = SpaceCatalog.ResolveSessionSpace(space, project, await _host.SpaceCatalog.LoadAsync(CancellationToken.None).ConfigureAwait(false));
+            var inSpace = new SpaceFilter(new CachedSpaceAssignments(new CodeAltaConfigStore(_host.CatalogOptions)).Current(), spaceId);
+            if (model?.Asked is { ProviderKey: { Length: > 0 } askedKey } && !inSpace.Allows(SpaceResourceKind.Provider, askedKey))
+                return Refuse($"The provider '{askedKey}' is not available in the space '{spaceId}'.");
             var choice = await SessionStartChoice.ChooseAsync(
-                    _host.ModelProviderRegistry.ListProviders(),
+                    [.. _host.ModelProviderRegistry.ListProviders().Where(candidate => inSpace.Allows(SpaceResourceKind.Provider, candidate.ProviderId.Value))],
                     new CodeAltaConfigStore(_host.CatalogOptions).GetEffectiveDefaultProvider(project.ProjectPath),
                     model?.Asked,
                     like,
@@ -80,7 +87,6 @@ internal sealed class SessionStarter : ISessionStarter
             if (choice.Provider is not { } provider) return Refuse(choice.Problem ?? "No model provider is enabled.");
 
             // The agent the space of the session starts its new sessions with, else the default one.
-            var space = _shownSpace();
             var drafts = await _host.Commands.GetDraftPromptsAsync(new(project.Id, project.ProjectPath), space, CancellationToken.None).ConfigureAwait(false);
             if (drafts is null) return Refuse("The application is closing.");
             var agent = drafts.DefaultPromptId;

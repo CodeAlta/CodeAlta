@@ -734,6 +734,84 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task RunsAndWork_StartWithAProviderOfTheirSpace_AndOneNamedOutsideItIsRefused()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-provider-space-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            // The default provider is the one of Personal; Business has an account of its own.
+            File.WriteAllText(Path.Combine(global, "config.toml"), """
+                [chat]
+                default_provider = "automation-fixture"
+
+                [providers.automation-fixture]
+                type = "codex"
+                spaces = ["personal"]
+
+                [providers.business-account]
+                type = "codex"
+                spaces = ["business"]
+                """);
+            var personal = new RunnerProvider();
+            var business = new RunnerProvider("business-account");
+            personal.Release.SetResult();
+            business.Release.SetResult();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry =>
+                {
+                    registry.RegisterOrReplace(personal.Descriptor, () => new RunnerRuntime(personal));
+                    registry.RegisterOrReplace(business.Descriptor, () => new RunnerRuntime(business));
+                },
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Personal")).Succeeded);
+            Assert.IsTrue((await host.SpaceCatalog.AssignAsync(project.Id, ["business"], null)).Succeeded);
+            var workspace = new WorkspaceService(host, Epoch);
+            async Task<string?> ProviderOf(string? sessionId) => (await workspace.SnapshotAsync(new(), default)).Sessions.Single(session => session.Id == sessionId).ProviderKey;
+
+            // A run of the project of Business: the account of Business, since the default provider is not there.
+            var runner = new AutomationRunner(host);
+            var source = new AutomationSource(Path.Combine(global, "config.toml"), null, null);
+            const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77";
+            var run = await runner.StartAsync(new(new(Id, "Review"), source, project.Id, project.ProjectPath, null), "run-1", "Review.", null, default);
+            Assert.IsNull(run.Problem);
+            Assert.AreEqual("business-account", await ProviderOf(run.SessionId));
+            var named = await runner.StartAsync(new(new(Id, "Review") { Model = new("automation-fixture", null, null) }, source, project.Id, project.ProjectPath, null), "run-2", "Review.", null, default);
+            Assert.AreEqual("The provider 'automation-fixture' is not available in the space 'business'.", named.Problem);
+            Assert.IsNull(named.SessionId);
+
+            // Work started from the window is in the space shown, with a provider of it.
+            var shown = "business";
+            var starter = new CodeAlta.Desktop.WorkItems.SessionStarter(host, null, () => shown);
+            var work = await starter.StartAsync(project, "A task", _ => "Do the task.", false, null, "task", null);
+            Assert.IsNull(work.Problem);
+            Assert.AreEqual("business-account", await ProviderOf(work.SessionId));
+            var asked = await starter.StartAsync(project, "A task", _ => "Do the task.", false, null, "task", new(new("automation-fixture"), null));
+            Assert.AreEqual("The provider 'automation-fixture' is not available in the space 'business'.", asked.Problem);
+            shown = "personal";
+            var there = await starter.StartAsync(project, "A task", _ => "Do the task.", false, null, "task", null);
+            Assert.AreEqual("automation-fixture", await ProviderOf(there.SessionId));
+            await workspace.CloseSessionsAsync();
+            await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
     public async Task Runner_WhenEveryCommandTheHostKeepsIsPending_StartsNoSession_AndRunsAgainOnceOneHasSettled()
     {
         var root = Directory.CreateTempSubdirectory("codealta-automation-capacity-").FullName;
@@ -920,9 +998,9 @@ public sealed class AutomationHostTests
         }
     }
 
-    private sealed class RunnerProvider
+    private sealed class RunnerProvider(string key = "automation-fixture")
     {
-        internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("automation-fixture"), "Automation fixture") { IsDefault = true, DefaultModelId = "fixture-model" };
+        internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(key), "Automation fixture") { IsDefault = true, DefaultModelId = "fixture-model" };
         internal Channel<(string SessionId, AgentSendOptions Options)> Sends { get; } = Channel.CreateUnbounded<(string, AgentSendOptions)>();
         internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
