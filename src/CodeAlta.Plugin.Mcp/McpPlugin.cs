@@ -234,8 +234,24 @@ public sealed class McpPlugin : PluginBase
             return null;
         }
 
+        // A server activated before it left the space of the session is dropped, and forgotten by the session.
+        if (context.SpaceId is { } spaceId)
+        {
+            var policy = LoadPolicy(projectPath);
+            var kept = activeServers.Where(server => policy.IsServerInSpace(server, spaceId)).ToArray();
+            if (kept.Length != activeServers.Count)
+            {
+                _activationState.ReplaceActiveServers(activationScope, kept);
+                activeServers = kept;
+                if (kept.Length == 0)
+                {
+                    return null;
+                }
+            }
+        }
+
         await using var runtime = new McpRuntimeService(_userHomeDirectory);
-        var direct = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath }, activeServers, cancellationToken).ConfigureAwait(false);
+        var direct = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId }, activeServers, cancellationToken).ConfigureAwait(false);
         _activationState.UpdateToolCounts(
             activationScope,
             direct.Tools
@@ -248,7 +264,7 @@ public sealed class McpPlugin : PluginBase
 
         return new PluginBeforeAgentRunResult
         {
-            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections)).ToArray(),
+            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId)).ToArray(),
             TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
         };
     }
@@ -264,7 +280,10 @@ public sealed class McpPlugin : PluginBase
             return new ValueTask<string?>((string?)null);
         }
 
+        // The space first: a server of another space is not offered, and its activation is forgotten below.
+        var policy = context.SpaceId is null ? null : LoadPolicy(projectPath);
         var configuredServers = snapshot.Servers
+            .Where(server => policy?.IsServerInSpace(server.Key, context.SpaceId) != false)
             .Where(static server => server.State == McpManagementServerState.Configured && server.PolicyEnabled != false)
             .OrderBy(static server => server.Key, StringComparer.Ordinal)
             .ToArray();
@@ -299,6 +318,10 @@ public sealed class McpPlugin : PluginBase
         return new ValueTask<string?>(builder.ToString().TrimEnd());
     }
 
+    private McpPolicyOptions LoadPolicy(string? projectPath)
+        => new McpPolicyLoader().Load(McpPolicyWriter.GetGlobalPolicyPath(_userHomeDirectory),
+            string.IsNullOrWhiteSpace(projectPath) ? null : McpPolicyWriter.GetProjectPolicyPath(projectPath));
+
     internal static string ResolveActivationScopeKey(PluginOperationContext context, string? projectPath)
         => McpActivationState.ResolveScopeKey(
             string.IsNullOrWhiteSpace(context.SessionId) ? context.Services.Sessions.SelectedSessionId : context.SessionId,
@@ -330,7 +353,8 @@ public sealed class McpPlugin : PluginBase
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory, McpSessionConnections? connections)
+    internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory, McpSessionConnections? connections,
+        string? spaceId = null)
     {
         var description = CreateToolDescription(tool);
         var useArgumentsJsonWrapper = RequiresArgumentsJsonWrapper(tool.InputSchema);
@@ -347,6 +371,7 @@ public sealed class McpPlugin : PluginBase
                 useArgumentsJsonWrapper,
                 connections,
                 invocation,
+                spaceId,
                 cancellationToken).ConfigureAwait(false));
     }
 
@@ -559,6 +584,7 @@ public sealed class McpPlugin : PluginBase
         bool useArgumentsJsonWrapper,
         McpSessionConnections? connections,
         AgentToolInvocation invocation,
+        string? spaceId,
         CancellationToken cancellationToken)
     {
         if (!TryReadArguments(invocation.Arguments, useArgumentsJsonWrapper, out var arguments, out var error))
@@ -567,7 +593,7 @@ public sealed class McpPlugin : PluginBase
         }
 
         var diagnostics = new List<McpRuntimeDiagnostic>();
-        var request = new McpRuntimeRequest { ProjectDirectory = projectPath, UserHomeDirectory = userHomeDirectory };
+        var request = new McpRuntimeRequest { ProjectDirectory = projectPath, UserHomeDirectory = userHomeDirectory, SpaceId = spaceId };
         McpRuntimeToolCallResult? result;
         if (connections is not null && !string.IsNullOrWhiteSpace(invocation.SessionId))
         {

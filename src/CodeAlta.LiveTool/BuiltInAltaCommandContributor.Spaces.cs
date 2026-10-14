@@ -240,7 +240,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     // The space of the calling session; null when no session calls. A session belongs to the space its journal
     // records, else to the space of its project when the project is in exactly one, else to the default space; a
     // session that cannot be read is in the default space.
-    private static async Task<SpaceDescriptor?> CallerSpaceAsync(AltaCommandContext context, SpaceCatalog spaces)
+    internal static async Task<SpaceDescriptor?> CallerSpaceAsync(AltaCommandContext context, SpaceCatalog spaces)
     {
         if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } sessionId)
         {

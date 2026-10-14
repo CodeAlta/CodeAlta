@@ -84,6 +84,13 @@ public sealed record PluginAltaCommandContext
     public string? SourceAgentId { get; init; }
 
     /// <summary>
+    /// Gets what reads the space of the session that calls the command: its identifier, or <see langword="null"/>
+    /// when no session calls (the user, who is not limited to a space). A command refuses an agent what its space
+    /// does not have. <see langword="null"/> where the host keeps no spaces.
+    /// </summary>
+    public Func<CancellationToken, ValueTask<string?>>? ResolveSourceSpaceIdAsync { get; init; }
+
+    /// <summary>
     /// Gets the tools of the agent run that called the command, when it is one: tools the command adds there
     /// are offered to the model from its next request of the same run. Null for any other caller.
     /// </summary>

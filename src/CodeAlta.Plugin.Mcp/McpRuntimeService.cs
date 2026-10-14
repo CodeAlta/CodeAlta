@@ -21,6 +21,10 @@ internal sealed record McpRuntimeRequest
 
     public string? UserHomeDirectory { get; init; }
 
+    // The space of the session the request is for; null applies none (the user, outside any session). A server the
+    // space does not have is refused whatever defines it and whatever its policy says.
+    public string? SpaceId { get; init; }
+
     public bool AllowOAuthBrowserLogin { get; init; }
 
     public bool ForceOAuth { get; init; }
@@ -419,6 +423,18 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         }
     }
 
+    // The refusal of a server that the space of the session does not have.
+    internal static McpRuntimeDiagnostic NotInSpace(string key, string spaceId) => new()
+    {
+        Code = "server_not_in_space",
+        Server = key,
+        Message = NotInSpaceMessage(key, spaceId),
+    };
+
+    internal static string NotInSpaceMessage(string key, string spaceId)
+        => $"The MCP server '{key}' is not available in the space '{spaceId}' of this session. Only the user assigns resources to spaces, " +
+           "in Settings of the CodeAlta window: tell the user if this session needs it.";
+
     private RuntimeContext LoadContext(McpRuntimeRequest request)
     {
         if (request.UserHomeDirectory is null && _userHomeDirectory is not null)
@@ -443,6 +459,12 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         var key = effective.Definition.Key;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
         var cacheKey = CreateServerCacheKey(effective.Definition, serverAliasPart);
+        // The space first, and never cached: a connection made for one space is not reached from another.
+        if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId))
+        {
+            return ServerRuntimeState.Failed(NotInSpace(key, context.Request.SpaceId!));
+        }
+
         if (_servers.TryGetValue(cacheKey, out var existing))
         {
             return existing;

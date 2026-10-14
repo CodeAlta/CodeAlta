@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.CommandLine;
 using Command = XenoAtom.CommandLine.Command;
@@ -118,6 +119,9 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
             SourceSessionId = invocation.Caller.SourceSessionId,
             SourceProjectId = invocation.Caller.SourceProjectId,
             SourceAgentId = invocation.Caller.SourceAgentId,
+            ResolveSourceSpaceIdAsync = invocation.Services.Get<SpaceCatalog>() is { } spaces
+                ? async _ => (await BuiltInAltaCommandContributor.CallerSpaceAsync(invocation, spaces).ConfigureAwait(false))?.Id
+                : null,
             RunTools = invocation.Caller.Kind == "agent" ? invocation.Caller.RunTools : null,
             Stdin = invocation.Stdin,
             Stdout = invocation.Stdout,

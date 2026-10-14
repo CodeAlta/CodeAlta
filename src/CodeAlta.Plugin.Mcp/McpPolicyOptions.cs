@@ -31,6 +31,21 @@ internal sealed record McpPolicyOptions
     public string PreferredWriteScope { get; init; } = "project";
 
     public IReadOnlyDictionary<string, McpServerPolicyOptions> Servers { get; init; } = new Dictionary<string, McpServerPolicyOptions>(StringComparer.Ordinal);
+
+    // The spaces of the servers that list some, by key without case, read from the global configuration only: a
+    // project cannot widen a space. The rule is the host's (CodeAlta.Catalog.SpaceScope), which this plugin does not
+    // reference: no list is every space, a list is only those spaces, the default space only when it is listed.
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> ServerSpaces { get; init; } = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+
+    public const string DefaultSpaceId = "default";
+
+    // Whether a server is available in a space; a null space applies none (the user, outside any session).
+    public bool IsServerInSpace(string key, string? spaceId)
+    {
+        if (spaceId is null || !ServerSpaces.TryGetValue(key, out var spaces) || spaces.Count == 0) return true;
+        var space = string.IsNullOrWhiteSpace(spaceId) ? DefaultSpaceId : spaceId.Trim();
+        return spaces.Contains(space, StringComparer.Ordinal);
+    }
 }
 
 internal sealed record McpServerPolicyOptions
@@ -64,12 +79,12 @@ internal sealed class McpPolicyLoader
     private static McpPolicyOptions LoadCore(string? globalConfigPath, string? projectConfigPath, bool bounded)
     {
         var policy = new McpPolicyOptions();
-        policy = ApplyFile(policy, globalConfigPath, bounded);
-        policy = ApplyFile(policy, projectConfigPath, bounded);
+        policy = ApplyFile(policy, globalConfigPath, bounded, global: true);
+        policy = ApplyFile(policy, projectConfigPath, bounded, global: false);
         return policy;
     }
 
-    private static McpPolicyOptions ApplyFile(McpPolicyOptions policy, string? path, bool bounded)
+    private static McpPolicyOptions ApplyFile(McpPolicyOptions policy, string? path, bool bounded, bool global)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
@@ -97,8 +112,36 @@ internal sealed class McpPolicyLoader
             ConfigScopes = GetString(mcp, "config_scopes") ?? policy.ConfigScopes,
             PreferredWriteScope = GetString(mcp, "preferred_write_scope") ?? policy.PreferredWriteScope,
             Servers = MergeServers(policy.Servers, mcp),
+            ServerSpaces = global ? ReadServerSpaces(mcp) : policy.ServerSpaces,
         };
         return policy;
+    }
+
+    // [plugins.mcp.servers.<key>] spaces = [...]: a list of strings, or one string; each identifier once, trimmed.
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> ReadServerSpaces(TomlTable mcp)
+    {
+        var result = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        if (!TryGetTable(mcp, "servers", out var servers)) return result;
+        foreach (var (key, value) in servers)
+        {
+            if (value is not TomlTable table || !table.TryGetValue("spaces", out var node)) continue;
+            IEnumerable<string?> values = node switch
+            {
+                TomlArray array => array.OfType<string>(),
+                string one => [one],
+                _ => [],
+            };
+            var list = new List<string>();
+            foreach (var text in values)
+            {
+                var id = text?.Trim();
+                if (!string.IsNullOrEmpty(id) && !list.Contains(id, StringComparer.Ordinal)) list.Add(id);
+            }
+
+            if (list.Count > 0) result[key.Trim()] = list;
+        }
+
+        return result;
     }
 
     private static IReadOnlyDictionary<string, McpServerPolicyOptions> MergeServers(IReadOnlyDictionary<string, McpServerPolicyOptions> current, TomlTable mcp)

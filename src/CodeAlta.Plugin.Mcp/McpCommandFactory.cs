@@ -80,12 +80,17 @@ internal static class McpCommandFactory
                 return WriteError(context, "server_not_found", "MCP server(s) are not configured: " + string.Join(", ", missing));
             }
 
+            if (await RefuseOutsideSpaceAsync(context, options, serverKeys).ConfigureAwait(false) is { } refused)
+            {
+                return refused;
+            }
+
             var projectDirectory = ResolveProjectDirectory(context);
             var scopeKey = ResolveActivationScopeKey(context, projectDirectory);
             var activated = activationState.ActivateServers(scopeKey, serverKeys);
             await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
             var direct = await runtime.ListToolsForServersAsync(
-                    CreateRuntimeRequest(context, options),
+                    (await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)),
                     activated,
                     context.CancellationToken)
                 .ConfigureAwait(false);
@@ -101,8 +106,9 @@ internal static class McpCommandFactory
 
             // An agent run that called the command takes the tools at once: its next model request offers them,
             // so the model goes on in the same turn. Later runs get them from the activation, as before.
+            var spaceId = await SourceSpaceAsync(context).ConfigureAwait(false);
             var registered = context.RunTools?.Add(
-                direct.Tools.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections)).ToArray()) ?? [];
+                direct.Tools.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections, spaceId)).ToArray()) ?? [];
             var availableNow = context.RunTools is { } runTools && direct.Tools.Count > 0 && direct.Tools.All(tool => runTools.Contains(tool.Alias));
 
             WriteRecord(context.Stdout, new
@@ -131,15 +137,18 @@ internal static class McpCommandFactory
     private static Command CreateListCommand(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var command = Leaf("list", "List configured MCP servers without connecting to them.");
-        command.Add((_, _) =>
+        command.Add(async (_, _) =>
         {
             var snapshot = Discover(context, options);
-            foreach (var server in snapshot.EffectiveServers)
+            // A session lists the servers of its space.
+            var spaceId = await SourceSpaceAsync(context).ConfigureAwait(false);
+            var policy = spaceId is null ? null : LoadPolicy(context, options);
+            foreach (var server in snapshot.EffectiveServers.Where(server => policy?.IsServerInSpace(server.Definition.Key, spaceId) != false))
             {
                 WriteRecord(context.Stdout, CreateServerRecord("alta.mcp.server", context, server, options.UserHomeDirectory));
             }
 
-            return ValueTask.FromResult(0);
+            return 0;
         });
         return command;
     }
@@ -206,7 +215,7 @@ internal static class McpCommandFactory
 
             await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
             var result = await runtime.TestServerAsync(
-                CreateRuntimeRequest(context, options) with
+                (await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)) with
                 {
                     ForceOAuth = true,
                     AllowOAuthBrowserLogin = true,
@@ -301,7 +310,7 @@ internal static class McpCommandFactory
         command.Add(async (_, _) =>
         {
             await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
-            var result = await runtime.SearchToolsAsync(CreateRuntimeRequest(context, options), server, query, context.CancellationToken).ConfigureAwait(false);
+            var result = await runtime.SearchToolsAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), server, query, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in result.Diagnostics)
             {
                 WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));
@@ -341,7 +350,7 @@ internal static class McpCommandFactory
             var toolName = RequireToolName(tool);
             var diagnostics = new List<McpRuntimeDiagnostic>();
             await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
-            var result = await runtime.DescribeToolAsync(CreateRuntimeRequest(context, options), serverKey, toolName, diagnostics, context.CancellationToken).ConfigureAwait(false);
+            var result = await runtime.DescribeToolAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), serverKey, toolName, diagnostics, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
             {
                 WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));
@@ -379,7 +388,7 @@ internal static class McpCommandFactory
 
             var diagnostics = new List<McpRuntimeDiagnostic>();
             await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
-            var result = await runtime.CallToolAsync(CreateRuntimeRequest(context, options), serverKey, toolName, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
+            var result = await runtime.CallToolAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), serverKey, toolName, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
             {
                 WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));
@@ -689,6 +698,12 @@ internal static class McpCommandFactory
                 return WriteError(context, "invalid_scope", target.ErrorMessage);
             }
 
+            // A session cannot turn on a server its space does not have; turning one off is always allowed.
+            if (enabled && await RefuseOutsideSpaceAsync(context, options, [key]).ConfigureAwait(false) is { } refused)
+            {
+                return refused;
+            }
+
             try
             {
                 var result = await new McpPolicyWriter().SetServerEnabledAsync(target.Path, target.Scope, key, enabled, context.CancellationToken).ConfigureAwait(false);
@@ -731,8 +746,37 @@ internal static class McpCommandFactory
             string.IsNullOrWhiteSpace(context.SourceSessionId) ? context.Services.Sessions.SelectedSessionId : context.SourceSessionId,
             projectDirectory);
 
-    private static McpRuntimeRequest CreateRuntimeRequest(PluginAltaCommandContext context, McpCommandFactoryOptions options)
-        => new() { UserHomeDirectory = options.UserHomeDirectory, ProjectDirectory = ResolveProjectDirectory(context) };
+    // What the runtime is asked for a caller: the servers of the space of its session only.
+    private static async ValueTask<McpRuntimeRequest> CreateRuntimeRequestAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options)
+        => new()
+        {
+            UserHomeDirectory = options.UserHomeDirectory,
+            ProjectDirectory = ResolveProjectDirectory(context),
+            SpaceId = await SourceSpaceAsync(context).ConfigureAwait(false),
+        };
+
+    // The space of the session that calls the command; null for the user, who is not limited to a space.
+    private static async ValueTask<string?> SourceSpaceAsync(PluginAltaCommandContext context)
+        => context.ResolveSourceSpaceIdAsync is { } resolve && !string.IsNullOrWhiteSpace(context.SourceSessionId)
+            ? await resolve(context.CancellationToken).ConfigureAwait(false) ?? McpPolicyOptions.DefaultSpaceId
+            : null;
+
+    private static McpPolicyOptions LoadPolicy(PluginAltaCommandContext context, McpCommandFactoryOptions options)
+    {
+        var projectDirectory = ResolveProjectDirectory(context);
+        return new McpPolicyLoader().Load(McpPolicyWriter.GetGlobalPolicyPath(options.UserHomeDirectory),
+            projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory));
+    }
+
+    // Refuses, for a session, the servers its space does not have: nothing is activated or enabled then.
+    private static async ValueTask<int?> RefuseOutsideSpaceAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options, IEnumerable<string> keys)
+    {
+        if (await SourceSpaceAsync(context).ConfigureAwait(false) is not { } spaceId) return null;
+        var policy = LoadPolicy(context, options);
+        var outside = keys.Where(key => !policy.IsServerInSpace(key, spaceId)).Distinct(StringComparer.Ordinal).OrderBy(static key => key, StringComparer.Ordinal).ToArray();
+        return outside.Length == 0 ? null
+            : WriteError(context, "server_not_in_space", string.Join(" ", outside.Select(key => McpRuntimeService.NotInSpaceMessage(key, spaceId))));
+    }
 
     private static McpWriteTarget ResolveJsonWriteTarget(
         PluginAltaCommandContext context,
