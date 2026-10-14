@@ -678,10 +678,12 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 ex);
         }
 
+        var contextOverflow = IsContextOverflowMessage(ex.Message);
         return new AgentTurnExecutionException(
             new AgentTurnFailure(
                 ex.Message,
-                IsContextOverflowMessage(ex.Message)),
+                contextOverflow,
+                contextOverflow ? new AgentFailureInfo(AgentFailureKind.Other) : OpenAIResponsesTurnExecutor.ClassifyFailure(ex)),
             ex);
     }
 

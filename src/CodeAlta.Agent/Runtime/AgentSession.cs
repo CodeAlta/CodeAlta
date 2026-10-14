@@ -2453,7 +2453,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DateTimeOffset.UtcNow,
             message,
             exception,
-            runId);
+            runId)
+        {
+            Failure = AgentFailureClassifier.Classify(exception),
+        };
 
         try
         {

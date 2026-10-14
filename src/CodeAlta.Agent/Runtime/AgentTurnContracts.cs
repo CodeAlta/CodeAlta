@@ -198,7 +198,8 @@ internal interface IAgentProviderCompaction
 
 internal sealed record AgentTurnFailure(
     string Message,
-    bool IsContextOverflow);
+    bool IsContextOverflow,
+    AgentFailureInfo? Failure = null);
 
 internal sealed class AgentTurnExecutionException : Exception
 {

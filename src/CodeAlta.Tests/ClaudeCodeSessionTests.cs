@@ -355,7 +355,7 @@ public sealed class ClaudeCodeSessionTests
         Assert.IsFalse(events.Snapshot().OfType<AgentErrorEvent>().Any(), "The turn the user stopped did not fail.");
 
         // The cancel is the one of its own turn: a failure of the next is one.
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
             () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout));
         StringAssert.Contains(failure.Message, "overloaded");
     }
@@ -381,7 +381,7 @@ public sealed class ClaudeCodeSessionTests
             directory,
             onPermission: static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel)));
 
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
             () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
 
         StringAssert.Contains(failure.Message, "turn limit");
@@ -495,7 +495,7 @@ public sealed class ClaudeCodeSessionTests
                 return new AgentPermissionDecision(AgentPermissionDecisionKind.Cancel);
             });
 
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
             () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("run it") }).WaitAsync(Timeout));
 
         StringAssert.Contains(failure.Message, "overloaded");
@@ -918,13 +918,72 @@ public sealed class ClaudeCodeSessionTests
         await using var session = await CreateSessionAsync(runtime, directory);
         var events = Collect(session);
 
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
             () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout));
 
         StringAssert.Contains(failure.Message, "not signed in");
         StringAssert.Contains(failure.Message, "/login");
-        Assert.IsTrue(events.Snapshot().OfType<AgentErrorEvent>().Any());
+        Assert.AreEqual(AgentFailureKind.Auth, events.Snapshot().OfType<AgentErrorEvent>().Single().Failure?.Kind);
         Assert.IsFalse(events.Snapshot().OfType<AgentContentCompletedEvent>().Any(static e => e.Kind == AgentContentKind.Assistant), "The error is not an answer of the model.");
+    }
+
+    [TestMethod]
+    public async Task RejectedPlanLimit_FailsTheTurnAsAnExhaustedQuotaWithItsReset()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitInit();
+            process.Emit(new JsonObject
+            {
+                ["type"] = "rate_limit_event",
+                ["rate_limit_info"] = new JsonObject { ["status"] = "rejected", ["rateLimitType"] = "five_hour", ["utilization"] = 1.0, ["resetsAt"] = 1_800_000_000 },
+            });
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.TextBlock("You've hit your limit")), error: "rate_limit", model: "<synthetic>");
+            process.EmitResult("You've hit your limit · resets 6pm", user, isError: true);
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout));
+
+        var error = events.Snapshot().OfType<AgentErrorEvent>().Single();
+        Assert.AreEqual(new AgentFailureInfo(AgentFailureKind.QuotaExhausted, DateTimeOffset.FromUnixTimeSeconds(1_800_000_000)), error.Failure);
+        var json = JsonSerializer.Serialize<AgentEvent>(error, AgentJsonSerializerContext.Default.AgentEvent);
+        StringAssert.Contains(json, "\"kind\":\"QuotaExhausted\"");
+        var read = (AgentErrorEvent)JsonSerializer.Deserialize(json, AgentJsonSerializerContext.Default.AgentEvent)!;
+        Assert.AreEqual(error.Failure, read.Failure);
+        AgentJournalValidation.ValidateEvent(JsonDocument.Parse(json).RootElement);
+    }
+
+    [TestMethod]
+    [DataRow("billing_error", AgentFailureKind.QuotaExhausted)]
+    [DataRow("rate_limit", AgentFailureKind.RateLimited)]
+    [DataRow("server_error", AgentFailureKind.Unavailable)]
+    [DataRow("invalid_request", AgentFailureKind.Other)]
+    public async Task ApiErrorOfTheLastRequest_GivesTheKindOfTheFailure(string apiError, AgentFailureKind expected)
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.TextBlock("API Error")), error: apiError, model: "<synthetic>");
+            process.EmitResult("API Error", user, isError: true);
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout));
+
+        Assert.AreEqual(expected, events.Snapshot().OfType<AgentErrorEvent>().Single().Failure?.Kind);
     }
 
     [TestMethod]
@@ -979,7 +1038,7 @@ public sealed class ClaudeCodeSessionTests
         await using var session = await CreateSessionAsync(runtime, directory);
         var events = Collect(session);
 
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
             () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("do it all") }).WaitAsync(Timeout));
 
         StringAssert.Contains(failure.Message, "turn limit");

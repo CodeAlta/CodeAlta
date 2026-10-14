@@ -103,7 +103,33 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
             configureOptions: ConfigureOptions,
-            prepareRequest: MarkCacheBreakpoints);
+            prepareRequest: MarkCacheBreakpoints,
+            classifyFailure: ClassifyFailure);
+    }
+
+    // The SDK's exceptions carry the HTTP status and body; an error in the stream carries its error type
+    // (overloaded_error, rate_limit_error...).
+    internal static AgentFailureInfo? ClassifyFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            switch (current)
+            {
+                case global::Anthropic.Exceptions.AnthropicApiException api:
+                    return AgentFailureClassifier.FromHttpStatus((int)api.StatusCode, api.ResponseBody ?? api.Message, retryAfterSeconds: null);
+                case global::Anthropic.Exceptions.AnthropicSseException sse:
+                    var text = sse.Message;
+                    if (text.Contains("overloaded", StringComparison.OrdinalIgnoreCase) || text.Contains("api_error", StringComparison.OrdinalIgnoreCase))
+                        return new AgentFailureInfo(AgentFailureKind.Unavailable);
+                    if (text.Contains("rate_limit", StringComparison.OrdinalIgnoreCase))
+                        return new AgentFailureInfo(AgentFailureClassifier.IsQuotaMessage(text) ? AgentFailureKind.QuotaExhausted : AgentFailureKind.RateLimited);
+                    return new AgentFailureInfo(AgentFailureKind.Other);
+                case global::Anthropic.Exceptions.AnthropicIOException:
+                    return new AgentFailureInfo(AgentFailureKind.Unavailable);
+            }
+        }
+
+        return AgentFailureClassifier.Classify(exception);
     }
 
     private static (IReadOnlyList<ChatMessage> Messages, ChatOptions Options) MarkCacheBreakpoints(

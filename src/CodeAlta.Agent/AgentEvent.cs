@@ -710,7 +710,42 @@ public sealed record AgentErrorEvent : AgentEvent
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public AgentExceptionInfo? ExceptionInfo { get; init; }
+
+    /// <summary>
+    /// Gets what kind of failure ended the run, when the provider said it (an exhausted quota, a provider that stays
+    /// unavailable...), or <see langword="null"/> when it is not known.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentFailureInfo? Failure { get; init; }
 }
+
+/// <summary>What kind of failure ended a run, as the provider said it.</summary>
+public enum AgentFailureKind
+{
+    /// <summary>Any other failure: a tool, a malformed request, a context overflow, an unknown error.</summary>
+    Other,
+
+    /// <summary>The quota, credits or allowance of the account are exhausted until they reset.</summary>
+    QuotaExhausted,
+
+    /// <summary>The provider limits the rate of requests for a short while.</summary>
+    RateLimited,
+
+    /// <summary>The provider stays unavailable (outage, overload, network) after its own retries.</summary>
+    Unavailable,
+
+    /// <summary>The account is not signed in or not allowed.</summary>
+    Auth,
+}
+
+/// <summary>What kind of failure ended a run, and when it ends when the provider said it.</summary>
+/// <param name="Kind">The kind of failure.</param>
+/// <param name="ResetsAt">When the quota or the limit resets, when known.</param>
+/// <param name="RetryAfterSeconds">How long the provider asks to wait before a new request, when it says it.</param>
+public sealed record AgentFailureInfo(
+    AgentFailureKind Kind,
+    DateTimeOffset? ResetsAt = null,
+    int? RetryAfterSeconds = null);
 
 /// <summary>
 /// JSON-safe exception payload.

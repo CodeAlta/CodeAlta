@@ -215,6 +215,7 @@ internal sealed class AgentObjectDictionaryJsonConverter : JsonConverter<IReadOn
 [JsonSerializable(typeof(AgentNetworkAccessRequest))]
 [JsonSerializable(typeof(AgentNetworkPolicyAmendment))]
 [JsonSerializable(typeof(AgentExceptionInfo))]
+[JsonSerializable(typeof(AgentFailureInfo))]
 [JsonSerializable(typeof(AgentModelInfo))]
 [JsonSerializable(typeof(AgentSystemPromptEvent))]
 [JsonSerializable(typeof(AgentPromptUsageInfo))]

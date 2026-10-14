@@ -86,6 +86,7 @@ internal sealed partial class ClaudeCodeSession
         _assistantTextInRun = false;
         _awaitingQueuedTurns = false;
         _apiError = null;
+        _rejectedLimit = null;
     }
 
     private async Task<AgentTurnResponse> ReadSegmentAsync(
@@ -582,6 +583,11 @@ internal sealed partial class ClaudeCodeSession
             Primary: fiveHour ?? (sevenDay is null ? limiting : null),
             Secondary: sevenDay,
             Label: type is null ? "Claude usage limit" : $"Claude usage limit ({type.Replace('_', ' ')})");
+        if (status == "rejected")
+        {
+            _rejectedLimit = (type, limiting.ResetsAt);
+        }
+
         if (status is "allowed_warning" or "rejected")
         {
             var text = status == "rejected" ? "reached" : "nearly reached";
@@ -762,8 +768,10 @@ internal sealed partial class ClaudeCodeSession
         => string.Equals(subtype, "error_during_execution", StringComparison.Ordinal) &&
            ClaudeCodeJson.GetString(result, "terminal_reason") is "aborted_streaming" or "aborted_tools";
 
-    private InvalidOperationException CreateFailure(JsonElement result, string? subtype)
+    private AgentProviderFailureException CreateFailure(JsonElement result, string? subtype)
     {
+        var rejected = _rejectedLimit;
+        _rejectedLimit = null;
         var text = ClaudeCodeJson.GetString(result, "result");
         if (string.IsNullOrWhiteSpace(text) && ClaudeCodeJson.TryGetArray(result, "errors", out var errors))
         {
@@ -789,13 +797,28 @@ internal sealed partial class ClaudeCodeSession
 
         if (string.Equals(apiError, "authentication_failed", StringComparison.Ordinal))
         {
-            return new InvalidOperationException(
+            return new AgentProviderFailureException(
                 "Claude Code is not signed in. Run `claude` in a terminal and sign in with /login, then send the message again. " +
-                $"CodeAlta does not handle the credentials of Claude Code. ({text.Trim()})");
+                $"CodeAlta does not handle the credentials of Claude Code. ({text.Trim()})",
+                new AgentFailureInfo(AgentFailureKind.Auth));
         }
 
-        return new InvalidOperationException($"Claude Code: {text.Trim()}");
+        // The CLI retried the request itself before it gave up: what is left is the kind of the last error, and the
+        // limit of the plan it rejected during the run, with its reset.
+        var failure = apiError switch
+        {
+            "billing_error" => new AgentFailureInfo(AgentFailureKind.QuotaExhausted, rejected?.ResetsAt),
+            "rate_limit" when rejected is not null => new AgentFailureInfo(AgentFailureKind.QuotaExhausted, rejected.Value.ResetsAt),
+            "rate_limit" => new AgentFailureInfo(AgentFailureKind.RateLimited),
+            "server_error" => new AgentFailureInfo(AgentFailureKind.Unavailable),
+            _ when rejected is not null => new AgentFailureInfo(AgentFailureKind.QuotaExhausted, rejected.Value.ResetsAt),
+            _ => new AgentFailureInfo(AgentFailureKind.Other),
+        };
+        return new AgentProviderFailureException($"Claude Code: {text.Trim()}", failure);
     }
+
+    // The limit of the plan the CLI said was rejected during the run, with its reset.
+    private (string? Type, DateTimeOffset? ResetsAt)? _rejectedLimit;
 
     private async Task<AgentCompactionOutcome> ReadCompactionAsync(CancellationToken cancellationToken)
     {

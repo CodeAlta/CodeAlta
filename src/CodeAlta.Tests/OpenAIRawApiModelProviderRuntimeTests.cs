@@ -5043,7 +5043,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         var usageLimit = new ClientResultException(
             new TestPipelineResponse(
                 $$$"""
-                {"error":{"code":"{{{errorCode}}}","message":"The request was rejected."}}
+                {"error":{"code":"{{{errorCode}}}","message":"The request was rejected.","resets_at":1800000000}}
                 """,
                 status: 429,
                 reasonPhrase: "Too Many Requests"));
@@ -5067,6 +5067,30 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         Assert.AreEqual(1, responsesClient.RequestCount);
         StringAssert.Contains(exception.Failure.Message, errorCode);
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, exception.Failure.Failure?.Kind);
+        Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), exception.Failure.Failure?.ResetsAt);
+    }
+
+    [TestMethod]
+    public void OpenAIResponsesTurnExecutor_ClassifiesTheFailureThatEndsATurn()
+    {
+        static AgentFailureKind? Kind(Exception exception) => OpenAIResponsesTurnExecutor.ClassifyFailure(exception)?.Kind;
+
+        Assert.AreEqual(AgentFailureKind.Auth, Kind(new HttpRequestException("Unauthorized.", null, HttpStatusCode.Unauthorized)));
+        Assert.AreEqual(AgentFailureKind.Auth, Kind(new InvalidOperationException("ChatGPT/Codex authentication failed; re-authentication is required.")));
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, Kind(new HttpRequestException("You exceeded your current quota (insufficient_quota).", null, HttpStatusCode.TooManyRequests)));
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, Kind(new ClientResultException(new TestPipelineResponse("{\"error\":{\"code\":\"usage_not_included\"}}", status: 403, reasonPhrase: "Forbidden"))));
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, Kind(new ClientResultException(new TestPipelineResponse("{\"error\":{\"message\":\"Monthly quota exceeded\"}}", status: 402, reasonPhrase: "Payment Required"))));
+        Assert.AreEqual(AgentFailureKind.RateLimited, Kind(new HttpRequestException("Rate limit reached, slow down.", null, HttpStatusCode.TooManyRequests)));
+        Assert.AreEqual(AgentFailureKind.Unavailable, Kind(new HttpRequestException("Service unavailable.", null, HttpStatusCode.ServiceUnavailable)));
+        Assert.AreEqual(AgentFailureKind.Unavailable, Kind(new InvalidOperationException("wrapper", new HttpRequestException("Bad gateway.", null, HttpStatusCode.BadGateway))));
+        Assert.IsNull(Kind(new HttpRequestException("Bad request.", null, HttpStatusCode.BadRequest)));
+
+        var limited = new HttpRequestException("Too many requests.", null, HttpStatusCode.TooManyRequests);
+        limited.Data["Retry-After"] = "20";
+        var failure = OpenAIResponsesTurnExecutor.ClassifyFailure(limited)!;
+        Assert.AreEqual(AgentFailureKind.RateLimited, failure.Kind);
+        Assert.AreEqual(20, failure.RetryAfterSeconds);
     }
 
     [TestMethod]
@@ -5096,6 +5120,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
         Assert.AreEqual(1, responsesClient.Requests.Count);
         StringAssert.Contains(exception.Failure.Message, "usage_limit_reached");
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, exception.Failure.Failure?.Kind);
     }
 
     [TestMethod]

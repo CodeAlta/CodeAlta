@@ -2498,11 +2498,76 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
-        => new(
+    {
+        var contextOverflow = IsContextOverflow(ex);
+        return new(
             new AgentTurnFailure(
                 ex.Message,
-                IsContextOverflow(ex)),
+                contextOverflow,
+                contextOverflow ? new AgentFailureInfo(AgentFailureKind.Other) : ClassifyFailure(ex)),
             ex);
+    }
+
+    // What kind of failure ended the turn, after the retries of the executor: an exhausted quota or allowance, a
+    // short rate limit, a sign-in, or a service that stays unavailable.
+    internal static AgentFailureInfo? ClassifyFailure(Exception exception)
+    {
+        var retryAfter = GetRetryAfterDelay(exception);
+        int? retryAfterSeconds = retryAfter is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : null;
+        var detail = GetCodexSubscriptionErrorDetail(exception);
+        var resetsAt = TryGetResetsAt(detail) ?? (retryAfter is { } wait ? DateTimeOffset.UtcNow + wait : null);
+        var status = GetHttpStatusCode(exception);
+        var code = TryGetResponsesErrorCode(exception, out var errorCode) ? errorCode.ToLowerInvariant() : string.Empty;
+
+        if (code is "insufficient_quota" or "usage_not_included" or "usage_limit_reached" or "subscription_sharing_usage_limit_exceeded" ||
+            (status is not System.Net.HttpStatusCode.Unauthorized && IsNonRetryableCodexSubscriptionLimit(exception)))
+        {
+            return new AgentFailureInfo(AgentFailureKind.QuotaExhausted, resetsAt, retryAfterSeconds);
+        }
+
+        if (status is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden ||
+            detail.Contains("authentication failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AgentFailureInfo(AgentFailureKind.Auth);
+        }
+
+        if (status is System.Net.HttpStatusCode.TooManyRequests || code is "rate_limit_exceeded" or "slow_down")
+        {
+            return new AgentFailureInfo(AgentFailureKind.RateLimited, resetsAt, retryAfterSeconds);
+        }
+
+        if (status is System.Net.HttpStatusCode.RequestTimeout or >= System.Net.HttpStatusCode.InternalServerError ||
+            code is "server_error" or "service_unavailable" or "upstream_error" or "server_overloaded" or "server_is_overloaded" ||
+            ContainsRetryableCodexSubscriptionFailureSignal(detail) ||
+            IsPrematureResponseEnded(exception) ||
+            IsWebSocketTransportTimeout(exception))
+        {
+            return new AgentFailureInfo(AgentFailureKind.Unavailable, resetsAt, retryAfterSeconds);
+        }
+
+        return AgentFailureClassifier.Classify(exception);
+    }
+
+    // The reset of an exhausted Codex limit: `resets_at` (Unix seconds) or `resets_in_seconds` of the error body, or
+    // the reset header of the primary window.
+    private static DateTimeOffset? TryGetResetsAt(string detail)
+    {
+        if (string.IsNullOrEmpty(detail))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(detail, "\"?(?:resets_at|x-codex-primary-reset-at)\"?\\s*[:=]\\s*\"?(\\d{9,12})", RegexOptions.CultureInvariant);
+        if (match.Success && long.TryParse(match.Groups[1].ValueSpan, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var unixSeconds))
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+        }
+
+        match = Regex.Match(detail, "\"?resets_in_seconds\"?\\s*[:=]\\s*(\\d{1,9})", RegexOptions.CultureInvariant);
+        return match.Success && long.TryParse(match.Groups[1].ValueSpan, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+            ? DateTimeOffset.UtcNow.AddSeconds(seconds)
+            : null;
+    }
 
     private static bool IsContextOverflow(Exception exception)
     {

@@ -27,6 +27,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     private readonly Func<AgentTurnRequest, AgentReasoningEffort, bool>? _supportsReasoningEffort;
     private readonly Action<AgentTurnRequest, ChatOptions>? _configureOptions;
     private readonly ChatClientRequestPreparer? _prepareRequest;
+    private readonly Func<Exception, AgentFailureInfo?>? _classifyFailure;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
@@ -40,12 +41,16 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// <param name="prepareRequest">
     /// Optional provider-specific last step on the messages and the options of a request, before the client gets them.
     /// </param>
+    /// <param name="classifyFailure">
+    /// Optional provider-specific kind of the failure that ended a turn; the HTTP status of the exception otherwise.
+    /// </param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
         Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
         Func<AgentTurnRequest, AgentReasoningEffort, bool>? supportsReasoningEffort = null,
         Action<AgentTurnRequest, ChatOptions>? configureOptions = null,
-        ChatClientRequestPreparer? prepareRequest = null)
+        ChatClientRequestPreparer? prepareRequest = null,
+        Func<Exception, AgentFailureInfo?>? classifyFailure = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -55,6 +60,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         _supportsReasoningEffort = supportsReasoningEffort;
         _configureOptions = configureOptions;
         _prepareRequest = prepareRequest;
+        _classifyFailure = classifyFailure;
     }
 
     /// <inheritdoc />
@@ -616,12 +622,18 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         }
     }
 
-    private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
-        => new(
+    private AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+    {
+        var contextOverflow = IsContextOverflowMessage(ex.Message);
+        return new(
             new AgentTurnFailure(
                 ex.Message,
-                IsContextOverflowMessage(ex.Message)),
+                contextOverflow,
+                contextOverflow
+                    ? new AgentFailureInfo(AgentFailureKind.Other)
+                    : _classifyFailure?.Invoke(ex) ?? AgentFailureClassifier.Classify(ex)),
             ex);
+    }
 
     private static bool IsContextOverflowMessage(string? message)
         => !string.IsNullOrWhiteSpace(message) &&
