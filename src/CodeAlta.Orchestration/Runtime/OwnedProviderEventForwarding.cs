@@ -470,23 +470,32 @@ internal sealed class OwnedProviderEventForwarding
         internal bool HandleAdmission { get; set; } = true;
         internal bool CallbackAdmission { get; set; } = true;
         internal int HandleUses { get; set; }
+        // The handle uses of work that changes the conversation (a send, a compaction), from the moment it takes the
+        // handle: its run may not be observed yet.
+        internal int WorkUses { get; set; }
+        internal bool HasWorkInProgress { get { lock (_owner._gate) return WorkUses != 0; } }
         internal int ProjectionUses { get; set; }
         internal int ActiveCallbacks { get; set; }
         internal bool Stopped { get; set; }
         internal bool IsRetiring { get { lock (_owner._gate) return !HandleAdmission; } }
-        internal Use? TryAcquireHandleUse()
+        internal Use? TryAcquireHandleUse() => TryAcquireHandleUse(work: false);
+        // A handle use of work that changes the conversation: see WorkUses.
+        internal Use? TryAcquireWorkUse() => TryAcquireHandleUse(work: true);
+        private Use? TryAcquireHandleUse(bool work)
         {
             lock (_owner._gate)
             {
                 if (_owner._closed || _owner._retainedDependencies.Count != 0 || !HandleAdmission) return null;
                 HandleUses++;
-                return new Use(this, projection: false);
+                if (work) WorkUses++;
+                return new Use(this, projection: false, work);
             }
         }
         internal void InstallSubscription(IDisposable subscription)
         { lock (_owner._gate) Subscription = subscription; }
         internal void CompleteSetup() => Setup.TrySetResult();
-        internal void Retain(Use use, bool projection, Exception failure)
+        internal void Retain(Use use, bool projection, Exception failure) => Retain(use, projection, work: false, failure);
+        internal void Retain(Use use, bool projection, bool work, Exception failure)
         {
             lock (_owner._gate)
             {
@@ -494,20 +503,22 @@ internal sealed class OwnedProviderEventForwarding
                 _owner._retainedDependencies.Add(use);
                 _owner._failures.Add((Ordinal, 0, failure));
                 HandleAdmission = false;
-                Release(projection);
+                Release(projection, work);
             }
         }
-        internal void Release(bool projection)
+        internal void Release(bool projection) => Release(projection, work: false);
+        internal void Release(bool projection, bool work)
         {
             lock (_owner._gate)
             {
                 if (projection) ProjectionUses--; else HandleUses--;
+                if (work) WorkUses--;
                 _owner.Pulse();
             }
         }
     }
 
-    internal sealed class Use(Attachment attachment, bool projection) : IDisposable
+    internal sealed class Use(Attachment attachment, bool projection, bool work = false) : IDisposable
     {
         private int _released;
         internal Attachment Attachment => attachment;
@@ -516,9 +527,9 @@ internal sealed class OwnedProviderEventForwarding
         {
             if (!HasRetention(failure)) throw new ArgumentException("Explicit retention evidence is required.", nameof(failure));
             if (Interlocked.CompareExchange(ref _released, 2, 0) != 0) return;
-            attachment.Retain(this, projection, failure);
+            attachment.Retain(this, projection, work, failure);
         }
         public void Dispose()
-        { if (Interlocked.CompareExchange(ref _released, 1, 0) == 0) attachment.Release(projection); }
+        { if (Interlocked.CompareExchange(ref _released, 1, 0) == 0) attachment.Release(projection, work); }
     }
 }

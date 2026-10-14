@@ -90,4 +90,11 @@ public sealed record ModelProviderDescriptor
     /// (<see cref="IAgentRemoteControlProvider"/>, Claude Code's Remote Control).
     /// </summary>
     public bool SupportsRemoteControl { get; init; }
+
+    /// <summary>
+    /// Gets whether the provider keeps the conversation of a session where other programs continue it (the transcript of
+    /// Claude Code, which VS Code and the CLI in a terminal write too): the turns made there are then added to the
+    /// session. The provider of a session without it is never asked for them.
+    /// </summary>
+    public bool SharesConversations { get; init; }
 }

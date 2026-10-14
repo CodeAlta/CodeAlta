@@ -81,6 +81,7 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
             PermissionModes = ClaudeCodeModelProviderRuntimeOptions.PermissionModes,
             DefaultPermissionMode = string.IsNullOrWhiteSpace(options.PermissionMode) ? null : options.PermissionMode.Trim(),
             SupportsRemoteControl = true,
+            SharesConversations = true,
         };
     }
 

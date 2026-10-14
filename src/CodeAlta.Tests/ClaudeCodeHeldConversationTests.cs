@@ -124,6 +124,54 @@ public sealed class ClaudeCodeHeldConversationTests
     }
 
     [TestMethod]
+    public async Task HeldConversation_Wait_EndsTheRun_WhenTheHolderAddedTurnsMeanwhile()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation, firstAnswer) = await ClaudeCodeExternalTurnsTests.StartConversationAsync(directory);
+        var transcript = new ClaudeCodeExternalTurnsTests.Transcript(ClaudeCodeExternalTurnsTests.TranscriptPath(cli, directory, conversation), conversation, directory.Path);
+        transcript.Write(
+            transcript.User("u1", null, "first", "sdk-cli"),
+            transcript.Assistant(firstAnswer, "u1", "msg_1", ClaudeCodeExternalTurnsTests.Text("Answer."), "sdk-cli"));
+        cli.HoldConversation(VsCodePid, conversation);
+        var asked = new List<AgentConversationHeldRequest>();
+
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        var events = new EventLog();
+        session.Subscribe(events.Add);
+        var send = session.SendAsync(Send("second", Answer(asked, AgentConversationHeldChoice.Wait)));
+        await events.WaitForAsync(static e => IsWait(e, AgentConversationHeldUpdates.Waiting), Timeout);
+
+        // VS Code goes on with the conversation while the run waits, then releases it.
+        transcript.Append(
+            transcript.User("u2", firstAnswer, "From VS Code."),
+            transcript.Assistant("a2", "u2", "msg_2", ClaudeCodeExternalTurnsTests.Text("Answered there.")));
+        var started = SessionProcesses(cli).Count;
+        cli.ReleaseConversation(VsCodePid);
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => send.WaitAsync(Timeout));
+        StringAssert.Contains(failure.Message, $"Turns were added to the Claude Code conversation {conversation} in VS Code while this run waited for it.");
+        StringAssert.Contains(failure.Message, "send the message again");
+        Assert.AreEqual(started, SessionProcesses(cli).Count, "The conversation is not resumed before the session has those turns.");
+
+        // The catch-up the next message starts with writes them after the prompt of the run that ended; the next turn
+        // then resumes the conversation, which has them, and is sent only its own prompt.
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
+        var state = (await store.GetStateAsync(sessionId))!;
+        var read = ClaudeCodeExternalTurns.Read(cli.ConfigRoot, state, directory.Path, CancellationToken.None);
+        Assert.AreEqual(AgentExternalTurnOrigin.VsCode, read.Turns.Single().Origin);
+        var prepared = await AgentExternalTurnJournal.PrepareAsync(new ModelProviderId("claude-code"), state, read, directory.Path,
+            static (_, _) => throw new InvalidOperationException(), static (result, _) => Task.FromResult(result), DateTimeOffset.UtcNow, CancellationToken.None);
+        await store.AppendEventsAsync(ClaudeCodeModelProviderRuntime.ProtocolFamily, "claude-code", sessionId, prepared.Events);
+        await using var nextRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var next = await nextRuntime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        await next.SendAsync(new AgentSendOptions { Input = AgentInput.Text("third") }).WaitAsync(Timeout);
+        var process = SessionProcess(cli);
+        Assert.AreEqual(conversation, process.ResumedSessionId);
+        Assert.AreEqual("third", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()));
+    }
+
+    [TestMethod]
     public async Task HeldConversation_CancelledWhileWaiting_EndsTheRun_AndKeepsThePrompt()
     {
         using var directory = TestTempDirectory.Create();

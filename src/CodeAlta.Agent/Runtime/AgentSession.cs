@@ -1255,6 +1255,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             outcome = new AgentCompactionOutcome(false, ex.Message);
         }
+        finally
+        {
+            // What the provider wrote of the compaction is where its conversation goes on from.
+            await RecordProviderStateUpdateAsync().ConfigureAwait(false);
+        }
 
         var usage = _state.Usage;
         if (outcome is { Success: true, PostCompactionTokens: { } postCompactionTokens })
@@ -2733,6 +2738,47 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         try
         {
+            return await ExecuteTurnWithOverflowRecoveryCoreAsync(request, runId, systemMessage, developerInstructions, modelInfo, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception) when (_turnExecutor is IAgentProviderStateUpdates)
+        {
+            // A turn stopped or failed after its prompt was sent: the provider may have moved its conversation all the same.
+            await RecordProviderStateUpdateAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    // A provider that moved its conversation outside an answer (a turn stopped after its prompt was sent, a compaction)
+    // gives the state that follows, which is recorded as the state of an answer is. A state that cannot be written is
+    // left to the next answer: what failed is reported, not this.
+    private async Task RecordProviderStateUpdateAsync()
+    {
+        if (_turnExecutor is not IAgentProviderStateUpdates updates || updates.TakeProviderState(SessionId) is not { } providerState)
+        {
+            return;
+        }
+
+        _state = _state with { ProviderState = providerState, UpdatedAt = DateTimeOffset.UtcNow };
+        try
+        {
+            await _store.UpsertStateAsync(_state, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task<AgentTurnResponse> ExecuteTurnWithOverflowRecoveryCoreAsync(
+        AgentTurnRequest request,
+        AgentRunId runId,
+        string? systemMessage,
+        string? developerInstructions,
+        AgentModelInfo? modelInfo,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
             return await _turnExecutor.ExecuteTurnAsync(
                     request,
                     (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
@@ -3845,7 +3891,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             name);
     }
 
-    private static string RenderUserInput(IReadOnlyList<AgentInputItem> items)
+    internal static string RenderUserInput(IReadOnlyList<AgentInputItem> items)
         => string.Join(
             Environment.NewLine,
             items.Select(static item => item switch
@@ -3869,7 +3915,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ? $"File: {file.Path}"
             : $"File: {file.Path} ({file.LineRange.StartLine}-{file.LineRange.EndLine})";
 
-    private static string RenderToolResult(AgentToolResult result)
+    internal static string RenderToolResult(AgentToolResult result)
     {
         var rendered = result.Items.Count == 0 ? string.Empty : AgentToolResultImages.RenderText(result);
         return string.IsNullOrWhiteSpace(rendered)
@@ -3995,13 +4041,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _ => null,
         };
 
-    private static JsonElement SerializeAgentInput(AgentInput input)
+    internal static JsonElement SerializeAgentInput(AgentInput input)
         => JsonSerializer.SerializeToElement(input, AgentJsonSerializerContext.Default.AgentInput);
 
-    private static JsonElement SerializeLocalMessage(AgentConversationMessage message)
+    internal static JsonElement SerializeLocalMessage(AgentConversationMessage message)
         => JsonSerializer.SerializeToElement(message, AgentJsonSerializerContext.Default.AgentConversationMessage);
 
-    private static JsonElement? CreateReasoningDetails(
+    internal static JsonElement? CreateReasoningDetails(
         AgentMessagePart.Reasoning reasoning,
         bool redactProtectedData = false)
     {
@@ -4054,7 +4100,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static JsonElement CreateToolCallDetails(AgentMessagePart.ToolCall toolCall, string? workingDirectory)
+    internal static JsonElement CreateToolCallDetails(AgentMessagePart.ToolCall toolCall, string? workingDirectory)
     {
         var fileActivity = GetToolFileActivity(toolCall, workingDirectory);
         using var stream = new MemoryStream();
@@ -4073,7 +4119,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static JsonElement CreateToolResultDetails(AgentMessagePart.ToolCall toolCall, AgentToolResult result, string? workingDirectory, string? diff = null)
+    internal static JsonElement CreateToolResultDetails(AgentMessagePart.ToolCall toolCall, AgentToolResult result, string? workingDirectory, string? diff = null)
     {
         var fileActivity = GetToolFileActivity(toolCall, workingDirectory);
         using var stream = new MemoryStream();

@@ -129,9 +129,10 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
 
     /// <summary>
     /// Writes the entry of the registry of live sessions of a process that holds a conversation, as Claude Code 2.1.296
-    /// writes it, and makes the process run.
+    /// writes it, and makes the process run. <paramref name="status"/> is what the process does (<c>idle</c>, <c>busy</c>,
+    /// <c>waiting</c>).
     /// </summary>
-    public void HoldConversation(int pid, string conversationId, string entrypoint = "claude-vscode", string kind = "interactive")
+    public void HoldConversation(int pid, string conversationId, string entrypoint = "claude-vscode", string kind = "interactive", string status = "idle")
     {
         var folder = Path.Combine(ConfigRoot, "sessions");
         Directory.CreateDirectory(folder);
@@ -144,7 +145,7 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
             ["version"] = "2.1.296",
             ["kind"] = kind,
             ["entrypoint"] = entrypoint,
-            ["status"] = "idle",
+            ["status"] = status,
             ["updatedAt"] = 1_791_616_422_304,
         }.ToJsonString());
         Probe.Run(pid);

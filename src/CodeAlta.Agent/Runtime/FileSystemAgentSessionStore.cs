@@ -915,6 +915,34 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         return projection?.Summary?.ProviderId ?? new ModelProviderId(providerKey);
     }
 
+    /// <summary>Gets the length of the journal of a session: one that changed between two reads had records appended.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancels the lookup.</param>
+    /// <returns>The length in bytes, or null when the session has no journal.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    internal async Task<long?> GetJournalLengthAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var path = await TryGetSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (path is null) return null;
+        try { return new FileInfo(path).Length; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>Creates the snapshot record of a session state, as <see cref="UpsertStateAsync"/> appends it.</summary>
+    /// <param name="providerId">The provider of the session.</param>
+    /// <param name="state">The state.</param>
+    /// <returns>The record, to append with others.</returns>
+    internal static AgentRawEvent CreateStateSnapshotEvent(ModelProviderId providerId, AgentSessionState state)
+        => new(providerId, state.SessionId, state.UpdatedAt, SessionStateEventType,
+            JsonSerializer.SerializeToElement(state, AgentJsonSerializerContext.Default.AgentSessionState), null);
+
+    /// <summary>Creates the snapshot record of a session summary, as <see cref="UpsertSessionAsync"/> appends it.</summary>
+    /// <param name="summary">The summary.</param>
+    /// <returns>The record, to append with others.</returns>
+    internal static AgentRawEvent CreateSummarySnapshotEvent(AgentSessionSummary summary)
+        => new(summary.ProviderId, summary.SessionId, summary.UpdatedAt, SessionSummaryEventType,
+            JsonSerializer.SerializeToElement(summary, AgentJsonSerializerContext.Default.AgentSessionSummary), null);
+
     internal async Task CommitProviderSelectionAsync(AgentTransferSnapshot original, AgentSessionSummary summary,
         AgentSessionState state, string? header, IReadOnlyList<string> additionalSnapshots, CancellationToken token)
     {

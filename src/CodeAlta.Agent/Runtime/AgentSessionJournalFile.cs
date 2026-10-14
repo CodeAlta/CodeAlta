@@ -344,6 +344,16 @@ internal sealed class AgentSessionJournalFile
         Encoding encoding,
         CancellationToken cancellationToken)
     {
+        // The records are written with one write: a process that ends meanwhile leaves all of them or none, never the
+        // first records of a turn without the state that follows them.
+        var builder = new StringBuilder();
+        foreach (var line in lines)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            builder.Append(line).Append(Environment.NewLine);
+        }
+
+        var text = builder.ToString();
         await RetryFileOperationAsync(
                 async () =>
                 {
@@ -352,14 +362,16 @@ internal sealed class AgentSessionJournalFile
                         FileMode.Append,
                         FileAccess.Write,
                         FileShare.Read,
-                        bufferSize: 4096,
+                        bufferSize: 0,
                         useAsync: true);
-                    await using var writer = new StreamWriter(stream, encoding);
-                    foreach (var line in lines)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        await writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
-                    }
+                    // As a writer would: the preamble of the encoding only at the start of the file.
+                    var preamble = stream.Length == 0 ? encoding.GetPreamble() : [];
+                    var bytes = new byte[preamble.Length + encoding.GetByteCount(text)];
+                    preamble.CopyTo(bytes, 0);
+                    encoding.GetBytes(text, 0, text.Length, bytes, preamble.Length);
+                    // Begun, the write is not cancelled halfway.
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await stream.WriteAsync(bytes, CancellationToken.None).ConfigureAwait(false);
                 },
                 cancellationToken)
             .ConfigureAwait(false);

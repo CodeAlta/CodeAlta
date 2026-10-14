@@ -155,10 +155,10 @@ internal sealed partial class ClaudeCodeSession
             case "stream_event":
                 return await ReduceStreamEventAsync(@event, onUpdate, cancellationToken).ConfigureAwait(false);
             case "assistant":
-                NoteEntry(message);
+                NoteEntry(message, assistant: true);
                 return ReduceAssistant(@event);
             case "user":
-                NoteEntry(message);
+                NoteEntry(message, assistant: false);
                 // The result of a tool: the message that called it has all its blocks, unless the model still writes it.
                 return _pending is { HasToolCalls: true } && !PendingGoesOn && FinalizePending() is { } toolSegment
                     ? CreateResponse(toolSegment, requiresFollowUp: false)
@@ -481,6 +481,8 @@ internal sealed partial class ClaudeCodeSession
 
     private AgentTurnResponse CompleteRun(string? resultText)
     {
+        // The run ends with an answer, whose state records what the CLI wrote for it.
+        _ownWritesPending = false;
         var segment = _held;
         _held = null;
         _awaitingQueuedTurns = false;
@@ -672,19 +674,25 @@ internal sealed partial class ClaudeCodeSession
     private int _conversationCount;
 
     // An assistant message or the result of a tool is an entry of the transcript of the CLI, named by its uuid.
-    private void NoteEntry(JsonElement message)
+    private void NoteEntry(JsonElement message, bool assistant)
     {
         if (ClaudeCodeJson.GetString(message, "uuid") is { Length: > 0 } uuid)
         {
             _leaf = uuid;
+            if (assistant)
+            {
+                _anchor = uuid;
+            }
         }
     }
 
     private AgentTurnResponse CreateResponse(Segment segment, bool requiresFollowUp)
     {
         // The CLI answered: its transcript holds the conversation from the point the session was forked at or rewound
-        // to, under the identifier it reported. What is started after this resumes that transcript as it is.
+        // to, under the identifier it reported. What is started after this resumes that transcript as it is. The state
+        // of the answer records the leaf.
         _branchPending = false;
+        _stateUnrecorded = false;
         _branchFork = false;
         _branchAt = null;
         _branchSource = null;
@@ -720,9 +728,7 @@ internal sealed partial class ClaudeCodeSession
             RequiresProviderFollowUp = requiresFollowUp,
             Usage = usageSnapshot,
             ProviderSessionId = _claudeSessionId,
-            ProviderState = _claudeSessionId is { } sessionId
-                ? new ClaudeCodeProviderState(sessionId, _syncedUsers, _syncedAssistants, _instructionsHash, _costTotal, _leaf).ToJson()
-                : null,
+            ProviderState = _claudeSessionId is { } sessionId ? CurrentProviderState(sessionId).ToJson() : null,
         };
     }
 

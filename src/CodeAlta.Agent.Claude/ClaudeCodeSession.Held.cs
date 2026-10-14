@@ -211,6 +211,51 @@ internal sealed partial class ClaudeCodeSession
         return true;
     }
 
+    /// <summary>
+    /// After a wait for another process to release the conversation, ends the run when that process added turns to it.
+    /// The prompt of the run was written in the journal of the session before them: resumed now, the run would answer
+    /// after turns the session does not show, and those turns, before its prompt in the conversation, could no longer be
+    /// added to the session. Ended, the session is idle: the next message first adds those turns to it (its catch-up),
+    /// then is sent.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Turns were added while the run waited.</exception>
+    private void RefuseTurnsMadeWhileWaiting(string? workingDirectory, string cliSessionId)
+    {
+        AgentExternalTurns read;
+        try
+        {
+            read = ClaudeCodeExternalTurns.Read(
+                ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable),
+                CurrentProviderState(cliSessionId),
+                workingDirectory ?? Environment.CurrentDirectory,
+                _positions,
+                CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // A transcript that cannot be read now is looked at again by the next catch-up: the run goes on.
+            HeldLogger.Warn($"Whether turns were added to the Claude Code conversation {cliSessionId} while CodeAlta waited is not known: {ex.Message}");
+            return;
+        }
+
+        if (read is not { Status: AgentExternalTurnsStatus.Read, Turns: [var first, ..] })
+        {
+            return;
+        }
+
+        ForgetBinding();
+        var where = first.Origin switch
+        {
+            AgentExternalTurnOrigin.VsCode => " in VS Code",
+            AgentExternalTurnOrigin.Terminal => " in a terminal",
+            AgentExternalTurnOrigin.OtherApplication => $" in another application ({first.Entrypoint})",
+            _ => string.Empty,
+        };
+        throw new InvalidOperationException(
+            $"Turns were added to the Claude Code conversation {cliSessionId}{where} while this run waited for it. " +
+            "CodeAlta adds them to this session before the next message: send the message again.");
+    }
+
     // The run continues a copy of the conversation, as a fork of the whole of it: the CLI names the copy when it starts,
     // and the session records that name with the first answer.
     private bool ContinueAsCopy(string cliSessionId)
