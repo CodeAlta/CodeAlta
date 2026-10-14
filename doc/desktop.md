@@ -2486,6 +2486,33 @@ before signing in. A `claude-code` provider has no API field and no **Account** 
 answer Claude Code saved for the key (blank), ignore it and use the Claude login (`ignore`), or use it (`use`). See
 "`ANTHROPIC_API_KEY`" in [providers.md](providers.md). Another adapter type does not keep the setting.
 
+**Claude Code accounts and CLI.** The form of a `claude-code` provider also has:
+
+- **Account folder** (`config_dir` of `GlobalConfigProvider`/`GlobalConfigProviderEdit`), a full path or one that starts
+  with `~` (the page and the store refuse a relative one), with one line saying that a new folder starts without
+  settings, memory or MCP servers. When it changes on a provider that has sessions (`providerSessions`, counted in the
+  workspace snapshot by provider key), **Save and apply** first opens a popover beside it that says their
+  conversations stay in the old folder; **Change the folder** saves.
+- **Duplicate** in the footer (`globalConfig.duplicateProvider`, refused while the form has unsaved changes): the host
+  adds `<key>-<n>` with the first free number (the copy of `claude-code-2` is `claude-code-3`), the same type and
+  settings, a numbered name and no `config_dir` or `codex_home`; the response names the new key (`key`), which the
+  page selects. Any provider type can be duplicated.
+- The **Claude Code CLI** box (`claudeCli/ClaudeCodeCli.tsx`): which CLI the provider runs (its `command`, shown
+  read-only from `GlobalConfigProvider.command`; the pinned version once downloaded; or the user's install with
+  its version), **Download &lt;version&gt; (&lt;size&gt;)** while the pinned version is not in the cache, its
+  progress and **Cancel** while it downloads, the reason of a failure, and the command to copy that signs in to the
+  account of the provider: the executable it runs and `CLAUDE_CONFIG_DIR` from the form, for PowerShell on Windows
+  and a POSIX shell elsewhere, with the home folder written `$HOME` (`claudeCli/claudeCli.ts`).
+
+**The `claudeCli` RPC** (`Desktop/Rpc/ClaudeCliRpc.cs`) serves that box. `read` gives the pinned `version`, the
+`size` of its archive, `supported` (Claude Code has a CLI for this platform), `pinnedPath` once it is in the cache,
+the user's own `installedPath` and `installedVersion` (`claude --version`, read once per file), and `windows` and
+`home` for the command. `install` starts the download (`ok`, `busy`, `unsupported`), `cancelInstall` stops it, and
+`watch` replays and follows its state (`idle`, `downloading`, `installing`, `done`, `failed`, `canceled`, with the
+bytes and the reason of a failure). The download belongs to the application: closing the page does not stop it,
+closing the window does. An instance on explicit roots registers the service unavailable and downloads nothing. The
+download itself is described in "The pinned CLI" of [providers.md](providers.md).
+
 **The default provider.** `ModelProviderDescriptor.IsDefault` is true for every configured provider (it is
 the default option of its own definition), so it never says which provider a new session starts with.
 `DesktopDefaultProvider` does: `[chat] default_provider` (of the project, then of the user) when that

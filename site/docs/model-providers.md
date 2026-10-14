@@ -73,6 +73,7 @@ Both apps edit the same providers and share the same credentials, so a provider 
 - add, delete, enable, and disable provider entries;
 - in CodeAlta Desktop, **Add provider** lists the built-in providers you do not have yet: choose one to add it with its key and type, or **Custom provider…** for an entry of your own;
 - in CodeAlta Desktop, choose the **Icon** of a provider among the brand logos and the general icons, and its **Icon color**;
+- in CodeAlta Desktop, **Duplicate** a provider to add another account of the same type, and for Claude Code set its **Account folder**, download the tested Claude Code CLI and copy the command that signs in (see [Claude Code](#claude-code));
 - validate provider keys, endpoint URLs, required credentials, and conflicting settings;
 - store an API key directly or refer to an environment variable;
 - list and choose a provider model on demand when the Model field is not using its default;
@@ -219,22 +220,31 @@ Provider-type-specific fields and restrictions:
 | `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
-| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `profile`, `compaction`, `protocol_trace` |
+| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `codex_home`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
-| `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `command`, `args`, `permission_mode`, `anthropic_api_key`, `prompt_suggestions`, `single_model_id`, `models_include_regex` |
+| `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `config_dir`, `command`, `args`, `permission_mode`, `anthropic_api_key`, `prompt_suggestions`, `single_model_id`, `models_include_regex` |
 
 For a recognized reasoning model through `openai-responses` against the official OpenAI endpoint, CodeAlta requests `summary: auto` and encrypted reasoning content even when effort is left to the service's model-specific default. The summary feeds the visible reasoning timeline, while the opaque encrypted item preserves stateless reasoning continuity between locally replayed calls. OpenAI-compatible custom endpoints retain their existing summary and encrypted-content request shape. Local replay preserves the relative order of assistant messages, opaque reasoning items, and tool calls.
 
 ### Claude Code
 
-The `claude-code` provider runs your sessions through the [Claude Code](https://code.claude.com/docs/en/overview) CLI installed on your computer, with the account that CLI is signed in to. This is how a Claude subscription is used from CodeAlta: Anthropic does not let other applications sign in to a Claude account, so CodeAlta does not. It starts the `claude` program you installed and talks to it.
+The `claude-code` provider runs your sessions through the [Claude Code](https://code.claude.com/docs/en/overview) CLI, with the account that CLI is signed in to. This is how a Claude subscription is used from CodeAlta: Anthropic does not let other applications sign in to a Claude account, so CodeAlta does not. It starts the `claude` program and talks to it.
 
-1. Install Claude Code and sign in: run `claude` in a terminal and use `/login` (an API key or a cloud provider configured for the CLI works too).
-2. In the provider editor, enable **Claude Code** and use **Test**. The test asks the CLI for its models; it does not call a model.
-3. Start a session with it. The models are the ones the CLI offers for your account, each under its own name. The first one is the model Claude Code recommends for the account.
+1. In CodeAlta Desktop, open **Settings > Providers** and select **Claude Code**. The **Claude Code CLI** box says which CLI the provider runs. Choose **Download** to get the version CodeAlta is tested with (about 110 MB, once for all your Claude providers); the box shows its progress.
+2. Sign in: copy the command the box gives, run it in a terminal, then type `/login` (an API key or a cloud provider configured for the CLI works too).
+3. Enable the provider and use **Test**. The test asks the CLI for its models; it does not call a model.
+4. Start a session with it. The models are the ones the CLI offers for your account, each under its own name. The first one is the model Claude Code recommends for the account.
 
 CodeAlta never sees your Claude credentials, and there is no API key, endpoint or sign-in for this provider in CodeAlta. Usage counts against the account the CLI is signed in to, with the limits of its plan.
+
+**Which CLI runs.** A newer Claude Code can change how it talks to CodeAlta, so each version of CodeAlta is tested with one version of Claude Code. CodeAlta runs, in this order:
+
+1. the program `command` names, when the provider has one;
+2. the version CodeAlta is tested with, once you downloaded it. It is the official release from GitHub, checked before use, and kept in `~/.alta/cache/claude-code/<version>`;
+3. the Claude Code you installed, found on `PATH` or where its installers put it. When its version is another one, **Test** says so; download the tested version to run it instead.
+
+**Several accounts.** Each Claude account is a provider of its own, with its own folder for Claude Code (its login, settings, memory and conversations). Select a Claude Code provider and choose **Duplicate**: CodeAlta adds `claude-code-2` with the same settings. In **Account folder** give it another folder, such as `~/.claude-work`, save, and sign in with the command the box gives, which starts Claude Code with that folder. A new folder starts empty: copy the settings, `CLAUDE.md` or MCP servers you want there from your usual folder (`~/.claude`). Changing the folder of a provider that has sessions asks first: their conversations stay in the old folder, and Claude Code no longer finds them to continue.
 
 **`ANTHROPIC_API_KEY`**: when this variable is set, Claude Code started by another application uses it without asking, even if you answered **No** when `claude` asked about it in a terminal. Its usage is then billed to the API account of the key, not to your plan. CodeAlta does not let that happen silently. It follows the answer you gave Claude Code for that key: with **No**, it starts Claude Code without the variable, so your login is used. When Claude Code has no answer for the key, a session does not start, and its error says what to choose. Choose in the provider editor (**ANTHROPIC_API_KEY**: use it, or ignore it and use your Claude login), or with `anthropic_api_key` in the configuration. The variable is left alone when Claude Code uses a cloud provider (Bedrock, Vertex AI, Foundry).
 
@@ -243,7 +253,7 @@ A session of this provider is a Claude Code session shown in CodeAlta:
 - Claude Code keeps its own system prompt, tools (`Read`, `Edit`, `Bash`, ...), settings, permission rules, hooks, skills and `CLAUDE.md` files. The instructions CodeAlta composes for the session (the agent prompt, skills, project context such as `AGENTS.md`) are added to its prompt, with a short note that says how they apply there: which tool `alta` is, and that CodeAlta's sessions, questions, skills, plans and notes are the ones to use where Claude Code has a tool of its own. Claude Code keeps the prompt a conversation started with, so when those instructions change later (you switch the agent prompt, a skill is activated, tools are turned on) CodeAlta gives what changed with your next prompt.
 - CodeAlta's own tools are available to it as MCP tools named `mcp__codealta__<name>`: the `alta` live tool, plugin tools, and the tools of the MCP servers you activated in CodeAlta.
 - What it delegates is a [sub-agent](sessions.md#sub-agents) of CodeAlta, a session you can open, follow and stop, like for any other provider. Claude Code's own subagents and workflows run where CodeAlta cannot show them, so a session runs without them.
-- Its tool calls, command output and file diffs appear in the timeline, and the session is saved, resumed, queued and steered like any other. Claude Code runs some tool calls of one answer at the same time: each is shown as running from the moment it starts. The CLI keeps the conversation in its own transcript (`~/.claude/projects`), which is what a resumed session continues from.
+- Its tool calls, command output and file diffs appear in the timeline, and the session is saved, resumed, queued and steered like any other. Claude Code runs some tool calls of one answer at the same time: each is shown as running from the moment it starts. The CLI keeps the conversation in its own transcript (in `projects` of the account folder, `~/.claude/projects` by default), which is what a resumed session continues from.
 - When Claude Code asks a permission that your Claude Code settings do not already decide, CodeAlta answers it the way it does for its own tools: commands and file edits follow the [permission mode](workspace.md#tool-permissions) of the session. A question of Claude (`AskUserQuestion`) opens the question form where CodeAlta takes live questions; in the desktop application Claude asks with `alta ask`, as the other providers do.
 - A picture a tool returns (a screenshot of the window, for instance) is also saved by Claude Code in its own folder, `~/.claude/projects/<folder>/<session>/tool-results`.
 - Claude Code's own plan mode is not used: its approval step has no place in the CodeAlta window. Use the **Plan** agent prompt of CodeAlta instead. With `permission_mode = "plan"` in the provider configuration a session stays read-only and gives its plan as its answer.
@@ -260,14 +270,17 @@ A session of this provider is a Claude Code session shown in CodeAlta:
 type = "claude-code"
 model = "sonnet"                 # optional
 reasoning_effort = "high"        # optional: low, medium, high, xhigh, max
-command = "~/.local/bin/claude"  # optional: when `claude` is not on PATH
+config_dir = "~/.claude-work"    # optional: the folder of the account (default: ~/.claude)
+command = "~/.local/bin/claude"  # optional: a Claude Code of your own
 permission_mode = "default"      # optional: default, acceptEdits, plan, auto, dontAsk, bypassPermissions
 anthropic_api_key = "ignore"     # optional: use or ignore ANTHROPIC_API_KEY (default: your answer in Claude Code)
 prompt_suggestions = true        # optional: suggest your next prompt after a turn (default: off)
 args = ["--add-dir", "/specs"]   # optional: more arguments for the CLI
 ```
 
-`command` is looked for on `PATH`, then in the folders the Claude Code installers use (`~/.local/bin`, Homebrew, npm). On Windows CodeAlta runs the native `claude.exe`; it does not run the `claude.cmd` shim of an npm installation. Add another `type = "claude-code"` entry with its own `command` or `args` to run a second configuration.
+`config_dir` is a full path or starts with `~`; Claude Code gets it as `CLAUDE_CONFIG_DIR`. A `command` that is a name is looked for on `PATH`, then in the folders the Claude Code installers use (`~/.local/bin`, Homebrew, npm). On Windows CodeAlta runs the native `claude.exe`; it does not run the `claude.cmd` shim of an npm installation, so a Windows user without the native installer downloads the tested version instead.
+
+A `codex` provider takes `codex_home` the same way: the folder the Codex CLI of OpenAI is started with (`CODEX_HOME`) when CodeAlta reads the usage of your plan, for a second ChatGPT account signed in to the Codex CLI with another folder.
 
 ### ChatGPT sign-in and migration
 

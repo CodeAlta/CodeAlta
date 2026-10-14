@@ -101,7 +101,7 @@ skipped. A section without a `type` (other than `codex` and `copilot`, which hav
 | `google-genai` | `CodeAlta.Agent.GoogleGenAI` | Requires API key. Wraps SDK chat streaming through the agent runtime and supports model metadata enrichment. |
 | `vertex-ai` | `CodeAlta.Agent.GoogleGenAI` | Uses Vertex project/location settings instead of an API key. |
 | `mistral` | `CodeAlta.Agent.Mistral` | Requires API key. Uses Mistral chat completions with streaming, tool calls, multi-turn replay, and upstream model listing. |
-| `claude-code` | `CodeAlta.Agent.Claude` | Runs the Claude Code CLI the user installed and signed in to. No credential, endpoint or login of CodeAlta; see [Claude Code CLI provider](#claude-code-cli-claude-code-provider). |
+| `claude-code` | `CodeAlta.Agent.Claude` | Runs the Claude Code CLI (the pinned version, else the user's own) signed in to the account of its `config_dir`. No credential, endpoint or login of CodeAlta; see [Claude Code CLI provider](#claude-code-cli-claude-code-provider). |
 
 External ACP CLI adapters are no longer registered as model providers. Legacy `[acp]` config is ignored and preserved only as compatibility data.
 
@@ -296,19 +296,37 @@ Relevant config keys for `type = "xai"` include `auth_source`, `model_discovery`
 
 ## Claude Code CLI `claude-code` provider
 
-`CodeAlta.Agent.Claude` runs CodeAlta sessions through the `claude` executable the user installed. It is not an API client: Anthropic's subscriptions are not reachable from a third-party application, and CodeAlta does not try. It starts the unmodified CLI as a child process and speaks the protocol of the Claude Agent SDKs with it (`-p --input-format stream-json --output-format stream-json`, one JSON object per line in both directions).
+`CodeAlta.Agent.Claude` runs CodeAlta sessions through the `claude` executable: the version CodeAlta pins, downloaded on the user's request, or the one the user installed. It is not an API client: Anthropic's subscriptions are not reachable from a third-party application, and CodeAlta does not try. It starts the unmodified CLI as a child process and speaks the protocol of the Claude Agent SDKs with it (`-p --input-format stream-json --output-format stream-json`, one JSON object per line in both directions).
 
 ### What CodeAlta does and does not do
 
 The provider follows Anthropic's conditions for running Claude Code from another product ([Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)):
 
-- The executable is the user's own installation. CodeAlta ships none, installs none and modifies none (`ClaudeCodeCliLocator`).
+- The executable is the official release of Anthropic, unmodified. CodeAlta ships none and modifies none: it runs the user's installation, or downloads the archive of the release it pins from GitHub when the user asks it to, checked against its SHA-256 (`ClaudeCodeCliLocator`, `ClaudeCodeCliInstaller`, below).
 - CodeAlta stores and forwards no credential. The CLI signs in with what the user set up for it: `claude` then `/login`, an API key, or a cloud provider. There is no login flow, no token store and no `api_key`/`api_key_env`/`api_url` for this type (the configuration rejects them), and `ClaudeCodeLauncher` sets no authentication, endpoint or provider variable. The one it may remove is `ANTHROPIC_API_KEY` (below). It never passes `--bare`, which would restrict the CLI to API-key authentication.
 - Usage is billed by Anthropic to the account the CLI is signed in to. CodeAlta does not pay for, resell or route it.
 - Claude Code keeps its system prompt, its tools, its permission rules, its hooks and its settings. CodeAlta adds to them (`appendSystemPrompt`, an MCP server, a hook that only waits before an edit, a hook that refuses the plan mode of Claude Code); it replaces none.
 - The UI names the provider for what it runs ("Claude Code"). It is one provider type among others, not a product or feature name of CodeAlta.
 
-The variables removed from the child's environment are the marks of a Claude Code session CodeAlta itself may have been started from (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, ...), and `ANTHROPIC_API_KEY` when the user chose their login over it. `CLAUDE_AGENT_SDK_CLIENT_APP=codealta/<version>` names CodeAlta in the CLI's user agent.
+The variables removed from the child's environment are the marks of a Claude Code session CodeAlta itself may have been started from (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, ...), and `ANTHROPIC_API_KEY` when the user chose their login over it. `CLAUDE_AGENT_SDK_CLIENT_APP=codealta/<version>` names CodeAlta in the CLI's user agent. The one variable set for the account is `CLAUDE_CONFIG_DIR`, from `config_dir` (below).
+
+### The pinned CLI
+
+A newer Claude Code can change its JSON input and output under CodeAlta, so CodeAlta pins the version it is tested with (#136). `ClaudeCodePinnedCli` holds it as immutable data: the version, and for each platform (`win-x64`, `win-arm64`, `osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`) the name, the size and the SHA-256 of its archive in the GitHub release (`claude-<os>-<arch>[-musl].tar.gz`, `claude-win32-<arch>.zip`; the hashes are those of the assets and of `SHASUMS256.txt`). Each archive holds the executable alone, at its root.
+
+- **The cache.** `CatalogOptions.ClaudeCodeRoot` is `~/.alta/cache/claude-code`, shared by the normal and the developer instance. A version is installed in `<root>/<version>/<rid>/`: `claude.exe` or `claude`, and the marker `claude-code.json`.
+- **The download** (`ClaudeCodeCliInstaller`, modeled on the speech installer) runs only when the user asks for it. The archive is written as `<name>.part` in `<rid>.partial`, resumed with a range request where it stopped, checked against the pinned size and SHA-256, then the executable is taken out of it (made executable on macOS and Linux) and the archive removed. The folder takes its name once its marker is written, so a folder under its name is complete; a lock file in `.partial` keeps the two instances from writing the same files (`busy_elsewhere`). Failures are `network`, `not_found`, `checksum`, `busy_elsewhere`, `disk` and `unsupported_platform`.
+- **Resolution** (`ClaudeCodeCliLocator`): the `command` of the provider; else the pinned version when it is in the cache; else `claude` on `PATH` and in the folders of its installers. The probe of a provider that runs the user's installation reads its version (`claude --version`, once per file) and adds to its status that it is not the pinned one (`ClaudeCodeCliVersion`). When nothing is found, the message points to the download in Settings > Providers.
+- **CodeAlta Desktop** serves the `claudeCli` RPC service (`read`, `install`, `cancelInstall`, `watch`): the form of a `claude-code` provider shows which CLI it runs, proposes the pinned version with its size, follows the download, and gives the login command. An instance started on explicit roots downloads nothing.
+- **Bumping the pin** is a step of the release (see `doc/development-guide.md`).
+
+### Several accounts: `config_dir`
+
+Several Claude accounts are several `claude-code` providers, each with its own `config_dir` (#134). The value, a full path or one that starts with `~` (the configuration refuses a relative one), is expanded and given to the CLI as `CLAUDE_CONFIG_DIR` (`ClaudeCodeLauncher`), so that its login, settings, memory, MCP servers and transcripts are those of that folder. CodeAlta reads the same folder where it reads the Claude folder itself, through `ClaudeCodeModelProviderRuntimeOptions.ReadEnvironment`: the answer about `ANTHROPIC_API_KEY` in its `.claude.json`, and the transcripts it moves when a session changes folder (`ClaudeCodeProjectFolders.ResolveConfigRoot`). The processes that list the models and read the usage of the plan are started by the same launcher, so they use the account of the provider too. The option is fixed for a provider runtime: a change of it registers the providers again.
+
+In the desktop form, **Duplicate** adds `<key>-2` (the next free number) with the type and the settings of the provider and no folder of its own; changing the folder of a provider that has sessions asks first, since their transcripts stay in the old folder. The form gives the login command to copy: the executable the provider runs and `CLAUDE_CONFIG_DIR`, written for PowerShell on Windows (`$env:CLAUDE_CONFIG_DIR="$HOME\.claude-work"; & "<claude.exe>"`) and for a POSIX shell elsewhere (`CLAUDE_CONFIG_DIR="$HOME/.claude-work" "<claude>"`), with the home folder as `$HOME`.
+
+A `codex` provider takes `codex_home` likewise: it is `CODEX_HOME` for the `codex app-server` process that reads the usage of the plan (`CodexAccountUsage`), and the folder an installation id is read from (`CodexHomeResolver`). The ChatGPT sign-in of CodeAlta is per provider key already.
 
 ### `ANTHROPIC_API_KEY`
 
