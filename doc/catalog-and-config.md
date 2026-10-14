@@ -194,6 +194,80 @@ Libraries I maintain and the projects I contribute to.
 - A catalog holds at most 32 spaces, the default one included.
 - `SeedAsync` gives a catalog that never had spaces its first ones, `work.md` and `personal.md`. It does nothing once the folder exists.
 
+A space is also a setup: its front matter can say what its new sessions start with, the identity its sessions work under and the tools they do without (`SpaceDescriptor.Settings`, a `SpaceSettings`). Each part is optional, and a file that sets none of them is written as above, byte for byte:
+
+```markdown
+---
+id: business
+kind: space
+name: Business
+order: 1
+new_sessions:
+  agent_prompt: reviewer
+  tiers:
+    complex: ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh"]
+    standard: ["claude-code:opus@medium"]
+    quick: ["claude-code:haiku@low"]
+identity:
+  git: { name: A. Mutel, email: alex@contoso.example, ssh_key: ~/.ssh/contoso, sign: ssh, signing_key: ~/.ssh/contoso.pub, signoff: true }
+  github: { config_dir: ~/.config/gh-contoso }
+  jira: { site: contoso.atlassian.net, email: alex@contoso.example, token_env: CONTOSO_JIRA_TOKEN }
+tools:
+  disabled: [shell_command]
+---
+Projects of the Contoso contract.
+```
+
+- `new_sessions.agent_prompt` is the id of an agent prompt; `new_sessions.tiers` lists, for `complex`, `standard` and `quick` work, at most 16 targets each, written `provider:model@effort1,effort2` (`ModelTierTarget`; the efforts are optional, each once).
+- `identity.git` has `name`, `email`, `ssh_key` (the private key to fetch and push), `sign` (`off`, `ssh` or `gpg`, which needs `signing_key`), `signing_key` and `signoff`; `identity.github.config_dir` is the folder of a GitHub CLI profile; `identity.jira` has `site`, `email` and `token_env`, the **name** of the environment variable that holds the token. Only paths and names of variables are kept, never a secret.
+- `tools.disabled` lists names of tools (letters, digits, `_`, `-`, `.`, `:`), at most 64.
+- A value that is not valid in a file written by hand is left out when the file is read (`SpaceSettings.Sanitized`), and the space is read with the rest. `SpaceCatalog.UpdateSettingsAsync` changes the settings from what the file has now, refuses a value that is not valid with what is wrong (`SpaceChangeStatus.Invalid`), and keeps the name, the icon, the color and the description; a rename keeps the settings.
+- These settings are read and validated; what uses them (new sessions, identity, tools) comes with the work that applies them.
+
+### The space of a session
+
+A session belongs to one space for its whole life. The first line of its journal (`SessionViewJournalHeader`) records it as `space_id`, written when the session is created and copied by a fork and by the session that keeps what a rewind removed; moving a session to another project keeps it. It reaches `SessionViewDescriptor.SpaceId`, `AgentSessionMetadata.SpaceId` (read from the header, also without the session list), the `space_id` column of the session list in the application database, `SessionRuntimeOverview.SpaceId` and the session records of the desktop page.
+
+| Created by | Space |
+| --- | --- |
+| A session (`alta session create`) | The space of the calling session; it can name no other one (`space.notOwnSpace`) |
+| The window (a new session, a task or an issue started there, a question about the guide) | The space the window shows, which the page names; `workspace.createSession` answers `space_missing` for a space that no longer exists |
+| An automation | The space of its project when the project is in exactly one, else the default space |
+| A caller with no session (`alta session create` from the MCP server of the window or a terminal) | The space `--space` names, else the one the window shows |
+| CodeAlta TUI | None (see below) |
+
+A session that records no space (one created before sessions had a space, or by the TUI) is in the space of its project when the project is in exactly one, and in the default space otherwise. A `space_id` that names no space (a space deleted, maybe by the other instance) is read as the default space. `SpaceCatalog.ResolveSessionSpace` applies these rules and never throws for what a journal says. Journals are not rewritten.
+
+The Runtime Context of an agent names the space of its session, with what it is for on the same line (the description, joined and cut at 300 characters), as soon as the catalog has a space besides the default one:
+
+```text
+- Space: Business (business): Projects of the Contoso contract.
+```
+
+### The spaces of providers, MCP servers, plugins, skills and prompts
+
+Every resource gets one optional list, `spaces`, in the global `config.toml`, beside the definition it already has; one definition can be shared by several spaces. `SpaceScope.IsAvailable(spaces, sessionSpaceId)` is the rule: absent or empty is every space, `["business"]` is Business only (not the default space), `["business", "default"]` is Business and the default space.
+
+```toml
+[providers.claude-business]
+type = "claude-code"
+spaces = ["business"]
+
+[plugins.mcp.servers.atlassian]       # the policy entry of an MCP server
+spaces = ["business"]
+
+[plugins.jira]
+spaces = ["business"]
+
+[skills.spaces]
+terraform = ["business"]
+
+[prompts.spaces]
+reviewer = ["business", "default"]
+```
+
+`CodeAltaConfigStore.LoadGlobalSpaceAssignments` reads them all as a `SpaceAssignments` (keys compared without case; a value that is not a list of strings, or one string, is ignored). `SaveGlobalSpaceAssignment(kind, key, spaces)` writes one list and nothing else: the line is replaced in place, added after the last setting of its table, or removed for an empty list (every space), and comments, blank lines and the other settings stay as they are (`SpaceAssignmentsSyntax`, on the syntax tree of the file). A missing table of an MCP server, a plugin, the skills or the prompts is added at the end of the file; a provider is assigned only when its table is in the file, so that a table with nothing but its spaces never reads as an incomplete provider. A table written inline or with dotted keys is refused (`InvalidDataException`) and left for the user to edit. `SpaceScope.With` and `SpaceScope.Without` work out the list when a space is turned on or off for a resource: a shared resource turned off in one space is listed for every other space that exists, the default space included, and a resource cannot be left in no space (`Without` returns `null`). A resource defined in a project follows its project. No `alta` command writes `spaces`.
+
 The projects of a space are the ones whose own file names it. `ProjectCatalog.UpdateSpacesAsync` changes that in place: only the `spaces` entry is written, added or removed, on one line, and every other byte of the project file stays. It runs under the project edit gate, with the renames and the archive changes of the same catalog instance, reads the edited text again with the YAML parser before saving, and saves over the revision it read; a file another process changed meanwhile is read again, twice at most. A project file whose front matter it cannot edit that way (the entry written twice, a link in the path, a descriptor without a file) is refused and left as it is. Deleting a space deletes its file first, then its id from each project file.
 
 Which space a window shows, and the tabs of each space, are not in the catalog: the page keeps them in the local storage of the window.

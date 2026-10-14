@@ -45,6 +45,12 @@ public sealed class SpaceDescriptor
     /// <summary>Gets or sets the place among the spaces: the lower comes first, after the default space.</summary>
     public int Order { get; set; }
 
+    /// <summary>
+    /// Gets or sets what the space sets up besides its projects: what its new sessions start with, the identity its
+    /// sessions work under and the tools they do without. Empty for a space that sets none of them.
+    /// </summary>
+    public SpaceSettings Settings { get; set; } = SpaceSettings.Empty;
+
     /// <summary>Gets or sets the file the space was read from; <see langword="null"/> for a space without a file.</summary>
     public string? SourcePath { get; set; }
 
@@ -64,6 +70,7 @@ public sealed class SpaceDescriptor
         if (Description is { Length: > MaximumDescriptionLength }) throw new ArgumentException("A space description is at most 2000 characters.", nameof(Description));
         if (Icon is not null && !IsValidIcon(Icon)) throw new ArgumentException($"Space icon '{Icon}' is not a valid icon name.", nameof(Icon));
         if (Color is not null && !IsValidColor(Color)) throw new ArgumentException($"Space color '{Color}' is not #rgb or #rrggbb.", nameof(Color));
+        if (Settings.Problem() is { } problem) throw new ArgumentException(problem, nameof(Settings));
     }
 
     /// <summary>Tells whether a text can be the identifier of a space.</summary>

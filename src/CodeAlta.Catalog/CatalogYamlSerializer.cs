@@ -74,6 +74,116 @@ public sealed class CatalogYamlSerializer
 
         [JsonPropertyName("order")]
         public int? Order { get; set; }
+
+        // The settings of a space: each is left out of a file that does not set it, which stays as it was.
+        [JsonPropertyName("new_sessions")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceNewSessionsFrontMatter? NewSessions { get; set; }
+
+        [JsonPropertyName("identity")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceIdentityFrontMatter? Identity { get; set; }
+
+        [JsonPropertyName("tools")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceToolsFrontMatter? Tools { get; set; }
+    }
+
+    private sealed class SpaceNewSessionsFrontMatter
+    {
+        [JsonPropertyName("agent_prompt")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? AgentPrompt { get; set; }
+
+        [JsonPropertyName("tiers")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceTiersFrontMatter? Tiers { get; set; }
+    }
+
+    private sealed class SpaceTiersFrontMatter
+    {
+        [JsonPropertyName("complex")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Complex { get; set; }
+
+        [JsonPropertyName("standard")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Standard { get; set; }
+
+        [JsonPropertyName("quick")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Quick { get; set; }
+    }
+
+    private sealed class SpaceIdentityFrontMatter
+    {
+        [JsonPropertyName("git")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceGitFrontMatter? Git { get; set; }
+
+        [JsonPropertyName("github")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceGitHubFrontMatter? GitHub { get; set; }
+
+        [JsonPropertyName("jira")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceJiraFrontMatter? Jira { get; set; }
+    }
+
+    private sealed class SpaceGitFrontMatter
+    {
+        [JsonPropertyName("name")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("email")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Email { get; set; }
+
+        [JsonPropertyName("ssh_key")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SshKey { get; set; }
+
+        [JsonPropertyName("sign")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Sign { get; set; }
+
+        [JsonPropertyName("signing_key")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? SigningKey { get; set; }
+
+        [JsonPropertyName("signoff")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? SignOff { get; set; }
+    }
+
+    private sealed class SpaceGitHubFrontMatter
+    {
+        [JsonPropertyName("config_dir")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ConfigDir { get; set; }
+    }
+
+    private sealed class SpaceJiraFrontMatter
+    {
+        [JsonPropertyName("site")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Site { get; set; }
+
+        [JsonPropertyName("email")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Email { get; set; }
+
+        [JsonPropertyName("token_env")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? TokenEnv { get; set; }
+    }
+
+    private sealed class SpaceToolsFrontMatter
+    {
+        [JsonPropertyName("disabled")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Disabled { get; set; }
     }
 
     private sealed class CheckoutFrontMatter
@@ -213,7 +323,67 @@ public sealed class CatalogYamlSerializer
             Color = string.IsNullOrWhiteSpace(frontMatter.Color) ? null : frontMatter.Color.Trim(),
             Order = frontMatter.Order ?? 0,
             Description = description.Length == 0 ? null : description,
+            Settings = ReadSpaceSettings(frontMatter),
         };
+    }
+
+    // The settings as the file writes them, before any validation: a target of a tier that cannot be read is left out.
+    private static SpaceSettings ReadSpaceSettings(SpaceFrontMatter frontMatter)
+    {
+        static IReadOnlyList<ModelTierTarget> Targets(List<string>? values)
+            => [.. (values ?? []).Select(static value => ModelTierTarget.TryParse(value, out var target) ? target : null).OfType<ModelTierTarget>()];
+        static string? Text(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        var sessions = frontMatter.NewSessions;
+        var tiers = sessions?.Tiers is { } written ? new SpaceModelTiers(Targets(written.Complex), Targets(written.Standard), Targets(written.Quick)) : null;
+        var identity = frontMatter.Identity;
+        var git = identity?.Git is { } g
+            ? new SpaceGitIdentity(Text(g.Name), Text(g.Email), Text(g.SshKey), SpaceGitIdentity.ParseSign(g.Sign), Text(g.SigningKey), g.SignOff)
+            : null;
+        return new SpaceSettings(
+            sessions is null ? null : new SpaceNewSessions(Text(sessions.AgentPrompt), tiers),
+            identity is null ? null : new SpaceIdentity(git,
+                identity.GitHub is { } github ? new SpaceGitHubIdentity(Text(github.ConfigDir)) : null,
+                identity.Jira is { } jira ? new SpaceJiraIdentity(Text(jira.Site), Text(jira.Email), Text(jira.TokenEnv)) : null),
+            frontMatter.Tools is { } tools ? new SpaceTools([.. (tools.Disabled ?? []).Select(static name => name?.Trim() ?? string.Empty)]) : null);
+    }
+
+    // What the file writes of the settings: nothing for what is not set.
+    private static void WriteSpaceSettings(SpaceFrontMatter frontMatter, SpaceSettings settings)
+    {
+        static List<string>? Targets(IReadOnlyList<ModelTierTarget> targets) => targets.Count == 0 ? null : [.. targets.Select(static target => target.ToString())];
+
+        if (settings.NewSessions is { IsEmpty: false } sessions)
+        {
+            frontMatter.NewSessions = new SpaceNewSessionsFrontMatter
+            {
+                AgentPrompt = sessions.AgentPrompt,
+                Tiers = sessions.Tiers is { IsEmpty: false } tiers
+                    ? new SpaceTiersFrontMatter { Complex = Targets(tiers.Complex), Standard = Targets(tiers.Standard), Quick = Targets(tiers.Quick) }
+                    : null,
+            };
+        }
+
+        if (settings.Identity is { IsEmpty: false } identity)
+        {
+            frontMatter.Identity = new SpaceIdentityFrontMatter
+            {
+                Git = identity.Git is { IsEmpty: false } git
+                    ? new SpaceGitFrontMatter
+                    {
+                        Name = git.Name, Email = git.Email, SshKey = git.SshKey, Sign = SpaceGitIdentity.FormatSign(git.Sign),
+                        SigningKey = git.SigningKey, SignOff = git.SignOff,
+                    }
+                    : null,
+                GitHub = identity.GitHub is { IsEmpty: false } github ? new SpaceGitHubFrontMatter { ConfigDir = github.ConfigDir } : null,
+                Jira = identity.Jira is { IsEmpty: false } jira ? new SpaceJiraFrontMatter { Site = jira.Site, Email = jira.Email, TokenEnv = jira.TokenEnv } : null,
+            };
+        }
+
+        if (settings.Tools is { IsEmpty: false } tools)
+        {
+            frontMatter.Tools = new SpaceToolsFrontMatter { Disabled = [.. tools.Disabled] };
+        }
     }
 
     /// <summary>
@@ -225,7 +395,7 @@ public sealed class CatalogYamlSerializer
     public string SerializeSpaceMarkdown(SpaceDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        var yaml = YamlSerializer.Serialize(new SpaceFrontMatter
+        var frontMatter = new SpaceFrontMatter
         {
             Id = descriptor.Id,
             Kind = "space",
@@ -233,7 +403,9 @@ public sealed class CatalogYamlSerializer
             Icon = descriptor.Icon,
             Color = descriptor.Color,
             Order = descriptor.Order,
-        }).Trim();
+        };
+        WriteSpaceSettings(frontMatter, descriptor.Settings);
+        var yaml = YamlSerializer.Serialize(frontMatter).Trim();
         var description = descriptor.Description?.Trim();
         return string.IsNullOrEmpty(description) ? $"---\n{yaml}\n---\n" : $"---\n{yaml}\n---\n\n{description}\n";
     }

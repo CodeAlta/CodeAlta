@@ -455,6 +455,61 @@ public sealed class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads the spaces each resource is assigned to in the global configuration: providers, MCP servers, plugins,
+    /// skills and agent prompts. A resource it does not list is in every space.
+    /// </summary>
+    /// <returns>The assignments; empty when the file does not exist.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public SpaceAssignments LoadGlobalSpaceAssignments()
+    {
+        var path = _options.ConfigPath;
+        return File.Exists(path) ? SpaceAssignments.Parse(File.ReadAllText(path), path) : SpaceAssignments.Empty;
+    }
+
+    /// <summary>
+    /// Writes the spaces a resource is assigned to in the global configuration, beside its definition: only that
+    /// list changes, and the comments and the other settings of the file stay as they are.
+    /// </summary>
+    /// <remarks>
+    /// An empty list removes the line: the resource is then in every space. A provider is assigned only when its
+    /// table is in the file, so that a table with nothing but its spaces never stands for an incomplete provider;
+    /// the table of an MCP server, a plugin, the skills or the prompts is added when it is missing. This is ordinary
+    /// configuration persistence, not a compare-and-swap with another writer.
+    /// </remarks>
+    /// <param name="kind">The kind of the resource.</param>
+    /// <param name="key">Its key, name or id.</param>
+    /// <param name="spaces">The identifiers of its spaces; <see langword="null"/> or empty for every space.</param>
+    /// <exception cref="ArgumentException"><paramref name="key"/> is empty, or a space is not the identifier of a space.</exception>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed, or writes the resource in a form that is not edited here.</exception>
+    /// <exception cref="InvalidOperationException">The provider is not defined in the configuration file.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    public void SaveGlobalSpaceAssignment(SpaceResourceKind kind, string key, IEnumerable<string>? spaces)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        var list = SpaceScope.Normalize(spaces ?? []);
+        if (list.FirstOrDefault(static id => !SpaceDescriptor.IsValidId(id)) is { } invalid)
+            throw new ArgumentException($"'{invalid}' is not the identifier of a space.", nameof(spaces));
+        var path = _options.ConfigPath;
+        var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        var (table, entry) = SpaceAssignments.Location(kind, key.Trim());
+        var updated = SpaceAssignmentsSyntax.Set(content, table, entry, list, createTable: kind != SpaceResourceKind.Provider);
+        if (string.Equals(updated, content, StringComparison.Ordinal)) return;
+        // The edited text must still be a configuration this version reads before it replaces the file.
+        try
+        {
+            _ = ParseDocument(updated, path);
+        }
+        catch (Exception ex) when (IsConfigLoadException(ex))
+        {
+            throw new InvalidDataException($"Failed to parse CodeAlta config '{path}'.", ex);
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, updated);
+    }
+
+    /// <summary>
     /// Persists a global plugin enablement override.
     /// </summary>
     /// <param name="pluginId">The built-in plugin id or source plugin package id.</param>

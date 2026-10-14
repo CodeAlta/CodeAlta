@@ -239,6 +239,143 @@ public sealed class SpaceCatalogTests
     }
 
     [TestMethod]
+    public async Task TheSettingsOfASpace_AreReadValidatedAndWrittenBack_AndAFileWithoutThemStaysAsItWas()
+    {
+        using var fixture = new Fixture();
+        var created = (await fixture.Spaces.CreateAsync("Business", "Projects of the Contoso contract.", "briefcase", "#2d72d2")).Space!;
+        var path = Path.Combine(fixture.Options.SpacesRoot, "business.md");
+        var plain = await File.ReadAllTextAsync(path);
+        Assert.AreEqual("---\nid: business\nkind: space\nname: Business\nicon: briefcase\ncolor: \"#2d72d2\"\norder: 1\n---\n\nProjects of the Contoso contract.\n", plain);
+        Assert.IsTrue(created.Settings.IsEmpty);
+
+        var settings = new SpaceSettings(
+            new SpaceNewSessions("reviewer", new SpaceModelTiers(
+                [Target("claude-code:opus@high,xhigh"), Target("codex:gpt-6.1@xhigh")], [Target("claude-code:opus@medium")], [])),
+            new SpaceIdentity(
+                new SpaceGitIdentity("A. Mutel", "alex@contoso.example", "~/.ssh/contoso", SpaceGitSigning.Ssh, "~/.ssh/contoso.pub", true),
+                new SpaceGitHubIdentity("~/.config/gh-contoso"),
+                new SpaceJiraIdentity("contoso.atlassian.net", "alex@contoso.example", "CONTOSO_JIRA_TOKEN")),
+            new SpaceTools(["shell_command"]));
+        Assert.AreEqual(SpaceChangeStatus.Ok, (await fixture.Spaces.UpdateSettingsAsync("business", _ => settings)).Status);
+
+        var read = (await fixture.Spaces.GetAsync("business"))!.Settings;
+        Assert.AreEqual("reviewer", read.NewSessions!.AgentPrompt);
+        CollectionAssert.AreEqual(new[] { "claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh" }, read.NewSessions.Tiers!.Complex.Select(static target => target.ToString()).ToArray());
+        CollectionAssert.AreEqual(new[] { "claude-code:opus@medium" }, read.NewSessions.Tiers.Standard.Select(static target => target.ToString()).ToArray());
+        Assert.AreEqual(0, read.NewSessions.Tiers.Quick.Count);
+        Assert.AreEqual(settings.Identity, read.Identity);
+        CollectionAssert.AreEqual(new[] { "shell_command" }, read.Tools!.Disabled.ToArray());
+        var text = await File.ReadAllTextAsync(path);
+        StringAssert.Contains(text, "new_sessions:");
+        StringAssert.Contains(text, "token_env: CONTOSO_JIRA_TOKEN");
+        StringAssert.EndsWith(text, "---\n\nProjects of the Contoso contract.\n");
+
+        // A rename keeps the settings; settings set back to nothing leave the file as it was before them.
+        Assert.IsTrue((await fixture.Spaces.UpdateAsync("business", new SpaceEdit(Name: "Contoso"))).Succeeded);
+        Assert.AreEqual(settings.Identity, (await fixture.Spaces.GetAsync("business"))!.Settings.Identity);
+        Assert.IsTrue((await fixture.Spaces.UpdateAsync("business", new SpaceEdit(Name: "Business"))).Succeeded);
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("business", _ => SpaceSettings.Empty)).Succeeded);
+        Assert.AreEqual(plain, await File.ReadAllTextAsync(path));
+
+        // Each part is changed from what the file has now; a wrong value is refused with what is wrong.
+        await fixture.Spaces.UpdateSettingsAsync("business", current => current with { Tools = new SpaceTools(["shell_command"]) });
+        await fixture.Spaces.UpdateSettingsAsync("business", current => current with { NewSessions = new SpaceNewSessions("plan") });
+        read = (await fixture.Spaces.GetAsync("business"))!.Settings;
+        Assert.AreEqual("plan", read.NewSessions!.AgentPrompt);
+        Assert.AreEqual("shell_command", read.Tools!.Disabled.Single());
+        var refused = await fixture.Spaces.UpdateSettingsAsync("business", current => current with
+        {
+            Identity = new SpaceIdentity(Jira: new SpaceJiraIdentity(TokenEnv: "secret-token-value")),
+        });
+        Assert.AreEqual(SpaceChangeStatus.Invalid, refused.Status);
+        StringAssert.Contains(refused.Message, "environment variable");
+        Assert.AreEqual(SpaceChangeStatus.Invalid, (await fixture.Spaces.UpdateSettingsAsync("business", current => current with
+        {
+            Identity = new SpaceIdentity(new SpaceGitIdentity(Sign: SpaceGitSigning.Gpg)),
+        })).Status, "Signing needs a key.");
+        Assert.AreEqual(SpaceChangeStatus.NotFound, (await fixture.Spaces.UpdateSettingsAsync("missing", current => current)).Status);
+    }
+
+    [TestMethod]
+    public async Task AWrongSettingInTheFile_IsLeftOut_AndTheSpaceIsStillRead()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Options.SpacesRoot);
+        await File.WriteAllTextAsync(Path.Combine(fixture.Options.SpacesRoot, "business.md"), """
+            ---
+            id: business
+            kind: space
+            name: Business
+            order: 1
+            new_sessions:
+              agent_prompt: "not a prompt id"
+              tiers:
+                complex: ["claude-code:opus@high", "no-colon", "codex:gpt@turbo", "codex:gpt-6.1"]
+            identity:
+              git: { name: A. Mutel, email: not-an-email, sign: gpg, signoff: true }
+              jira: { site: contoso.atlassian.net, token_env: "abc def" }
+            tools:
+              disabled: [shell_command, "bad name", shell_command]
+            ---
+            """);
+        var space = (await fixture.Spaces.GetAsync("business"))!;
+        Assert.AreEqual("Business", space.Name);
+        var settings = space.Settings;
+        Assert.IsNull(settings.NewSessions!.AgentPrompt);
+        CollectionAssert.AreEqual(new[] { "claude-code:opus@high", "codex:gpt-6.1" }, settings.NewSessions.Tiers!.Complex.Select(static target => target.ToString()).ToArray());
+        Assert.AreEqual(new SpaceGitIdentity("A. Mutel", SignOff: true), settings.Identity!.Git, "Signing without its key and a wrong email are left out.");
+        Assert.AreEqual(new SpaceJiraIdentity("contoso.atlassian.net"), settings.Identity.Jira);
+        CollectionAssert.AreEqual(new[] { "shell_command" }, settings.Tools!.Disabled.ToArray());
+    }
+
+    [TestMethod]
+    public async Task TheSpaceOfASession_IsTheOneItRecords_ElseTheOnlyOneOfItsProject_ElseTheDefaultOne()
+    {
+        using var fixture = new Fixture();
+        await fixture.Spaces.CreateAsync("Business");
+        await fixture.Spaces.CreateAsync("Personal");
+        var alone = await fixture.Projects.UpsertFromPathAsync(fixture.Folder("alone"));
+        var shared = await fixture.Projects.UpsertFromPathAsync(fixture.Folder("shared"));
+        var nowhere = await fixture.Projects.UpsertFromPathAsync(fixture.Folder("nowhere"));
+        await fixture.Spaces.AssignAsync(alone.Id, ["business"], null);
+        await fixture.Spaces.AssignAsync(shared.Id, ["business", "personal"], null);
+        alone = (await fixture.Projects.GetByIdAsync(alone.Id))!;
+        var spaces = await fixture.Spaces.LoadAsync();
+
+        Assert.AreEqual("personal", SpaceCatalog.ResolveSessionSpace("personal", alone, spaces), "What the session records wins.");
+        Assert.AreEqual("business", SpaceCatalog.ResolveSessionSpace(null, alone, spaces), "An older session is in the only space of its project.");
+        Assert.AreEqual("default", SpaceCatalog.ResolveSessionSpace(null, (await fixture.Projects.GetByIdAsync(shared.Id))!, spaces));
+        Assert.AreEqual("default", SpaceCatalog.ResolveSessionSpace(null, nowhere, spaces));
+        Assert.AreEqual("default", SpaceCatalog.ResolveSessionSpace(null, null, spaces), "An older chat is in the default space.");
+        Assert.AreEqual("default", SpaceCatalog.ResolveSessionSpace("deleted", alone, spaces), "A space that is gone is read as the default one.");
+        Assert.AreEqual("default", SpaceCatalog.ResolveSessionSpace("Not An Id", null, spaces));
+
+        Assert.AreEqual("business", (await fixture.Spaces.ResolveSessionSpaceAsync(null, alone.Id)).Id);
+        Assert.AreEqual("personal", (await fixture.Spaces.ResolveSessionSpaceAsync("personal", null)).Id);
+        await fixture.Spaces.DeleteAsync("business");
+        Assert.IsTrue((await fixture.Spaces.ResolveSessionSpaceAsync("business", alone.Id)).IsDefault);
+        Assert.IsTrue((await fixture.Spaces.ResolveSessionSpaceAsync(null, alone.Id)).IsDefault, "Its project left the space with it.");
+    }
+
+    private static ModelTierTarget Target(string text)
+        => ModelTierTarget.TryParse(text, out var target) ? target! : throw new AssertFailedException($"'{text}' is a target.");
+
+    [TestMethod]
+    public void ATargetOfATier_IsAProviderAModelAndItsEfforts()
+    {
+        Assert.AreEqual(new ModelTierTarget("copilot", "claude-opus-4.6", []), Target("copilot:claude-opus-4.6"));
+        var target = Target(" claude-code:opus@high,xhigh ");
+        Assert.AreEqual("claude-code", target.Provider);
+        Assert.AreEqual("opus", target.Model);
+        CollectionAssert.AreEqual(new[] { CodeAlta.Agent.AgentReasoningEffort.High, CodeAlta.Agent.AgentReasoningEffort.XHigh }, target.Efforts.ToArray());
+        Assert.AreEqual("openai:org/model:v2@low", Target("openai:org/model:v2@low").ToString(), "A model may have a colon of its own.");
+        foreach (var wrong in new[] { "", "opus", ":opus", "codex:", "codex:gpt@", "codex:gpt@high,high", "codex:gpt@fast", "co dex:gpt", "codex:g pt" })
+        {
+            Assert.IsFalse(ModelTierTarget.TryParse(wrong, out _), wrong);
+        }
+    }
+
+    [TestMethod]
     public void TheIdentifierOfASpace_IsWorkedOutFromItsName()
     {
         Assert.AreEqual("open-source", SpaceDescriptor.IdFromName("  Open -- Source  "));

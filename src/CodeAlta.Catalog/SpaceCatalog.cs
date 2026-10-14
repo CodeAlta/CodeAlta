@@ -211,6 +211,40 @@ public sealed class SpaceCatalog
     }
 
     /// <summary>
+    /// Changes what a space sets up besides its projects (what its new sessions start with, its identity, the tools
+    /// it turns off), in one edit of its file. The change is given the settings as the file has them now, so that
+    /// two changes of different parts never undo each other. Its name, icon, color and description stay.
+    /// </summary>
+    /// <param name="id">The identifier of the space.</param>
+    /// <param name="change">Gives the new settings from the present ones.</param>
+    /// <param name="cancellationToken">Cancels before the file is written.</param>
+    /// <returns>The space after the change, or why it was not made: <see cref="SpaceChangeStatus.Invalid"/> with the problem.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is <see langword="null"/>.</exception>
+    /// <exception cref="IOException">The file could not be written.</exception>
+    public async Task<SpaceChange> UpdateSettingsAsync(string id, Func<SpaceSettings, SpaceSettings> change, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var spaces = await LoadAsync(cancellationToken).ConfigureAwait(false);
+            var space = spaces.FirstOrDefault(value => string.Equals(value.Id, id, StringComparison.Ordinal));
+            if (space is null) return new(SpaceChangeStatus.NotFound, Message: $"No space has the id '{id}'.");
+            var settings = change(space.Settings) ?? SpaceSettings.Empty;
+            if (settings.Problem() is { } problem) return new(SpaceChangeStatus.Invalid, Message: problem);
+            if (settings == space.Settings) return new(SpaceChangeStatus.Ok, space);
+            space.Settings = settings;
+            return await WriteAsync(space, cancellationToken).ConfigureAwait(false)
+                ? new(SpaceChangeStatus.Ok, space)
+                : new(SpaceChangeStatus.Conflict, Message: "The file of the space changed meanwhile.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
     /// Deletes a space: its file, then its name in the file of each of its projects. The projects, their
     /// folders and their sessions stay, and are still in the default space.
     /// </summary>
@@ -400,6 +434,7 @@ public sealed class SpaceCatalog
         if (space.Description is { Length: > SpaceDescriptor.MaximumDescriptionLength }) return "A space description is at most 2000 characters.";
         if (space.Icon is not null && !SpaceDescriptor.IsValidIcon(space.Icon)) return $"'{space.Icon}' is not the name of an icon.";
         if (space.Color is not null && !SpaceDescriptor.IsValidColor(space.Color)) return $"'{space.Color}' is not a color written #rgb or #rrggbb.";
+        if (space.Settings.Problem() is { } problem) return problem;
         return spaces.Any(other => !ReferenceEquals(other, space) && string.Equals(other.Name, space.Name, StringComparison.OrdinalIgnoreCase))
             ? $"A space is already named '{space.Name}'."
             : null;
@@ -421,6 +456,8 @@ public sealed class SpaceCatalog
             if (!SpaceDescriptor.IsValidColor(space.Color)) space.Color = null;
             if (space.Description is { Length: > SpaceDescriptor.MaximumDescriptionLength }) space.Description = space.Description[..SpaceDescriptor.MaximumDescriptionLength];
             if (space.IsDefault) space.Order = 0;
+            // A setting that is not valid is left out: the space is read with the others.
+            space.Settings = space.Settings.Sanitized();
             return SpaceDescriptor.IsValidName(space.Name) ? space : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or YamlException or DecoderFallbackException)
