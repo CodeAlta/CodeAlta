@@ -224,6 +224,23 @@ each row a provider, a model and its ordered reasoning efforts, and the fallback
 composer offers the three tiers first, with the model each gives now; choosing one records the tier of the session.
 A new desktop session starts on `standard` when the tiers are set.
 
+**Tiers per space.** The file of a space can set tiers of its own, in `new_sessions.tiers` (`SpaceModelTiers`, whose
+targets are the same `ModelTierTarget`, written the same way). They replace the global tiers for the sessions of the
+space, also for a tier they leave empty; the fallback (`[models.fallback]`) stays global. `ModelTierScope` holds the
+tiers a session uses: `ModelTierScope.Of(global, space, assignments)` takes the space's own tiers when they have a
+target, else the global ones, and `IsProviderAvailable` refuses a provider the space has not got (its `spaces`, see
+[SpaceScope](#the-spaces-of-providers-mcp-servers-plugins-skills-and-prompts)). `ModelTierScope.LoadAsync` reads it for
+the space a session records (else the one of its project, else the default space). Every reader of the tiers uses
+it: the fallback (`RunFailureNotice.Scope`), `alta session create --tier` and `alta model resolve --tier` (the space
+of the session created, else the one of the caller, else the one shown), the Runtime Context line (which names only
+the targets the space can use), and the composers (`globalConfig.modelTiers` with a `sessionId`, or with the
+`spaceId` of the space shown for a new session). The global reading of Settings > Models has no space and filters no
+provider.
+
+CodeAlta Desktop edits the tiers of a space on its page, in **New sessions** > **Model tiers**: **Use global**, or
+**Customize**, which starts from a copy of the global tiers (`globalConfig.saveModelTiers` with `spaceId`, written by
+`SpaceCatalog.UpdateSettingsAsync`; `useGlobal` removes them).
+
 ## Project catalog
 
 `ProjectCatalog` stores project descriptors under `~/.alta/projects`. Current saves use flat `<slug>.md` files; the loader still reads older `<slug>/readme.md` descriptor paths so existing user state can be opened.

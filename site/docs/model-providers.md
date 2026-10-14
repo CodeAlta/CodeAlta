@@ -148,6 +148,8 @@ Once tiers are set:
 - a new session starts on **Standard**;
 - agents give a tier to the sessions they create: **Quick** for a search, **Complex** for a hard problem.
 
+A space can have tiers of its own: in **Settings > Spaces**, open the space and set **Model tiers** to **Customize** in its **New sessions** section. They start as a copy of the global tiers and replace them for the sessions of that space. Wherever its tiers come from, a session never takes a model whose provider is not available in its space.
+
 ### Fallback when a provider fails
 
 The fallback is off until you turn it on, with its switch in the **Model tiers** section. Then, when a run stops because a provider fails, the session goes on with the next model of its tier:

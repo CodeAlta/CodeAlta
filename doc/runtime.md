@@ -1312,6 +1312,10 @@ hook the runtime calls (`TryClaim`).
 **Rules.**
 
 - It is opt-in: with `enabled = false` (the default) or no tier, a failure goes through as before.
+- The tiers are those of the space of the session (`RunFailureNotice.Scope`, a `ModelTierScope`: the space's own when
+  its file sets some, the global ones otherwise), and a target whose provider is not available in that space is never
+  taken. `SessionRuntimeService.LoadModelTierScopeAsync` reads it with the space and the provider assignments that the
+  sends and the provider switches of the session check (`IsProviderInSpace`).
 - It starts on the kind of the failure (`AgentErrorEvent.Failure`, see "Failure kinds of a turn" in
   [providers](providers.md#failure-kinds-of-a-turn)): `QuotaExhausted`, and `RateLimited` unless its `Retry-After` is
   under 60 seconds (`ShortRateLimit`: the provider waits that out), when `on` has `quota`; `Unavailable` when `on`
