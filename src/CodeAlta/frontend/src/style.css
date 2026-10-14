@@ -1578,6 +1578,8 @@ dialog.command-help-dialog:has(> .app-window) > .app-window > .app-window-body {
 /* Open project: saved projects as a picker list, with the add-folder controls underneath. */
 dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
 .open-project-dialog .reference-row[aria-disabled="true"] { opacity: .5; }
+/* What a move does, above the list of the windows of a move to a project or to a space. */
+dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body > .move-session-hint { margin: 10px 14px 8px; font-size: 12px; }
 .open-project-dialog .project-import { display: grid; justify-items: stretch; gap: 6px; margin: 0; padding: 10px 12px; border-top: 1px solid var(--line); overflow: visible; }
 .open-project-dialog .project-import p { margin: 0; font-size: 12px; }
 .project-import-row { display: flex; align-items: center; gap: 6px; min-width: 0; }

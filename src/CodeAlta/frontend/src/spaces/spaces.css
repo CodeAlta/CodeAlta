@@ -107,6 +107,9 @@
 .space-project, .space-pool .bp6-input-group { cursor: default; }
 .space-open { display: inline-flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; padding: 3px 6px 3px 3px; border: 0; border-radius: 6px; color: var(--text); background: transparent; font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; }
 .space-open:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+/* The generic buttons of the Settings pages draw a field: the name of a space is a title that opens its page. */
+.settings-dialog-content .space-heading .space-heading-row > button.space-open:not(.bp6-button):not(.icon-button) { padding: 3px 6px 3px 3px; border: 0; border-radius: 6px; background: transparent; font-size: 13.5px; font-weight: 600; }
+.settings-dialog-content .space-heading .space-heading-row > button.space-open:not(.bp6-button):not(.icon-button):hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
 .space-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .space-open-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .space-open-chevron { flex: none; color: var(--muted); opacity: 0; transition: opacity .12s ease, transform .12s ease; }

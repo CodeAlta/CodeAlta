@@ -1,6 +1,6 @@
 /* The child sessions of a session: their tree, where each one is, and their deletion with it. */
 dialog.session-children-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
-dialog.session-children-dialog .session-children-note { width: auto; margin: 10px 14px 8px; font-size: 12px; }
+dialog.session-children-dialog:has(> .app-window) > .app-window > .app-window-body > .session-children-note { width: auto; margin: 10px 14px 8px; font-size: 12px; }
 .session-children-list { margin: 0; list-style: none; }
 .session-children-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; min-height: 28px;
   padding-block: 3px; padding-inline-end: 10px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; font-size: 13px; text-align: start; cursor: default; }
