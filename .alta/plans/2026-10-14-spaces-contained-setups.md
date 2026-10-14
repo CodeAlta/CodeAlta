@@ -215,7 +215,7 @@ The **Identity** section of a space has three optional cards. Empty means "your 
 
 Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high) in its own worktree, branch `alta/<name>`, merged to `main` when its build, tests and UI check pass. **A1** lands first, because every other workstream builds on it.
 
-- [ ] 1. **G — Quick items** (this session, on `main`): PR #127 fixes on the contributor branch, squash-merge; culture fix of the tests; ask you about #117.
+- [ ] 1. **G — Quick items**: PR #127 fixes on the contributor branch, squash-merge (this session); culture fix of the tests (child session). #117 stays open until you have checked a dictation in French (no question is asked: the user is away).
 - [ ] 2. **A1 — Space foundation** (`alta/spaces-core`):
   - `space_id` in header, cache, descriptors and RPC; inheritance rules; `alta session create --space` and the own-space rule; Runtime Context line.
   - `SpaceScope` and the reader/writer of `spaces` in `config.toml` for all kinds.
@@ -231,6 +231,10 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
 - [ ] 9. **Docs** in each workstream: `doc/desktop.md`, `doc/catalog-and-config.md`, `doc/live-tool.md`, `doc/providers.md`, `doc/mcp.md`, `doc/skills.md`, `doc/statistics.md`, `site/docs/spaces.md` (rewritten around "a space is a setup"), `site/docs/model-providers.md`, `troubleshooting.md`, the built-in plugin skill, `readme.md`.
 - [ ] 10. **Final UX pass** (one session, after everything merges): the whole space journey on a fresh isolated profile, both themes, the narrow window; retake the spaces pictures of the site with the recipe of the site screenshots.
 - [ ] 11. Close #130–#134 and #136 with a comment each; push `main` to origin; watch CI until it is green.
+
+### Discovered tasks
+
+- [ ] 12. **H — Ask answers shown as not confirmed** (found 2026-10-14 during this plan's review): after the user answers the questions of an `alta ask` in a Claude Code provider session, the cards stay "Answer not confirmed · submitting" and "Answer not confirmed", although the answers reached the session as the next prompt. Regression test first, then fix (`alta/ask-confirmation`).
 
 ### How the work is run
 
