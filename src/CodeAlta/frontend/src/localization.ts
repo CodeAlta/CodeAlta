@@ -24,6 +24,7 @@ import { searchCanvasMessages } from "./search/canvas/messages";
 import { promptInheritanceMessages } from "./promptInheritance/messages";
 import { conversationHeldMessages } from "./conversationHeld/messages";
 import { claudeCodeImportMessages } from "./claudeCodeImport/messages";
+import { claudeCodeOpenMessages } from "./claudeCodeOpen/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2603,6 +2604,7 @@ export const messages = dictionary({
   ...promptInheritanceMessages,
   ...conversationHeldMessages,
   ...claudeCodeImportMessages,
+  ...claudeCodeOpenMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

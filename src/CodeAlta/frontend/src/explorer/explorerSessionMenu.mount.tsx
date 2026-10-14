@@ -9,6 +9,7 @@ import { sessionCanvasMenuEntries } from "../canvases/canvasPages";
 import { PluginButtons } from "../pluginButtons/PluginButtons";
 import { PluginButtonsContext, createHiddenButtons, type PluginButtonsHost } from "../pluginButtons/pluginButtonModel";
 import { sessionHierarchy } from "../sessionHierarchy";
+import { ProviderBrandsContext } from "../ProviderIcon";
 import { ExplorerSessions } from "./ExplorerSessions";
 import { sessionList } from "./sessionTree";
 
@@ -25,6 +26,9 @@ const state = {
   catalog: [] as CanvasItem[],
   canvases: [] as { canvas: string; project: { id: string; path: string } | null; sessionId: string | null }[],
   pages: 0,
+  /** Whether the other project has Claude Code sessions, and what the window allows for its rows (the actions besides renaming and deleting). */
+  claudeCode: false,
+  access: {} as Record<string, boolean>,
 };
 
 /** A canvas as the host declares it. */
@@ -61,10 +65,15 @@ const session = (id: string, projectId: string | null, parentSessionId: string |
 });
 // The selected scope is project-a with its session a-1; the two lists below are of scopes that are open and not selected.
 const sessions = [session("a-1", "project-a"), session("chat-1", null), session("chat-2", null), session("b-1", "project-b"), session("b-2", "project-b", "b-1")];
+// Sessions of the Claude Code provider of the configuration: one whose conversation of the CLI exists, one before its first turn.
+const claudeCodeSessions = [{ ...session("b-cc", "project-b"), providerKey: "Claude", providerConversation: true },
+  { ...session("b-new", "project-b"), providerKey: "Claude" }];
+const brands = new Map([["claude", { key: "Claude", type: "claude-code" }], ["codex", { key: "codex", type: "openai-responses" }]]);
 const tree = { toggle: () => { }, more: () => { }, fewer: () => { } };
 
 function Scope({ scope }: { scope: string | null }) {
-  const rows = sessionHierarchy(sessions.filter(value => value.projectId === scope), sessions, scope);
+  const all = state.claudeCode ? [...sessions, ...claudeCodeSessions] : sessions;
+  const rows = sessionHierarchy(all.filter(value => value.projectId === scope), all, scope);
   const entries = sessionList(rows, { count: 50, subCount: 4, active: null, extra: () => 0, collapsed: () => false }).entries;
   // The lists are where the Explorer puts them, under the tree of the projects: the rules of that tree apply to their buttons.
   return <section data-scope={scope ?? "chats"}><h2>{scope ?? "Chats"}</h2><ul className="nav-list project-root-list"><li className="project-session-branch">
@@ -72,7 +81,7 @@ function Scope({ scope }: { scope: string | null }) {
       menuEntries={row => sessionCanvasMenuEntries(state.catalog, row, projects.find(value => value.id === scope), {
         label: title => `Open ${title}`, more: "More…", openPage: () => { state.pages++; },
         open: (item, target) => { state.canvases.push({ canvas: item.id, project: target.project, sessionId: target.sessionId }); } })}
-      access={() => ({ rename: true, delete: true })} marks={() => null} onAction={(value, action) => { state.actions.push({ session: value.id, action }); }}
+      access={() => ({ rename: true, delete: true, ...state.access })} marks={() => null} onAction={(value, action) => { state.actions.push({ session: value.id, action }); }}
       onMore={() => { }} onFewer={() => { }} /></li></ul></section>;
 }
 
@@ -86,11 +95,13 @@ const fixture = {
   setCanvases(items: CanvasItem[]) { state.catalog = items; },
   /** Under StrictMode, as in the application: React then runs each effect of a new component twice. */
   render() {
-    flushSync(() => root.render(createElement(StrictMode, null, createElement(PluginButtonsContext.Provider, { value: host() },
+    flushSync(() => root.render(createElement(StrictMode, null, createElement(ProviderBrandsContext.Provider, { value: brands }, createElement(PluginButtonsContext.Provider, { value: host() },
       createElement("div", { className: "ide-shell", style: { padding: 12, width: 320 } },
         createElement("div", { className: "window-actions" }, createElement(PluginButtons, { place: "TitleBar", context: { projectId: "project-a", sessionId: "a-1" } })),
-        createElement(Scope, { scope: null }), createElement(Scope, { scope: "project-b" }))))));
+        createElement(Scope, { scope: null }), createElement(Scope, { scope: "project-b" })))))));
   },
+  /** Lists the Claude Code sessions in the other project, with what the window allows for its rows. */
+  setClaudeCode(on: boolean, access: Record<string, boolean> = {}) { state.claudeCode = on; state.access = access; },
   clear() { flushSync(() => root.render(null)); },
 };
 Object.assign(window, { explorerFixture: fixture });

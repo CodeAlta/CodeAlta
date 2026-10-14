@@ -1399,6 +1399,25 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ProcessesOfTheSessions_AreCodeAltasOwn_ForEveryExecutorOfTheSameProvider()
+    {
+        // Each attached session has a runtime of its own; the registry of live sessions is read from another one.
+        var cli = new ClaudeCodeFakeCli();
+        cli.AssignProcessId = static () => 7200;
+        var options = cli.CreateOptions();
+        await using var attached = new ClaudeCodeTurnExecutor(options);
+        await using var reader = new ClaudeCodeTurnExecutor(options);
+
+        await ExecuteAsync(attached, CreateRequest([User("one")]));
+        cli.HoldConversation(7200, cli.Last.SessionId, entrypoint: "sdk-cli");
+
+        Assert.AreEqual(ClaudeCodeSessionHoldStatus.None, reader.LiveSessions.FindHolder(cli.Last.SessionId).Status);
+        await attached.DisposeProviderSessionAsync("session-1");
+        Assert.AreEqual(ClaudeCodeSessionHoldStatus.Held, reader.LiveSessions.FindHolder(cli.Last.SessionId).Status,
+            "Once closed, a process that still has the identifier is not CodeAlta's.");
+    }
+
+    [TestMethod]
     public async Task RegistryOfLiveSessions_IsTheOneOfTheConfigurationFolder()
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-claude-config-" + Guid.NewGuid().ToString("N"));

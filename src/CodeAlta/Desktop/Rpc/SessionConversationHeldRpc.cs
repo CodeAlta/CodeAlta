@@ -53,9 +53,7 @@ internal sealed class ConversationHeldService
                 var wire = Wire(handle);
                 if (!TryHandle(wire, out _)) return Error("wire_limit");
                 entries.Add(new(wire, entry.ProviderId, entry.Timestamp.ToString("O", CultureInfo.InvariantCulture), entry.ConversationId,
-                    new ConversationHeldHolder(OriginName(holder.Origin), Cut(holder.OriginText, 256) ?? string.Empty, holder.ProcessId,
-                        Cut(holder.Entrypoint, 128), Cut(holder.Kind, 128), Cut(holder.Status, 128), Cut(holder.WorkingDirectory, 1024), Cut(holder.Name, 256)),
-                    [.. entry.Choices.Select(ChoiceName)]));
+                    WireHolder(holder), [.. entry.Choices.Select(ChoiceName)]));
             }
 
             return new("ok", _epoch, request.SessionId, [.. entries]);
@@ -98,6 +96,11 @@ internal sealed class ConversationHeldService
         "cancel" => AgentConversationHeldChoice.Cancel,
         _ => null,
     };
+
+    /// <summary>The process that holds a conversation, as the page is told it: what its registry entry says, cut to bounds.</summary>
+    internal static ConversationHeldHolder WireHolder(AgentConversationHolder holder)
+        => new(OriginName(holder.Origin), Cut(holder.OriginText, 256) ?? string.Empty, holder.ProcessId,
+            Cut(holder.Entrypoint, 128), Cut(holder.Kind, 128), Cut(holder.Status, 128), Cut(holder.WorkingDirectory, 1024), Cut(holder.Name, 256));
 
     private static string OriginName(AgentConversationHolderOrigin origin) => origin switch
     {

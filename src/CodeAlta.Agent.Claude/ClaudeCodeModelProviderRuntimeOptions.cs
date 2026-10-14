@@ -178,6 +178,16 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// </summary>
     internal IClaudeCodeProcessProbe? ProcessProbe { get; init; }
 
+    private ClaudeCodeOwnProcesses? _ownProcesses;
+
+    /// <summary>
+    /// Gets the CLI processes CodeAlta runs for this provider, shared by every runtime made from these options: each
+    /// attached session has a runtime of its own, while the registry of live sessions is read from another one, which
+    /// must not take a process of CodeAlta for another program that holds a conversation.
+    /// </summary>
+    internal ClaudeCodeOwnProcesses OwnProcesses
+        => LazyInitializer.EnsureInitialized(ref _ownProcesses, () => new ClaudeCodeOwnProcesses(ProcessProbe ?? ClaudeCodeProcessProbe.Instance));
+
     /// <summary>
     /// Gets or initializes what tells whether the CLI finds the transcript of a conversation it is to resume, from the
     /// working directory and the identifier of the conversation. Tests replace it; by default the folders of the

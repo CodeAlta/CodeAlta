@@ -113,7 +113,7 @@ internal sealed partial class ClaudeCodeSession
 
     private const string BackgroundOriginText = "a background session of Claude Code";
 
-    private static AgentConversationHolder ToAgentHolder(ClaudeCodeSessionHolder holder)
+    internal static AgentConversationHolder ToAgentHolder(ClaudeCodeSessionHolder holder)
     {
         var background = holder.Kind is "bg" or "daemon" or "daemon-worker";
         var origin = background

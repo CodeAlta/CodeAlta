@@ -1,5 +1,5 @@
 import { AppWindowSurface } from "./AppWindow";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
@@ -17,14 +17,18 @@ import { findSpace, type Space } from "./spaces/spaces";
 /** The space of a session and what it can use there, which the panel reads when it opens; null where the host keeps no spaces. */
 export type SessionSpaceResources = Readonly<{ spaces: readonly Space[]; read: () => Promise<SpaceSessionResourcesResponse | null> }> | null;
 import { SessionIdentityInfo } from "./spaces/SessionIdentityInfo";
+import { ClaudeCodeConversationRow } from "./claudeCodeOpen/ClaudeCodeConversationRow";
+import type { SessionClaudeCodeConversationResult } from "#neoastra";
 
 export type SessionInfoLifetime = { revision: number; current: () => boolean };
 
-export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime, canRead = () => true, spaceResources = null }: {
+export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime, canRead = () => true, spaceResources = null, conversation = null }: {
   info: SessionInfoView; demo: boolean; onClose: () => void; target?: RuntimeTarget | null;
   lifetime?: SessionInfoLifetime; canRead?: () => boolean;
   /** The space of the session and what it can use there. */
   spaceResources?: SessionSpaceResources;
+  /** Reads the conversation of the Claude Code CLI the session continues, once; null for a session that has none. */
+  conversation?: (() => Promise<SessionClaudeCodeConversationResult | null>) | null;
 }) {
   const { t } = useShellLanguage();
   const [resources, setResources] = useState<SpaceSessionResourcesResponse | null>(null);
@@ -50,6 +54,11 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
     setNotice(message);
   }
   const [pending, setPending] = useState(false);
+  // Read once for the session shown: the reader the window gives changes at every render.
+  const conversationLatest = useRef(conversation); conversationLatest.current = conversation;
+  const hasConversation = !!conversation;
+  const conversationRead = useMemo(() => hasConversation ? () => conversationLatest.current?.() ?? Promise.resolve(null) : null,
+    [hasConversation, info.id, lifetime?.revision]);
   const generation = useRef(0);
   const request = useRef<AbortController | null>(null);
   const identity = useRef<InfoObservations["identity"]>(undefined);
@@ -155,6 +164,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       {info.worktree && <div><dt>{t("Git worktree")}</dt><dd>{info.worktree.path}
         {info.worktree.missing && <small>{t("The folder of this worktree is gone: the session continues in the folder of the project.")}</small>}</dd></div>}
       <div><dt>{t("Provider")}</dt><dd>{info.provider ? <span className="with-logo"><ProviderIcon providerKey={info.provider} size={14} />{info.provider}</span> : t("Not recorded or unverified")}</dd></div>
+      {conversationRead && <ClaudeCodeConversationRow read={conversationRead} />}
       <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? recorded(info.updatedAt) : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Recorded creation time")}</dt><dd>{info.createdAt ? recorded(info.createdAt) : t("Not recorded or unavailable")}</dd></div>
       {info.archived && <div><dt>{t("Archived")}</dt><dd>{info.archived.at ? recorded(info.archived.at) : t("Not recorded or unavailable")}</dd></div>}

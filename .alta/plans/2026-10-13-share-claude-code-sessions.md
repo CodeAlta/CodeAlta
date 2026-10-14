@@ -494,9 +494,52 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
       on the session's folder (moved from phase 0: it opens VS Code windows on the user's screen, so warn
       first). If the folder must be open, open it first (`vscode://file/<folder>` or `code <folder>`),
       then the session URI; record the rule.
-- [ ] Host RPCs; release of the idle CLI process; the VS Code URI built on the host only.
-- [ ] Row menus, palette, header overflow, Session Info row; gating to claude-code sessions with a CLI id.
-- [ ] Tests: host refuses unknown ids and non-claude sessions; frontend menu and palette tests.
+      Not done yet (opens windows on the user's screen): the code path is testable through the opener seam of
+      `SessionOperationsService` (`SharedConversationSeam.Open`; production: `DesktopLinks.Open`, shell execute).
+- [x] Host RPCs; release of the idle CLI process; the VS Code URI built on the host only.
+      Done: provider-neutral `IAgentProviderSharedConversation.DescribeSharedConversationAsync(state, workingDirectory)` →
+      `AgentSharedConversation(ConversationId, ResumeCommand, WorkingDirectory, EditorUri, Holder)`
+      (`CodeAlta.Agent/Runtime/AgentSharedConversation.cs`), implemented by `ClaudeCodeTurnExecutor`: null while a `ProviderBranch`
+      exists or when the recorded id is not a GUID; command and URI from `ClaudeCodeConversationLinks` (GUID-checked);
+      holder = `LiveSessions.FindHolder`. Routed by `AgentHub.DescribeSharedConversationAsync` (providers with `SharesConversations`
+      only). `SessionRuntimeService.SharedConversation.cs`: `DescribeSharedConversationAsync` (`ok`/`unavailable`/`unsupported`/`none`,
+      folder = summary `ExecutionDirectory`) and `ReleaseSharedConversationAsync`: on the actor, the catch-up guards with a reason each
+      (`running`, `remote_control`, `background_tasks`, `interaction_pending`), then the idle attachment is retired as a provider
+      selection retires it (`_forwarding.RetireAsync`, entry removed, transition until it ends): the AgentSession is disposed, which
+      closes the CLI process; `released` also when nothing was attached; `release_unconfirmed` when the retirement failed.
+      `OwnedSessionCommandService.GetSharedConversationAsync` / `ReleaseSharedConversationAsync` (public, `OwnedSharedConversation*`
+      records; release describes first, `busy`/`running`/`interaction_pending` from the command locks). Desktop RPCs on `sessions`:
+      `claudeCodeConversation({expectedEpoch, sessionId})` and `releaseClaudeCodeConversation(...)` →
+      `{status, epoch, sessionId, cliSessionId, resumeCommand, workingDirectory, held}` (`held` = the `ConversationHeldHolder` of
+      phase 2), `openInVsCode(...)` → `{status opened|open_failed|<refusal>, epoch, sessionId}`: describe, release, then open the
+      host-built URI; the desktop projects only a GUID id whose URI and command are exactly the Claude Code ones (else
+      `unsupported`); the URI never goes to the page (`[JsonIgnore]`). `WorkspaceSession.providerConversation` (optional, true when
+      the catalog has a `ProviderSessionId`) gates the actions without listing the id.
+      Deviations: (1) a third RPC, `releaseClaudeCodeConversation`, for **Run in terminal** (the terminal is the page's, through the
+      terminals RPC). (2) **Fix of phase 1**: every attached session has a provider runtime of its own
+      (`AgentHub.CreateStartedProviderRuntimeAsync` → `CreateRuntimeAsync`), while the registry, catch-up, discovery and this
+      description read from the registry's runtime: its own-process set never had the attached sessions' CLI pids, so CodeAlta's
+      own idle CLI was reported as a holder ("another application (sdk-cli)"). `ClaudeCodeOwnProcesses` now lives on the options
+      instance (`ClaudeCodeModelProviderRuntimeOptions.OwnProcesses`, lazily created), shared by every runtime of that provider.
+- [x] Row menus, palette, header overflow, Session Info row; gating to claude-code sessions with a CLI id.
+      Done: `frontend/src/claudeCodeOpen/` (`claudeCodeOpen.ts`: gating `opensElsewhere(session, providerType)`, the three flows
+      with an injectable API, refusal messages; `openElsewhereEntries.ts`; `hostApi.ts`; `ClaudeCodeConversationRow.tsx`;
+      `messages.ts`, 5 languages). `SessionAction` + `sessionActionAccess`: `open-vs-code` and `run-in-terminal` with the authority of a
+      change, `copy-resume-command` with the session's read authority. **Open in VS Code**, **Run in terminal**, **Copy resume command**
+      in both row menus (after Remote Control) and in the search window (Session: `open_in_vscode`, `run_in_terminal`,
+      `copy_resume_command`); outcomes as toasts. Run in terminal: release, `terminals.create` with the session (its folder), then
+      `claude --resume <id>\r`. Session Info: a "Claude Code conversation" row (id, Copy → "Copied", "Open now in …" when held),
+      read once when the window opens. Demo API stand-ins. Deviation: the session header has no overflow menu (its actions are
+      icon buttons); none was added.
+- [x] Tests: host refuses unknown ids and non-claude sessions; frontend menu and palette tests.
+      Done: `ClaudeCodeOpenElsewhereTests` (4: named from the recorded state with own process not a holder, VS Code holder named,
+      release closes the idle process and the next prompt resumes; refused while a run works; refused with Remote Control;
+      unknown/no conversation/tampered id), `ClaudeCodeTurnExecutorTests.ProcessesOfTheSessions_AreCodeAltasOwn_ForEveryExecutorOfTheSameProvider`,
+      `SessionCatchUpTests.SharedConversation_OfAProviderThatSharesNone_IsUnsupported_AndItsProcessIsKept`,
+      `SessionClaudeCodeConversationRpcTests` (5: validation/stale epoch, projection + holder, open after release with the host URI,
+      nothing opened when refused or forged, release), `DesktopWorkspaceTests.Projection_SaysWhichSessionsHaveAConversationOfTheirProvider_OnlyForThem`;
+      frontend `claudeCodeOpen.test.ts` (8), `sessionRowActions.test.ts` (+1), explorer menu browser test (+1),
+      `claudeCodeConversationRow.browser.test.ts` (2).
 
 ### Phase 7: docs and full verification (commit)
 - [ ] `doc/providers.md` (Claude Code section: registry, held prompt, catch-up, import, open elsewhere,

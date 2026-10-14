@@ -234,6 +234,23 @@ public sealed class SessionCatchUpTests
         Assert.AreEqual(0, provider.Reads);
     }
 
+    [TestMethod]
+    public async Task SharedConversation_OfAProviderThatSharesNone_IsUnsupported_AndItsProcessIsKept()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new ExternalProvider(sharesConversations: false);
+        await using var host = await CreateHostAsync(temp, provider);
+        var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Not shared")).SessionId;
+
+        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.GetSharedConversationAsync(sessionId).WaitAsync(Timeout),
+            "No turn yet, and no conversation to share whatever the turns.");
+        await SendAsync(host, sessionId, "one");
+
+        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.GetSharedConversationAsync(sessionId).WaitAsync(Timeout));
+        Assert.AreEqual(new OwnedSharedConversationResult("unsupported", null), await host.Commands.ReleaseSharedConversationAsync(sessionId).WaitAsync(Timeout));
+        Assert.IsNotNull(await host.RuntimeService.TryGetActiveSessionDescriptorAsync(sessionId), "Nothing is released for a provider that shares nothing.");
+    }
+
     private static async Task SendAsync(CodeAltaHost host, string sessionId, string prompt)
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;

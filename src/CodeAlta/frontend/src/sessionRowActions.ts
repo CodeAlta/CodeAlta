@@ -1,7 +1,9 @@
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 
 export type SessionMenuTarget = { id: string; projectId: string | null; hostEpoch: string | null };
-export type SessionAction = "open" | "rename" | "fork" | "delete" | "archive" | "remote-control" | "move" | "space";
+export type SessionAction = "open" | "rename" | "fork" | "delete" | "archive" | "remote-control" | "move" | "space"
+  // A Claude Code session opened in VS Code or a terminal (claudeCodeOpen/claudeCodeOpen.ts).
+  | "open-vs-code" | "copy-resume-command" | "run-in-terminal";
 
 export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTarget, selectedId: string | null,
   selectedProjectId: string | null, project: WorkspaceProject | undefined, hostEpoch: string | null,
@@ -17,7 +19,11 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
   // Remote Control acts on the session's provider: the same authority as a change of the session.
   // A fork leaves the session as it is, and is made while it works; it creates a session in the same scope.
   // Only the session of a project moves to another project; a chat and a session of a project move to another space.
-  return { open, rename: mutate, fork: mutate, delete: mutate, archive: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null, space: mutate };
+  // Opening a Claude Code session in VS Code or a terminal closes the process CodeAlta keeps for it: a change of the
+  // session too. Copying the command that resumes it changes nothing: the session of an owned window is enough.
+  const read = open && exactScope && owned && !!hostEpoch;
+  return { open, rename: mutate, fork: mutate, delete: mutate, archive: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null, space: mutate,
+    "open-vs-code": mutate, "copy-resume-command": read, "run-in-terminal": mutate };
 }
 
 /**
