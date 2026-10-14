@@ -1183,6 +1183,15 @@ internal sealed class JournalPayloadParser
 
                         record.ProjectRef = ReadString(ref reader);
                     }
+                    else if (reader.ValueTextEquals("space_id"u8))
+                    {
+                        if (!reader.Read())
+                        {
+                            return record;
+                        }
+
+                        record.SpaceId = ReadString(ref reader);
+                    }
                     else if (reader.ValueTextEquals("parent_session_id"u8))
                     {
                         if (!reader.Read())

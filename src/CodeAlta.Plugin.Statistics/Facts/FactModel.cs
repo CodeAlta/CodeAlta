@@ -658,6 +658,9 @@ internal sealed class SessionRow
     /// <summary>Gets or sets the project the session was created for.</summary>
     public string? ProjectRef { get; set; }
 
+    /// <summary>Gets or sets the space the session belongs to; null for a session created before sessions had a space.</summary>
+    public string? SpaceId { get; set; }
+
     /// <summary>Gets or sets the kind of session.</summary>
     public string? SessionKind { get; set; }
 

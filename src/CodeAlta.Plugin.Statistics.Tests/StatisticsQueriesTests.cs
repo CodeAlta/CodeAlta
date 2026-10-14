@@ -294,7 +294,7 @@ public sealed class StatisticsQueriesTests
     }
 
     [TestMethod]
-    public async Task ASpaceHasTheChats_AsTheExplorerShowsThemInEverySpace()
+    public async Task ASpaceHasItsOwnChats_AndTheDefaultSpaceTheChatsOfNoOtherSpace()
     {
         await using var harness = await QueryHarness.CreateAsync("Europe/Paris");
         harness.Directory.Projects.AddRange(
@@ -304,23 +304,29 @@ public sealed class StatisticsQueriesTests
             new ProjectInfo("project-2", "gamma", "Gamma", ["oss"]),
         ]);
         harness.Directory.Spaces.AddRange([new SpaceInfo("work", "Work", false), new SpaceInfo("empty", "Empty", false)]);
-        // A chat: a session of no project.
-        var chat = SyntheticFacts.Batch(new Random(99), "chat-1", SyntheticFacts.SpringStart + 100, 200 * 96, 150);
-        chat.Session!.ProjectRef = null;
-        await harness.AddAsync(chat);
+        // Chats, the sessions of no project: one created before sessions had a space, one of Work, one of a space that is gone.
+        foreach (var (id, seed, space) in new[] { ("chat-1", 99, (string?)null), ("chat-2", 98, "work"), ("chat-3", 97, "gone") })
+        {
+            var chat = SyntheticFacts.Batch(new Random(seed), id, SyntheticFacts.SpringStart + 100, 200 * 96, 150);
+            chat.Session!.ProjectRef = null;
+            chat.Session.SpaceId = space;
+            await harness.AddAsync(chat);
+        }
+
         var period = "2026-04-01..2026-09-30";
+        double Naive(Func<string?, string?, bool> match) => harness.Naive(QueryHarness.Tokens, StatisticsFrequency.Year, new DateOnly(2026, 4, 1), new DateOnly(2026, 9, 30), DayOfWeek.Monday,
+            batch => match(batch.Session!.ProjectRef, batch.Session.SpaceId)).Values.Sum();
+        async Task<double> Total(StatisticsFilter filter) => (await harness.Queries.SeriesAsync(new StatisticsRequest { Period = period, Filter = filter }, "tokens")).Series.Sum(static line => line.Total);
 
-        double Naive(Func<string?, bool> match) => harness.Naive(QueryHarness.Tokens, StatisticsFrequency.Year, new DateOnly(2026, 4, 1), new DateOnly(2026, 9, 30), DayOfWeek.Monday, batch => match(batch.Session!.ProjectRef)).Values.Sum();
-        async Task<double> Total(StatisticsFilter filter) => (await harness.Queries.SeriesAsync(new StatisticsRequest { Period = period, Filter = filter }, "tokens")).Series.Single().Total;
-
-        var chats = Naive(project => project is null);
-        Assert.IsGreaterThan(0, chats, "The chat has something to count.");
-        Assert.AreEqual(Naive(project => project is null or "project-0"), await Total(new StatisticsFilter { Space = "Work" }), 0.001, "A space has its projects and the chats.");
-        Assert.AreEqual(chats, await Total(new StatisticsFilter { Space = "Empty" }), 0.001, "A space with no project still has the chats.");
-        Assert.AreEqual(Naive(project => project == "project-0"), await Total(new StatisticsFilter { Space = "Work", Project = "alpha" }), 0.001, "A project filter leaves the chats out.");
-        Assert.AreEqual(Naive(project => project == "project-0"), await Total(new StatisticsFilter { Project = "alpha" }), 0.001);
-        Assert.AreEqual(Naive(_ => true), await Total(new StatisticsFilter { Space = "default" }), 0.001, "The default space has everything, the chats too.");
-        Assert.AreEqual(Naive(_ => true), await Total(new StatisticsFilter()), 0.001);
+        Assert.IsGreaterThan(0, Naive((project, space) => project is null && space == "work"), "The chat of Work has something to count.");
+        Assert.AreEqual(Naive((project, space) => project == "project-0" || project is null && space == "work"), await Total(new StatisticsFilter { Space = "Work" }), 0.001,
+            "A space has its projects and its own chats.");
+        Assert.AreEqual(0, await Total(new StatisticsFilter { Space = "Empty" }), 0.001, "A space with no project and no chat has nothing.");
+        Assert.AreEqual(Naive((project, _) => project == "project-0"), await Total(new StatisticsFilter { Space = "Work", Project = "alpha" }), 0.001, "A project filter leaves the chats out.");
+        Assert.AreEqual(Naive((project, _) => project == "project-0"), await Total(new StatisticsFilter { Project = "alpha" }), 0.001);
+        Assert.AreEqual(Naive((project, space) => project is not null || space != "work"), await Total(new StatisticsFilter { Space = "default" }), 0.001,
+            "The default space has every project, and the chats of no other space: those that record none or a space that is gone.");
+        Assert.AreEqual(Naive((_, _) => true), await Total(new StatisticsFilter()), 0.001);
     }
 
     [TestMethod]

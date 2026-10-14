@@ -51,6 +51,9 @@ internal sealed class SessionFactsState
     /// <summary>Gets or sets the project the session was created for.</summary>
     public string? ProjectRef { get; set; }
 
+    /// <summary>Gets or sets the space the session belongs to, as its header records it.</summary>
+    public string? SpaceId { get; set; }
+
     /// <summary>Gets or sets the kind of session.</summary>
     public string? SessionKind { get; set; }
 

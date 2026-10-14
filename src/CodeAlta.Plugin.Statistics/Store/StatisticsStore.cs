@@ -24,7 +24,7 @@ namespace CodeAlta.Plugin.Statistics.Store;
 internal sealed partial class StatisticsStore
 {
     /// <summary>The version of the tables, kept by the host for the plugin.</summary>
-    public const int SchemaVersion = 3;
+    public const int SchemaVersion = 4;
 
     /// <summary>The version of the roll-ups: when it changes, they are added up again from the facts.</summary>
     public const int RollupVersion = 1;
@@ -98,6 +98,15 @@ internal sealed partial class StatisticsStore
             {
                 using var sql = new SqlSession(connection);
                 sql.Execute($"CREATE TABLE {Table("archive")} (session_id TEXT PRIMARY KEY, generation TEXT NOT NULL, facts_version INTEGER NOT NULL, full_source INTEGER NOT NULL, recorded_metrics TEXT NOT NULL, effective INTEGER NOT NULL, source_seen INTEGER NOT NULL)");
+            }
+
+            if (from < 4)
+            {
+                // The space a session records: a chat is counted in its own space. Sessions read before have none,
+                // and are counted in the default space, as the window lists them.
+                using var sql = new SqlSession(connection);
+                if (sql.ScalarLong($"SELECT COUNT(*) FROM pragma_table_info('{Table("session")}') WHERE name = 'space_id'") == 0)
+                    sql.Execute($"ALTER TABLE {Table("session")} ADD COLUMN space_id TEXT");
             }
 
             return ValueTask.CompletedTask;
@@ -472,11 +481,11 @@ internal sealed partial class StatisticsStore
         }
 
         sql.Execute(
-            $"INSERT INTO {Table("session")} (session_id, project_ref, session_kind, parent_session_id, created_by_kind, created_by_session_id, automation_id, title, provider, permission_mode, first_ms, last_ms, deleted) "
-            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, 0) "
+            $"INSERT INTO {Table("session")} (session_id, project_ref, session_kind, parent_session_id, created_by_kind, created_by_session_id, automation_id, title, provider, permission_mode, first_ms, last_ms, deleted, space_id) "
+            + "VALUES (@p0, @p1, @p2, @p3, @p4, @p5, @p6, @p7, @p8, @p9, @p10, @p11, 0, @p12) "
             + "ON CONFLICT (session_id) DO UPDATE SET project_ref = excluded.project_ref, session_kind = excluded.session_kind, parent_session_id = excluded.parent_session_id, created_by_kind = excluded.created_by_kind, "
             + "created_by_session_id = excluded.created_by_session_id, automation_id = excluded.automation_id, title = excluded.title, provider = excluded.provider, permission_mode = excluded.permission_mode, "
-            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0",
+            + "first_ms = excluded.first_ms, last_ms = excluded.last_ms, deleted = 0, space_id = excluded.space_id",
             row.SessionId,
             row.ProjectRef,
             row.SessionKind,
@@ -488,7 +497,8 @@ internal sealed partial class StatisticsStore
             row.Provider,
             row.PermissionMode,
             row.FirstRecord?.ToUnixTimeMilliseconds(),
-            row.LastRecord?.ToUnixTimeMilliseconds());
+            row.LastRecord?.ToUnixTimeMilliseconds(),
+            row.SpaceId);
     }
 
     private void WriteJournal(SqlSession sql, ApplyRequest request, long? updatedMilliseconds = null)

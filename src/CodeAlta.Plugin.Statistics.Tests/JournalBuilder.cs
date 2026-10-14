@@ -59,7 +59,8 @@ internal sealed class JournalBuilder
         bool legacy = false,
         DateTimeOffset? countedFrom = null,
         string forkKind = "Fork",
-        int rewindCount = 0)
+        int rewindCount = 0,
+        string? spaceId = null)
     {
         var raw = new StringBuilder("{\"schema_version\":1,");
         raw.Append(legacy ? $"\"thread_id\":\"{SessionId}\"," : $"\"session_id\":\"{SessionId}\",");
@@ -67,6 +68,11 @@ internal sealed class JournalBuilder
         if (projectRef is not null)
         {
             raw.Append($",\"project_ref\":\"{projectRef}\"");
+        }
+
+        if (spaceId is not null)
+        {
+            raw.Append($",\"space_id\":\"{spaceId}\"");
         }
 
         if (parent is not null)

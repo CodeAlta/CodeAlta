@@ -857,6 +857,18 @@ public sealed class SessionFactsReducerTests
     // ----- identity -----
 
     [TestMethod]
+    public void Session_SpaceComesFromTheHeader_AndAHeaderWrittenAgainSaysTheNewOne()
+    {
+        var b = new JournalBuilder("33333333-3333-3333-3333-333333333333", "codex");
+        b.Header(T0, spaceId: "work").Idle(T0.AddSeconds(1), "r1");
+        Assert.AreEqual("work", Reduce(b).Session!.SpaceId);
+
+        var older = new JournalBuilder("55555555-5555-5555-5555-555555555555", "codex");
+        older.Header(T0).Idle(T0.AddSeconds(1), "r1");
+        Assert.IsNull(Reduce(older).Session!.SpaceId, "A session created before sessions had a space records none.");
+    }
+
+    [TestMethod]
     public void Session_IdentityComesFromTheHeaderAndTheState()
     {
         var b = new JournalBuilder("33333333-3333-3333-3333-333333333333", "codex");

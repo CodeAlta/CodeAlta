@@ -90,6 +90,9 @@ internal sealed class HeaderRecord : JournalRecord
     /// <summary>Gets or sets the identifier of the project the session was created for.</summary>
     public string? ProjectRef { get; set; }
 
+    /// <summary>Gets or sets the space the session belongs to; null for a session created before sessions had a space.</summary>
+    public string? SpaceId { get; set; }
+
     /// <summary>Gets or sets the parent session of a sub-agent session.</summary>
     public string? ParentSessionId { get; set; }
 

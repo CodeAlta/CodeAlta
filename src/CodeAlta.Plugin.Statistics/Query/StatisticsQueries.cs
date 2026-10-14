@@ -108,7 +108,7 @@ public sealed partial class StatisticsQueries
             names[project.Id] = project.Name;
         }
 
-        var refs = ResolveProjectRefs(filter, projects, spaces, notes, out var includesChats);
+        var refs = ResolveProjectRefs(filter, projects, spaces, notes, out var includesChats, out var chatSpace);
         var saved = await _store.ReadAsync(sql => sql.Query($"SELECT facts_version,full_source,recorded_metrics FROM {P}archive WHERE effective=1",
             reader => (Version: (int)reader.GetInt64(0), Verified: reader.GetInt64(1) != 0, Metrics: reader.GetString(2).Split('\n', StringSplitOptions.RemoveEmptyEntries))), cancellationToken).ConfigureAwait(false);
         var unavailable = StatisticsStore.CurrentMetrics().Where(metric => saved.Any(archive => !archive.Metrics.Contains(metric, StringComparer.Ordinal))).ToArray();
@@ -134,6 +134,8 @@ public sealed partial class StatisticsQueries
             WeekStart = weekStart,
             ProjectRefs = refs,
             IncludesChats = includesChats,
+            ChatSpaceId = chatSpace?.Id,
+            OtherSpaceIds = chatSpace is { IsDefault: true } ? [.. spaces.Where(static space => !space.IsDefault).Select(static space => space.Id)] : [],
             ProjectNames = names,
             Coverage = coverage,
             Notes = notes,
@@ -231,9 +233,11 @@ public sealed partial class StatisticsQueries
     }
 
     // A space has the projects it has today and the chats (the sessions of no project), which the Explorer shows in every space.
-    private static IReadOnlyList<string>? ResolveProjectRefs(StatisticsFilter filter, IReadOnlyList<ProjectInfo> projects, IReadOnlyList<SpaceInfo> spaces, List<string> notes, out bool includesChats)
+    private static IReadOnlyList<string>? ResolveProjectRefs(StatisticsFilter filter, IReadOnlyList<ProjectInfo> projects, IReadOnlyList<SpaceInfo> spaces, List<string> notes,
+        out bool includesChats, out SpaceInfo? chatSpace)
     {
         includesChats = false;
+        chatSpace = null;
         IEnumerable<string>? result = null;
         if (filter.Project is { Length: > 0 } project)
         {
@@ -257,6 +261,7 @@ public sealed partial class StatisticsQueries
             notes.Add("space-membership-is-current");
             var members = projects.Where(item => found.IsDefault || item.SpaceIds.Contains(found.Id, StringComparer.Ordinal)).Select(static item => item.Id);
             includesChats = result is null;
+            chatSpace = found;
             result = result is null ? members : result.Intersect(members, StringComparer.OrdinalIgnoreCase);
         }
 
@@ -297,14 +302,24 @@ public sealed partial class StatisticsQueries
         /// <summary>Gets the references of the projects the query is limited to; null for no project filter.</summary>
         public IReadOnlyList<string>? ProjectRefs { get; init; }
 
-        /// <summary>Gets a value indicating whether the sessions of no project (the chats) are in the limit of <see cref="ProjectRefs"/>: the chats are in every space, as the Explorer shows them.</summary>
+        /// <summary>Gets a value indicating whether the sessions of no project (the chats) are in the limit of <see cref="ProjectRefs"/>: those of the space of the limit (<see cref="ChatSpaceId"/>).</summary>
         public bool IncludesChats { get; init; }
 
+        /// <summary>
+        /// Gets the space whose chats are counted: a chat is counted in the space it records, and a chat that records
+        /// none, or a space that no longer exists, in the default space. Null for the chats of every space.
+        /// </summary>
+        public string? ChatSpaceId { get; init; }
+
+        /// <summary>Gets, when <see cref="ChatSpaceId"/> is the default space, the other spaces: a chat of one of them is not the default space's.</summary>
+        public IReadOnlyList<string> OtherSpaceIds { get; init; } = [];
+
         /// <summary>Gets the condition of the limit to projects, to add to a WHERE clause: empty for no limit, starting with <c> AND </c> otherwise.</summary>
-        /// <param name="column">The column that holds the project reference of a session.</param>
+        /// <param name="column">The column that holds the project reference of a session, as <c>s.project_ref</c>; its table also has <c>space_id</c>.</param>
         /// <param name="argument">Gives the name of a parameter for a value.</param>
         public string ProjectClause(string column, Func<string, string> argument)
         {
+            var spaceColumn = column[..(column.LastIndexOf('.') + 1)] + "space_id";
             if (ProjectRefs is not { } refs)
             {
                 return string.Empty;
@@ -318,7 +333,15 @@ public sealed partial class StatisticsQueries
 
             if (IncludesChats)
             {
-                parts.Add($"({column} IS NULL OR {column} = '')");
+                var chats = $"({column} IS NULL OR {column} = '')";
+                if (ChatSpaceId is { } space)
+                {
+                    chats += OtherSpaceIds.Count > 0
+                        ? $" AND ({spaceColumn} IS NULL OR {spaceColumn} NOT IN ({string.Join(", ", OtherSpaceIds.Select(argument))}))"
+                        : OtherSpaceIds.Count == 0 && space == "default" ? string.Empty : $" AND {spaceColumn} = {argument(space)}";
+                }
+
+                parts.Add($"({chats})");
             }
 
             return parts.Count == 0 ? " AND 0" : $" AND ({string.Join(" OR ", parts)})";

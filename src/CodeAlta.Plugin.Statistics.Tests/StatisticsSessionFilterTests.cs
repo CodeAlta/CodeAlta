@@ -172,9 +172,10 @@ public sealed class StatisticsSessionFilterTests
         var everywhere = await harness.Queries.SeriesAsync(request with { Filter = request.Filter with { Space = "default" } }, "tokens");
         Assert.AreEqual(Sum(harness, QueryHarness.Tokens, tree), everywhere.Series.Single().Total, 0.001);
 
-        // A chat (a session of no project) is in every space, alone or as the top of a tree.
+        // A chat (a session of no project) is in its own space, alone or as the top of a tree.
         var chat = SyntheticFacts.Batch(new Random(5), "chat", SyntheticFacts.SpringStart + 10, 50 * 96, 40);
         chat.Session!.ProjectRef = null;
+        chat.Session.SpaceId = "work";
         await harness.AddAsync(chat);
         var chatInWork = await harness.Queries.SeriesAsync(Scoped("chat", frequency: StatisticsFrequency.Year) with { Filter = new StatisticsFilter { Session = "chat", WithChildren = true, Space = "work" } }, "tokens");
         Assert.AreEqual(Sum(harness, QueryHarness.Tokens, new HashSet<string> { "chat" }), chatInWork.Series.Single().Total, 0.001);

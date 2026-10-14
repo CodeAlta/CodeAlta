@@ -504,6 +504,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         {
             SessionId = _sessionId,
             ProjectRef = _state.ProjectRef,
+            SpaceId = _state.SpaceId,
             SessionKind = _state.SessionKind,
             ParentSessionId = _state.ParentSessionId,
             CreatedByKind = _state.CreatedByKind,
@@ -524,6 +525,8 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         _state.HasHeader = true;
         _state.SessionKind = header.SessionKind ?? _state.SessionKind;
         _state.ProjectRef = header.ProjectRef ?? _state.ProjectRef;
+        // A header written again (a move to another space) says the space the session is in now.
+        _state.SpaceId = header.SpaceId ?? _state.SpaceId;
         _state.ParentSessionId = header.ParentSessionId ?? _state.ParentSessionId;
         ApplyCreatedBy(header.CreatedBy);
         // The title is the start of the first prompt of the session: it is kept short and without the paths it names.
