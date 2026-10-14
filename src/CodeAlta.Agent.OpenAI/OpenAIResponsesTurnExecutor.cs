@@ -191,10 +191,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 continue;
                             }
 
-                            // The payload dump re-serializes the update, which some compatible providers
-                            // cannot round-trip (unknown response properties such as "output_text" make
-                            // the OpenAI client throw while writing). Only pay that cost when the Codex
-                            // console diagnostics are enabled, and never let the dump abort the turn.
+                            // The dump serializes the update again, which fails for some compatible providers (#103): only when it is printed.
                             if (IsCodexConsoleDiagnosticEnabled(provider))
                             {
                                 WriteCodexConsoleDiagnostic(

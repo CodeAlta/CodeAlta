@@ -1199,10 +1199,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_ToleratesUnknownResponsePropertiesWithoutCodexDebug()
     {
-        // Some compatible providers (e.g. Neuralwatt) add their own properties such as
-        // "output_text" to the response payload. OpenAI 2.14 cannot re-serialize a response
-        // carrying such unknown data, so the debug payload dump must stay gated behind
-        // CODEALTA_CODEX_SUB_DEBUG instead of running for every streamed update.
+        // Neuralwatt adds "output_text" to the response, which the OpenAI client cannot serialize again (#103).
         var responsesClient = new RecordingOpenAIResponseClient(
         [
             [
