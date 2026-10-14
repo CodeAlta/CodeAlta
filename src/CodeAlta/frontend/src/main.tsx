@@ -169,7 +169,9 @@ import { TerminalList } from "./terminal/TerminalList";
 import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type TerminalLook } from "./terminal/terminalLook";
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
-import { listedSessions, sessionList, type SessionListEntry } from "./explorer/sessionTree";
+import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
+import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
+import { hasClaudeCodeProvider } from "./claudeCodeImport/claudeCodeSessions";
 import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
@@ -273,6 +275,7 @@ import "./pluginButtons/pluginButtons.css";
 import "./sessionBranch/sessionBranch.css";
 import "./sessionChildren/sessionChildren.css";
 import "./conversationHeld/conversationHeld.css";
+import "./claudeCodeImport/claudeCodeSessions.css";
 import { createConversationHeldReviewer } from "./conversationHeld/conversationHeld";
 import { SessionBranchDialog, type BranchDialogHost } from "./sessionBranch/SessionBranchDialog";
 import { SessionLineageBanner, SessionLineageMark } from "./sessionBranch/SessionLineage";
@@ -753,6 +756,7 @@ function App() {
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
+  const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession }));
   // The session whose project is being chosen, with the project it is in when its menu was used.
   const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
@@ -2899,7 +2903,8 @@ function App() {
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions entries={shown.entries} global={scope === null} projectId={scope} more={shown.more} extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)}
+    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more}
+      extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)} claudeCode={claudeCodeGroup}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
@@ -2909,6 +2914,33 @@ function App() {
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
+  }
+
+  // The Claude Code sessions started in VS Code or a terminal in the folder of a project, at the end of its sessions: a
+  // click imports one and opens the session that continues it.
+  const claudeCodeConfigured = owned && hasClaudeCodeProvider(providerLogos.values());
+  function claudeCodeGroup(scope: string) {
+    const project = snapshot?.projects.find(value => value.id === scope);
+    if (!project || project.archived) return null;
+    return <ClaudeCodeSessionsGroup project={{ id: project.id, path: project.path }} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
+      refresh={snapshot?.sessions.length ?? 0} indent={sessionRowIndent(0)} onOpen={(id, _existing, title) => void showImportedSession(id, title)} />;
+  }
+  async function showImportedSession(id: string, title: string) {
+    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+    const epoch = currentHostEpoch.current;
+    let fresh: WorkspaceSnapshot | undefined;
+    try { fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 }); } catch { /* The session exists whatever the list says. */ }
+    if (!creationAlive.current) return;
+    const session = fresh?.configured && currentHostEpoch.current === epoch ? (catalog.current ?? fresh).sessions.find(value => value.id === id) : undefined;
+    if (!fresh || !session) {
+      showToast({ message: say("The session “{title}” was imported, but it could not be opened from here. Look for it in the list of sessions.", { title: plainTitle(title) }),
+        intent: "warning", icon: "warning-sign", timeout: 12_000 });
+      return;
+    }
+    publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    keptSession.current = session.id;
+    revealSessionLatest.current(session);
+    focusPromptSoon();
   }
 
   function dismissSessionMenu(restoreFocus: boolean) {
@@ -4288,6 +4320,8 @@ function App() {
               {selectedList.hidden > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({selectedList.hidden})</span></button>}
               {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
             </div>
+            {withClaudeCodeSessions(selectedList.entries, projectId, claudeCodeConfigured).map(entry => entry.kind === "claude-code"
+              && <Fragment key={`claude-code:${entry.projectId}`}>{claudeCodeGroup(entry.projectId)}</Fragment>)}
           </div>
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">

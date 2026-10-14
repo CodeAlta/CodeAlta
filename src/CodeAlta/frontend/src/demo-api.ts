@@ -7,7 +7,9 @@ import type {
   ConfigurationSnapshot,
   HistoryRequest,
   HistoryResponse,
+  WorkspaceClaudeCodeSessionsRequest,
   WorkspaceForkSessionRequest,
+  WorkspaceImportClaudeCodeSessionRequest,
   WorkspaceRewindSessionRequest,
   WorkspaceSessionTurnsRequest,
   WorkspaceSnapshot,
@@ -88,6 +90,11 @@ export const workspace = Object.freeze({
   sessionTurns: async (request: WorkspaceSessionTurnsRequest) => ({ status: "unconfigured", hostEpoch: null, sessionId: request.sessionId, turns: [], total: 0, activeRunId: null, revision: null }),
   forkSession: async (request: WorkspaceForkSessionRequest) => ({ status: "unconfigured", hostEpoch: null, scope: null, projectId: null, projectPath: null, sessionId: request.sessionId,
     forkSessionId: null, title: null, turnCount: 0, prompt: null, promptTruncated: false }),
+  // Nor any Claude Code session started elsewhere to list or import.
+  claudeCodeSessions: async (request: WorkspaceClaudeCodeSessionsRequest) => ({ status: "no_provider", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, providerId: null, sessions: [], total: 0 }),
+  importClaudeCodeSession: async (request: WorkspaceImportClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, cliSessionId: request.cliSessionId, sessionId: null }),
   rewindSession: async (request: WorkspaceRewindSessionRequest) => ({ status: "unconfigured", hostEpoch: null, scope: null, projectId: null, projectPath: null, sessionId: request.sessionId,
     turnCount: 0, removedTurnCount: 0, prompt: null, promptTruncated: false, removedTurnsSessionId: null, removedTurnsTitle: null, rewindCount: 0, spaceId: null }),
   history: async (request: HistoryRequest): Promise<HistoryResponse> => ({

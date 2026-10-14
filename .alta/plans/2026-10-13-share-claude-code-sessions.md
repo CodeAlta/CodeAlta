@@ -442,11 +442,52 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
         provider is created on open.
 
 ### Phase 5: discovery and import (commit)
-- [ ] Discovery RPC + index of known CLI ids; import store method (temp file + rename) + RPC.
-- [ ] Instructions note variant for an imported conversation.
-- [ ] Desktop "From Claude Code (N)" group; import on click and select.
-- [ ] Tests: imported session lists in the right project, renders, first prompt resumes with `--resume`
+- [x] Discovery RPC + index of known CLI ids; import store method (temp file + rename) + RPC.
+      Done: provider-neutral `IAgentProviderExternalConversations` (`CodeAlta.Agent/Runtime/AgentExternalConversations.cs`:
+      `ListExternalConversationsAsync(workingDirectory, isKnown, limit)` → `AgentExternalConversationList(Conversations, Total)`,
+      `ReadExternalConversationAsync(workingDirectory, id)` → `AgentExternalConversationImport(Conversation, Turns)` or null), implemented by
+      `ClaudeCodeTurnExecutor` with `ClaudeCodeExternalConversations` (instance-owned header cache keyed by path + length + mtime, max
+      4,096 headers; the newest 1,000 `<uuid>.jsonl` of the project folders whose name matches case-insensitively on Windows, de-duplicated
+      by id; `IsListedByVsCode` and `cwd` = project path; held = `LiveSessions.FindHolder`). Routed by `AgentHub.ListExternalConversationsAsync`
+      / `ReadExternalConversationAsync` (providers with `SharesConversations` only, nothing started; the read also returns the runtime
+      descriptor for the protocol family/key of the journal). `SessionRuntimeService.Import.cs`: index of known ids = every catalog session's
+      `ProviderSessionId` (any project, archived too; the project's session preferred), import serialized by an instance gate, known → `existing`
+      (idempotent), else full read → `AgentExternalTurnJournal.PrepareAsync` (origin marks, images saved beside the new journal) →
+      `SessionViewJournalStore.ImportAsync` → `FileSystemAgentSessionStore.CommitImportAsync` (temp file + rename, then cache upsert) →
+      `NotifySessionCreatedAsync`. Session: ProjectSession, `ProjectRef`, `WorkingDirectory == project.ProjectPath`, title of the transcript
+      (`TitleSource = User`: CodeAlta does not retitle it), the provider's default model/effort/permission mode, `ProviderSessionId` = CLI id,
+      claude-code state `SessionId`, counts written, `Leaf`/`Anchor` = leaf, `Position` of the full read, `Cost` = last `cost-state` or null
+      (the first CodeAlta turn is then given no cost rather than the whole conversation's), `Instructions = null`, `imported: true`.
+      Statistics: every record is under an `external:` run with an Idle without usage (the Phase 4 reducer rule). Desktop RPCs
+      `workspace.claudeCodeSessions({expectedHostEpoch, projectId, projectPath})` → `{status, hostEpoch, projectId, projectPath, providerId,
+      sessions[{cliSessionId, title, lastChangedAt, origin, held}], total}` (≤ 50) and `workspace.importClaudeCodeSession({expectedHostEpoch,
+      projectId, projectPath, cliSessionId})` → `{status ok|existing|not_found|…, sessionId}`, exact catalog project, provider = the project's
+      default when it shares conversations, else the first enabled one that does (`no_provider` otherwise); import admitted under the
+      workspace session gate (`busy`, `closed`, drained on close, `import_unconfirmed` after admission). Deviation: no per-folder mtime cache
+      (a folder's mtime does not change when a transcript grows); the per-file header cache does that job.
+- [x] Instructions note variant for an imported conversation.
+      Done: `ClaudeCodeProviderState.Imported` (`"imported": true`, written only while `Instructions` is null); the session keeps it
+      until its first instructions note, which is `ClaudeCodePrompts.CreateInstructionsForImportedConversation` ("…You were not given the
+      instructions of CodeAlta before: they are below…") instead of the "replaces the `# CodeAlta` part" wording.
+- [x] Desktop "From Claude Code (N)" group; import on click and select.
+      Done: entry kind `claude-code` (`explorer/sessionTree.ts`: `SessionTreeEntry` for what `sessionList` builds, `SessionListEntry` adds the
+      group; `withClaudeCodeSessions`, `sessionEntries`), rendered after the disclosure of the selected scope (main.tsx) and of open scopes
+      (`ExplorerSessions` `claudeCode` prop) when a `claude-code` provider is configured and the window is owned.
+      `claudeCodeImport/ClaudeCodeSessionsGroup.tsx`: decision on N — one listing call when the project's list is shown (N and the first 50
+      rows together: the host's header cache makes it cheap), again when the sessions of the window change (count) and when the group is
+      opened; hidden while N = 0; rows show title, time, "VS Code"/"terminal"/"another program", "open elsewhere"; a click imports (one at a
+      time) and the window refreshes its snapshot and reveals the session (toast when it cannot). Strings in 5 languages
+      (`claudeCodeImport/messages.ts`); demo-api stand-ins.
+- [x] Tests: imported session lists in the right project, renders, first prompt resumes with `--resume`
       and sends the full instructions; `sdk-*` and already-known transcripts are not listed.
+      Done: `ClaudeCodeExternalConversationsTests` (5: filter — sdk-cli, daemon, sidechain, continued-in, known, other cwd, untitled, empty,
+      non-uuid names; order, limit, total, re-read on change; held; read → turns + state; imported mark; note wording),
+      `ClaudeCodeImportTests` (2: end to end with the host and the fake CLI — listed, imported in the project, turns made in VS Code, no usage,
+      state, idempotent, first prompt `--resume` with the imported note and no preamble; non-listable → `not_found`, nothing written),
+      `WorkspaceClaudeCodeSessionsTests` (2, desktop RPC validation/busy/closed/unconfirmed),
+      `SessionFactsReducerTests.SessionImportedFromClaudeCode_CountsNoRunOfCodeAlta`, frontend `sessionTree.test.ts` (+1),
+      `claudeCodeImport/claudeCodeSessions.test.ts` (4), `claudeCodeSessions.browser.test.ts` (mount: hidden until found, N, re-read on open,
+      rows, held mark, one import at a time, error, German, both themes and 900×650).
 
 ### Phase 6: open in VS Code / CLI (commit)
 - [ ] `vscode://anthropic.claude-code/open?session=<id>` with VS Code closed, open on another folder, open

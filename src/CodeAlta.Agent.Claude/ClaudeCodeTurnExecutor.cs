@@ -18,6 +18,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderPermissionMode,
     IAgentProviderPromptSuggestions,
     IAgentProviderExternalTurns,
+    IAgentProviderExternalConversations,
     IAgentProviderStateUpdates,
     IAsyncDisposable
 {
@@ -30,11 +31,9 @@ internal sealed class ClaudeCodeTurnExecutor :
         _options = options ?? throw new ArgumentNullException(nameof(options));
         var probe = options.ProcessProbe ?? ClaudeCodeProcessProbe.Instance;
         OwnProcesses = new ClaudeCodeOwnProcesses(probe);
-        LiveSessions = new ClaudeCodeLiveSessions(
-            ClaudeCodeProjectFolders.ResolveConfigRoot(options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable),
-            OwnProcesses,
-            probe,
-            TimeProvider.System);
+        var configRoot = ClaudeCodeProjectFolders.ResolveConfigRoot(options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        LiveSessions = new ClaudeCodeLiveSessions(configRoot, OwnProcesses, probe, TimeProvider.System);
+        ExternalConversations = new ClaudeCodeExternalConversations(configRoot, LiveSessions);
     }
 
     /// <summary>Gets the CLI processes the sessions of this executor run.</summary>
@@ -42,6 +41,9 @@ internal sealed class ClaudeCodeTurnExecutor :
 
     /// <summary>Gets the reader of the registry of live sessions of the CLI, which tells whether another process holds a conversation.</summary>
     internal ClaudeCodeLiveSessions LiveSessions { get; }
+
+    /// <summary>Gets the reader of the conversations started in VS Code or a terminal, which a project can import.</summary>
+    internal ClaudeCodeExternalConversations ExternalConversations { get; }
 
     /// <summary>Gets where the reads of the transcripts of the sessions of this executor stopped.</summary>
     internal ClaudeCodeTranscriptPositions TranscriptPositions { get; } = new();
@@ -186,6 +188,32 @@ internal sealed class ClaudeCodeTurnExecutor :
 
             return ClaudeCodeExternalTurns.Read(root, persisted, workingDirectory, TranscriptPositions, cancellationToken);
         }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists the conversations of Claude Code started in VS Code or by the CLI in a terminal in a folder, which VS Code
+    /// lists too, and which no session of CodeAlta continues.
+    /// </summary>
+    /// <inheritdoc />
+    public Task<AgentExternalConversationList> ListExternalConversationsAsync(string workingDirectory, Func<string, bool> isKnown, int limit,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentNullException.ThrowIfNull(isKnown);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        // Many transcripts may be looked at: on the pool, not on the thread of the caller.
+        return Task.Run(() => ExternalConversations.List(workingDirectory, isKnown, limit, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>Reads a whole conversation of Claude Code started in VS Code or a terminal, to import it.</summary>
+    /// <inheritdoc />
+    /// <remarks>A conversation another process holds is read all the same: importing it only reads it.</remarks>
+    public Task<AgentExternalConversationImport?> ReadExternalConversationAsync(string workingDirectory, string conversationId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        return Task.Run(() => ExternalConversations.Read(workingDirectory, conversationId, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />

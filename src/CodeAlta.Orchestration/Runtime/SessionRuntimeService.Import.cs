@@ -1,0 +1,280 @@
+using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Images;
+using CodeAlta.Catalog;
+
+namespace CodeAlta.Orchestration.Runtime;
+
+/// <summary>A conversation another program started in the folder of a project, which a session can import.</summary>
+/// <param name="ConversationId">The identifier the provider gives it (Claude Code: the session of the CLI).</param>
+/// <param name="Title">Its title, as the program that started it shows it.</param>
+/// <param name="LastChangedAt">When it was last written.</param>
+/// <param name="Origin">Where it was started: <c>vscode</c>, <c>terminal</c>, <c>other</c> or <c>unknown</c>.</param>
+/// <param name="Entrypoint">The name the provider gives that program, as written; null when it names none.</param>
+/// <param name="IsHeld">Whether another live program holds it now (open in VS Code, a CLI in a terminal).</param>
+public sealed record ExternalConversationSummary(
+    string ConversationId,
+    string Title,
+    DateTimeOffset LastChangedAt,
+    string Origin,
+    string? Entrypoint,
+    bool IsHeld);
+
+/// <summary>The conversations other programs started in the folder of a project.</summary>
+/// <param name="Conversations">The conversations, the most recently changed first, at most the limit asked for.</param>
+/// <param name="Total">How many there are, also those beyond the limit.</param>
+public sealed record ExternalConversationListing(IReadOnlyList<ExternalConversationSummary> Conversations, int Total);
+
+/// <summary>The outcome of the import of a conversation another program started.</summary>
+/// <param name="Status">
+/// <c>imported</c> (a new session holds it), <c>existing</c> (a session continues it already: that one is given),
+/// or <c>not_found</c> (the provider has no such conversation the listing would give for the project).
+/// </param>
+/// <param name="Session">The session that holds the conversation; null for <c>not_found</c>.</param>
+public sealed record ExternalConversationImportResult(string Status, SessionViewDescriptor? Session);
+
+public sealed partial class SessionRuntimeService
+{
+    internal const string ImportImported = "imported";
+    internal const string ImportExisting = "existing";
+    internal const string ImportNotFound = "not_found";
+
+    // One import at a time: a second import of one conversation finds the session of the first.
+    private readonly SemaphoreSlim _externalImportGate = new(1, 1);
+
+    /// <summary>
+    /// Lists the conversations a provider keeps that other programs started in the folder of a project (Claude Code: in
+    /// VS Code or by the CLI in a terminal) and that no session of CodeAlta continues. Nothing of the provider is started.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="provider">The provider, which shares its conversations with other programs; another one lists nothing.</param>
+    /// <param name="limit">The most conversations returned.</param>
+    /// <param name="cancellationToken">Stops the listing.</param>
+    /// <returns>The conversations, newest first, and how many there are.</returns>
+    /// <remarks>
+    /// A conversation is known when a session of CodeAlta names it as the conversation of its provider, in any project,
+    /// archived or not: only the last conversation of a session is known, so one it left (after a broken resume, or a
+    /// change of provider) is listed again.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
+    public async Task<ExternalConversationListing> ListExternalConversationsAsync(ProjectDescriptor project, ModelProviderDescriptor provider, int limit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        return await AdmitAsync(async () =>
+        {
+            var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+            var listing = await _agentHub.ListExternalConversationsAsync(provider.ProviderId, project.ProjectPath, known.ContainsKey, limit, cancellationToken)
+                .ConfigureAwait(false);
+            return new ExternalConversationListing(
+                [.. listing.Conversations.Select(static conversation => new ExternalConversationSummary(
+                    conversation.ConversationId,
+                    conversation.Title,
+                    conversation.LastChangedAt,
+                    OriginName(conversation.Origin),
+                    conversation.Entrypoint,
+                    conversation.IsHeld))],
+                listing.Total);
+        }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Imports a conversation another program started in the folder of a project as a new session of that project, which
+    /// continues it: its turns are written as turns made elsewhere, and the first prompt resumes the conversation of the
+    /// provider. A conversation a session continues already is not imported again: that session is given.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="provider">The provider of the new session: its default model and reasoning effort are those of the session.</param>
+    /// <param name="conversationId">The conversation, as the listing gave it.</param>
+    /// <param name="cancellationToken">Stops waiting before the session is written.</param>
+    /// <returns>The session that holds the conversation, or why there is none.</returns>
+    /// <remarks>
+    /// The conversation is only read, also when another program holds it now: the first prompt of the session then
+    /// asks what to do, as for any conversation held elsewhere. Nothing of the provider is started. The turns carry no
+    /// usage: they are not counted as usage of CodeAlta. The journal is written whole, then listed.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="conversationId"/> is empty.</exception>
+    /// <exception cref="IOException">The journal or an attachment cannot be written.</exception>
+    /// <exception cref="OperationCanceledException">The import was stopped before the session was written.</exception>
+    public async Task<ExternalConversationImportResult> ImportExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
+        string conversationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        return await AdmitAsync(() => ImportExternalConversationOwnedAsync(project, provider, conversationId, cancellationToken), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<ExternalConversationImportResult> ImportExternalConversationOwnedAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
+        string conversationId, CancellationToken cancellationToken)
+    {
+        await _externalImportGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+            if (known.TryGetValue(conversationId, out var existingId))
+            {
+                var existing = await ResolveOwnedSessionBodyAsync(existingId, cancellationToken).ConfigureAwait(false);
+                return existing is null ? new(ImportNotFound, null) : new(ImportExisting, existing);
+            }
+
+            var read = await _agentHub.ReadExternalConversationAsync(provider.ProviderId, project.ProjectPath, conversationId, cancellationToken)
+                .ConfigureAwait(false);
+            if (read is not { } found) return new(ImportNotFound, null);
+            var (conversation, runtime) = found;
+
+            var now = DateTimeOffset.UtcNow;
+            var sessionId = Guid.CreateVersion7().ToString();
+            var title = ImportedTitle(conversation.Conversation.Title, project);
+            var target = new SessionViewDescriptor
+            {
+                SessionId = sessionId,
+                Kind = SessionViewKind.ProjectSession,
+                ProviderId = provider.ProviderId.Value,
+                ProviderKey = provider.ProviderId.Value,
+                ProjectRef = project.Id,
+                WorkingDirectory = project.ProjectPath,
+                Title = title,
+                // The title the conversation has where it was started was chosen there: CodeAlta does not replace it.
+                TitleSource = AgentSessionTitleSource.User,
+                Status = SessionViewStatus.Active,
+                CreatedAt = now,
+                UpdatedAt = now,
+                LastActiveAt = now,
+                StartedAt = now,
+                ModelId = provider.DefaultModelId,
+                ReasoningEffort = provider.DefaultReasoningEffort,
+            };
+            var initial = new AgentSessionState
+            {
+                SessionId = sessionId,
+                ProtocolFamily = runtime.ProtocolFamily,
+                ProviderKey = runtime.ProviderKey,
+                ProviderSessionId = conversationId,
+                UpdatedAt = now,
+            };
+
+            // The images of the turns are saved beside the journal before it is written; removed again when it is not.
+            var attachments = _sessionViewCatalog.JournalStore.GetNewSessionAttachmentDirectory(target);
+            var attachmentsExisted = Directory.Exists(attachments);
+            var images = new PromptImageAttachmentStore(_catalogOptions);
+            var toolImages = new AgentSessionToolImages(new NewSessionAttachments(attachments), sessionId);
+            try
+            {
+                var prepared = await AgentExternalTurnJournal.PrepareAsync(
+                    provider.ProviderId,
+                    initial,
+                    conversation.Turns,
+                    project.ProjectPath,
+                    async (data, imageToken) =>
+                    {
+                        byte[] bytes;
+                        try { bytes = Convert.FromBase64String(data.Base64Data); }
+                        catch (FormatException) { return new AgentInputItem.Text("[An image whose data is not valid.]"); }
+                        var stored = await images.SaveAsync(target,
+                            [new PromptImageAttachment(Guid.NewGuid().ToString("N"), "image", bytes, data.MediaType, ImageExtension(data.MediaType))],
+                            imageToken).ConfigureAwait(false);
+                        return new AgentInputItem.LocalImage(stored[0].Path, stored[0].Title, stored[0].MediaType);
+                    },
+                    (toolResult, resultToken) => toolImages.PrepareAsync(toolResult, null, resultToken),
+                    now,
+                    cancellationToken).ConfigureAwait(false);
+                target.LatestSummary = prepared.Preview;
+                var summary = new AgentSessionSummary
+                {
+                    SessionId = sessionId,
+                    ProviderId = provider.ProviderId,
+                    ProtocolFamily = runtime.ProtocolFamily,
+                    ProviderKey = runtime.ProviderKey,
+                    ModelId = provider.DefaultModelId,
+                    ReasoningEffort = provider.DefaultReasoningEffort,
+                    WorkingDirectory = project.ProjectPath,
+                    Title = title,
+                    TitleSource = AgentSessionTitleSource.User,
+                    Summary = prepared.Preview,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                };
+                var local = new SessionViewLocalState
+                {
+                    ProviderKey = provider.ProviderId.Value,
+                    ModelId = provider.DefaultModelId,
+                    ReasoningEffort = provider.DefaultReasoningEffort,
+                    PermissionMode = NormalizeOptionalText(provider.DefaultPermissionMode),
+                };
+                await _sessionViewCatalog.JournalStore.ImportAsync(target, summary, prepared.State, prepared.Events, local, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                // Nothing names what was saved: the session does not exist.
+                if (!attachmentsExisted && Directory.Exists(attachments))
+                {
+                    try { Directory.Delete(attachments, recursive: true); }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+                }
+
+                throw;
+            }
+
+            await _agentSessionCatalog.NotifySessionCreatedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            var listed = await ResolveOwnedSessionBodyAsync(sessionId, CancellationToken.None).ConfigureAwait(false) ?? target;
+            PublishSessionCatalogEvent(listed);
+            PublishSessionLifecycleEvent(sessionId);
+            return new(ImportImported, listed);
+        }
+        finally
+        {
+            _externalImportGate.Release();
+        }
+    }
+
+    // The conversations sessions of CodeAlta continue, with the session that does: one of the project first.
+    private async Task<Dictionary<string, string>> ReadKnownConversationsAsync(ProjectDescriptor project, CancellationToken cancellationToken)
+    {
+        var known = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        await foreach (var session in _agentSessionCatalog.ListSessionsAsync(filter: null, cancellationToken: cancellationToken).ConfigureAwait(false))
+        {
+            if ((session.Details as RawApiSessionMetadataDetails)?.ProviderSessionId is not { Length: > 0 } conversation) continue;
+            if (!known.ContainsKey(conversation) || string.Equals(session.WorkspacePath, project.ProjectPath, StringComparison.OrdinalIgnoreCase))
+                known[conversation] = session.SessionId;
+        }
+
+        return known;
+    }
+
+    // The title the conversation has elsewhere, made a title of a session: one line, at most 256 characters.
+    private static string ImportedTitle(string title, ProjectDescriptor project)
+    {
+        var line = string.Join(' ', title.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        line = new string([.. line.Where(static character => !char.IsControl(character))]).Trim();
+        if (line.Length > 256)
+        {
+            var cut = char.IsHighSurrogate(line[255]) ? 255 : 256;
+            line = line[..cut].TrimEnd();
+        }
+
+        return SessionTitleError(line) is null ? line : project.DisplayName;
+    }
+
+    private static string OriginName(AgentExternalTurnOrigin origin)
+        => origin switch
+        {
+            AgentExternalTurnOrigin.VsCode => "vscode",
+            AgentExternalTurnOrigin.Terminal => "terminal",
+            AgentExternalTurnOrigin.OtherApplication => "other",
+            _ => "unknown",
+        };
+
+    // The attachment folder of a session whose journal is written last.
+    private sealed class NewSessionAttachments(string folder) : IAgentSessionAttachmentStore
+    {
+        public ValueTask<string?> GetAttachmentDirectoryAsync(string sessionId, CancellationToken cancellationToken) => ValueTask.FromResult<string?>(folder);
+    }
+}

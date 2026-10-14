@@ -18,6 +18,7 @@ import { disabledToolMessages } from "./disabledToolMessages";
 import { promptSurfaceMessages } from "./promptSurface/messages";
 import { externalEditorMessages } from "./externalEditors/messages";
 import { conversationHeldMessages } from "./conversationHeld/messages";
+import { claudeCodeImportMessages } from "./claudeCodeImport/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2546,6 +2547,7 @@ export const messages = dictionary({
   ...promptSurfaceMessages,
   ...externalEditorMessages,
   ...conversationHeldMessages,
+  ...claudeCodeImportMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;
