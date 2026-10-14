@@ -494,6 +494,7 @@ export const messages = dictionary({
   "Next sent prompt": ["Prompt enviado siguiente", "Prompt envoyé suivant", "Nächster gesendeter Prompt", "次に送信したプロンプト", "下一条已发送的提示词"],
   "Reference a project file": ["Referenciar un archivo del proyecto", "Référencer un fichier du projet", "Projektdatei referenzieren", "プロジェクトファイルを参照", "引用项目文件"],
   "Reference an issue": ["Referenciar una incidencia", "Référencer un ticket", "Issue referenzieren", "Issue を参照", "引用议题"],
+  "Reopen the @ or # picker": ["Volver a abrir el selector de @ o #", "Rouvrir le sélecteur @ ou #", "@- oder #-Auswahl wieder öffnen", "@ または # の選択を再度開く", "重新打开 @ 或 # 选择器"],
   "1 match · {count} indexed": ["1 coincidencia · {count} indexados", "1 résultat · {count} indexés", "1 Treffer · {count} indiziert", "1 件一致 · {count} 件をインデックス済み", "1 个匹配 · 已索引 {count} 项"],
   "GitHub issues": ["Incidencias de GitHub", "Tickets GitHub", "GitHub-Issues", "GitHub の Issue", "GitHub 议题"],
   "GitLab issues": ["Incidencias de GitLab", "Tickets GitLab", "GitLab-Issues", "GitLab の Issue", "GitLab 议题"],

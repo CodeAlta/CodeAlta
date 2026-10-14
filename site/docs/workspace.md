@@ -378,6 +378,8 @@ Type `@` in the prompt to search project files and folders. Accepted entries bec
 @"src/path with spaces/file.cs":10-40
 ```
 
+Close the picker with `Esc` or its close button and keep typing: it stays closed for that `@`, and opens again at the next `@` you type. To open it again for that `@`, put the caret in the word right after it and press `Ctrl+Space`: the search starts with the text after the `@`. The `#` issue picker works the same way.
+
 Use `Ctrl+E` or `/edit` to open the same picker and edit the selected file in the [code editor](#code-editor).
 
 ## Code editor
