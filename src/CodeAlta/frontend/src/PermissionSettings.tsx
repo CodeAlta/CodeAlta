@@ -1,5 +1,5 @@
 import { Card, HTMLSelect, Switch } from "@blueprintjs/core";
-import { globalConfig } from "#neoastra";
+import type { globalConfig } from "#neoastra";
 import { builtInToolNames, DisabledToolsField } from "./DisabledToolsField";
 import { askPermissionMode, bypassPermissionMode, permissionModeDescription, permissionModeName } from "./permissionModes";
 import { SettingsField as Field } from "./SettingsField";
@@ -12,10 +12,12 @@ import type { Confirmation } from "./windowPreferences";
  * one of its own, and what a session an agent creates is given. The choices are kept by the host: the first applies to
  * the next Send of each session, the second to the next session an agent creates.
  */
-export function PermissionSettings({ permissions, confirms, epoch = null, toolsApi = globalConfig }: {
-  /** The host the tools every session does without are read from and written to; null where the window has none. */
-  epoch?: string | null;
-  toolsApi?: Pick<typeof globalConfig, "disabledTools" | "saveDisabledTools">;
+export function PermissionSettings({ permissions, confirms, tools = null }: {
+  /**
+   * The host the tools every session does without are read from and written to; null where the window has none. The
+   * page is given the service: it is mounted alone in tests, without the client of the host.
+   */
+  tools?: Readonly<{ epoch: string; api: Pick<typeof globalConfig, "disabledTools" | "saveDisabledTools"> }> | null;
   /**
    * Whether the sessions are asked first, whether a session an agent creates takes the mode of its creator, and what
    * changes them; null where the window does not own the host.
@@ -50,7 +52,7 @@ export function PermissionSettings({ permissions, confirms, epoch = null, toolsA
         </HTMLSelect>
       </Field>
     </Card>
-    {epoch && <ToolSettings epoch={epoch} api={toolsApi} />}
+    {tools && <ToolSettings epoch={tools.epoch} api={tools.api} />}
     <Card className="appearance-settings" aria-labelledby="settings-confirmations-title">
       <h2 id="settings-confirmations-title">{t("Confirmations")}</h2>
       <p className="settings-field-help">{t("These confirmations apply to manual actions, not automatic session retention.")}</p>
