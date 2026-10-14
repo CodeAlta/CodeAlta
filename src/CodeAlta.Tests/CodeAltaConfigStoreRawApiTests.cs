@@ -488,6 +488,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             permission_mode = " acceptEdits "
             anthropic_api_key = " ignore "
             prompt_suggestions = true
+            config_dir = " ~/.claude-business "
             models_include_regex = "sonnet|opus"
             """);
 
@@ -503,6 +504,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.AreEqual("acceptEdits", provider.PermissionMode);
         Assert.AreEqual("ignore", provider.AnthropicApiKey);
         Assert.AreEqual(true, provider.PromptSuggestions);
+        Assert.AreEqual("~/.claude-business", provider.ConfigDir);
         Assert.AreEqual("Claude Code", CodeAltaConfigStore.CreateProviderTypeDefaults("claude-code").DisplayName);
 
         // The settings of the CLI are written back, and the default display name is not.
@@ -512,6 +514,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         StringAssert.Contains(saved, "permission_mode = \"acceptEdits\"");
         StringAssert.Contains(saved, "anthropic_api_key = \"ignore\"");
         StringAssert.Contains(saved, "prompt_suggestions = true");
+        StringAssert.Contains(saved, "config_dir = \"~/.claude-business\"");
         StringAssert.Contains(saved, "args = [");
         Assert.IsFalse(saved.Contains("display_name", StringComparison.Ordinal));
         var reloaded = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
@@ -549,6 +552,8 @@ public sealed class CodeAltaConfigStoreRawApiTests
     [DataRow("permission_mode = \"plan\"", "permission_mode")]
     [DataRow("anthropic_api_key = \"use\"", "anthropic_api_key")]
     [DataRow("prompt_suggestions = true", "prompt_suggestions")]
+    [DataRow("config_dir = \"~/.claude-work\"", "config_dir")]
+    [DataRow("codex_home = \"~/.codex-work\"", "codex_home")]
     public void LoadGlobalProviderDefinitions_RejectsCliSettingsForApiProviders(string setting, string field)
     {
         using var temp = TempDirectory.Create();
@@ -599,6 +604,23 @@ public sealed class CodeAltaConfigStoreRawApiTests
         Assert.IsFalse(provider.SendInstallationId);
         Assert.AreEqual("codealta_state", provider.InstallationIdSource);
         Assert.IsFalse(provider.Experimental);
+        Assert.IsNull(provider.CodexHome);
+    }
+
+    [TestMethod]
+    public void LoadGlobalProviderDefinitions_CodexTakesAFolderOfItsOwn()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), """
+            [providers.codex-work]
+            type = "codex"
+            codex_home = " ~/.codex-work "
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single(static provider => provider.ProviderKey == "codex-work");
+
+        Assert.AreEqual("~/.codex-work", provider.CodexHome);
     }
 
     [TestMethod]

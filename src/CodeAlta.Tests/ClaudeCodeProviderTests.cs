@@ -235,6 +235,33 @@ public sealed class ClaudeCodeProviderTests
     }
 
     [TestMethod]
+    public void ConfigDirectory_IsGivenToTheCliAndReadForTheSavedAnswer()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "claude-business");
+        var options = new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-business",
+            ConfigDirectory = folder + Path.DirectorySeparatorChar,
+            GetEnvironmentVariable = static name => name switch
+            {
+                "CLAUDE_CONFIG_DIR" => "/the/folder/of/the/environment",
+                "ANTHROPIC_API_KEY" => "sk-ant-api03-xxxx0123456789abcdefKLMN",
+                _ => null,
+            },
+        };
+
+        var launch = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true);
+        var inherited = ClaudeCodeLauncher.Create("/bin/claude", new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", ConfigDirectory = " " },
+            new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true);
+
+        Assert.AreEqual(folder, launch.Environment["CLAUDE_CONFIG_DIR"]);
+        Assert.IsFalse(inherited.Environment.ContainsKey("CLAUDE_CONFIG_DIR"), "Without a folder of its own, the CLI keeps the one it inherits.");
+        // The answer about the key is read in the folder of the account the CLI runs with.
+        Assert.AreEqual(Path.Combine(folder, ".claude.json"), ClaudeCodeApiKey.ClaudeConfigPath(options.ReadEnvironment()));
+        Assert.AreEqual("sk-ant-api03-xxxx0123456789abcdefKLMN", options.ReadEnvironment()("ANTHROPIC_API_KEY"));
+    }
+
+    [TestMethod]
     [DataRow("use", ClaudeCodeApiKeyPolicy.Use)]
     [DataRow(" ignore ", ClaudeCodeApiKeyPolicy.Ignore)]
     [DataRow(null, ClaudeCodeApiKeyPolicy.FollowClaudeCode)]

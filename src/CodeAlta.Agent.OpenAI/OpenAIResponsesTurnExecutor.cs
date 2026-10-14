@@ -1523,7 +1523,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             : provider.StateRootPath;
         var installationIdProvider = new CodexSubscriptionInstallationIdProvider(
             stateRootPath,
-            CodexHomeResolver.ResolveCodexHome());
+            CodexHomeResolver.ExpandCodexHome(codexOptions.CodexHome) ?? CodexHomeResolver.ResolveCodexHome());
         var installationId = await installationIdProvider.ResolveAsync(
             codexOptions.SendInstallationId,
             codexOptions.InstallationIdSource,

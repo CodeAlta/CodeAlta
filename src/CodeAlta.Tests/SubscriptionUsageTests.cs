@@ -193,6 +193,10 @@ public sealed class SubscriptionUsageTests
         Assert.AreEqual(cli, start.FileName);
         CollectionAssert.AreEqual(new[] { "app-server" }, start.ArgumentList.ToArray());
         Assert.IsTrue(start.RedirectStandardInput && start.RedirectStandardOutput && !start.UseShellExecute && start.CreateNoWindow);
+        Assert.AreEqual(Environment.GetEnvironmentVariable("CODEX_HOME"), start.Environment.TryGetValue("CODEX_HOME", out var inherited) ? inherited : null,
+            "Without a folder of its own, the CLI keeps the one it inherits.");
+        var work = Path.Combine(folder.Path, "codex-work");
+        Assert.AreEqual(work, CodexAccountUsage.CreateStartInfo(cli, work).Environment["CODEX_HOME"]);
         if (OperatingSystem.IsWindows())
         {
             // A script that a package manager installs runs through the command interpreter.

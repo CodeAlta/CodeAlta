@@ -169,6 +169,38 @@ public sealed class ClaudeCodeTranscriptRelocationTests
     }
 
     [TestMethod]
+    public async Task ProviderRuntime_MovesTheTranscriptInTheConfigFolderOfTheProvider()
+    {
+        var source = WriteTranscript(OldDirectory, "conversation");
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-business",
+            ConfigDirectory = _root,
+            // The folder of the provider wins over the one of the environment CodeAlta was started with.
+            GetEnvironmentVariable = name => name == ClaudeCodeProjectFolders.ConfigDirectoryVariable ? Path.Combine(_root, "elsewhere") : null,
+        });
+        var state = new CodeAlta.Agent.Runtime.AgentSessionState { SessionId = "codealta-session", ProviderKey = "claude-business",
+            ProtocolFamily = "claude-code", ProviderState = new ClaudeCodeProviderState(SessionId, 2, 2).ToJson(), UpdatedAt = DateTimeOffset.UtcNow };
+
+        Assert.IsNull(await runtime.RelocateSessionAsync(state, OldDirectory, NewDirectory));
+        Assert.AreEqual("conversation", File.ReadAllText(TranscriptPath(NewDirectory)));
+        Assert.IsFalse(File.Exists(source));
+    }
+
+    [TestMethod]
+    public void ExpandConfigDirectory_ExpandsHomeAndMakesThePathFull()
+    {
+        var home = Path.Combine(Path.GetTempPath(), "home");
+
+        Assert.IsNull(ClaudeCodeProjectFolders.ExpandConfigDirectory(" ", home));
+        Assert.AreEqual(Path.Combine(home, ".claude-business"), ClaudeCodeProjectFolders.ExpandConfigDirectory("~/.claude-business", home));
+        Assert.AreEqual(Path.Combine(home, ".claude-business"), ClaudeCodeProjectFolders.ExpandConfigDirectory(@"~\.claude-business\", home));
+        Assert.AreEqual(home, ClaudeCodeProjectFolders.ExpandConfigDirectory("~", home));
+        Assert.AreEqual(Path.Combine(home, "profiles", "work"), ClaudeCodeProjectFolders.ExpandConfigDirectory(Path.Combine(home, "profiles", "work"), null));
+        Assert.ThrowsExactly<ArgumentException>(() => ClaudeCodeProjectFolders.ExpandConfigDirectory("~/x", null));
+    }
+
+    [TestMethod]
     public async Task Relocate_TakesTheOnlyCopyOfAnotherFolder()
     {
         var source = WriteTranscript(@"C:\elsewhere", "content");

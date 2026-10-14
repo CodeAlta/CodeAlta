@@ -347,6 +347,22 @@ public sealed class CodeAltaProviderDocument
     public bool? PromptSuggestions { get; set; }
 
     /// <summary>
+    /// Gets or sets the configuration folder of a <c>claude-code</c> provider, given to the CLI as
+    /// <c>CLAUDE_CONFIG_DIR</c>: one folder per Claude account. A leading <c>~</c> is the home folder. When it is
+    /// empty the CLI uses its own folder (<c>~/.claude</c>, or <c>CLAUDE_CONFIG_DIR</c> of the environment).
+    /// </summary>
+    [JsonPropertyName("config_dir")]
+    public string? ConfigDir { get; set; }
+
+    /// <summary>
+    /// Gets or sets the folder of the Codex CLI of a <c>codex</c> provider, given to it as <c>CODEX_HOME</c>: the
+    /// account whose usage is read, and the installation id. A leading <c>~</c> is the home folder. When it is empty
+    /// the CLI uses its own folder (<c>~/.codex</c>, or <c>CODEX_HOME</c> of the environment).
+    /// </summary>
+    [JsonPropertyName("codex_home")]
+    public string? CodexHome { get; set; }
+
+    /// <summary>
     /// Gets or sets the GitHub Enterprise URL or domain for the GitHub Copilot direct provider.
     /// </summary>
     [JsonPropertyName("github_enterprise_url")]

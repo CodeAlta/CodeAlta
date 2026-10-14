@@ -294,6 +294,12 @@ public sealed class OpenAICodexSubscriptionOptions
     /// Gets or sets whether the provider was explicitly opted into as experimental.
     /// </summary>
     public bool Experimental { get; set; }
+
+    /// <summary>
+    /// Gets or sets the folder of the Codex CLI of this provider (<c>CODEX_HOME</c>), where an installation id is read
+    /// from; a leading <c>~</c> is the home folder. Null for <c>CODEX_HOME</c> of the environment, else <c>~/.codex</c>.
+    /// </summary>
+    public string? CodexHome { get; set; }
 }
 
 internal sealed record OpenAIResponsesClientFactoryContext(

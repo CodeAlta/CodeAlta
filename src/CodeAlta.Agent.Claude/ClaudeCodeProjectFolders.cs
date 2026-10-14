@@ -40,6 +40,35 @@ public static class ClaudeCodeProjectFolders
             : folder;
     }
 
+    /// <summary>
+    /// Expands the configuration folder a provider is given (<c>config_dir</c>): a leading <c>~</c> is the home folder,
+    /// and a relative path is made full. Blank is no folder of its own.
+    /// </summary>
+    /// <param name="value">The folder as the configuration writes it.</param>
+    /// <param name="home">The home folder.</param>
+    /// <returns>The full path of the folder, or null when <paramref name="value"/> is blank.</returns>
+    /// <exception cref="ArgumentException">The folder is not a valid path.</exception>
+    public static string? ExpandConfigDirectory(string? value, string? home)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var path = value.Trim();
+        if (path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(home))
+            {
+                throw new ArgumentException($"The folder '{path}' starts with ~ and the home folder is not known.", nameof(home));
+            }
+
+            path = Path.Combine(home, path[1..].TrimStart('/', '\\'));
+        }
+
+        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    }
+
     /// <summary>Gets the folder that holds the project folders of a configuration folder.</summary>
     /// <param name="configRoot">The configuration folder of Claude Code.</param>
     /// <returns>The <c>projects</c> folder.</returns>

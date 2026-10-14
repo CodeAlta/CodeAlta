@@ -37,7 +37,25 @@ public static class CodexAccountUsage
     /// </returns>
     /// <exception cref="InvalidOperationException">The CLI did not answer.</exception>
     /// <exception cref="OperationCanceledException">The reading was canceled.</exception>
-    public static async Task<AgentSubscriptionUsageReading> ReadAsync(string? expectedAccount, CancellationToken cancellationToken, string? command = null)
+    public static Task<AgentSubscriptionUsageReading> ReadAsync(string? expectedAccount, CancellationToken cancellationToken, string? command = null)
+        => ReadAsync(expectedAccount, codexHome: null, cancellationToken, command);
+
+    /// <summary>Starts the Codex CLI with a folder of its own, asks it for the usage of its account, and stops it.</summary>
+    /// <param name="expectedAccount">The e-mail address of the account CodeAlta is signed in with, when it is known: another account is not shown.</param>
+    /// <param name="codexHome">
+    /// The folder the CLI is started with (<c>CODEX_HOME</c>), where it keeps its sign-in; a leading <c>~</c> is the
+    /// home folder. Null for the folder of the environment.
+    /// </param>
+    /// <param name="cancellationToken">Stops the reading.</param>
+    /// <param name="command">The path of the CLI, or null to look for <c>codex</c> on the machine.</param>
+    /// <returns>
+    /// The usage; or that the CLI is missing, that it is not signed in with a ChatGPT plan of the same account, or
+    /// that this account has no usage to show.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">The CLI did not answer.</exception>
+    /// <exception cref="ArgumentException"><paramref name="codexHome"/> is not a valid path.</exception>
+    /// <exception cref="OperationCanceledException">The reading was canceled.</exception>
+    public static async Task<AgentSubscriptionUsageReading> ReadAsync(string? expectedAccount, string? codexHome, CancellationToken cancellationToken, string? command = null)
     {
         if (ResolveCli(command) is not { } cli)
         {
@@ -49,7 +67,7 @@ public static class CodexAccountUsage
         Process? process = null;
         try
         {
-            process = Process.Start(CreateStartInfo(cli)) ?? throw new InvalidOperationException($"The Codex CLI at '{cli}' did not start.");
+            process = Process.Start(CreateStartInfo(cli, CodexHomeResolver.ExpandCodexHome(codexHome))) ?? throw new InvalidOperationException($"The Codex CLI at '{cli}' did not start.");
             // What the CLI logs is not read: left unread, it would fill the pipe and stop the CLI.
             process.ErrorDataReceived += static (_, _) => { };
             process.BeginErrorReadLine();
@@ -232,7 +250,7 @@ public static class CodexAccountUsage
         return null;
     }
 
-    internal static ProcessStartInfo CreateStartInfo(string cli)
+    internal static ProcessStartInfo CreateStartInfo(string cli, string? codexHome = null)
     {
         var start = new ProcessStartInfo
         {
@@ -256,6 +274,12 @@ public static class CodexAccountUsage
         {
             start.FileName = cli;
             start.ArgumentList.Add("app-server");
+        }
+
+        if (codexHome is not null)
+        {
+            // The account of the provider: the CLI signs in with what that folder holds.
+            start.Environment[CodexHomeResolver.Variable] = codexHome;
         }
 
         return start;

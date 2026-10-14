@@ -248,8 +248,10 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);
         definition.GitHubEnterpriseUrl = ProviderType == "copilot" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
-        // The settings of a provider that runs a CLI: the arguments, anthropic_api_key and prompt_suggestions are edited in the TOML of the provider.
+        // The settings of a provider that runs a CLI: the arguments, anthropic_api_key, prompt_suggestions and config_dir are edited in the TOML of the provider.
         var runsCli = ProviderType == "claude-code";
+        definition.ConfigDir = runsCli ? definition.ConfigDir : null;
+        definition.CodexHome = ProviderType == "codex" ? definition.CodexHome : null;
         definition.Command = runsCli && !UseDefaultCommand ? NormalizeText(Command) : null;
         definition.PermissionMode = runsCli && !UseDefaultPermissionMode ? NormalizeText(PermissionMode) : null;
         definition.Arguments = runsCli ? definition.Arguments : null;
@@ -375,6 +377,8 @@ internal sealed partial class ModelProviderEditorItemViewModel
             PermissionMode = definition.PermissionMode,
             AnthropicApiKey = definition.AnthropicApiKey,
             PromptSuggestions = definition.PromptSuggestions,
+            ConfigDir = definition.ConfigDir,
+            CodexHome = definition.CodexHome,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,
             CopilotTokenEnv = definition.CopilotTokenEnv,

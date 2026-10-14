@@ -460,6 +460,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                 SendInstallationId = definition.SendInstallationId ?? false,
                 InstallationIdSource = NormalizeText(definition.InstallationIdSource) ?? "codealta_state",
                 Experimental = definition.Experimental == true,
+                CodexHome = NormalizeText(definition.CodexHome),
             },
         };
 
@@ -652,6 +653,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             ProviderKey = definition.ProviderKey,
             DisplayName = ResolveProviderDisplayName(definition),
             Command = NormalizeText(definition.Command),
+            ConfigDirectory = NormalizeText(definition.ConfigDir),
             ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
             PermissionMode = NormalizeText(definition.PermissionMode),
             ApiKeyPolicy = ClaudeCodeModelProviderRuntimeOptions.ParseApiKeyPolicy(definition.AnthropicApiKey),
@@ -670,7 +672,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         descriptor = ClaudeCodeModelProviderRuntime.CreateDescriptor(options);
         createRuntime = () => new ClaudeCodeModelProviderRuntime(options);
         LogInfo(
-            $"Registered model provider key={definition.ProviderKey} type={definition.ProviderType} displayName={options.DisplayName} command={options.Command ?? "claude"}");
+            $"Registered model provider key={definition.ProviderKey} type={definition.ProviderType} displayName={options.DisplayName} command={options.Command ?? "claude"} configDir={options.ConfigDirectory ?? "(default)"}");
         return true;
     }
 

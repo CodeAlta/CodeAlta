@@ -178,7 +178,8 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
         ArgumentException.ThrowIfNullOrWhiteSpace(fromDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(toDirectory);
         if (ClaudeCodeTranscriptRelocation.ReadCliSessionId(state.ProviderState) is not { } cliSessionId) return null;
-        var root = ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        // The folder of the provider's account, where its CLI keeps the transcripts.
+        var root = ClaudeCodeProjectFolders.ResolveConfigRoot(_options.ReadEnvironment());
         ClaudeCodeTranscriptRelocationResult result;
         try
         {

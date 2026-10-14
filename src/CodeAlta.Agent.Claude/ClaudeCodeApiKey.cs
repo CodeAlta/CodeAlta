@@ -66,11 +66,14 @@ internal static class ClaudeCodeApiKey
     // Claude Code saves an answer as the last characters of the trimmed key.
     private const int SavedKeyLength = 20;
 
-    /// <summary>Decides for the environment of this process, which the CLI inherits.</summary>
+    /// <summary>
+    /// Decides for the environment of this process, which the CLI inherits, and the configuration folder of the
+    /// provider, where Claude Code saved its answer.
+    /// </summary>
     public static ClaudeCodeApiKeyDecision Decide(ClaudeCodeModelProviderRuntimeOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var environment = options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        var environment = options.ReadEnvironment();
         return Decide(options.ApiKeyPolicy, environment, options.ReadClaudeConfig ?? (() => ReadClaudeConfig(environment)));
     }
 

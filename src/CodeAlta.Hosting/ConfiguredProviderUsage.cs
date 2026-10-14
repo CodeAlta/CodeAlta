@@ -47,7 +47,7 @@ public static class ConfiguredProviderUsage
                 var credential = await new FileOpenAICodexSubscriptionCredentialStore(stateRootPath)
                     .LoadAsync(definition.ProviderKey, cancellationToken).ConfigureAwait(false);
                 return OpenAICodexSubscriptionLoginManager.IsRegistration(credential) && !string.IsNullOrWhiteSpace(credential.AccessToken)
-                    ? await CodexAccountUsage.ReadAsync(credential.Email ?? credential.AccountLabel, cancellationToken).ConfigureAwait(false)
+                    ? await CodexAccountUsage.ReadAsync(credential.Email ?? credential.AccountLabel, Text(definition.CodexHome), cancellationToken).ConfigureAwait(false)
                     : AgentSubscriptionUsageReading.NotSignedIn;
             case "copilot":
                 var source = Text(definition.AuthSource) ?? CopilotDirectAuthSources.GitHubDeviceFlow;
@@ -63,6 +63,7 @@ public static class ConfiguredProviderUsage
                     {
                         ProviderKey = definition.ProviderKey,
                         Command = Text(definition.Command),
+                        ConfigDirectory = Text(definition.ConfigDir),
                         ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
                         ApiKeyPolicy = ClaudeCodeModelProviderRuntimeOptions.ParseApiKeyPolicy(definition.AnthropicApiKey),
                     },

@@ -35,6 +35,14 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public string? Command { get; init; }
 
     /// <summary>
+    /// Gets or initializes the configuration folder of Claude Code the CLI is started with (<c>CLAUDE_CONFIG_DIR</c>):
+    /// its login, settings, memory and transcripts. Several providers with their own folder are several Claude
+    /// accounts. A leading <c>~</c> is the home folder. When it is empty the CLI uses its own folder, and CodeAlta
+    /// reads the same one (<see cref="ClaudeCodeProjectFolders.ResolveConfigRoot()"/>).
+    /// </summary>
+    public string? ConfigDirectory { get; init; }
+
+    /// <summary>
     /// Gets or initializes arguments added to the command line of the CLI, after those of CodeAlta.
     /// </summary>
     public IReadOnlyList<string> ExtraArguments { get; init; } = [];
@@ -163,4 +171,23 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// Gets or initializes the reader of the configuration file of Claude Code (null when there is none). Tests replace it.
     /// </summary>
     internal Func<string?>? ReadClaudeConfig { get; init; }
+
+    /// <summary>
+    /// Gets the configuration folder the CLI is started with: <see cref="ConfigDirectory"/> with its <c>~</c>
+    /// expanded, or null when the provider leaves it to the environment.
+    /// </summary>
+    internal string? ResolveConfigDirectory()
+        => ClaudeCodeProjectFolders.ExpandConfigDirectory(ConfigDirectory, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+
+    /// <summary>
+    /// Reads the environment the CLI is started with: the one CodeAlta inherits, with <c>CLAUDE_CONFIG_DIR</c> set to
+    /// the folder of the provider when it has one.
+    /// </summary>
+    internal Func<string, string?> ReadEnvironment()
+    {
+        var inherited = GetEnvironmentVariable ?? Environment.GetEnvironmentVariable;
+        return ResolveConfigDirectory() is { } folder
+            ? name => string.Equals(name, ClaudeCodeProjectFolders.ConfigDirectoryVariable, StringComparison.Ordinal) ? folder : inherited(name)
+            : inherited;
+    }
 }

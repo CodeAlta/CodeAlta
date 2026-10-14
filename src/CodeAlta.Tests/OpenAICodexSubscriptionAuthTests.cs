@@ -558,6 +558,16 @@ public sealed class OpenAICodexSubscriptionAuthTests
     }
 
     [TestMethod]
+    public void CodexHomeResolver_ExpandsTheFolderOfAProvider()
+    {
+        var home = Path.Combine(Path.GetTempPath(), "home");
+
+        Assert.IsNull(CodexHomeResolver.ExpandCodexHome(" ", home));
+        Assert.AreEqual(Path.Combine(home, ".codex-work"), CodexHomeResolver.ExpandCodexHome("~/.codex-work/", home));
+        Assert.AreEqual(Path.Combine(home, "codex"), CodexHomeResolver.ExpandCodexHome(Path.Combine(home, "codex"), null));
+    }
+
+    [TestMethod]
     public async Task InstallationIdProvider_OmitsIdWhenDisabled()
     {
         using var temp = TempDirectory.Create();

@@ -180,6 +180,12 @@ internal static class ClaudeCodeLauncher
             environment[ClaudeCodeApiKey.Variable] = null;
         }
 
+        // The account of the provider: its login, settings, memory and transcripts are in that folder.
+        if (options.ResolveConfigDirectory() is { } configDirectory)
+        {
+            environment[ClaudeCodeProjectFolders.ConfigDirectoryVariable] = configDirectory;
+        }
+
         // The CLI tells this side when a session is idle again, and names CodeAlta in its user agent.
         environment["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"] = "1";
         environment["CLAUDE_AGENT_SDK_CLIENT_APP"] = string.IsNullOrWhiteSpace(options.ClientApp) ? DefaultClientApp : options.ClientApp.Trim();

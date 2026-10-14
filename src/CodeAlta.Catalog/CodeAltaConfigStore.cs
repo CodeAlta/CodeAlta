@@ -1733,6 +1733,7 @@ public sealed class CodeAltaConfigStore
         definition.SendInstallationId ??= false;
         definition.InstallationIdSource ??= CodexSubscriptionDefaultInstallationIdSource;
         definition.Experimental ??= false;
+        definition.CodexHome = NormalizeText(definition.CodexHome);
     }
 
     private static void ApplyCopilotDirectDefaults(CodeAltaProviderDocument definition)
@@ -1773,6 +1774,7 @@ public sealed class CodeAltaConfigStore
         definition.Command = NormalizeText(definition.Command);
         definition.PermissionMode = NormalizeText(definition.PermissionMode);
         definition.AnthropicApiKey = NormalizeText(definition.AnthropicApiKey);
+        definition.ConfigDir = NormalizeText(definition.ConfigDir);
         // Off is the absence of the setting.
         definition.PromptSuggestions = definition.PromptSuggestions == true ? true : null;
         if (definition.Arguments is { Count: 0 })
@@ -1790,11 +1792,13 @@ public sealed class CodeAltaConfigStore
             RejectUnsupportedField(definition, "permission_mode", definition.PermissionMode);
             RejectUnsupportedField(definition, "anthropic_api_key", definition.AnthropicApiKey);
             RejectUnsupportedField(definition, "prompt_suggestions", definition.PromptSuggestions);
+            RejectUnsupportedField(definition, "config_dir", definition.ConfigDir);
         }
 
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "service_tier", definition.ServiceTier);
+            RejectUnsupportedField(definition, "codex_home", definition.CodexHome);
         }
 
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal) &&
@@ -2429,6 +2433,8 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.PermissionMode) ||
                !string.IsNullOrWhiteSpace(definition.AnthropicApiKey) ||
                definition.PromptSuggestions is not null ||
+               !string.IsNullOrWhiteSpace(definition.ConfigDir) ||
+               !string.IsNullOrWhiteSpace(definition.CodexHome) ||
                !string.IsNullOrWhiteSpace(definition.GitHubEnterpriseUrl) ||
                !string.IsNullOrWhiteSpace(definition.GitHubTokenEnv) ||
                !string.IsNullOrWhiteSpace(definition.CopilotTokenEnv) ||
@@ -2526,6 +2532,8 @@ public sealed class CodeAltaConfigStore
             PermissionMode = definition.PermissionMode,
             AnthropicApiKey = definition.AnthropicApiKey,
             PromptSuggestions = definition.PromptSuggestions,
+            ConfigDir = definition.ConfigDir,
+            CodexHome = definition.CodexHome,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,
             CopilotTokenEnv = definition.CopilotTokenEnv,
