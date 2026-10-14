@@ -15,7 +15,11 @@ internal sealed record ClaudeCodeInspection(
     string ExecutablePath,
     IReadOnlyList<AgentModelInfo> Models,
     bool IsSignedIn,
-    string? AccountSummary);
+    string? AccountSummary)
+{
+    /// <summary>Gets what to tell the user when the Claude Code they installed is not the version CodeAlta is tested with.</summary>
+    public string? VersionWarning { get; init; }
+}
 
 /// <summary>
 /// Lists the models of the Claude Code CLI by asking the CLI: it knows what the plan, the settings and the
@@ -51,6 +55,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
     private readonly SemaphoreSlim _gate = new(1, 1);
     private ClaudeCodeInspection? _cached;
     private DateTimeOffset _cachedAt;
+    private (string Path, DateTime Written, string? Version)? _version;
 
     public ClaudeCodeModelCatalog(ClaudeCodeModelProviderRuntimeOptions options)
     {
@@ -100,7 +105,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
 
     private async Task<ClaudeCodeInspection> InspectCoreAsync(CancellationToken cancellationToken)
     {
-        var resolution = _options.ResolveCli?.Invoke() ?? ClaudeCodeCliLocator.Resolve(_options.Command);
+        var resolution = _options.ResolveExecutable();
         if (resolution.Path is null)
         {
             throw new ClaudeCodeNotFoundException(resolution.Error ?? "Claude Code was not found.");
@@ -135,12 +140,41 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
 
             var models = ReadModels(response);
             var (isSignedIn, summary) = ReadAccount(response);
-            return new ClaudeCodeInspection(resolution.Path, Filter(models.Count == 0 ? FallbackModels : models), isSignedIn, summary);
+            return new ClaudeCodeInspection(resolution.Path, Filter(models.Count == 0 ? FallbackModels : models), isSignedIn, summary)
+            {
+                // The pinned version and the one a provider names are what they are; the one the user installed may be newer.
+                VersionWarning = resolution.Source == ClaudeCodeCliSource.Installed
+                    ? ClaudeCodeCliVersion.DescribeDifference(await ReadVersionAsync(resolution.Path, cancellationToken).ConfigureAwait(false))
+                    : null,
+            };
         }
         finally
         {
             await connection.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    // The version of an executable is read once while the file stays the same. Called under the gate.
+    private async Task<string?> ReadVersionAsync(string path, CancellationToken cancellationToken)
+    {
+        DateTime written;
+        try
+        {
+            written = File.GetLastWriteTimeUtc(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+
+        if (_version is { } known && known.Path == path && known.Written == written)
+        {
+            return known.Version;
+        }
+
+        var version = await (_options.ReadVersion ?? ClaudeCodeCliVersion.ReadAsync)(path, cancellationToken).ConfigureAwait(false);
+        _version = (path, written, version);
+        return version;
     }
 
     internal static List<AgentModelInfo> ReadModels(JsonElement response)

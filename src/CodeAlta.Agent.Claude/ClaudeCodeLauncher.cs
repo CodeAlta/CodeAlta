@@ -211,7 +211,8 @@ internal static class ClaudeCodeLauncher
             ? null
             : modelId.Trim();
 
-    private static string DefaultClientApp { get; } = CreateDefaultClientApp();
+    /// <summary>The name and the version of the application that runs, as <c>codealta/1.2.3</c>.</summary>
+    internal static string DefaultClientApp { get; } = CreateDefaultClientApp();
 
     private static string CreateDefaultClientApp()
     {

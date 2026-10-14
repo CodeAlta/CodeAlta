@@ -1,6 +1,24 @@
 namespace CodeAlta.Agent.Claude;
 
 /// <summary>
+/// Where the Claude Code executable CodeAlta runs comes from.
+/// </summary>
+internal enum ClaudeCodeCliSource
+{
+    /// <summary>None was found.</summary>
+    None,
+
+    /// <summary>The <c>command</c> of the provider.</summary>
+    Configured,
+
+    /// <summary>The version CodeAlta pins, downloaded into its cache.</summary>
+    Pinned,
+
+    /// <summary>A Claude Code the user installed, found on <c>PATH</c> or in the folders of its installers.</summary>
+    Installed,
+}
+
+/// <summary>
 /// The Claude Code executable CodeAlta runs, or why there is none.
 /// </summary>
 /// <param name="Path">The full path of the executable, when it was found.</param>
@@ -8,6 +26,20 @@ namespace CodeAlta.Agent.Claude;
 internal sealed record ClaudeCodeCliResolution(string? Path, string? Error)
 {
     public bool Found => Path is not null;
+
+    /// <summary>Gets where the executable comes from.</summary>
+    public ClaudeCodeCliSource Source { get; init; }
+}
+
+/// <summary>
+/// Finds the Claude Code the user installed, which a provider runs while the version CodeAlta pins is not downloaded.
+/// </summary>
+public static class ClaudeCodeInstalledCli
+{
+    /// <summary>Looks for <c>claude</c> on <c>PATH</c> and in the folders its installers use.</summary>
+    /// <returns>The full path of the executable, or null when none that CodeAlta runs was found.</returns>
+    public static string? Find()
+        => ClaudeCodeCliLocator.Resolve(null, ClaudeCodeCliEnvironment.Current(pinnedRoot: null)) is { Source: ClaudeCodeCliSource.Installed, Path: { } path } ? path : null;
 }
 
 /// <summary>
@@ -25,25 +57,36 @@ internal sealed record ClaudeCodeCliEnvironment(
     string? RoamingAppData,
     Func<string, bool> FileExists)
 {
-    public static ClaudeCodeCliEnvironment Current() => new(
+    /// <summary>Gets the folder of Claude Code in the cache of CodeAlta, where the pinned version is downloaded; null to not look there.</summary>
+    public string? PinnedRoot { get; init; }
+
+    /// <summary>Gets the platform whose pinned executable is looked for.</summary>
+    public string? RuntimeIdentifier { get; init; }
+
+    public static ClaudeCodeCliEnvironment Current(string? pinnedRoot) => new(
         OperatingSystem.IsWindows(),
         Environment.GetEnvironmentVariable("PATH"),
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        File.Exists);
+        File.Exists)
+    {
+        PinnedRoot = pinnedRoot,
+        RuntimeIdentifier = ClaudeCodePinnedCli.CurrentRuntimeIdentifier(),
+    };
 }
 
 /// <summary>
-/// Finds the <c>claude</c> executable the user installed. CodeAlta ships none and never installs one.
+/// Finds the <c>claude</c> executable CodeAlta runs: the <c>command</c> of the provider, else the version CodeAlta
+/// pins when it was downloaded into its cache, else the one the user installed.
 /// </summary>
 internal static class ClaudeCodeCliLocator
 {
     private const string InstallHint =
-        "Install Claude Code (https://code.claude.com/docs/en/setup), sign in by running `claude` in a terminal, " +
-        "or set `command` of the provider to the path of the executable.";
+        "Download the version of Claude Code CodeAlta is tested with in Settings > Providers, install Claude Code " +
+        "(https://code.claude.com/docs/en/setup), or set `command` of the provider to the path of the executable.";
 
-    public static ClaudeCodeCliResolution Resolve(string? configuredCommand)
-        => Resolve(configuredCommand, ClaudeCodeCliEnvironment.Current());
+    public static ClaudeCodeCliResolution Resolve(string? configuredCommand, string? pinnedRoot)
+        => Resolve(configuredCommand, ClaudeCodeCliEnvironment.Current(pinnedRoot));
 
     public static ClaudeCodeCliResolution Resolve(string? configuredCommand, ClaudeCodeCliEnvironment environment)
     {
@@ -58,9 +101,16 @@ internal static class ClaudeCodeCliLocator
                 return new(null, $"The Claude Code executable '{path}' set as `command` was not found.");
             }
 
-            return Accept(path, environment);
+            return Accept(path, environment, ClaudeCodeCliSource.Configured);
         }
 
+        // The version CodeAlta is tested with comes before the one of the user, which may be newer.
+        if (command is null && ClaudeCodePinnedCli.FindInstalled(environment.PinnedRoot, environment.RuntimeIdentifier, environment.FileExists) is { } pinned)
+        {
+            return new(pinned, null) { Source = ClaudeCodeCliSource.Pinned };
+        }
+
+        var source = command is null ? ClaudeCodeCliSource.Installed : ClaudeCodeCliSource.Configured;
         var name = command ?? "claude";
         string? shim = null;
         foreach (var candidate in EnumerateCandidates(name, environment, searchInstallFolders: command is null))
@@ -77,26 +127,27 @@ internal static class ClaudeCodeCliLocator
                 continue;
             }
 
-            return new(candidate, null);
+            return new(candidate, null) { Source = source };
         }
 
         return shim is not null
-            ? Accept(shim, environment)
+            ? Accept(shim, environment, source)
             : new(null, $"Claude Code was not found: no `{name}` executable is on PATH. {InstallHint}");
     }
 
-    private static ClaudeCodeCliResolution Accept(string path, ClaudeCodeCliEnvironment environment)
+    private static ClaudeCodeCliResolution Accept(string path, ClaudeCodeCliEnvironment environment, ClaudeCodeCliSource source)
     {
         if (environment.IsWindows && IsBatchScript(path))
         {
             // Windows runs a .cmd through cmd.exe, which parses the whole command line again: an argument
             // cannot be escaped reliably for it. The npm shim is such a script.
             return new(null,
-                $"'{path}' is a batch script, which CodeAlta does not run. Install the native Claude Code " +
-                "(PowerShell: irm https://claude.ai/install.ps1 | iex) or set `command` of the provider to a claude.exe.");
+                $"'{path}' is a batch script, which CodeAlta does not run. Download the version of Claude Code CodeAlta is " +
+                "tested with in Settings > Providers, install the native Claude Code (PowerShell: irm https://claude.ai/install.ps1 | iex), " +
+                "or set `command` of the provider to a claude.exe.");
         }
 
-        return new(path, null);
+        return new(path, null) { Source = source };
     }
 
     private static IEnumerable<string> EnumerateCandidates(string name, ClaudeCodeCliEnvironment environment, bool searchInstallFolders)

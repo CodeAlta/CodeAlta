@@ -34,7 +34,7 @@ public static class ClaudeCodeAccountUsage
     public static async Task<AgentSubscriptionUsageReading> ReadAsync(ClaudeCodeModelProviderRuntimeOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var resolution = options.ResolveCli?.Invoke() ?? ClaudeCodeCliLocator.Resolve(options.Command);
+        var resolution = options.ResolveExecutable();
         if (resolution.Path is null)
         {
             return AgentSubscriptionUsageReading.NoTool;

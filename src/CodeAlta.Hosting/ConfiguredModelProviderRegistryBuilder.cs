@@ -213,7 +213,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             case "mistral":
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
-                return TryCreateClaudeCodeProvider(definition, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -644,6 +644,7 @@ public static class ConfiguredModelProviderRegistryBuilder
     // installed and signed in is found by the probe, not here.
     private static bool TryCreateClaudeCodeProvider(
         CodeAltaProviderDocument definition,
+        string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
@@ -654,6 +655,8 @@ public static class ConfiguredModelProviderRegistryBuilder
             DisplayName = ResolveProviderDisplayName(definition),
             Command = NormalizeText(definition.Command),
             ConfigDirectory = NormalizeText(definition.ConfigDir),
+            // The state root of the providers is the global root: the CLI CodeAlta pins is in its cache.
+            PinnedCliRoot = new CatalogOptions { GlobalRoot = stateRootPath }.ClaudeCodeRoot,
             ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
             PermissionMode = NormalizeText(definition.PermissionMode),
             ApiKeyPolicy = ClaudeCodeModelProviderRuntimeOptions.ParseApiKeyPolicy(definition.AnthropicApiKey),

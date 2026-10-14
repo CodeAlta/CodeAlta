@@ -521,6 +521,10 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(SpeechTranscript))]
 [JsonSerializable(typeof(SpeechListingResponse))]
 [JsonSerializable(typeof(SpeechInstallState))]
+[JsonSerializable(typeof(ClaudeCliRequest))]
+[JsonSerializable(typeof(ClaudeCliCommandResponse))]
+[JsonSerializable(typeof(ClaudeCliStatusResponse))]
+[JsonSerializable(typeof(ClaudeCliInstallState))]
 [JsonSerializable(typeof(SessionRetentionProtectionRequest))]
 [JsonSerializable(typeof(SessionRetentionProtectionResponse))]
 internal sealed partial class DesktopJsonContext : JsonSerializerContext;

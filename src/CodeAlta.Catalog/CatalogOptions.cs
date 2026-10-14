@@ -90,6 +90,12 @@ public sealed class CatalogOptions
     public string SpeechRoot => Path.Combine(CacheRoot, "speech");
 
     /// <summary>
+    /// Gets the folder of the Claude Code CLI CodeAlta pins under <see cref="CacheRoot"/>: one folder per version and
+    /// platform, downloaded on first use and shared by the normal and the developer instance.
+    /// </summary>
+    public string ClaudeCodeRoot => Path.Combine(CacheRoot, "claude-code");
+
+    /// <summary>
     /// Gets the path of the SQLite database of the application, under <see cref="StateRoot"/>: the one file of
     /// this instance that holds the list of sessions and the tables of the plugins.
     /// </summary>

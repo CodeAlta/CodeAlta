@@ -402,7 +402,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         // switched to the mode: one started in it resumes the conversation.
         await CloseConnectionAsync().ConfigureAwait(false);
 
-        var resolution = _options.ResolveCli?.Invoke() ?? ClaudeCodeCliLocator.Resolve(_options.Command);
+        var resolution = _options.ResolveExecutable();
         if (resolution.Path is null)
         {
             throw new InvalidOperationException(resolution.Error ?? "Claude Code was not found.");

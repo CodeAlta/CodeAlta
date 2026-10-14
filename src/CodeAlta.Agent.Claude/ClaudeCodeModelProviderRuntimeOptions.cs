@@ -1,7 +1,8 @@
 namespace CodeAlta.Agent.Claude;
 
 /// <summary>
-/// Options of the model provider that drives the Claude Code CLI installed by the user.
+/// Options of the model provider that drives the Claude Code CLI: the version CodeAlta pins, downloaded on first use,
+/// or one the user installed.
 /// </summary>
 /// <remarks>
 /// CodeAlta starts the unmodified <c>claude</c> executable and talks to it over its stream-json input and
@@ -29,8 +30,9 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public string? DisplayName { get; init; }
 
     /// <summary>
-    /// Gets or initializes the path or the name of the <c>claude</c> executable. When it is empty the executable is
-    /// looked for on <c>PATH</c> and in the folders its installers use.
+    /// Gets or initializes the path or the name of the <c>claude</c> executable. When it is empty the version CodeAlta
+    /// pins is run when it was downloaded (<see cref="PinnedCliRoot"/>), else the executable is looked for on
+    /// <c>PATH</c> and in the folders its installers use.
     /// </summary>
     public string? Command { get; init; }
 
@@ -41,6 +43,13 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// reads the same one (<see cref="ClaudeCodeProjectFolders.ResolveConfigRoot()"/>).
     /// </summary>
     public string? ConfigDirectory { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the folder of Claude Code in the cache of CodeAlta, where the version CodeAlta pins
+    /// (<see cref="ClaudeCodePinnedCli"/>) is downloaded; null to not look there. When <see cref="Command"/> is empty,
+    /// that version is run before a Claude Code the user installed.
+    /// </summary>
+    public string? PinnedCliRoot { get; init; }
 
     /// <summary>
     /// Gets or initializes arguments added to the command line of the CLI, after those of CodeAlta.
@@ -171,6 +180,14 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// Gets or initializes the reader of the configuration file of Claude Code (null when there is none). Tests replace it.
     /// </summary>
     internal Func<string?>? ReadClaudeConfig { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the reader of the version of an executable the user installed. Tests replace it.
+    /// </summary>
+    internal Func<string, CancellationToken, Task<string?>>? ReadVersion { get; init; }
+
+    /// <summary>Finds the executable the provider runs.</summary>
+    internal ClaudeCodeCliResolution ResolveExecutable() => ResolveCli?.Invoke() ?? ClaudeCodeCliLocator.Resolve(Command, PinnedCliRoot);
 
     /// <summary>
     /// Gets the configuration folder the CLI is started with: <see cref="ConfigDirectory"/> with its <c>~</c>

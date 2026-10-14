@@ -145,9 +145,9 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
             Models = inspection.Models,
             SelectedModelId = Descriptor.DefaultModelId,
             SelectedReasoningEffort = Descriptor.DefaultReasoningEffort,
-            StatusMessage = inspection.AccountSummary is { Length: > 0 } account
+            StatusMessage = (inspection.AccountSummary is { Length: > 0 } account
                 ? $"Claude Code at {inspection.ExecutablePath} ({account})."
-                : $"Claude Code at {inspection.ExecutablePath}.",
+                : $"Claude Code at {inspection.ExecutablePath}.") + (inspection.VersionWarning is { } warning ? " " + warning : ""),
         };
     }
 

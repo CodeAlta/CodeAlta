@@ -261,6 +261,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ProviderLoginService? providerLogin = null;
         ProviderUsageService? providerUsage = null;
         SpeechService? speech = null;
+        ClaudeCliService? claudeCli = null;
         McpServersService? mcpServers = null;
         PluginUiService? pluginCommands = null;
         DesktopCanvases? canvases = null;
@@ -429,6 +430,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
                 providerUsage?.Dispose();
                 if (speech is not null) await speech.CloseAsync(); // A download of a speech model stops, and the speech worker ends.
+                if (claudeCli is not null) await claudeCli.CloseAsync(); // So does a download of the Claude Code CLI.
                 if (mcpServers is not null) await mcpServers.CloseAsync(); // So is a running MCP authorization.
                 if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
                 canvases?.Dispose(); // The tabs of plugins end with the application.
@@ -691,6 +693,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // An instance on explicit roots is automation and stays off the network: it downloads no model.
                     speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
                     builder.AddSpeechService(speech);
+                    claudeCli = roots.Home is not null ? new ClaudeCliService() : new ClaudeCliService(catalog, epoch);
+                    builder.AddClaudeCliService(claudeCli);
                     mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);
                     builder.AddMcpServersService(mcpServers);
                     var agentPrompts = new AgentPromptsService(host.ProjectCatalog, epoch,
@@ -936,6 +940,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddProviderLoginService(new ProviderLoginService());
             builder.AddProviderUsageService(new ProviderUsageService());
             builder.AddSpeechService(new SpeechService());
+            builder.AddClaudeCliService(new ClaudeCliService());
             builder.AddMcpServersService(new McpServersService());
             builder.AddAgentPromptsService(new AgentPromptsService());
             builder.AddSkillsService(new SkillsService());
