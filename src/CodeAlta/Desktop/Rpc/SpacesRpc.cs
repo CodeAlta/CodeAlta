@@ -24,6 +24,8 @@ internal sealed class SpacesService
     private readonly DesktopSpaceView? _view;
     private readonly Func<IReadOnlyList<SessionRuntimeOverview>>? _runs;
     private readonly Func<ValueTask<IReadOnlyList<string>>>? _waiting;
+    // Gives the chats of a space that is deleted the default space.
+    private readonly Func<string, Task<OwnedSessionSpaceMoveResult>>? _moveChats;
     private readonly string? _epoch;
 
     /// <summary>Creates the service of a window whose host keeps no spaces: it answers <c>unavailable</c>.</summary>
@@ -37,15 +39,16 @@ internal sealed class SpacesService
     /// <param name="runs">What the sessions of the runtime are doing.</param>
     /// <param name="waiting">The sessions that wait for the user: a question, a command to review, a form.</param>
     /// <param name="epoch">The host epoch.</param>
+    /// <param name="moveChats">Gives the chats of a deleted space the default space; null where nothing moves them.</param>
     internal SpacesService(SpaceCatalog catalog, DesktopSpaceView view, Func<IReadOnlyList<SessionRuntimeOverview>> runs,
-        Func<ValueTask<IReadOnlyList<string>>> waiting, string epoch)
+        Func<ValueTask<IReadOnlyList<string>>> waiting, string epoch, Func<string, Task<OwnedSessionSpaceMoveResult>>? moveChats = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(runs);
         ArgumentNullException.ThrowIfNull(waiting);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
-        (_catalog, _view, _runs, _waiting, _epoch) = (catalog, view, runs, waiting, epoch);
+        (_catalog, _view, _runs, _waiting, _epoch, _moveChats) = (catalog, view, runs, waiting, epoch, moveChats);
     }
 
     /// <summary>Lists the spaces with the projects of each, the default one first.</summary>
@@ -92,12 +95,28 @@ internal sealed class SpacesService
             new SpaceEdit(request.Name, request.Description, request.Icon, request.Color), cancellationToken));
     }
 
-    /// <summary>Deletes a space. Its projects stay, in the default space and in their other ones.</summary>
+    /// <summary>
+    /// Deletes a space. Its projects stay, in the default space and in their other ones, and its chats go to the
+    /// default space: <c>movedSessions</c> says how many did. A chat at work is left as it is, and reads as in the
+    /// default space all the same.
+    /// </summary>
     [NeoRpcMethod("delete")]
-    public Task<SpaceChangeResponse> DeleteAsync(SpaceDeleteRequest request, CancellationToken cancellationToken)
+    public async Task<SpaceChangeResponse> DeleteAsync(SpaceDeleteRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return ChangeAsync(request.ExpectedEpoch, () => _catalog!.DeleteAsync(request.Id ?? string.Empty, cancellationToken));
+        var id = request.Id ?? string.Empty;
+        var deleted = await ChangeAsync(request.ExpectedEpoch, () => _catalog!.DeleteAsync(id, cancellationToken)).ConfigureAwait(false);
+        if (deleted.Status != "ok" || _moveChats is null) return deleted;
+        try
+        {
+            var moved = await _moveChats(id).ConfigureAwait(false);
+            return deleted with { MovedSessions = moved.Moved.Count };
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The space is gone: its chats read as in the default space until they are moved there.
+            return deleted;
+        }
     }
 
     /// <summary>Makes a project join spaces and leave others, in one edit of its file.</summary>
@@ -285,7 +304,8 @@ internal sealed record SpaceShownRequest(string ExpectedEpoch, string? Id);
 /// <param name="Status">How the change ended.</param>
 /// <param name="Message">What was wrong, for a change that was not made.</param>
 /// <param name="Space">The space after the change, without its projects; null when the change names none.</param>
-internal sealed record SpaceChangeResponse(string Status, string? Message, SpaceItem? Space);
+/// <param name="MovedSessions">For a deletion, how many chats of the space went to the default space.</param>
+internal sealed record SpaceChangeResponse(string Status, string? Message, SpaceItem? Space, int MovedSessions = 0);
 
 /// <summary>A request that reaches the page from elsewhere.</summary>
 /// <param name="Kind"><c>show</c>: show the space named; <c>changed</c>: read the spaces again.</param>

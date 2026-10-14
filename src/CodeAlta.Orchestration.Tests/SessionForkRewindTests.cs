@@ -295,6 +295,66 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task ASessionMovesToAnotherSpace_WithTheSessionsItStarted_OnlyWhenIdle_AndTheChatsOfADeletedSpaceGoToTheDefaultOne()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        await host.SpaceCatalog.CreateAsync("Business");
+        await host.SpaceCatalog.CreateAsync("Personal");
+        // Attached as the window attaches them, with the handlers of the host: a move leaves alone what another caller configured.
+        var permissions = host.RuntimeService.Permissions;
+        var options = new SessionExecutionOptions
+        {
+            ProviderId = provider.Descriptor.ProviderId, ProviderKey = provider.Descriptor.ProviderId.Value, WorkingDirectory = temp.ProjectRoot,
+            ProjectRoots = [temp.ProjectRoot], Model = "fake-model",
+            OnPermissionRequest = permissions.OwnedDefaultPermissionHandler, OnUserInputRequest = permissions.OwnedDefaultUserInputHandler,
+        };
+        var chatOptions = new SessionExecutionOptions
+        {
+            ProviderId = options.ProviderId, ProviderKey = options.ProviderKey, WorkingDirectory = temp.GlobalRoot, Model = options.Model,
+            OnPermissionRequest = options.OnPermissionRequest, OnUserInputRequest = options.OnUserInputRequest,
+        };
+        var chat = await host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Chat", null, null, "business", CancellationToken.None);
+        var child = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Child", chat.SessionId, null, null, "business", CancellationToken.None);
+        var other = await host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Other", null, null, "business", CancellationToken.None);
+        var moved = await host.Commands.MoveSessionToSpaceAsync(chat.SessionId, "personal");
+
+        Assert.AreEqual("ok", moved.Status, string.Join("; ", moved.Warnings));
+        CollectionAssert.AreEquivalent(new[] { chat.SessionId, child.SessionId }, moved.Moved.ToArray(), "The session it started goes with it.");
+        Assert.AreEqual("personal", (await host.SessionViewCatalog.JournalStore.ReadHeaderAsync(chat.SessionId, chat.CreatedAt))!.SpaceId);
+        Assert.AreEqual("personal", (await ListedAsync(host, chat.SessionId)).SpaceId);
+        Assert.AreEqual("personal", (await ListedAsync(host, child.SessionId)).SpaceId);
+        Assert.AreEqual(host.CurrentProject.Id, (await ListedAsync(host, child.SessionId)).ProjectRef, "Only its space changes.");
+        Assert.AreEqual("business", (await ListedAsync(host, other.SessionId)).SpaceId);
+
+        // Its next turn is in its new space: it goes on with its conversation, and its agent is told the space.
+        await SendAsync(host, await ListedAsync(host, chat.SessionId), chatOptions, "two");
+        var request = provider.Requests.Last(value => value.SessionId == chat.SessionId);
+        CollectionAssert.AreEqual(new[] { "two" }, UserTexts(request));
+        StringAssert.Contains(request.DeveloperInstructions + request.SystemMessage, "- Space: Personal (personal)");
+
+        // A session at work stays where it is.
+        provider.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var running = host.RuntimeService.SendAsync(other, chatOptions, new AgentSendOptions { Input = AgentInput.Text("busy") }, CancellationToken.None);
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual("session_in_use", (await host.Commands.MoveSessionToSpaceAsync(other.SessionId, "personal")).Status);
+        provider.Hold.TrySetResult();
+        await running;
+        await WaitIdleAsync(host, other);
+
+        // The chats of a deleted space go to the default one; a project session is not a chat of the space.
+        await host.SpaceCatalog.DeleteAsync("business");
+        var chats = await host.Commands.MoveSpaceChatsAsync("business", "default");
+        Assert.AreEqual("ok", chats.Status);
+        CollectionAssert.AreEqual(new[] { other.SessionId }, chats.Moved.ToArray());
+        Assert.AreEqual("default", (await ListedAsync(host, other.SessionId)).SpaceId);
+        Assert.AreEqual("personal", (await ListedAsync(host, chat.SessionId)).SpaceId);
+        Assert.AreEqual("session_missing", (await host.Commands.MoveSessionToSpaceAsync("no-such-session", "personal")).Status);
+        Assert.ThrowsExactly<ArgumentException>(() => host.Commands.MoveSessionToSpaceAsync(chat.SessionId, "Not A Space"));
+    }
+
+    [TestMethod]
     public void BranchTitle_CountsTheForksOfAFork()
     {
         Assert.AreEqual("Review (fork)", SessionRuntimeService.BranchTitle("Review", "fork"));
@@ -371,7 +431,7 @@ public sealed class SessionForkRewindTests
 
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
         {
-            ProtocolFamily = "test",
+            ProtocolFamily = "fake-branch",
             ProviderKey = "fake-branch",
             DisplayName = "Fake Branch",
             TransportKind = AgentTransportKind.OpenAIResponses,

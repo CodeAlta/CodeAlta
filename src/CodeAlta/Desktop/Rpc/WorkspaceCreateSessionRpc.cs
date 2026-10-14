@@ -50,6 +50,7 @@ internal sealed partial class WorkspaceService
         _forkSession = host.Commands.ForkSessionAsync;
         _rewindSession = host.Commands.RewindSessionAsync;
         _moveSession = host.Commands.MoveSessionAsync;
+        _moveToSpace = host.Commands.MoveSessionToSpaceAsync;
     }
 
     // Only catalogs: this read does not initialize a provider, create a session or confer send authority.

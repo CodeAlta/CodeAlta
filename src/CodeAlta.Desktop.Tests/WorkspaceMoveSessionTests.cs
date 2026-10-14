@@ -70,6 +70,55 @@ public sealed class WorkspaceMoveSessionTests
     }
 
     [TestMethod]
+    public async Task OwnedMoveToAnotherSpace_ChangesOnlyItsSpace_AndDeletingASpaceSendsItsChatsToTheDefaultOne()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-session-space-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime()),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Personal")).Succeeded);
+            var chat = await host.Commands.CreateDraftSessionAsync(null, Provider, "Chat", spaceId: "business");
+            var session = await host.Commands.CreateDraftSessionAsync(project, Provider, "Work", spaceId: "business");
+            var rpc = new WorkspaceService(host, Epoch);
+            WorkspaceMoveToSpaceRequest Request(string id, string space) => new(Epoch, id, space);
+
+            Assert.AreEqual("stale_epoch", (await rpc.MoveSessionToSpaceAsync(Request(session.SessionId, "personal") with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") },
+                CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await rpc.MoveSessionToSpaceAsync(Request(session.SessionId, "Not A Space"), CancellationToken.None)).Status);
+            Assert.AreEqual("space_missing", (await rpc.MoveSessionToSpaceAsync(Request(session.SessionId, "gone"), CancellationToken.None)).Status);
+
+            var moved = await rpc.MoveSessionToSpaceAsync(Request(session.SessionId, "personal"), CancellationToken.None);
+            Assert.AreEqual("ok", moved.Status, string.Join(" | ", moved.Warnings));
+            CollectionAssert.AreEqual(new[] { session.SessionId }, moved.Moved.ToArray());
+            Assert.AreEqual(moved.Status, JsonSerializer.Deserialize(JsonSerializer.Serialize(moved, DesktopJsonContext.Default.WorkspaceMoveToSpaceResponse),
+                DesktopJsonContext.Default.WorkspaceMoveToSpaceResponse)!.Status);
+            var listed = (await new WorkspaceService(global).SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(value => value.Id == session.SessionId);
+            Assert.AreEqual(("personal", project.Id, "project", "Work"), (listed.SpaceId, listed.ProjectId, listed.ScopeKind, listed.Title), "Only its space changed.");
+
+            // Deleting Business sends its chat to the default space, and says how many went.
+            var spaces = new SpacesService(host.SpaceCatalog, new DesktopSpaceView(), host.RuntimeService.ListOverview,
+                () => ValueTask.FromResult<IReadOnlyList<string>>([]), Epoch, id => host.Commands.MoveSpaceChatsAsync(id, SpaceDescriptor.DefaultId));
+            var deleted = await spaces.DeleteAsync(new(Epoch, "business"), CancellationToken.None);
+            Assert.AreEqual(("ok", 1), (deleted.Status, deleted.MovedSessions));
+            Assert.AreEqual("default", (await new WorkspaceService(global).SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(value => value.Id == chat.SessionId).SpaceId);
+            await rpc.CloseSessionsAsync();
+            await rpc.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task MovedSessionWithRemoteControl_IsAttachedAgainInItsNewFolder_WithRemoteControlOn()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-move-" + Guid.NewGuid().ToString("N"));
