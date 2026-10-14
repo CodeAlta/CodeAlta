@@ -709,6 +709,48 @@ error answer or an answer without limits is "not available". During a turn, `rat
 the two windows of the session usage from `unifiedWindows` (five hours first, the week second) when
 the CLI sends them, and the window that limits otherwise.
 
+## Failure kinds of a turn
+
+A run that ends on an error says what kind of failure it was, when the provider tells it:
+`AgentErrorEvent.Failure` is an `AgentFailureInfo` with a `Kind`, the `ResetsAt` of a quota or a limit
+when the provider names it, and the `RetryAfterSeconds` of the response. It is null for a run the user
+cancelled and when nothing is known. The fallback of a session to the next model of its tier (see
+"Provider fallback" in [runtime](runtime.md#provider-fallback)) reads it; nothing else depends on it.
+
+| `AgentFailureKind` | Meaning |
+| --- | --- |
+| `QuotaExhausted` | The quota, the credits or the allowance of the account are used up until they reset. |
+| `RateLimited` | The provider limits the rate of requests for a short while. |
+| `Unavailable` | The provider stays unavailable (outage, overload, network, timeout) after its own retries. |
+| `Auth` | The account is not signed in or not allowed. |
+| `Other` | Anything else: a tool, a malformed request, a context overflow, an unknown error. |
+
+The kind is decided once the provider has given up: the retries of an executor (Codex, the Claude Code
+CLI) come first. `AgentSession` sets it when it writes the error, with
+`AgentFailureClassifier.Classify(exception)`, which walks the exception and its inner exceptions:
+
+- a failure a provider already classified wins: the `AgentTurnFailure.Failure` of an
+  `AgentTurnExecutionException`, or the `Failure` of an `AgentProviderFailureException` (the exception a provider
+  ends a run with when it knows the kind);
+- else an `HttpRequestException` with a status (`FromHttpStatus`): 401 and 403 are `Auth`, 402 is
+  `QuotaExhausted`, 429 is `RateLimited` unless its message speaks of a quota (`IsQuotaMessage`:
+  `insufficient_quota`, `usage_limit_reached`, `usage_not_included`, "quota", "credit", "billing"), and 408, 529
+  and the 5xx statuses are `Unavailable`;
+- an `HttpRequestException` that could not connect or resolve the name, and a `TimeoutException`, are
+  `Unavailable`;
+- an `OperationCanceledException` that is not a timeout gives no kind.
+
+A context overflow is always `Other`, whatever the status that carried it: a model that cannot read the
+conversation is not a reason to change provider. The providers classify their own errors:
+
+| Provider | Classifier | What it reads |
+| --- | --- | --- |
+| `codex`, `openai-responses`, `xai`, the Responses route of `copilot` | `OpenAIResponsesTurnExecutor.ClassifyFailure` | The error code of the response: `insufficient_quota`, `usage_not_included`, `usage_limit_reached`, `subscription_sharing_usage_limit_exceeded` and a Codex plan limit that is not retried are `QuotaExhausted`; 401, 403 and "authentication failed" are `Auth`; 429, `rate_limit_exceeded` and `slow_down` are `RateLimited`; 408, 5xx, `server_error`, `service_unavailable`, `upstream_error`, `server_overloaded`, a retryable Codex subscription signal, a response that ended early and a WebSocket timeout are `Unavailable`. The reset comes from `resets_at` or `x-codex-primary-reset-at` (Unix seconds) or `resets_in_seconds` of the body, else from `Retry-After`. |
+| `openai-chat`, `azure-openai`, the chat route of `copilot` | `OpenAIChatTurnExecutor`, with the same `ClassifyFailure` | As above. |
+| `anthropic`, the Messages route of `copilot` | `AnthropicModelProviderRuntime.ClassifyFailure` | An `AnthropicApiException` by its HTTP status and body; an error in the stream by its type (`overloaded_error` and `api_error` are `Unavailable`, `rate_limit_error` is `RateLimited`, or `QuotaExhausted` when its text speaks of a quota); an `AnthropicIOException` is `Unavailable`. |
+| `google-genai`, `vertex-ai`, `mistral` | `ChatClientTurnExecutor`, without a classifier of their own | The HTTP status of the exception, through `AgentFailureClassifier`. |
+| `claude-code` | `ClaudeCodeSession.CreateFailure` | The CLI has retried before it gives up; what is left is the `error` of its last assistant message and the limit of the plan it rejected during the run (a `rate_limit_event` with status `rejected`, kept as `_rejectedLimit` with its reset). `billing_error` is `QuotaExhausted`; `rate_limit` is `QuotaExhausted` with the reset of the rejected limit when there is one, else `RateLimited`; `server_error` is `Unavailable`; `authentication_failed` is `Auth`; any other error is `QuotaExhausted` when a limit was rejected, else `Other`. |
+
 ## Token counts of a request
 
 `AgentOperationUsageSnapshot` is the usage of one request to the model, whatever the provider:

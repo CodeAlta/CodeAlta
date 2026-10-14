@@ -115,6 +115,12 @@ start = "session"
 
 [sessions]
 title = "first_prompt"
+
+[models.tiers]
+standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
+
+[models.fallback]
+enabled = true
 ```
 
 `CodeAltaConfigDocument` maps these sections to:
@@ -130,6 +136,8 @@ title = "first_prompt"
 - `work_items`: what is done with tasks and plans (`WorkItemSettings.Read`, file of the user only). `propose` (default `true`) lets agents propose follow-up tasks; `notify` (default `true`) shows the proposals as cards in the session; `completed_tasks` and `dismissed_tasks` are `delete` (default) or `keep` for the file of a task that is closed; `completed_plans` is `keep` (default) or `delete` for a plan once it is done; `start` is the way of starting that is offered first: `worktree` (default), `session` or `here`. A default is not written, and a table left empty is removed.
 
 - `speech`: the choices for speech to prompt of CodeAlta Desktop (`SpeechSettings.Read`, file of the user only). `enabled` defaults to `true`; `model` is the id of a preset model (`parakeet-tdt-0.6b-v3` by default, `SpeechSettings.DefaultModel`) or the address of a Hugging Face repository (`https://huggingface.co/<owner>/<repository>[/tree/<revision>[/<folder>]]`). The catalog checks only the shape of `model`: which ids are presets is known to the desktop (`SpeechModelCatalog`). `send` is what is done with the prompt when a dictation stops: `manual` (the default: it stays for the user to send) or `on_stop` (it is sent). `SaveGlobalSpeechSettings` omits the defaults and keeps unknown settings; a `model` that is neither shape or an unknown `send` is a validation error of the file, never replaced by the default. The microphone is not here: device ids belong to the WebView profile, so the page keeps the chosen device in its own storage.
+
+- `models`: the model tiers and the provider fallback (`ModelSettings.Read`, file of the user only); see [Model tiers and fallback](#model-tiers-and-fallback).
 
 - `storage`: global-only maintenance policy (`StorageSettings.Read`). `clear_scratchpad_on_startup` defaults to `true`. `[storage.session_retention]` has `enabled` (default `true`; `false` means Never), `amount` (a positive integer, default `3`) and `unit` (`days`, `weeks`, `months` or `years`, default `months`). Months and years use UTC calendar arithmetic, not fixed day approximations. Retention uses one captured UTC cutoff and retains equality. Invalid settings or an unrepresentable cutoff must skip cleanup and report a configuration error, never fall back to a shorter duration. `SaveGlobalStorageSettings` omits default fields/empty tables, keeps unknown TOML settings, and preserves a custom duration when retention is disabled. These settings authorize only guarded maintenance of instance-owned scratchpad/session artifacts, never configuration or arbitrary profile folders.
 
@@ -162,6 +170,59 @@ Provider registrations are skipped at startup when required credentials or provi
 Project-local config can override effective chat/provider behavior for that project. Project execution preferences live in `ui-state.yaml`; session-specific provider/model/reasoning selections live in session journal state, so an existing session view can keep its selected runtime after global defaults change.
 
 Skill disablement is additive rather than an override: a skill named in global `[skills].disabled` is disabled everywhere, and a skill named in project `[skills].disabled` is disabled only for that project. A project config cannot re-enable a globally disabled skill.
+
+### Model tiers and fallback
+
+The `[models]` table of the global file (`CodeAltaModelSettingsDocument`, read with
+`CodeAltaConfigStore.LoadGlobalModelSettings` into `ModelSettings`, in `CodeAlta.Catalog.ModelTiers`) lists the
+models to use for three kinds of work, and says whether a session goes on with the next one when its provider fails:
+
+```toml
+[models.tiers]
+complex  = ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh", "copilot:claude-opus-4.6@high"]
+standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
+quick    = ["claude-code:haiku@low", "codex:gpt-6.1-mini@low"]
+
+[models.fallback]
+enabled = false                 # opt-in
+on = ["quota", "unavailable"]
+```
+
+- A tier (`complex`, `standard`, `quick`; `ModelTier`) is an ordered list of targets, the preferred first. A target
+  (`ModelTierTarget`) is written `<provider>:<model>` or `<provider>:<model>@<reasoning>,<reasoning>`: the provider
+  is the key of a configured provider, which names the account (two accounts of one vendor are two keys); the
+  reasoning efforts are in order of preference, and none leaves the choice to the provider. The provider key is
+  normalized to lower case. A tier steps through each target with each of its efforts in order
+  (`ModelTierResolver.Candidates`).
+- `ModelTierResolver.Resolve` gives the model a tier gives now: the first target whose provider is configured and
+  ready and lists the model (when it lists models), with the first of its efforts that the model supports.
+  `ModelTierSettings.FindTierOf` finds the tier of a model chosen by hand: the one where it comes first, standard
+  before complex before quick on a tie.
+- `[models.fallback]`: `enabled` is `false` unless the user sets it; `on` lists the failures that lead to the next
+  target, `quota` (an exhausted quota or allowance, a long rate limit) and `unavailable` (a provider that stays
+  unavailable after its retries), both when absent. What the fallback does is in "Provider fallback" in
+  [runtime](runtime.md#provider-fallback).
+
+Validation (`ModelSettings.Validate`) runs with the rest of the file, so an invalid table makes the file invalid.
+Each message names its setting: `models.tiers.<tier>[<n>]` for a target that is not `<provider>:<model>`, that
+names no provider or model, whose reasoning is not one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or
+`max`, or lists an effort twice, and for a model listed twice in one tier ("give one entry its reasoning efforts in
+order"); `models.fallback.on` for a failure that is neither `quota` nor `unavailable`. That a provider exists or
+lists the model is not checked: a target whose provider is missing, disabled or not ready is skipped when the tier
+is resolved. The runtime and the live tool read the table with `LoadModelSettings`, which gives no tier and no
+fallback when the file cannot be read or is invalid.
+
+`SaveGlobalModelSettings` writes the table, without the defaults: an empty tier, `enabled = false` and an `on` that
+has both failures are not written, and an empty table is removed (normalization keeps an invalid target, so that
+validation reports it).
+
+The `tier` a session runs on is not configuration: it is kept in the local state of its journal (see "Session and
+session-view storage" below).
+
+CodeAlta Desktop edits the table in Settings > Models, in the **Model tiers** section: an ordered list per tier,
+each row a provider, a model and its ordered reasoning efforts, and the fallback switch. The model picker of the
+composer offers the three tiers first, with the model each gives now; choosing one records the tier of the session.
+A new desktop session starts on `standard` when the tiers are set.
 
 ## Project catalog
 
@@ -281,6 +342,8 @@ CodeAlta uses two related records for active work:
   A `codealta.sessionState` record is written compacted, so its size does not grow with the number of prompts already handled: queued prompts that are pending (`queued`, `submitting`) keep their whole text; the newest 20 handled ones (`submitted`, `failed`) keep their small fields (id, kind, state, run id, error, dates) and their text is replaced by the preview of at most 160 characters; older handled ones are dropped. `prompt_provenance` keeps the newest 100 entries, plus the entry of every pending queued prompt. The fields are the same as before, so older records still read and an older binary reads the new ones. Existing journals are not rewritten.
 
 **Where a session works.** The working directory of a session is the folder it belongs to: the folder of its project, or the global root for a chat. It is written once, in the header of the journal, and it is what ties a session to its project. A session that works in a git worktree records that folder beside it, as `worktreeDirectory` in `local.sessionSummary` (`AgentSessionSummary.WorktreeDirectory`, `AgentSessionMetadata.WorktreePath`, `SessionViewDescriptor.WorktreeDirectory`): the tools of the agent run there. Journals written before worktrees have no such value and read as sessions that work in their folder. The value is cleared when the session continues after its worktree was removed. The SQLite projection keeps the whole summary, so the cache needs no column for it.
+
+**The tier of a session.** The local state of a session (`SessionViewLocalState`, the `codealta.sessionState` record) has `tier`: `complex`, `standard` or `quick` when the session runs on a tier of models, absent for a model chosen by hand. `SessionRuntimeService.SetSessionTierAsync` writes it (a session created with `--tier` or on the default `standard` tier, a tier chosen in the model picker of CodeAlta Desktop, a fallback) and `GetSessionTierAsync` reads it. It decides what the session falls back on, not the model it runs. A fork keeps it.
 
 `SessionViewJournalStore` still reads and writes the legacy header/state event names in the same journal used by the agent runtime. This avoids maintaining separate provider-bound state files for the same session while preserving existing user data.
 

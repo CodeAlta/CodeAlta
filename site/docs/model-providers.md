@@ -134,6 +134,51 @@ The [context usage](workspace.md#context-usage-popup) of a session shows the las
 
 A cache is kept for a few minutes after the last request (five minutes for Anthropic models). The first request after a longer pause, a change of the tools of a session (a tool or an MCP server that is activated), and a compaction are paid at the full price, then cached again.
 
+## Model tiers and fallback
+
+Instead of a model, a session can run on a tier: **Complex** for hard work, **Standard** for everyday work, and **Quick** for searches and simple tasks. Each tier is a list of models you choose, the preferred first. A session on a tier takes the first of them whose provider is ready.
+
+In CodeAlta Desktop, set the tiers in **Settings > Models**, in the **Model tiers** section. Each row of a tier is a provider, a model and the reasoning efforts to use, the preferred first. Add, remove and reorder the rows as you like.
+
+Once tiers are set:
+
+- the model picker of the prompt shows **Complex**, **Standard** and **Quick** first, each with the model it gives now. Choosing one puts the session on that tier;
+- a new session starts on **Standard**;
+- agents give a tier to the sessions they create: **Quick** for a search, **Complex** for a hard problem.
+
+### Fallback when a provider fails
+
+The fallback is off until you turn it on, with its switch in the **Model tiers** section. Then, when a run stops because a provider fails, the session goes on with the next model of its tier:
+
+- the quota, the usage limit or the credits of the account are used up, or the provider limits requests for more than a minute;
+- the provider stays unavailable (outage, overload, network) after its own retries.
+
+Any other failure stops the session as before: a sign-in problem, a tool or a test that fails, a conversation too long for the model, a run you stopped.
+
+A session on a model you chose yourself falls back along the tier where that model comes first. The fallback only uses the models you listed: listing a model of a provider is what allows CodeAlta to use that account. A provider whose limit is reached is skipped until the limit resets. The session keeps its permission mode, or takes a narrower one when the new provider does not offer it: a fallback never lets a session do more without asking you.
+
+When a session falls back:
+
+- its timeline shows a **Model changed after a failure** card, with the model it left and the model it now runs on;
+- a notification says so, with **Show** to open the session;
+- the session receives a message from CodeAlta that asks the agent to continue the task, and to check what an interrupted command or edit already did before it runs it again;
+- a session that delegated the work gets the answer of the run that continues, not the failure.
+
+When no other model of the tier can take over, a warning card says so: choose another model, or send again once the limit resets.
+
+The tiers and the fallback are the `[models]` table of `~/.alta/config.toml`. Each entry is `provider:model`, followed by `@` and the reasoning efforts in order; the provider is the key of a provider of the Providers page:
+
+```toml
+[models.tiers]
+complex  = ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh", "copilot:claude-opus-4.6@high"]
+standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
+quick    = ["claude-code:haiku@low", "codex:gpt-6.1-mini@low"]
+
+[models.fallback]
+enabled = true
+on = ["quota", "unavailable"]   # the failures to fall back on; both by default
+```
+
 ## Advanced TOML reference
 
 Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.

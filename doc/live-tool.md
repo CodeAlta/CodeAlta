@@ -281,6 +281,7 @@ Useful control commands:
 alta session create --project <project> --title "Investigate parser"
 alta session create --project <project> --same-model-as <session-id>
 alta session create --global --space <space>
+alta session create --project <project> --tier quick
 alta session set_agent <session-id> --prompt-id <prompt-id>
 alta session title <session-id> --set "Parser rewrite"
 alta session title <session-id> --mode last_message
@@ -341,6 +342,41 @@ direct children; grandchildren appear in `session children --recursive`. Relatio
 loads the session inventory; sending and steering an active session do not need that scan.
 
 Control commands acknowledge submission. They do not block until the target model finishes. If a session is busy, `send --queue-if-busy` and `session queue` persist queue items with caller attribution; the runtime drains at most one queued prompt when that session becomes idle.
+
+### Model tiers
+
+The user can list, in the settings, the models to use for three kinds of work: `complex`, `standard` and `quick`
+(`[models.tiers]`, see [catalog and config](catalog-and-config.md#model-tiers-and-fallback)). An agent asks for a
+tier instead of naming a model:
+
+```text
+alta session create --project <project> --tier quick
+alta model resolve --tier complex
+```
+
+`--tier complex|standard|quick` is a model-selection option, so `session create` and `model resolve` both take it.
+It gives the first target of the tier whose provider is enabled and not known to be unavailable, and that lists the
+model when it lists models (a provider not probed yet counts as ready). Its effort is the one `--reasoning` asks,
+which may go with `--tier`, else the first effort of the target that the model supports. `--tier` cannot go with
+`--model-ref`, `--provider`, `--model` or `--same-model-as` (`usage.tierConflict`). A tier with no target fails with
+`usage.noTier`, and a tier none of whose targets is ready with `tier.unavailable`; both name `--model-ref` as the
+way out. A name that is not a tier is a usage error on `--tier`.
+
+`session create` records the tier of the session (the `tier` of its local state, and `tier` in the
+`alta.session.created` record): a session that runs on a tier falls back along it when the fallback is on (see
+"Provider fallback" in [runtime](runtime.md#provider-fallback)). A selection that names no model and inherits none
+(no `--model-ref`, `--provider` or `--model`, no `--same-model-as` and no calling session to inherit from) takes the
+`standard` tier when it has a ready target: such a session starts on it and records it, and `model resolve` gives
+it. Otherwise the default provider applies as before. A child of a session still inherits the model of its parent;
+its tier is then the one where that model comes first, if any.
+
+When the settings have tiers, the runtime context of the system prompt has one line for them
+(`SystemPromptBuilder`, from `ModelTierResolver.DescribeForAgents`): each tier that has a target, with its first
+step and how many targets follow, for example
+``- Model tiers: `complex` (claude-code:opus@high, then 2 more), `standard` (claude-code:opus@medium, then 1 more), `quick` (claude-code:haiku@low, then 1 more). Give a session one with `alta session create --tier <name>` instead of naming a model.``
+When the fallback is on, the line adds that a session goes on with the next model of its tier when its provider
+fails. The built-in `default` and `plan` prompts tell an agent to give a child `--tier quick` for search and simple
+work, and `--tier complex` only for a hard, well-bounded problem, when its runtime context lists tiers.
 
 ### Turns, fork and rewind
 
@@ -578,7 +614,7 @@ alta session request <session-id> --reply-requested --stdin
 
 Polling commands such as `status`, `tail`, and `events` are for diagnostics, explicit observation, or cases where no parent notification is expected.
 
-The built-in prompts leave the use of sub-agents to the agent (see "Sub-agents" in `default.prompt.md` and "Focused exploration" in `plan.prompt.md`): it gives each independent part of a piece of work to a sub-agent (as many as there are parts), keeps the decisions and the integration, works directly when the task is small or does not split, lowers the reasoning effort of simple work, and, when its runtime context names a parent session, never hands its task to a single child. `alta session list` and `alta session children` name a session by the title it was given, so that a parent finds the sub-agents it created. A prompt an agent sends with `alta session send` is recorded with the id of the session that sent it (`source_session_id` of the user message), and what the model receives is unchanged. A send made by an MCP client is handed over as the send of an agent is: the command answers once the run has started, and its time limit does not end the run. A child created without a model option inherits the provider/model/reasoning of the session that creates it, as `--same-model-as <session-id>` does, and `--reasoning` alone changes only the effort. When the user requests a specific sub-session agent, provider, model, or reasoning effort, use `--prompt-id`, `--model-ref provider:model@reasoning`, or the separate `--provider`, `--model`, and `--reasoning` flags when available; otherwise state the limitation instead of silently substituting. For implementation delegation, schedule writing children sequentially and have the parent inspect/verify each result before starting the next writing step.
+The built-in prompts leave the use of sub-agents to the agent (see "Sub-agents" in `default.prompt.md` and "Focused exploration" in `plan.prompt.md`): it gives each independent part of a piece of work to a sub-agent (as many as there are parts), keeps the decisions and the integration, works directly when the task is small or does not split, gives simple work `--tier quick` when its runtime context lists model tiers and otherwise lowers its reasoning effort, and, when its runtime context names a parent session, never hands its task to a single child. `alta session list` and `alta session children` name a session by the title it was given, so that a parent finds the sub-agents it created. A prompt an agent sends with `alta session send` is recorded with the id of the session that sent it (`source_session_id` of the user message), and what the model receives is unchanged. A send made by an MCP client is handed over as the send of an agent is: the command answers once the run has started, and its time limit does not end the run. A child created without a model option inherits the provider/model/reasoning of the session that creates it, as `--same-model-as <session-id>` does, and `--reasoning` alone changes only the effort. When the user requests a specific sub-session agent, provider, model, or reasoning effort, use `--prompt-id`, `--model-ref provider:model@reasoning`, or the separate `--provider`, `--model`, and `--reasoning` flags when available; otherwise state the limitation instead of silently substituting. For implementation delegation, schedule writing children sequentially and have the parent inspect/verify each result before starting the next writing step.
 
 ## Provider and model discovery
 
@@ -591,9 +627,10 @@ alta provider model list --provider <provider-key>
 alta model list --provider <provider-key> --reasoning high
 alta model show --model-ref <provider-key>:<model-id>@high
 alta model resolve --model-ref <provider-key>:<model-id>@high
+alta model resolve --tier quick
 ```
 
-`model show` and `model resolve` validate exact refs when model metadata is available and report requested/effective reasoning so callers can see whether reasoning was applied, defaulted, or unsupported.
+`model show` and `model resolve` validate exact refs when model metadata is available and report requested/effective reasoning so callers can see whether reasoning was applied, defaulted, or unsupported. `model resolve --tier` gives the model a session created with the same `--tier` starts on (see [Model tiers](#model-tiers)).
 
 A selection that names no model (`alta session create --provider <provider-key>`, `alta model resolve --provider <provider-key>`) is completed with the model a session of that provider starts with in the window: the model of the provider's configuration when the provider lists it, else the first model it lists, with the effort that was asked or inherited when that model has it, else the provider's configured effort, High, the model's default or its first effort (`StartingModel`, which follows `OwnedSessionCommandService`). A model is inherited with its provider only: a session of one provider that creates a session of another gives it the effort, not the model. A provider that lists no model and has none configured is refused (`usage.missingModel`); when its models cannot be read the session is created without one, with a `model.validationUnavailable` warning. `alta session send` completes the same way a session that was saved without a model, so that no request leaves without one while the provider lists models. A `codex` provider fails a turn that still has no model before anything is sent, with a message that says so, where the endpoint would answer "The 'None' model is not supported".
 

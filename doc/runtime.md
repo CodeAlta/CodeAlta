@@ -1138,7 +1138,8 @@ The custom agents of GitHub Copilot are agent prompts too (`CopilotAgentFiles`):
 - the selected agent prompt body from `prompts/agents`;
 - generated runtime/tool guidance. The runtime context names the working directory and the project root, and
   says how an answer points to a file: a Markdown link whose target is the path relative to that root, with
-  `#L<line>` for a place in the file (`[Program.cs](src/Program.cs#L42)`), which the frontends open;
+  `#L<line>` for a place in the file (`[Program.cs](src/Program.cs#L42)`), which the frontends open. When the
+  settings have model tiers, it has a `- Model tiers:` line (see "Model tiers" in `live-tool.md`);
 - skills metadata when skills are available for the selected session;
 - project-context sections and file/reference context.
 
@@ -1299,6 +1300,68 @@ operation's lifetime. Borrowed managers are quiesced globally without transferri
 Flowed callback/startup self-joins are rejected before close mutation; suppressed-context/detached
 cycles are not universally detected. Initialization and activation failures before an active handle
 is returned remain outside this guarantee, as do unregistered background work and complete host termination.
+
+## Provider fallback
+
+When the user turned it on (`[models.fallback]`, see "Model tiers and fallback" in
+[catalog and config](catalog-and-config.md#model-tiers-and-fallback)), a session whose run fails on its provider
+goes on with the next target of its tier of models. `SessionFallbackCoordinator`, owned by
+`OwnedSessionCommandService` (`Fallback`), decides and runs it; `SessionRuntimeService.RunFailureFallback` is the
+hook the runtime calls (`TryClaim`).
+
+**Rules.**
+
+- It is opt-in: with `enabled = false` (the default) or no tier, a failure goes through as before.
+- It starts on the kind of the failure (`AgentErrorEvent.Failure`, see "Failure kinds of a turn" in
+  [providers](providers.md#failure-kinds-of-a-turn)): `QuotaExhausted`, and `RateLimited` unless its `Retry-After` is
+  under 60 seconds (`ShortRateLimit`: the provider waits that out), when `on` has `quota`; `Unavailable` when `on`
+  has `unavailable`. Never on `Auth`, `Other` (a tool or a test that fails, a context overflow), a run the user
+  stopped, or an error without a run id.
+- The tier is the one recorded for the session (`tier` of its local state); for a model chosen by hand, the tier
+  where that model comes first (`ModelTierSettings.FindTierOf`, standard before complex before quick on a tie). A
+  model no tier lists does not fall back.
+- The next step (`FindNext`) is the first one after the failed provider, model and effort in the order of
+  `ModelTierResolver.Candidates` (each target, with each of its efforts in order). A step of the same provider is
+  skipped after a quota or rate-limit failure, and so is any provider whose quota is known to be exhausted: until its `ResetsAt`,
+  else for its `Retry-After`, else for 15 minutes. A lower effort of the same model is therefore taken only after
+  `Unavailable`. A provider that is disabled, or known not to be ready or not to list the model, is skipped; one not
+  probed yet counts as usable. While prompts wait in the queue of the session, a step of another provider is
+  skipped, since the switch of provider refuses a queue.
+- Only targets the user listed are used: listing a target is what approves that account.
+- The permission mode is kept or narrowed, never widened (`KeepOrNarrow`): the mode of the session when the target
+  provider offers it, else the widest of its modes that is not wider (`plan`/`dontAsk`, then `default`,
+  `acceptEdits`, `auto`, `bypassPermissions`), else its narrowest.
+
+**Where it runs.** The claim is made on the actor of the session, with the error event
+(`TryClaimRunFailureAsync` in `SessionRuntimeService.ModelTiers.cs`): it reads the latest local state (model,
+effort, tier, queue) and decides without waiting. A claimed failure holds back what the error would have released:
+the notification of the parent (`TakeParentNotifications`) and the drain of the queue go into a `HeldRunFailure`
+instead of the effects of the event. The fallback then runs detached (`Task.Run`), after the event is published:
+
+1. It waits until the send of the failed run releases the session (`IsSessionHeldForFallback`, two minutes at most).
+2. For another provider, it switches the session with the model, the effort and the permission mode carried over:
+   `OwnedSessionCommandService.SelectProviderAsync(…, SessionViewProviderCarryOver)`, which ends in
+   `SessionViewJournalStore.SelectProviderAsync(…, SessionViewProviderCarryOver, …)` and saves them in place of the
+   provider's defaults. A `busy` or stale answer is asked again for a while. A step of the same provider needs no
+   switch: the selection of the continuation names the effort.
+3. It records the tier (`SetSessionTierAsync`), writes a timeline card (`AgentSessionUpdateKind.ProviderFallback`,
+   "Model changed after a failure"; its details are `reason`, `from`, `to`, `resetsAt` and `failedRunId`) and keeps
+   the record in `LastFallbacks`.
+4. It sends a continuation prompt through `AdmitSend` with the new selection. The prompt says it comes from
+   CodeAlta, names the failure and the new model, and asks the agent to continue from where the run stopped and to
+   check the state (files, git status, the output of a command) before running again a tool call that was running.
+5. Once the continuation has started, `HeldRunFailure.Replace` drops the held notification: the parent is not told
+   of the failure that was replaced, and the run that continues tells its own end. The queue drains after that run.
+
+When no step can take over, a `Warning` card says so ("no other model of the … tier can take over", with what to
+do), and `HeldRunFailure.ReleaseAsync` lets the failure through: the parent is told and the queue drains. The same
+happens with a card that says why when the session stays busy, the switch is refused, the continuation is not
+admitted or does not start, or the host closes (`CloseAsync` stops new fallbacks and waits for the running ones).
+
+**What the user sees.** Besides the card, CodeAlta Desktop lists a session that fell back in the last 10 minutes in
+the activity of the spaces (`SpacesService`, `SpaceSessionActivity.Fallback`, from `LastFallbacks`), and the page
+shows a toast once per fallback (`fallbackNotices.ts`) with a **Show** action. The first reading of a window shows
+none: a fallback that happened before it opened is not news.
 
 ## Error and cancellation behavior
 

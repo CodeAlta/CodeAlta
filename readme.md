@@ -51,6 +51,7 @@ CodeAlta Desktop brings together:
 - **Welcome page**: jump back to recent projects and sessions, with useful shortcuts.
 - **Built-in documentation**: read the guide beside your work, or ask an agent to help.
 - **Model choice**: use Claude Code, Codex or GitHub Copilot subscriptions, or APIs; choose provider, model and reasoning effort per session.
+- **Model tiers & fallback**: pick Complex, Standard or Quick instead of a model, and optionally [go on with the next model of the tier](https://codealta.github.io/docs/model-providers/#model-tiers-and-fallback) when a provider runs out of quota or goes down.
 - **Permissions & visibility**: set each session to ask first, accept edits or run freely; inspect tool inputs, outputs, file changes and live commands.
 - **Agent prompts**: plan, build, review or define your own roles.
 - **Skills & MCP**: bring in skills, tools and services.
