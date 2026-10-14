@@ -27,7 +27,7 @@ const entry = (overrides: Partial<Entry> = {}): Entry => ({ offset: "1", eventTy
   tool: null, files: null, images: null, text: "persisted", details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides });
 const session = (overrides: Partial<SessionDisplayView> = {}): SessionDisplayView => ({ sessionId: "session", revision: "1",
   lifecycle: null, queuedPromptCount: null, configuration: { providerId: "provider", providerKey: null, modelId: null,
-    reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null,
+    reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null, conversationWait: null,
   text: [{ timestamp: null, sequence: null, runId: "run", contentId: "content", kind: "Assistant", text: "live", isComplete: true,
     isTruncated: false, startedWithDelta: false }], toolActivities: [], metadataTruncated: false,
   transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0", ...overrides });

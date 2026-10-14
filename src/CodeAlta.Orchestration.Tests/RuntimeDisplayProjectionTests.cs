@@ -349,6 +349,41 @@ public sealed class RuntimeDisplayProjectionTests
         }
     }
 
+    [TestMethod]
+    public void ConversationWait_IsShownFromTheWaitingUpdateUntilReleaseOrRunEnd()
+    {
+        var publisher = new SessionRuntimeEventPublisher(8);
+        var request = new AgentConversationHeldRequest(new ModelProviderId("claude-code"), "session", new AgentRunId("run"), "request",
+            DateTimeOffset.UtcNow, "conversation", new AgentConversationHolder(AgentConversationHolderOrigin.VsCode, "VS Code", 42),
+            [AgentConversationHeldChoice.Wait, AgentConversationHeldChoice.Cancel]);
+        SessionAgentEvent Update(string state) => new("session", new AgentSessionUpdateEvent(new ModelProviderId("claude-code"), "session",
+            DateTimeOffset.UtcNow, new AgentRunId("run"), AgentSessionUpdateKind.Info, "waiting", AgentConversationHeldUpdates.CreateDetails(request, state)));
+        RuntimeDisplayConversationWait? Wait() => publisher.Display.GetSnapshot().Sessions.Single().ConversationWait;
+
+        publisher.TryPublish(Text("before"));
+        Assert.IsNull(Wait());
+        publisher.TryPublish(Update(AgentConversationHeldUpdates.Waiting));
+        Assert.AreEqual("VS Code", Wait()?.OriginText);
+        // Another update of the session (a plain Info, a text) leaves the wait as it is.
+        publisher.TryPublish(new SessionAgentEvent("session", new AgentSessionUpdateEvent(new ModelProviderId("claude-code"), "session",
+            DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Info, "other")));
+        Assert.AreEqual("VS Code", Wait()?.OriginText);
+        publisher.TryPublish(Update(AgentConversationHeldUpdates.Released));
+        Assert.IsNull(Wait());
+
+        publisher.TryPublish(Update(AgentConversationHeldUpdates.Waiting));
+        publisher.TryPublish(new SessionLifecycleRuntimeEvent("session", DateTimeOffset.UtcNow,
+            new SessionLifecycleEvent { SessionId = "session", Kind = SessionLifecycleEventKind.RunAborted, RunId = "run" }));
+        Assert.IsNull(Wait());
+
+        // Where the other process runs is bounded.
+        var longOrigin = request with { Holder = request.Holder with { OriginText = new string('x', 200) } };
+        publisher.TryPublish(new SessionAgentEvent("session", new AgentSessionUpdateEvent(new ModelProviderId("claude-code"), "session",
+            DateTimeOffset.UtcNow, null, AgentSessionUpdateKind.Info, null, AgentConversationHeldUpdates.CreateDetails(longOrigin, AgentConversationHeldUpdates.Waiting))));
+        Assert.AreEqual(RuntimeDisplayProjection.MaxConversationWaitOriginCharacters, Wait()?.OriginText.Length);
+        publisher.Complete();
+    }
+
     private static SessionAgentEvent Text(string text, string session = "session", string contentId = "content") => new(session,
         new AgentContentDeltaEvent(new ModelProviderId("fake"), session, DateTimeOffset.UtcNow, new AgentRunId("run"),
             AgentContentKind.Assistant, contentId, null, text));

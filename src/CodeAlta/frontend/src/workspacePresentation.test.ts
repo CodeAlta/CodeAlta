@@ -24,7 +24,7 @@ test("empty/loading live windows stay out of the timeline, but faults and covera
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, hasGap: true } }), true);
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, evictedSessions: "1" } }), true);
   const session: SessionDisplayView = { sessionId: "session", revision: "0", configuration: null, queuedPromptCount: null,
-    text: [], toolActivities: [], lifecycle: null, statusKind: null, statusMessage: null,
+    text: [], toolActivities: [], lifecycle: null, statusKind: null, statusMessage: null, conversationWait: null,
     metadataTruncated: false, transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0" };
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session } }), false);
   assert.equal(showLiveDisplay({ ...empty, snapshot: { ...snapshot, session: { ...session, queuedPromptCount: 0 } } }), false);

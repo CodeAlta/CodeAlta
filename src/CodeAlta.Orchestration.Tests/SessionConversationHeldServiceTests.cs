@@ -51,6 +51,46 @@ public sealed class SessionConversationHeldServiceTests
     }
 
     [TestMethod]
+    public async Task Observer_IsToldOfEachQuestion_UntilItEnds_AndNoLongerOnceStopped()
+    {
+        await using var fixture = new Fixture();
+        var asked = new List<(SessionConversationHeldSnapshot Snapshot, CancellationToken Ended)>();
+        var told = new SemaphoreSlim(0);
+        var observation = fixture.Service.Observe((snapshot, ended) =>
+        {
+            lock (asked) asked.Add((snapshot, ended));
+            told.Release();
+            return Task.CompletedTask;
+        });
+        // An observer that fails does not stop the question.
+        using var failing = fixture.Service.Observe((_, _) => throw new InvalidOperationException("broken view"));
+
+        var ask = fixture.Service.Handler(Request(), CancellationToken.None);
+        Assert.IsTrue(await told.WaitAsync(Timeout));
+        var (snapshot, ended) = asked.Single();
+        Assert.AreEqual((await fixture.WaitForPendingAsync()).Single().Handle, snapshot.Handle);
+        Assert.IsFalse(ended.IsCancellationRequested, "The question waits.");
+        Assert.IsTrue(await fixture.Service.ResolveAsync(snapshot.Handle, AgentConversationHeldChoice.Wait, default));
+        Assert.AreEqual(AgentConversationHeldChoice.Wait, await ask.WaitAsync(Timeout));
+        Assert.IsTrue(ended.IsCancellationRequested, "An answered question has ended.");
+
+        using var run = new CancellationTokenSource();
+        var second = fixture.Service.Handler(Request(), run.Token);
+        Assert.IsTrue(await told.WaitAsync(Timeout));
+        var secondEnded = asked[1].Ended;
+        await run.CancelAsync();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => second.WaitAsync(Timeout));
+        Assert.IsTrue(secondEnded.IsCancellationRequested, "A question ends with its run.");
+
+        observation.Dispose();
+        var third = fixture.Service.Handler(Request(), CancellationToken.None);
+        var handle = (await fixture.WaitForPendingAsync()).Single().Handle;
+        Assert.IsFalse(await told.WaitAsync(TimeSpan.FromMilliseconds(200)), "A stopped observation is told nothing.");
+        Assert.IsTrue(await fixture.Service.ResolveAsync(handle, AgentConversationHeldChoice.Cancel, default));
+        Assert.AreEqual(AgentConversationHeldChoice.Cancel, await third.WaitAsync(Timeout));
+    }
+
+    [TestMethod]
     public async Task ChoiceTheQuestionDidNotOffer_IsRefused()
     {
         await using var fixture = new Fixture();

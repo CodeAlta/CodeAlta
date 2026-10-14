@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime.Actors;
@@ -39,6 +40,7 @@ public sealed class SessionConversationHeldService : IAsyncDisposable
 
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionConversationHeldHandle, Pending> _pending = [];
+    private ImmutableArray<Func<SessionConversationHeldSnapshot, CancellationToken, Task>> _observers = [];
     private int _disposeStarted;
     private bool _stopped;
 
@@ -80,6 +82,12 @@ public sealed class SessionConversationHeldService : IAsyncDisposable
 
         // The question ends with the run and with the attachment of its session.
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, target!.Attachment.Cancellation.Token);
+        using var ended = new CancellationTokenSource();
+        foreach (var observer in _observers)
+        {
+            _ = NotifyAsync(observer, pending.Snapshot, ended.Token);
+        }
+
         try
         {
             return await pending.Completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
@@ -87,6 +95,47 @@ public sealed class SessionConversationHeldService : IAsyncDisposable
         finally
         {
             await ExecuteAsync(() => Complete(pending.Snapshot.Handle, null), false).ConfigureAwait(false);
+            await ended.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
+    // An observer that fails shows nothing: the question still waits for an answer given another way, or for its run to end.
+    private static async Task NotifyAsync(Func<SessionConversationHeldSnapshot, CancellationToken, Task> observer, SessionConversationHeldSnapshot snapshot,
+        CancellationToken ended)
+    {
+        try
+        {
+            await Task.Yield();
+            await observer(snapshot, ended).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Tells a host that shows the questions by itself (a terminal dialog) about each question asked from now on, with a
+    /// token cancelled when the question ends: answered (by this host or another), or ended with its run or attachment.
+    /// The host answers with <see cref="ResolveAsync"/>. The question does not wait for the observer.
+    /// </summary>
+    /// <param name="onAsked">Called once for each question, on the thread pool.</param>
+    /// <returns>Stops the observation.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="onAsked"/> is null.</exception>
+    public IDisposable Observe(Func<SessionConversationHeldSnapshot, CancellationToken, Task> onAsked)
+    {
+        ArgumentNullException.ThrowIfNull(onAsked);
+        ImmutableInterlocked.Update(ref _observers, static (observers, added) => observers.Add(added), onAsked);
+        return new Observation(this, onAsked);
+    }
+
+    private sealed class Observation(SessionConversationHeldService owner, Func<SessionConversationHeldSnapshot, CancellationToken, Task> onAsked) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            ImmutableInterlocked.Update(ref owner._observers, static (observers, removed) => observers.Remove(removed), onAsked);
         }
     }
 

@@ -73,7 +73,17 @@ public readonly record struct RuntimeDisplaySession(string SessionId, long Revis
 
     /// <summary>Tool identities evicted during this retained session window; not a history/effect count.</summary>
     public long EvictedToolActivities { get; init; }
+
+    /// <summary>
+    /// The run waits for another process to release its conversation (the user chose to wait); null when it does not,
+    /// once the conversation was released or the run ended.
+    /// </summary>
+    public RuntimeDisplayConversationWait? ConversationWait { get; init; }
 }
+
+/// <summary>A run that waits for another process to release its conversation.</summary>
+/// <param name="OriginText">Where that process runs, in words (<c>VS Code</c>, <c>a terminal</c>), bounded.</param>
+public readonly record struct RuntimeDisplayConversationWait(string OriginText);
 
 /// <summary>A complete replacement of the retained live display window, never a complete journal or M4 snapshot.</summary>
 /// <param name="Epoch">Projection-owner identity; revisions from another epoch are unrelated.</param>
