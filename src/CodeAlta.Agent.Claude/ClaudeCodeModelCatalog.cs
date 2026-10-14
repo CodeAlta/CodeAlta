@@ -85,7 +85,10 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_cached is { } cached && DateTimeOffset.UtcNow - _cachedAt < CacheLifetime)
+            // An answer is kept while the same executable would answer: a download of the pinned version replaces
+            // the CLI of the user at once.
+            if (_cached is { } cached && DateTimeOffset.UtcNow - _cachedAt < CacheLifetime &&
+                string.Equals(_options.ResolveExecutable().Path, cached.ExecutablePath, StringComparison.Ordinal))
             {
                 return cached;
             }

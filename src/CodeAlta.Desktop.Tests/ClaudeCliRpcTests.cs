@@ -1,5 +1,6 @@
 using CodeAlta.Agent.Claude;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Hosting;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -68,7 +69,7 @@ public sealed class ClaudeCliRpcTests
     {
         public Fixture(string runtimeIdentifier)
         {
-            Service = new ClaudeCliService(new ClaudeCodeCliInstaller(Root, new HttpClientHandler(), runtimeIdentifier), "host", () => Installed,
+            Service = new ClaudeCliService(new ConfiguredClaudeCodeCli(Root, new HttpClientHandler(), runtimeIdentifier), "host", () => Installed,
                 (_, _) => { VersionReads++; return Task.FromResult(Version); });
         }
 

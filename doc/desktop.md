@@ -2504,7 +2504,8 @@ answer Claude Code saved for the key (blank), ignore it and use the Claude login
   account of the provider: the executable it runs and `CLAUDE_CONFIG_DIR` from the form, for PowerShell on Windows
   and a POSIX shell elsewhere, with the home folder written `$HOME` (`claudeCli/claudeCli.ts`).
 
-**The `claudeCli` RPC** (`Desktop/Rpc/ClaudeCliRpc.cs`) serves that box. `read` gives the pinned `version`, the
+**The `claudeCli` RPC** (`Desktop/Rpc/ClaudeCliRpc.cs`) serves that box, through `ConfiguredClaudeCodeCli` of
+`CodeAlta.Hosting`: the desktop assembly names no provider package. `read` gives the pinned `version`, the
 `size` of its archive, `supported` (Claude Code has a CLI for this platform), `pinnedPath` once it is in the cache,
 the user's own `installedPath` and `installedVersion` (`claude --version`, read once per file), and `windows` and
 `home` for the command. `install` starts the download (`ok`, `busy`, `unsupported`), `cancelInstall` stops it, and

@@ -1,8 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
-using CodeAlta.Agent.Claude;
 using CodeAlta.Catalog;
+using CodeAlta.Hosting;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -14,7 +14,7 @@ namespace CodeAlta.Desktop.Rpc;
 [NeoRpcService("claudeCli", Version = 1)]
 internal sealed class ClaudeCliService
 {
-    private readonly ClaudeCodeCliInstaller? _installer;
+    private readonly ConfiguredClaudeCodeCli? _installer;
     private readonly Func<string?>? _findInstalled;
     private readonly Func<string, CancellationToken, Task<string?>>? _readVersion;
     private readonly string? _epoch;
@@ -26,14 +26,14 @@ internal sealed class ClaudeCliService
 
     /// <summary>Creates the service on the network and on the CLI of this computer.</summary>
     internal ClaudeCliService(CatalogOptions options, string epoch)
-        : this(new ClaudeCodeCliInstaller(options.ClaudeCodeRoot), epoch, ClaudeCodeInstalledCli.Find, ClaudeCodeCliVersion.ReadAsync) { }
+        : this(new ConfiguredClaudeCodeCli(options.ClaudeCodeRoot), epoch, ConfiguredClaudeCodeCli.FindUserInstall, ConfiguredClaudeCodeCli.ReadVersionAsync) { }
 
     /// <summary>Creates the service on given parts.</summary>
     /// <param name="installer">The installer of the pinned version.</param>
     /// <param name="epoch">The epoch of the host.</param>
     /// <param name="findInstalled">Finds the Claude Code the user installed.</param>
     /// <param name="readVersion">Reads the version of an executable.</param>
-    internal ClaudeCliService(ClaudeCodeCliInstaller installer, string epoch, Func<string?> findInstalled, Func<string, CancellationToken, Task<string?>> readVersion)
+    internal ClaudeCliService(ConfiguredClaudeCodeCli installer, string epoch, Func<string?> findInstalled, Func<string, CancellationToken, Task<string?>> readVersion)
     {
         ArgumentNullException.ThrowIfNull(installer);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
@@ -44,7 +44,7 @@ internal sealed class ClaudeCliService
     }
 
     /// <summary>Gets the installer, for tests.</summary>
-    internal ClaudeCodeCliInstaller? Installer => _installer;
+    internal ConfiguredClaudeCodeCli? Installer => _installer;
 
     /// <summary>
     /// Reads the pinned version and whether it is in the cache, and the Claude Code the user installed with its version.
@@ -57,7 +57,7 @@ internal sealed class ClaudeCliService
         var installer = _installer!;
         var (pinned, installed) = await Task.Run(() => (installer.InstalledPath, _findInstalled!()), cancellationToken).ConfigureAwait(false);
         var installedVersion = installed is null ? null : await ReadVersionAsync(installed, cancellationToken).ConfigureAwait(false);
-        return new("ok", installer.IsSupported, ClaudeCodePinnedCli.Version, installer.Asset?.Size ?? 0, pinned, installed, installedVersion,
+        return new("ok", installer.IsSupported, ConfiguredClaudeCodeCli.PinnedVersion, installer.Size, pinned, installed, installedVersion,
             OperatingSystem.IsWindows(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     }
 
@@ -92,7 +92,7 @@ internal sealed class ClaudeCliService
     {
         if (Refuse(request.ExpectedEpoch) is not null) yield break;
         // Only the latest state matters: the bytes received so far, or how it ended.
-        var snapshots = Channel.CreateBounded<ClaudeCodeCliInstallSnapshot>(new BoundedChannelOptions(1) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
+        var snapshots = Channel.CreateBounded<ConfiguredClaudeCodeCliState>(new BoundedChannelOptions(1) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
         using var subscription = _installer!.Subscribe(snapshot => snapshots.Writer.TryWrite(snapshot));
         await foreach (var snapshot in snapshots.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             yield return new(snapshot.State, snapshot.ReceivedBytes, snapshot.TotalBytes, snapshot.Error);
@@ -139,7 +139,7 @@ internal sealed record ClaudeCliStatusResponse(string Status, bool Supported, st
     [property: NeoRpcInt64(NeoRpcInt64Policy.String), JsonConverter(typeof(NeoRpcInt64JsonConverter))] long Size,
     string? PinnedPath, string? InstalledPath, string? InstalledVersion, bool Windows, string? Home)
 {
-    internal static ClaudeCliStatusResponse Refused(string status) => new(status, false, ClaudeCodePinnedCli.Version, 0, null, null, null, OperatingSystem.IsWindows(), null);
+    internal static ClaudeCliStatusResponse Refused(string status) => new(status, false, ConfiguredClaudeCodeCli.PinnedVersion, 0, null, null, null, OperatingSystem.IsWindows(), null);
 }
 
 /// <param name="State"><c>idle</c>, <c>downloading</c>, <c>installing</c>, <c>done</c>, <c>failed</c> or <c>canceled</c>.</param>

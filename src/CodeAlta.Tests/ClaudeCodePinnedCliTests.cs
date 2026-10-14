@@ -130,6 +130,31 @@ public sealed class ClaudeCodePinnedCliTests
     }
 
     [TestMethod]
+    public async Task Probe_AsksAgainOnceAnotherExecutableWouldAnswer()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        var path = "/home/me/.local/bin/claude";
+        await using var runtime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-code",
+            TransportFactory = cli,
+            GetEnvironmentVariable = static _ => null,
+            ResolveCli = () => new ClaudeCodeCliResolution(path, null) { Source = ClaudeCodeCliSource.Installed },
+            ReadVersion = static (_, _) => Task.FromResult<string?>("9.9.9"),
+        });
+
+        StringAssert.Contains((await runtime.ProbeAsync()).StatusMessage, "9.9.9");
+        StringAssert.Contains((await runtime.ProbeAsync()).StatusMessage, "9.9.9");
+        Assert.AreEqual(1, cli.Processes.Count, "The answer is kept while the executable is the same.");
+
+        // The pinned version was downloaded: it answers from now on.
+        path = "/home/me/.alta/cache/claude-code/claude";
+        var probe = await runtime.ProbeAsync();
+        Assert.AreEqual(2, cli.Processes.Count);
+        StringAssert.Contains(probe.StatusMessage, path);
+    }
+
+    [TestMethod]
     public async Task Installer_DownloadsChecksAndExtractsTheZipOfWindows()
     {
         using var fixture = new Fixture();
