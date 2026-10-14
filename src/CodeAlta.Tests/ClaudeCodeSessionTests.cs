@@ -848,6 +848,7 @@ public sealed class ClaudeCodeSessionTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             GetEnvironmentVariable = options.GetEnvironmentVariable,
             PermissionMode = "plan",
@@ -917,6 +918,7 @@ public sealed class ClaudeCodeSessionTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             PermissionMode = providerMode,
         });
@@ -1507,18 +1509,124 @@ public sealed class ClaudeCodeSessionTests
             sessionId = session.SessionId;
         }
 
-        cli.FailResume = true;
+        cli.ForgetTranscripts();
+        var started = SessionProcesses(cli).Count;
         await using var resumedRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
         await using var resumed = await resumedRuntime.ResumeSessionAsync(sessionId, CreateResumeOptions(directory));
         await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second question") }).WaitAsync(Timeout);
 
         var process = SessionProcess(cli);
         Assert.IsNull(process.ResumedSessionId);
+        Assert.IsTrue(SessionProcesses(cli).Skip(started).All(static other => other.ResumedSessionId is null), "A transcript that is gone is not tried first.");
         var sent = ClaudeCodeFakeProcess.UserText(process.UserMessages.Single());
         StringAssert.Contains(sent, "<codealta_previous_conversation>");
         StringAssert.Contains(sent, "first question");
         StringAssert.Contains(sent, "ok");
         StringAssert.EndsWith(sent, "second question");
+    }
+
+    [TestMethod]
+    public async Task TranscriptTheCliDoesNotFind_StartsAgainWithTheRecordedConversationAsContext()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        string sessionId, claudeSessionId;
+        await using (var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var session = await CreateSessionAsync(runtime, directory))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first question") }).WaitAsync(Timeout);
+            sessionId = session.SessionId;
+            claudeSessionId = SessionProcess(cli).SessionId;
+        }
+
+        // The transcript is found, but the CLI says it has no such conversation (a profile that names its folders
+        // another way): the conversation starts again, as for a transcript that is gone.
+        cli.FailResume = true;
+        var started = SessionProcesses(cli).Count;
+        await using var resumedRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var resumed = await resumedRuntime.ResumeSessionAsync(sessionId, CreateResumeOptions(directory));
+        await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second question") }).WaitAsync(Timeout);
+
+        Assert.AreEqual(claudeSessionId, SessionProcesses(cli)[started].ResumedSessionId);
+        var process = SessionProcess(cli);
+        Assert.IsNull(process.ResumedSessionId);
+        var sent = ClaudeCodeFakeProcess.UserText(process.UserMessages.Single());
+        StringAssert.Contains(sent, "<codealta_previous_conversation>");
+        StringAssert.EndsWith(sent, "second question");
+    }
+
+    [TestMethod]
+    public async Task SlowStartOfAResumedConversation_FailsTheRunAndKeepsTheConversation()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        string sessionId, claudeSessionId;
+        await using (var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var session = await CreateSessionAsync(runtime, directory))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first question") }).WaitAsync(Timeout);
+            sessionId = session.SessionId;
+            claudeSessionId = SessionProcess(cli).SessionId;
+        }
+
+        // The CLI takes longer than allowed to answer `initialize` when it resumes the conversation.
+        var slow = new TaskCompletionSource();
+        cli.ResumeInitializeAnswer = slow.Task;
+        var started = SessionProcesses(cli).Count;
+        await using var resumedRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions(startupTimeout: TimeSpan.FromMilliseconds(300)));
+        await using var resumed = await resumedRuntime.ResumeSessionAsync(sessionId, CreateResumeOptions(directory));
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second question") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "did not start in time");
+        var afterFailure = SessionProcesses(cli).Skip(started).ToArray();
+        Assert.IsTrue(afterFailure.Length > 0);
+        Assert.IsTrue(afterFailure.All(process => process.ResumedSessionId == claudeSessionId), "A slow start is not a missing transcript: no new conversation is started.");
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
+        Assert.AreEqual(claudeSessionId, ClaudeCodeProviderState.Read((await store.GetStateAsync(sessionId))!)!.SessionId);
+
+        // The next try resumes the same conversation, and the CLI is not told it as text.
+        slow.TrySetResult();
+        cli.ResumeInitializeAnswer = null;
+        await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("third question") }).WaitAsync(Timeout);
+        var process = SessionProcess(cli);
+        Assert.AreEqual(claudeSessionId, process.ResumedSessionId);
+        var sent = string.Join("\n", process.UserMessages.Select(ClaudeCodeFakeProcess.UserText));
+        Assert.IsFalse(sent.Contains("<codealta_previous_conversation>", StringComparison.Ordinal));
+        StringAssert.EndsWith(sent, "third question");
+    }
+
+    [TestMethod]
+    public async Task ConversationHeldByABackgroundSession_FailsTheRunWithoutANewConversation()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        string sessionId, claudeSessionId;
+        await using (var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var session = await CreateSessionAsync(runtime, directory))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first question") }).WaitAsync(Timeout);
+            sessionId = session.SessionId;
+            claudeSessionId = SessionProcess(cli).SessionId;
+        }
+
+        cli.HeldByBackground = true;
+        var started = SessionProcesses(cli).Count;
+        await using var resumedRuntime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var resumed = await resumedRuntime.ResumeSessionAsync(sessionId, CreateResumeOptions(directory));
+
+        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second question") }).WaitAsync(Timeout));
+
+        StringAssert.Contains(failure.Message, "background session");
+        StringAssert.Contains(failure.Message, "claude attach job-1");
+        var afterFailure = SessionProcesses(cli).Skip(started).ToArray();
+        Assert.AreEqual(1, afterFailure.Length, "The refusal is not taken for a missing transcript: no new conversation is started.");
+        Assert.AreEqual(claudeSessionId, afterFailure[0].ResumedSessionId);
+        Assert.AreEqual("1", afterFailure[0].Launch.Environment["CLAUDE_CODE_STARTUP_FAILURE_RESULTS"], "The CLI is asked to name the reason of a refused start.");
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
+        Assert.AreEqual(claudeSessionId, ClaudeCodeProviderState.Read((await store.GetStateAsync(sessionId))!)!.SessionId);
     }
 
     [TestMethod]
@@ -2364,6 +2472,7 @@ public sealed class ClaudeCodeSessionTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             ApiKeyPolicy = policy,
             GetEnvironmentVariable = static name => name == "ANTHROPIC_API_KEY" ? "sk-ant-api03-xxxx0123456789abcdefKLMN" : null,
@@ -2373,6 +2482,10 @@ public sealed class ClaudeCodeSessionTests
 
     private static ClaudeCodeFakeProcess SessionProcess(ClaudeCodeFakeCli cli)
         => cli.Processes.Last(static process => process.Launch.Arguments.Contains("--mcp-config"));
+
+    // The processes that ran a session, not those that listed the models.
+    private static IReadOnlyList<ClaudeCodeFakeProcess> SessionProcesses(ClaudeCodeFakeCli cli)
+        => [.. cli.Processes.Where(static process => process.Launch.Arguments.Contains("--mcp-config"))];
 
     private static async Task<IAgentSession> CreateSessionAsync(
         ClaudeCodeModelProviderRuntime runtime,

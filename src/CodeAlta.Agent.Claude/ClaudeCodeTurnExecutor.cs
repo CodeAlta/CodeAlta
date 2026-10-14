@@ -25,7 +25,20 @@ internal sealed class ClaudeCodeTurnExecutor :
     public ClaudeCodeTurnExecutor(ClaudeCodeModelProviderRuntimeOptions options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        var probe = options.ProcessProbe ?? ClaudeCodeProcessProbe.Instance;
+        OwnProcesses = new ClaudeCodeOwnProcesses(probe);
+        LiveSessions = new ClaudeCodeLiveSessions(
+            ClaudeCodeProjectFolders.ResolveConfigRoot(options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable),
+            OwnProcesses,
+            probe,
+            TimeProvider.System);
     }
+
+    /// <summary>Gets the CLI processes the sessions of this executor run.</summary>
+    internal ClaudeCodeOwnProcesses OwnProcesses { get; }
+
+    /// <summary>Gets the reader of the registry of live sessions of the CLI, which tells whether another process holds a conversation.</summary>
+    internal ClaudeCodeLiveSessions LiveSessions { get; }
 
     /// <inheritdoc />
     public Task<AgentTurnResponse> ExecuteTurnAsync(
@@ -166,6 +179,6 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        return _sessions.GetOrAdd(sessionId, static (id, options) => new ClaudeCodeSession(id, options), _options);
+        return _sessions.GetOrAdd(sessionId, static (id, executor) => new ClaudeCodeSession(id, executor._options, executor.OwnProcesses, executor.LiveSessions), this);
     }
 }

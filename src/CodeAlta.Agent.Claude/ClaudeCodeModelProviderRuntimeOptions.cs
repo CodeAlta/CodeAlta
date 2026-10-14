@@ -167,6 +167,19 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     internal IClaudeCodeTransportFactory? TransportFactory { get; init; }
 
     /// <summary>
+    /// Gets or initializes what looks at the processes of the system for the registry of live sessions of the CLI.
+    /// Tests replace it.
+    /// </summary>
+    internal IClaudeCodeProcessProbe? ProcessProbe { get; init; }
+
+    /// <summary>
+    /// Gets or initializes what tells whether the CLI finds the transcript of a conversation it is to resume, from the
+    /// working directory and the identifier of the conversation. Tests replace it; by default the folders of the
+    /// configuration folder of Claude Code are looked at.
+    /// </summary>
+    internal Func<string, string, ClaudeCodeTranscriptPresence>? LocateTranscript { get; init; }
+
+    /// <summary>
     /// Gets or initializes the resolver of the executable. Tests replace it.
     /// </summary>
     internal Func<ClaudeCodeCliResolution>? ResolveCli { get; init; }

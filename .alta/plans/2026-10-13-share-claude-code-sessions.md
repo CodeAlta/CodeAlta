@@ -252,14 +252,33 @@ from `origin/main` 4a34f104 (which has the permission-mode change #119), in the 
       is then listed for import.
 
 ### Phase 1: provider groundwork (commit)
-- [ ] `IClaudeCodeTransport.ProcessId`; instance-owned set of CodeAlta's CLI pids in the runtime.
-- [ ] `ClaudeCodeLiveSessions` reader + liveness rule; tests with fixture registry files (live, stale pid,
+- [x] `IClaudeCodeTransport.ProcessId`; instance-owned set of CodeAlta's CLI pids in the runtime.
+      Done: `ClaudeCodeOwnProcesses` (pid + start read at registration) owned by `ClaudeCodeTurnExecutor`,
+      fed by `ClaudeCodeSession` when a connection starts, released when it closes. Opt-in live test
+      `Registry_NamesTheProcessCodeAltaStarted` (`CODEALTA_TEST_CLAUDE_CLI=auto`, no model call): the entry of
+      the native claude.exe CodeAlta starts has its pid, `procStart` = `StartTime.ToFileTimeUtc()`, and
+      `pidDomain` = `win32:` + `Dns.GetHostName()` in lower case. The model probes are not tracked (their
+      conversations are random ids nobody resumes).
+- [x] `ClaudeCodeLiveSessions` reader + liveness rule; tests with fixture registry files (live, stale pid,
       reused pid, own pid, other `pidDomain`, ticks instead of FILETIME, unreadable fresh entry, unknown
-      shape, unreadable folder).
-- [ ] Check that the transcript exists before `--resume` (reuse `ClaudeCodeTranscriptRelocation.FindSources`
+      shape, unreadable folder). Done (`ClaudeCodeLiveSessionsTests`, 30 tests, 39 cases); reachable from the session
+      (`ClaudeCodeSession.LiveSessions`) for phase 2. Own domain as the extension builds it: Windows
+      `win32:<host>`, Linux `linux:<machine-id>:<readlink /proc/self/ns/pid>`, macOS `darwin` (no host);
+      unknown own domain + an entry with a domain → "unknown". macOS token: `Process.StartTime` in UTC formatted
+      as C's `%c` (no `ps`): not verified on a Mac. Precedence: a described holder (latest `updatedAt`) >
+      unreadable fresh entry > unknown > none.
+- [x] Check that the transcript exists before `--resume` (reuse `ClaudeCodeTranscriptRelocation.FindSources`
       rules); fall back to a new conversation only when it is missing, not on a slow start nor on a
       `session_held_by_background` refusal (that one is "held elsewhere", phase 2). Regression tests first
-      (a slow start and that refusal must not drop the conversation).
+      (a slow start and that refusal must not drop the conversation). Done: `LocateTranscript` (Present /
+      Missing / Unknown → tried). Facts found: the CLI (2.1.296) refuses before it reads its input with
+      `Error: That session is running in the background (<job>). Run \`claude attach <job>\` ...` on stderr and
+      exit 1; it writes a zeroed `error_during_execution` result with `startup_failure_reason:
+      "session_held_by_background"` only when `CLAUDE_CODE_STARTUP_FAILURE_RESULTS` is set, which CodeAlta now
+      sets. Both are recognized. Both failures fail the run and leave the conversation bound to the recorded
+      state (the next turn resumes it). Deviation: a CLI that exits for another reason while the transcript is
+      found (e.g. "No conversation found", a profile with `CLAUDE_CODE_PROJECT_DIR_NAME`) still starts a new
+      conversation with the preamble, as before.
 
 ### Phase 2: held-elsewhere prompt (commit)
 - [ ] `AgentConversationHeldRequest` on `AgentProviderRunContext`; hosts without a handler fail the run

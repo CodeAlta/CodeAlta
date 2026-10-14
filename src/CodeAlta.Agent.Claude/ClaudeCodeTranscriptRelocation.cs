@@ -54,6 +54,21 @@ public sealed record ClaudeCodeTranscriptRelocationResult(
 }
 
 /// <summary>
+/// Whether the CLI finds the transcript of a conversation to resume.
+/// </summary>
+internal enum ClaudeCodeTranscriptPresence
+{
+    /// <summary>The folder of the working directory has it, or other folders do (one is what the CLI accepts).</summary>
+    Present,
+
+    /// <summary>No folder of the profile has it: <c>--resume</c> would fail.</summary>
+    Missing,
+
+    /// <summary>The folders could not be looked at: <c>--resume</c> is tried.</summary>
+    Unknown,
+}
+
+/// <summary>
 /// Moves the transcript of a conversation of Claude Code to the folder of another working directory, so that
 /// <c>--resume</c> finds it when the CLI is started there.
 /// </summary>
@@ -235,6 +250,34 @@ public static class ClaudeCodeTranscriptRelocation
         {
             Rollback(undo);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Tells whether the CLI started in a working directory finds the transcript of a conversation: the folder of the
+    /// directory is looked at first, as the CLI does, then the other folders (links and junctions to one folder are one).
+    /// </summary>
+    /// <param name="configRoot">The configuration folder of Claude Code.</param>
+    /// <param name="workingDirectory">The working directory the CLI is started in.</param>
+    /// <param name="cliSessionId">The identifier of the conversation of the CLI.</param>
+    /// <returns>Whether the transcript is there; <see cref="ClaudeCodeTranscriptPresence.Unknown"/> when the folders cannot be read.</returns>
+    internal static ClaudeCodeTranscriptPresence LocateTranscript(string configRoot, string workingDirectory, string cliSessionId)
+    {
+        try
+        {
+            ValidateSessionId(cliSessionId);
+            var folderName = ClaudeCodeProjectFolders.GetFolderName(workingDirectory);
+            return FindSources(ClaudeCodeProjectFolders.GetProjectsFolder(configRoot), folderName, folderName, cliSessionId + TranscriptExtension).Count > 0
+                ? ClaudeCodeTranscriptPresence.Present
+                : ClaudeCodeTranscriptPresence.Missing;
+        }
+        catch (ArgumentException)
+        {
+            return ClaudeCodeTranscriptPresence.Unknown;
+        }
+        catch (Exception ex) when (IsFileSystemError(ex) || ex is System.Security.SecurityException)
+        {
+            return ClaudeCodeTranscriptPresence.Unknown;
         }
     }
 

@@ -45,6 +45,7 @@ internal sealed class ClaudeCodeConnection : IAsyncDisposable
     private Task? _reader;
     private int _nextRequestId;
     private volatile bool _closed;
+    private volatile string? _startupFailureReason;
     private int _disposed;
 
     public ClaudeCodeConnection(IClaudeCodeTransport transport, IClaudeCodeConnectionHandler handler)
@@ -55,6 +56,12 @@ internal sealed class ClaudeCodeConnection : IAsyncDisposable
 
     /// <summary>Gets a value indicating whether the process ended.</summary>
     public bool IsClosed => _closed;
+
+    /// <summary>
+    /// Gets why the CLI refused to start, when it said so (<c>startup_failure_reason</c> of the result it writes before
+    /// it exits, such as <c>session_held_by_background</c>); null otherwise. Complete once the connection is disposed.
+    /// </summary>
+    public string? StartupFailureReason => _startupFailureReason;
 
     /// <summary>Starts reading the output of the process.</summary>
     public void Start() => _reader ??= Task.Run(ReadAsync);
@@ -286,6 +293,11 @@ internal sealed class ClaudeCodeConnection : IAsyncDisposable
 
                 break;
             default:
+                if (type == "result" && ClaudeCodeJson.GetString(root, "startup_failure_reason") is { Length: > 0 } reason)
+                {
+                    _startupFailureReason = reason;
+                }
+
                 _handler.OnMessage(type, root);
                 break;
         }

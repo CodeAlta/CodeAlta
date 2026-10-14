@@ -204,10 +204,16 @@ internal static class ClaudeCodeLauncher
 
         // The CLI tells this side when a session is idle again, and names CodeAlta in its user agent.
         environment["CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS"] = "1";
+        // A start the CLI refuses for a known reason (a conversation a background session runs, ...) ends with a result
+        // that names it, not with its error output alone.
+        environment[StartupFailureResultsVariable] = "1";
         environment["CLAUDE_AGENT_SDK_CLIENT_APP"] = string.IsNullOrWhiteSpace(options.ClientApp) ? DefaultClientApp : options.ClientApp.Trim();
 
         return new ClaudeCodeLaunch(executable, arguments, key.WorkingDirectory, environment);
     }
+
+    /// <summary>The variable that makes the CLI write a result naming why it refused to start.</summary>
+    public const string StartupFailureResultsVariable = "CLAUDE_CODE_STARTUP_FAILURE_RESULTS";
 
     /// <summary>Maps the reasoning effort of CodeAlta to the effort level of the CLI.</summary>
     public static string? ToEffort(AgentReasoningEffort? effort)

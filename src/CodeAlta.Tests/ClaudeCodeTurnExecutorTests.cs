@@ -287,6 +287,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = "claude-code",
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = cli.CreateOptions().ResolveCli,
             IdleTimeout = TimeSpan.Zero,
             PermissionMode = "acceptEdits",
@@ -543,6 +544,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             IdleTimeout = TimeSpan.FromMilliseconds(100),
         });
@@ -628,6 +630,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             IdleTimeout = TimeSpan.FromMilliseconds(100),
         });
@@ -828,6 +831,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             GetEnvironmentVariable = options.GetEnvironmentVariable,
             IdleTimeout = TimeSpan.FromMilliseconds(50),
@@ -867,6 +871,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             GetEnvironmentVariable = options.GetEnvironmentVariable,
             IdleTimeout = TimeSpan.FromMilliseconds(50),
@@ -1374,6 +1379,36 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         await executor.DisposeAsync();
         Assert.IsTrue(cli.Processes[1].IsDisposed);
+    }
+
+    [TestMethod]
+    public async Task ProcessesOfTheSessions_AreCodeAltasOwn_UntilTheyAreClosed()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        var next = 7000;
+        cli.AssignProcessId = () => Interlocked.Increment(ref next);
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        // What the registry of live sessions of the CLI has for this process is not another process that holds the conversation.
+        CollectionAssert.AreEqual(new[] { cli.Last.ProcessId!.Value }, executor.OwnProcesses.Snapshot().ToArray());
+        await executor.DisposeProviderSessionAsync("session-1");
+        Assert.AreEqual(0, executor.OwnProcesses.Snapshot().Count);
+    }
+
+    [TestMethod]
+    public async Task RegistryOfLiveSessions_IsTheOneOfTheConfigurationFolder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-claude-config-" + Guid.NewGuid().ToString("N"));
+        var options = new ClaudeCodeFakeCli().CreateOptions();
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            GetEnvironmentVariable = name => name == ClaudeCodeProjectFolders.ConfigDirectoryVariable ? root : null,
+        });
+
+        Assert.AreEqual(Path.Combine(root, "sessions"), executor.LiveSessions.RegistryFolder);
     }
 
     private static Task<AgentTurnResponse> ExecuteAsync(ClaudeCodeTurnExecutor executor, AgentTurnRequest request)
