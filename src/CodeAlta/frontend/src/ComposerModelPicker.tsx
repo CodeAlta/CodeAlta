@@ -5,15 +5,24 @@ import { matchingModels, modelAfterKey, modelPickerPreferences, useModelPickerRo
 import { ModelIcon } from "./ProviderIcon";
 import { useShellLanguage } from "./shellLanguage";
 
+/** A tier of models as the list of the composer offers it: its name, and the model it gives now (null when none is ready). */
+export type ComposerTier = Readonly<{ tier: string; label: string; detail: string | null; title?: string | null }>;
+
 /**
  * The model of the next Send as a searchable list: the focus stays in the search box, the arrows move through the
  * models that match, and Enter takes the active one. The list shows the number of models chosen in Settings and scrolls
  * for the rest. A saved model the provider does not list is named on the button, never in the list.
  */
-export function ComposerModelPicker({ id, value, models, providerKey, disabled = false, loading = false, title, onChange, preferences = modelPickerPreferences }: {
+export function ComposerModelPicker({ id, value, models, providerKey, disabled = false, loading = false, title, onChange, preferences = modelPickerPreferences,
+  tiers, currentTier = null, onChooseTier }: {
   id: string; value: string | null; models: readonly ModelPickerChoice[]; providerKey?: string | null;
   disabled?: boolean; loading?: boolean; title?: string; onChange: (modelId: string) => void;
   preferences?: ModelPickerPreferenceStore;
+  /** The tiers of the settings, shown at the top of the list with the model each gives; none when the user set none. */
+  tiers?: readonly ComposerTier[];
+  /** The tier the session runs on, or null for a model chosen by hand. */
+  currentTier?: string | null;
+  onChooseTier?: (tier: string) => void;
 }) {
   const { t } = useShellLanguage();
   const rows = useModelPickerRows(preferences);
@@ -34,6 +43,14 @@ export function ComposerModelPicker({ id, value, models, providerKey, disabled =
     if (model.id !== value) onChange(model.id);
   }
   const content = <div className="composer-model-picker" style={{ "--model-picker-rows": rows } as CSSProperties}>
+    {tiers && tiers.length > 0 && onChooseTier && <div className="composer-tiers" role="group" aria-label={t("Tiers")}>
+      {tiers.map(tier => <Button key={tier.tier} variant="minimal" size="small" className="composer-tier" active={tier.tier === currentTier}
+        aria-pressed={tier.tier === currentTier} disabled={!tier.detail} title={tier.title ?? undefined}
+        onClick={() => { setOpen(false); onChooseTier(tier.tier); }}>
+        <span className="composer-tier-name">{tier.label}</span>
+        <span className="composer-tier-model">{tier.detail ?? t("No model ready")}</span>
+      </Button>)}
+    </div>}
     <InputGroup type="search" inputRef={search} role="combobox" aria-label={t("Search models")} placeholder={t("Search models")} value={query}
       aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={shown.length ? option(active) : undefined}
       leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}

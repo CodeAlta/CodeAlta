@@ -3088,6 +3088,7 @@ function App() {
     const handoff = fromDraft ? { scope: draftScope, ...typed, imageKey: localImageKey, images: localImages.images,
       imageGeneration: localImageGeneration.current } : null;
     const creationSelection = { ...draftChoices.value };
+    const creationTier = draftChoices.tier;
     const recordHandoff = (outcome: string) => { if (handoff) setDraftHandoffNotice(outcome); };
     creationPending.current = true;
     creationHeld.current = true;
@@ -3142,6 +3143,9 @@ function App() {
           } catch { /* Original draft and choices stay available for manual review. */ }
           const offered = choices && choices.status === "ok" && choices.epoch === epoch && choices.sessionId === selection.sessionId
             && choices.current && validSelection(choices, creationSelection) ? choices : undefined;
+          // A session that starts with the model of the standard tier runs on that tier, and falls back along it.
+          if (offered && creationTier) void sessionOperations.setTier({ expectedEpoch: epoch!, sessionId: selection.sessionId, tier: creationTier },
+            { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps its model; only its fallback is not set. */ });
           if (handoff) {
             if (!isCurrent() || !offered) {
               recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");

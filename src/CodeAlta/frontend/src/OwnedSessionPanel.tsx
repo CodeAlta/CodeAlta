@@ -38,6 +38,7 @@ import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
+import { composerTierEntries, tierLabels, useTiers, type TierName } from "./modelTiers";
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { showToast } from "./appToaster";
 import { PermissionModeMenu } from "./PermissionModeMenu";
@@ -957,6 +958,75 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!selections.set(epoch, sessionId, activeChoices, next)) return;
     setSelection(next);
     setChoicesNotice("");
+    // A model chosen by hand is not the one of a tier any more.
+    if (field === "modelId" && activeChoices.tier) void recordTier(null);
+  }
+  const tierState = useTiers(epoch);
+  const composerTiers = composerTierEntries(tierState, t);
+  // Records the tier the session runs on, or that its model was chosen by hand; the choices then name it.
+  async function recordTier(tier: string | null) {
+    const signal = scope.current?.signal;
+    const result = await sessions.setTier({ expectedEpoch: epoch, sessionId, tier }, { signal }).catch(() => null);
+    if (signal?.aborted) return;
+    if (result?.status !== "ok" || result.epoch !== epoch || result.sessionId !== sessionId) {
+      showToast({ message: t("The tier was not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+    setChoices(current => current && current.sessionId === sessionId ? { ...current, tier: result.tier } : current);
+  }
+  // A tier takes the model it gives now: of the session's provider at once, of another provider through a switch of
+  // provider, as the provider list does. The session then falls back along that tier.
+  async function chooseTier(tier: string) {
+    if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
+    const choice = tierState?.choices[tier as TierName];
+    if (!choice) {
+      showToast({ message: t("No model of the {tier} tier is ready.", { tier: t(tierLabels[tier as TierName] ?? "Standard") }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+    const signal = scope.current.signal;
+    if (choice.providerKey === selected.providerKey) {
+      const model = changeSelection(activeChoices, selected, "modelId", choice.modelId);
+      const next = model && choice.reasoning ? changeSelection(activeChoices, model, "reasoningEffort", choice.reasoning) ?? model : model;
+      if (!next || !selections.set(epoch, sessionId, activeChoices, next)) {
+        showToast({ message: t("The choice was not changed: choose an available model and agent prompt first."), intent: "warning", icon: "warning-sign", timeout: 6000 });
+        return;
+      }
+      setSelection(next); setChoicesNotice("");
+      await recordTier(tier);
+      return;
+    }
+    const entry = runtimeState?.kind === "ready" ? runtimeState.snapshot : null;
+    if (!entry || entry.coordinatorTransitionInProgress || entry.entry?.activeRunId || entry.entry?.queueDrainInProgress || entry.entry?.isRetiring) {
+      showToast({ message: t("The tier was not changed ({status}).", { status: "busy" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+    setProviderBusy(true);
+    try {
+      const offered = await sessions.providerChoices({ expectedEpoch: epoch, sessionId }, { signal });
+      if (signal.aborted) return;
+      const status = offered.status !== "ok" || offered.epoch !== epoch || !offered.runtimeInstanceId || !offered.revision ? offered.status
+        : !offered.providers.some(provider => provider.id === choice.providerKey) ? "provider_unavailable" : null;
+      const switched = status ? null : await sessions.selectProvider({ expectedEpoch: epoch, sessionId, providerKey: choice.providerKey,
+        expectedProviderKey: offered.providerKey!, runtimeInstanceId: offered.runtimeInstanceId!, attachmentGeneration: offered.attachmentGeneration,
+        revision: offered.revision! }, { signal });
+      if (signal.aborted) return;
+      if (status || switched?.status !== "ok") {
+        showToast({ message: t("The tier was not changed ({status}).", { status: status ?? switched?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+        return;
+      }
+      const value = await sessions.choices({ expectedEpoch: epoch, sessionId }, { signal });
+      if (signal.aborted || !capability.canMutate() || value.epoch !== epoch || value.sessionId !== sessionId || value.status !== "ok" || !value.current) return;
+      const base = { ...value.current, agentPromptId: selected.agentPromptId ?? value.current.agentPromptId };
+      const model = changeSelection(value, base, "modelId", choice.modelId) ?? base;
+      const next = choice.reasoning ? changeSelection(value, model, "reasoningEffort", choice.reasoning) ?? model : model;
+      if (!selections.set(epoch, sessionId, value, next)) selections.set(epoch, sessionId, value, value.current);
+      setChoices(value); setChoicesNotice("");
+      loadModelChoices();
+      void runtimeScope.current?.refresh();
+      await recordTier(tier);
+    } catch {
+      if (!signal.aborted) showToast({ message: t("The tier was not changed ({status}).", { status: "selection_unconfirmed" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+    } finally { setProviderBusy(false); }
   }
   // The permission mode applies at once, also to a turn that runs: what waits for an answer and the new mode grants is
   // allowed. The button shows the choice while the host takes it, and the mode in force again when it refuses.
@@ -1115,6 +1185,7 @@ ${value}` : value);
         }} />}
       model={<ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} providerKey={selected?.providerKey}
         disabled={invalidEpoch || !!pending} loading={loadingChoices} onChange={modelId => select("modelId", modelId)}
+        tiers={composerTiers} currentTier={activeChoices?.tier ?? null} onChooseTier={tier => void chooseTier(tier)}
         title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />} />

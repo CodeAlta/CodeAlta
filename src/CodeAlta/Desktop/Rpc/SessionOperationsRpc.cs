@@ -197,6 +197,7 @@ internal sealed class SessionOperationsService
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
                 DefaultPermissionMode = choices.DefaultPermissionMode,
                 SupportsRemoteControl = choices.SupportsRemoteControl ? true : null,
+                Tier = choices.Tier,
             };
         }
         catch (OperationCanceledException) { throw; }
@@ -270,6 +271,25 @@ internal sealed class SessionOperationsService
         }
         var result = await _commands.SetPermissionModeAsync(request.SessionId, request.PermissionMode, cancellationToken).ConfigureAwait(false);
         return new(result.Status, _epoch, request.SessionId, result.PermissionMode);
+    }
+
+    // The tier of a session says what it falls back on; the model itself goes with the selection of its next prompt.
+    [NeoRpcMethod("setTier")]
+    public async Task<SessionTierResult> SetTierAsync(SessionTierRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        Catalog.ModelTiers.ModelTier? tier = null;
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null);
+            if (request.Tier is not null && (tier = Catalog.ModelTiers.ModelTiers.Parse(request.Tier)) is null) return new("invalid_request", _epoch, request.SessionId, null);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null);
+        }
+
+        var status = await _commands.SetSessionTierAsync(request.SessionId, tier, cancellationToken).ConfigureAwait(false);
+        return new(status, _epoch, request.SessionId, tier is { } chosen && status == "ok" ? Catalog.ModelTiers.ModelTiers.NameOf(chosen) : null);
     }
 
     // Remote Control acts on the provider at once, outside the runs: it leaves no receipt. Its state is read in the
@@ -586,7 +606,14 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // True when the session can be followed and driven from claude.ai (Claude Code's Remote Control); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? SupportsRemoteControl { get; init; }
+    // The tier of models the session runs on (complex, standard or quick); absent for a model chosen by hand.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Tier { get; init; }
 }
+// Records the tier of models a session runs on (complex, standard or quick), or null for a model chosen by hand.
+internal sealed record SessionTierRequest(string ExpectedEpoch, string SessionId, string? Tier);
+// ok with the tier after the request; invalid_request, unavailable (an unknown session), closed, or why it was refused.
+internal sealed record SessionTierResult(string Status, string? Epoch, string SessionId, string? Tier);
 // A mode a session can be given, by its identifier: the page names it.
 internal sealed record SessionPermissionModeChoice(string Id);
 internal sealed record SessionAbortRequest(string ExpectedEpoch, string ClientRequestId, string TargetOperationId);

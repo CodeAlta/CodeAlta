@@ -8,6 +8,7 @@ import type { CatalogNextSendTarget, NextSendResult, createNextSendSelectionStor
 import { useShellLanguage } from "./shellLanguage";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
 import { ModelPickerSettings } from "./ModelPickerSettings";
+import { ModelTierSettings } from "./ModelTierSettings";
 
 type ProvidersRead = (request: ModelCatalogProvidersRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogProvidersResponse>;
 type ModelsRead = (request: ModelCatalogModelsRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogModelsResponse>;
@@ -139,7 +140,9 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
     <header className="page-heading"><span className="eyebrow">{t("Desktop / Models")}</span><h1>{t("Model catalog")}</h1>
       <p>{t("Models reported by your providers.")}</p></header>
     <ModelPickerSettings />
-    {!epoch? <p role="status">{t("Catalog-only mode has no owned model inventory. Configured default model names are not a model list.")}</p>
+    {epoch && <ModelTierSettings epoch={epoch} providers={activeProviders?.providers ?? []}
+      models={new Map([...pages].map(([id, page]) => [id, page.models]))} />}
+    {!epoch?<p role="status">{t("Catalog-only mode has no owned model inventory. Configured default model names are not a model list.")}</p>
       : <div className="model-catalog-all">
         <section className="model-catalog-results" aria-label={t("Provider models")}>
           {!activeProviders && !providersError && <p role="status">{t("Loading providers…")}</p>}

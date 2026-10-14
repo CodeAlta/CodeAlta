@@ -129,6 +129,27 @@ public sealed class DesktopOwnedSessionTests
     });
 
     [TestMethod]
+    public Task Tier_IsRecordedForTheSession_AndNamedByItsChoices() => RealFixture.RunAsync(async f =>
+    {
+        f.Provider.Release.TrySetResult();
+        var service = new SessionOperationsService(f.Host.Commands, "fixture-epoch");
+        async Task<SessionTierResult> ChooseAsync(string? tier, string epoch = "fixture-epoch")
+            => await f.Wait(f.Keep(service.SetTierAsync(new(epoch, f.SessionId, tier), CancellationToken.None)));
+        async Task<string?> TierAsync()
+            => (await f.Wait(f.Keep(service.Choices(new("fixture-epoch", f.SessionId), CancellationToken.None)))).Tier;
+
+        Assert.IsNull(await TierAsync());
+        Assert.AreEqual(new SessionTierResult("ok", "fixture-epoch", f.SessionId, "quick"), await ChooseAsync("Quick"));
+        Assert.AreEqual("quick", await TierAsync());
+        Assert.AreEqual("invalid_request", (await ChooseAsync("fast")).Status);
+        Assert.AreEqual("stale_epoch", (await ChooseAsync("complex", "other-epoch")).Status);
+        Assert.AreEqual("quick", await TierAsync());
+        // A model chosen by hand is no tier.
+        Assert.AreEqual(new SessionTierResult("ok", "fixture-epoch", f.SessionId, null), await ChooseAsync(null));
+        Assert.IsNull(await TierAsync());
+    });
+
+    [TestMethod]
     public Task PermissionMode_ChoicesNameTheModesOfTheProvider_AndASendGivesOneToTheSession() => RealFixture.RunAsync(async f =>
     {
         f.Host.ModelProviderRegistry.RegisterOrReplace(f.Provider.Descriptor with

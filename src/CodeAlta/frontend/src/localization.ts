@@ -6,6 +6,7 @@ import { bookmarkMessages } from "./bookmarks/messages";
 import { storageMessages } from "./storage/messages";
 import { sessionBranchMessages } from "./sessionBranch/messages";
 import { speechMessages } from "./speech/messages";
+import { modelTierMessages } from "./modelTierMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2483,6 +2484,7 @@ export const messages = dictionary({
   ...sessionBranchMessages,
   ...bookmarkMessages,
   ...speechMessages,
+  ...modelTierMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

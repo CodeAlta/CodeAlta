@@ -69,9 +69,24 @@ export function newSessionProvider(saved: NewSessionPreference | undefined, prov
  * what the terminal would pick, the configured model of the provider and its effort.
  */
 export function newSessionSelection(saved: NewSessionPreference | undefined, provider: string, prompts: readonly Readonly<{ id: string }>[],
-  models: readonly Model[], configured?: Readonly<{ defaultModel?: string | null; defaultReasoning?: string | null }>): SessionSelection {
-  const modelId = saved?.providerKey === provider && models.some(model => model.id === saved.modelId) ? saved.modelId! : defaultModelId(models, configured?.defaultModel);
+  models: readonly Model[], configured?: Readonly<{ defaultModel?: string | null; defaultReasoning?: string | null }>,
+  tier?: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }> | null): SessionSelection {
+  // The model of the standard tier, when the user chose no model of this provider and the provider lists it.
+  const tierModel = tier?.providerKey === provider && models.some(model => model.id === tier.modelId) ? tier : null;
+  const modelId = saved?.providerKey === provider && models.some(model => model.id === saved.modelId) ? saved.modelId!
+    : tierModel?.modelId ?? defaultModelId(models, configured?.defaultModel);
   const model = models.find(value => value.id === modelId);
   return { providerKey: provider, agentPromptId: prompts.find(prompt => prompt.id === saved?.agentPromptId)?.id ?? "default", modelId,
-    reasoningEffort: model?.efforts.find(effort => effort === saved?.reasoningEffort) ?? defaultReasoningEffort(model, configured?.defaultReasoning) };
+    reasoningEffort: model?.efforts.find(effort => effort === saved?.reasoningEffort)
+      ?? (tierModel && modelId === tierModel.modelId ? model?.efforts.find(effort => effort === tierModel.reasoning) : undefined)
+      ?? defaultReasoningEffort(model, configured?.defaultReasoning) };
+}
+
+/**
+ * The provider of a new session when the user chose none: the one of the model the standard tier gives, while it is
+ * enabled; otherwise null, and the default provider is taken.
+ */
+export function newSessionTierProvider(saved: NewSessionPreference | undefined, providers: readonly Readonly<{ id: string }>[],
+  tier: Readonly<{ providerKey: string }> | null | undefined): string | null {
+  return !saved?.providerKey && tier && providers.some(provider => provider.id === tier.providerKey) ? tier.providerKey : null;
 }

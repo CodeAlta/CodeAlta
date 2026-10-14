@@ -156,6 +156,62 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task ModelTiers_AreReadAndSavedWithTheModelEachGives()
+    {
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
+        var empty = fixture.Service.ModelTiers(new(Epoch));
+        Assert.AreEqual("ok", empty.Status);
+        CollectionAssert.AreEqual(new[] { "complex", "standard", "quick" }, empty.Tiers.Select(static list => list.Tier).ToArray());
+        Assert.IsTrue(empty.Tiers.All(static list => list.Targets.Count == 0 && list.Choice is null));
+        Assert.AreEqual(new ModelFallbackSetting(false, true, true), empty.Fallback);
+
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch)
+        {
+            ProviderStates = () =>
+            [
+                new ModelProviderStateSnapshot
+                {
+                    Descriptor = new ModelProviderDescriptor(new ModelProviderId("codex"), "Codex"),
+                    Availability = ModelProviderAvailability.Ready,
+                    Models = [new AgentModelInfo("gpt-6.1", "GPT-6.1", SupportedReasoningEfforts: [AgentReasoningEffort.High, AgentReasoningEffort.XHigh])],
+                },
+            ],
+        };
+        var saved = service.SaveModelTiers(new(Epoch,
+        [
+            new("complex", [new("claude-code", "opus", ["High", "XHigh"]), new("codex", "gpt-6.1", ["XHigh"])]),
+            new("quick", [new("claude-code", "haiku", [])]),
+        ], new(true, true, false)));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        // Claude Code is not ready: the complex tier gives the next target.
+        Assert.AreEqual(new ModelTierChoiceItem("codex", "gpt-6.1", "XHigh", "Codex", "GPT-6.1"), saved.Tiers[0].Choice);
+        Assert.IsNull(saved.Tiers[2].Choice);
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "\"claude-code:opus@high,xhigh\"");
+        StringAssert.Contains(text, "on = [\"quota\"]");
+        StringAssert.Contains(text, "sk-kept", "The other settings stay.");
+        CollectionAssert.AreEqual(new[] { "High", "XHigh" }, service.ModelTiers(new(Epoch)).Tiers[0].Targets[0].Reasoning.ToArray());
+
+        // What is not a target is refused with what is wrong, and nothing is written.
+        var refused = service.SaveModelTiers(new(Epoch, [new("quick", [new("claude-code", "haiku", ["Huge"])])], new(false, true, true)));
+        Assert.AreEqual(("invalid", "'Huge' is not a reasoning effort."), (refused.Status, refused.Message));
+        Assert.AreEqual("invalid", service.SaveModelTiers(new(Epoch, [new("quick", [new("", "haiku", [])])], new(false, true, true))).Status);
+        Assert.AreEqual("invalid", service.SaveModelTiers(new(Epoch, [new("fast", [])], new(false, true, true))).Status);
+        StringAssert.Contains(service.SaveModelTiers(new(Epoch, [new("quick", [new("a", "m", []), new("A", "M", [])])], new(false, true, true))).Message, "listed twice");
+        Assert.AreEqual(text, File.ReadAllText(fixture.ConfigPath));
+
+        // Tiers the file writes wrong are said, and shown as none.
+        File.WriteAllText(fixture.ConfigPath, "[models.tiers]\nquick = [\"haiku\"]\n");
+        var invalid = service.ModelTiers(new(Epoch));
+        Assert.AreEqual("invalid", invalid.Status);
+        StringAssert.Contains(invalid.Message, "models.tiers.quick[1]");
+        Assert.IsTrue(invalid.Tiers.All(static list => list.Targets.Count == 0));
+
+        Assert.AreEqual("stale_epoch", service.ModelTiers(new("another")).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().ModelTiers(new(Epoch)).Status);
+    }
+
+    [TestMethod]
     public async Task Providers_ReportWhatBlankFieldsFallBackTo()
     {
         await using var fixture = new Fixture("""

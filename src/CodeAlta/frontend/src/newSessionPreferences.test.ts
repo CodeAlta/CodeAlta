@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, rememberNewSessionPreference, restoreNewSessionPreferences,
+import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTierProvider, rememberNewSessionPreference, restoreNewSessionPreferences,
   type NewSessionPreference } from "./newSessionPreferences";
 
 const chosen: NewSessionPreference = { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" };
@@ -86,4 +86,17 @@ test("what was chosen is used only while the catalogs offer it", () => {
     { providerKey: "claude", agentPromptId: "plan", modelId: "opus", reasoningEffort: null });
   // While the catalogs are read, nothing is offered yet.
   assert.deepEqual(newSessionSelection(chosen, "codex", [], [], providers[0]), { providerKey: "codex", agentPromptId: "default", modelId: null, reasoningEffort: null });
+});
+
+test("with tiers, a new session the user chose nothing for starts on the model of the standard tier", () => {
+  const standard = { providerKey: "codex", modelId: "model", reasoning: "medium" };
+  assert.equal(newSessionTierProvider(undefined, providers, standard), "codex");
+  assert.equal(newSessionTierProvider({ providerKey: "claude" }, providers, standard), null, "A provider the user chose comes first.");
+  assert.equal(newSessionTierProvider(undefined, providers, { ...standard, providerKey: "off" }), null, "A provider that is not enabled is not taken.");
+  assert.equal(newSessionTierProvider(undefined, providers, null), null);
+  assert.deepEqual(newSessionSelection(undefined, "codex", prompts, models, providers[0], standard),
+    { providerKey: "codex", agentPromptId: "default", modelId: "model", reasoningEffort: "medium" });
+  // A model the user chose for the provider stays; a tier model the provider does not list gives the default.
+  assert.equal(newSessionSelection({ providerKey: "codex", modelId: "small" }, "codex", prompts, models, providers[0], standard).modelId, "small");
+  assert.equal(newSessionSelection(undefined, "codex", prompts, models, providers[0], { ...standard, modelId: "gone" }).modelId, "small");
 });

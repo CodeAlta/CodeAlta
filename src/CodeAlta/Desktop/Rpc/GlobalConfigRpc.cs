@@ -13,7 +13,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// re-register the configured model providers after a save (the TUI's "Save and Apply").
 /// </summary>
 [NeoRpcService("globalConfig", Version = 1)]
-internal sealed class GlobalConfigService
+internal sealed partial class GlobalConfigService
 {
     /// <summary>Largest configuration text accepted or returned, in UTF-16 units.</summary>
     internal const int MaximumContentLength = 256 * 1024;
