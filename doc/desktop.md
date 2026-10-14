@@ -4351,7 +4351,7 @@ each creation through `CodeAltaHostOptions.InheritPermissionModePolicy`:
 | Setting | A created session | A prompt to another session |
 | --- | --- | --- |
 | **Bypass permissions** (the default) | does not ask: it is given `bypassPermissions` where the default mode asks, and no mode where the default mode bypasses or its provider is configured with a mode | any session |
-| **Same as the session that creates them** | has the mode of the policy of its creator: `default`, `acceptEdits`, or `bypassPermissions` (no mode where it bypasses anyway) | refused (`session.promptDenied`) for a session that asks less than the caller |
+| **Same as the session that creates them** | has the very mode of its creator when it is a mode of the provider that its own provider offers a session (`auto`, `dontAsk`: not `plan`); otherwise the mode of the policy of its creator: `default`, `acceptEdits`, or `bypassPermissions` (no mode where it bypasses anyway) | refused (`session.promptDenied`) for a session that asks less than the caller |
 
 The default lets a session that asks hand a command to a session that does not: this is the user's choice,
 since a sub-agent that waits for an answer stops the work of its creator. The second value closes that

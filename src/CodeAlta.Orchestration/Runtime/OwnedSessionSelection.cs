@@ -106,7 +106,7 @@ public sealed partial class OwnedSessionCommandService
 
     // Modes a session is not given by itself. The plan mode of Claude Code ends with an approval CodeAlta does not
     // ask for: it stays a mode of the provider's configuration.
-    private static readonly FrozenSet<string> ProviderOnlyPermissionModes = FrozenSet.ToFrozenSet(["plan"], StringComparer.Ordinal);
+    internal static readonly FrozenSet<string> ProviderOnlyPermissionModes = FrozenSet.ToFrozenSet(["plan"], StringComparer.Ordinal);
 
     internal static bool IsValidSelection(OwnedSelectionChoices choices, OwnedSessionSelection selection)
     {

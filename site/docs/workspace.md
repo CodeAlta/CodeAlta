@@ -838,7 +838,8 @@ Permissions > **Sessions created by agents** changes that:
 - **Bypass permissions** (the default): the session an agent creates does not ask. A session that asks
   can then hand a command to a session that does not.
 - **Same as the session that creates them**: it asks what its creator asks, and a session cannot send a
-  prompt to a session that asks less than it does.
+  prompt to a session that asks less than it does. A creator in **Auto** or **Don't ask** gives the session
+  the same mode when its provider has it; otherwise the session asks first.
 
 The mode is given when the session is created, and you can change it in its prompt like any other.
 
