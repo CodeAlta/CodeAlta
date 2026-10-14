@@ -74,6 +74,21 @@ test("instance-owned selection survives a denied storage write but never revives
   assert.equal(store.set("epoch", "one", choices, { ...current, modelId: null, reasoningEffort: null }), false, "a listed model is named");
 });
 
+test("a selection of a provider the session left is forgotten, and the next Send takes the session's own", () => {
+  // The host moved the session to another provider (a fallback after a failure): what was chosen for the former one
+  // can never be sent, and must not keep the composer from sending.
+  const store = createNextSendSelectionStore(() => null, () => {});
+  const next = { ...current, modelId: "new", reasoningEffort: "Low" };
+  assert.equal(store.set("epoch", "one", choices, next), true);
+  const moved: SessionChoicesResponse = { ...choices, current: { ...current, providerKey: "beta" } };
+  assert.equal(store.get("epoch", "one", moved), null);
+  assert.equal(store.current("epoch", "one"), null);
+  // Within the same provider, a selection the catalog no longer offers is kept, unverified, as before.
+  assert.equal(store.set("epoch", "one", choices, next), true);
+  assert.equal(store.get("epoch", "one", { ...choices, models: [choices.models[0]] }), null);
+  assert.deepEqual(store.current("epoch", "one"), next);
+});
+
 test("a selection kept while the provider listed no model names the session's model once it does", () => {
   const store = createNextSendSelectionStore(() => null, () => {});
   const unlisted = { ...choices, current: { ...current, modelId: null, reasoningEffort: null }, models: [] };

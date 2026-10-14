@@ -22,6 +22,12 @@ export function createNextSendSelectionStore(load: (key: string) => string | nul
     get(epoch: string, sessionId: string, choices: SessionChoicesResponse): SessionSelection | null {
       if (choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId || !choices.current) return null;
       const entry = entries.get(sessionId);
+      if (entry?.epoch === epoch && entry.selection.providerKey !== choices.current.providerKey) {
+        // The host moved the session to another provider (a fallback after a failure): a choice made for the former
+        // one can never be sent, and is forgotten.
+        entries.delete(sessionId);
+        return null;
+      }
       if (entry?.epoch === epoch) {
         // Kept while the provider listed no model: it names one as soon as the provider does.
         const kept = completeSelection(choices, entry.selection);
