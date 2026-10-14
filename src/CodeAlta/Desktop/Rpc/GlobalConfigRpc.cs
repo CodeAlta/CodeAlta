@@ -183,7 +183,7 @@ internal sealed partial class GlobalConfigService
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
-                          PromptSuggestions = definition?.PromptSuggestions == true };
+                          PromptSuggestions = definition?.PromptSuggestions == true, ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command) };
                     }).ToArray();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
                 var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
@@ -244,7 +244,7 @@ internal sealed partial class GlobalConfigService
         var key = edit?.Key?.Trim().ToLowerInvariant();
         if (edit is null || string.IsNullOrEmpty(key) || key.Length > 64 || !key.All(static character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_'))
             return new("invalid", null, "A provider key uses letters, digits, '-' or '_' (at most 64).", null, null, 0);
-        if (new[] { edit.DisplayName, edit.Model, edit.ReasoningEffort, edit.ApiUrl, edit.ApiKeyEnv, edit.ApiKey, edit.Type }.Any(static value => value?.Length > 2048))
+        if (new[] { edit.DisplayName, edit.Model, edit.ReasoningEffort, edit.ApiUrl, edit.ApiKeyEnv, edit.ApiKey, edit.Type, edit.ConfigDir }.Any(static value => value?.Length > 2048))
             return new("invalid", null, "A provider field is too long.", null, null, 0);
         // The file is written by hand too, and is read whatever these two say: only the form is held to their shape.
         var icon = Optional(edit.Icon)?.ToLowerInvariant();
@@ -282,6 +282,8 @@ internal sealed partial class GlobalConfigService
             definition.AnthropicApiKey = definition.ProviderType == "claude-code" ? anthropicApiKey : null;
             // So are its prompt suggestions; off is the absence of the setting.
             definition.PromptSuggestions = definition.ProviderType == "claude-code" && edit.PromptSuggestions ? true : null;
+            // And its configuration folder: the account it runs with.
+            definition.ConfigDir = definition.ProviderType == "claude-code" ? Optional(edit.ConfigDir) : null;
             // Only a provider that runs the CLI takes a permission mode; the store refuses the field for any
             // other type, so a type changed away from it leaves the mode behind.
             definition.PermissionMode = TakesPermissionMode(definition.ProviderType) ? permissionMode : null;
@@ -320,6 +322,59 @@ internal sealed partial class GlobalConfigService
             store.SaveGlobalProviderDefinitions(definitions);
             return null;
         });
+    }
+
+    /// <summary>
+    /// Adds a copy of a provider under the first free key <c>&lt;key&gt;-2</c>, <c>&lt;key&gt;-3</c>…: the same type and
+    /// settings, a numbered name, and no folder of its own (<c>config_dir</c>, <c>codex_home</c>), which the user sets
+    /// for the other account. It is not the default provider. The providers are re-registered.
+    /// </summary>
+    [NeoRpcMethod("duplicateProvider")]
+    public GlobalConfigSaveResponse DuplicateProvider(GlobalConfigDuplicateProviderRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string? created = null;
+        var response = Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
+        {
+            var source = definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, request.Key?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (source is null) return "The provider no longer exists in the configuration.";
+            var (key, number) = NextKey(source.ProviderKey, definitions);
+            var copy = CodeAltaConfigStore.CloneProviderDefinition(source);
+            copy.ProviderKey = key;
+            var name = source.DisplayName ?? (source.ProviderType is { } type ? CodeAltaConfigStore.CreateProviderTypeDefaults(type).DisplayName : null) ?? source.ProviderKey;
+            // The copy of "Claude Code 2" is "Claude Code 3".
+            var space = name.LastIndexOf(' ');
+            if (space > 0 && name.AsSpan(space + 1).IndexOfAnyExceptInRange('0', '9') < 0) name = name[..space];
+            copy.DisplayName = $"{name} {number}";
+            copy.ConfigDir = null;
+            copy.CodexHome = null;
+            definitions.Add(copy);
+            store.SaveGlobalProviderDefinitions(definitions);
+            created = key;
+            return null;
+        });
+        return response with { Key = response.Status is "ok" or "apply_failed" ? created : null };
+    }
+
+    // The first key of the form <key>-<n> from 2 that no provider has, within the 64 characters of a key.
+    private static (string Key, int Number) NextKey(string key, List<CodeAltaProviderDocument> definitions)
+    {
+        var stem = key;
+        var dash = key.LastIndexOf('-');
+        var start = 2;
+        if (dash > 0 && int.TryParse(key.AsSpan(dash + 1), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) && number >= 1)
+        {
+            // The copy of claude-code-2 is claude-code-3, not claude-code-2-2.
+            stem = key[..dash];
+            start = number + 1;
+        }
+
+        for (var next = start; ; next++)
+        {
+            var suffix = "-" + next.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var candidate = (stem.Length + suffix.Length > 64 ? stem[..(64 - suffix.Length)] : stem) + suffix;
+            if (!definitions.Any(value => string.Equals(value.ProviderKey, candidate, StringComparison.OrdinalIgnoreCase))) return (candidate, next);
+        }
     }
 
     /// <summary>Removes one provider definition and optionally re-registers the remaining providers.</summary>
@@ -506,7 +561,14 @@ internal sealed record GlobalConfigValidationResponse(bool Valid, string? Messag
     public string? Warning { get; init; }
 }
 internal sealed record GlobalConfigSaveRequest(string? ExpectedEpoch, string? Content, string? ExpectedRevision, bool ApplyProviders);
-internal sealed record GlobalConfigSaveResponse(string Status, string? Revision, string? Message, int? Line, int? Column, int ProvidersApplied);
+internal sealed record GlobalConfigSaveResponse(string Status, string? Revision, string? Message, int? Line, int? Column, int ProvidersApplied)
+{
+    /// <summary>The key of the provider a duplication added; null for any other save.</summary>
+    public string? Key { get; init; }
+}
+
+/// <summary>Asks to copy a provider; the revision is the one of the listing it was chosen from.</summary>
+internal sealed record GlobalConfigDuplicateProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? Key);
 internal sealed record GlobalConfigProvidersRequest(string? ExpectedEpoch);
 internal sealed record GlobalConfigSessionTitlesRequest(string? ExpectedEpoch);
 /// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
@@ -576,6 +638,15 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
 
     /// <summary>Whether a <c>claude-code</c> provider asks the CLI to suggest the next prompt after each turn.</summary>
     public bool PromptSuggestions { get; init; }
+
+    /// <summary>
+    /// The configuration folder a <c>claude-code</c> provider gives its CLI (<c>config_dir</c>), as the file writes it;
+    /// null for the folder of Claude Code itself.
+    /// </summary>
+    public string? ConfigDir { get; init; }
+
+    /// <summary>The executable a provider that runs a CLI names (<c>command</c>), as the file writes it; null when CodeAlta finds it.</summary>
+    public string? Command { get; init; }
 }
 
 /// <summary>What each blank field of a provider falls back to; null when nothing is known for the field.</summary>
@@ -602,6 +673,12 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
 
     /// <summary>Whether the CLI suggests the next prompt after each turn. Kept for <c>claude-code</c> only.</summary>
     public bool PromptSuggestions { get; init; }
+
+    /// <summary>
+    /// The configuration folder of the CLI (<c>config_dir</c>), a full path or one that starts with <c>~</c>; blank for
+    /// the folder of Claude Code itself. Kept for <c>claude-code</c> only.
+    /// </summary>
+    public string? ConfigDir { get; init; }
 }
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
     GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);

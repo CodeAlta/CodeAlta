@@ -4007,7 +4007,8 @@ function App() {
       : settingsSection === "providers" ? owned && status?.hostEpoch
         ? <ProviderSettings epoch={status.hostEpoch} readRuntime={modelCatalog.providers} probe={modelCatalog.probe}
           onOpenModels={() => navigate("models")} onOpenConfiguration={() => navigate("config")} onApplied={() => void refreshConfiguration()}
-          onOpenFile={closeSettings} guide={providerGuide} onGuideClosed={() => setProviderGuide(false)} />
+          onOpenFile={closeSettings} guide={providerGuide} onGuideClosed={() => setProviderGuide(false)}
+          providerSessions={key => snapshot?.sessions.filter(session => session.providerKey?.toLowerCase() === key.toLowerCase()).length ?? 0} />
         : <ProvidersPanel epoch={null} read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers}
           holds={providerProbeHolds} onOpenModels={() => navigate("models")} />
       : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}

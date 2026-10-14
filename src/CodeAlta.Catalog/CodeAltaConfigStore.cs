@@ -1824,6 +1824,8 @@ public sealed class CodeAltaConfigStore
         }
 
         ValidateModelsIncludeRegex(definition);
+        ValidateFolderField(definition, "config_dir", definition.ConfigDir);
+        ValidateFolderField(definition, "codex_home", definition.CodexHome);
 
         switch (definition.ProviderType)
         {
@@ -2135,6 +2137,19 @@ public sealed class CodeAltaConfigStore
 
     private static bool IsOpenAISdkProviderType(string? providerType)
         => providerType is "openai-chat" or "openai-responses" or "azure-openai" or CodexSubscriptionProviderType;
+
+    // A folder the CLI of a provider is given: a relative one would depend on the folder CodeAlta was started in.
+    private static void ValidateFolderField(CodeAltaProviderDocument definition, string fieldName, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            value == "~" || value.StartsWith("~/", StringComparison.Ordinal) || value.StartsWith("~\\", StringComparison.Ordinal) ||
+            Path.IsPathRooted(value))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"providers.{definition.ProviderKey} {fieldName} must be a full path or start with ~.");
+    }
 
     private static void RejectUnsupportedField(CodeAltaProviderDocument definition, string fieldName, object? value)
     {
@@ -2509,7 +2524,13 @@ public sealed class CodeAltaConfigStore
         }
     }
 
-    private static CodeAltaProviderDocument CloneProviderDefinition(CodeAltaProviderDocument definition)
+    /// <summary>
+    /// Copies a provider definition, with its tables and lists, as it is: no default is filled in.
+    /// </summary>
+    /// <param name="definition">The definition to copy.</param>
+    /// <returns>A copy that shares nothing the caller can change with <paramref name="definition"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="definition"/> is null.</exception>
+    public static CodeAltaProviderDocument CloneProviderDefinition(CodeAltaProviderDocument definition)
     {
         ArgumentNullException.ThrowIfNull(definition);
 

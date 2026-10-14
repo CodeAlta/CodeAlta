@@ -1,6 +1,7 @@
 import type { GlobalConfigProvider, GlobalConfigProviderEdit } from "#neoastra";
 import { brandColor } from "./brands";
 import type { MessageKey } from "./localization";
+import { validConfigDir } from "./claudeCli/claudeCli";
 
 /** Editable provider fields; empty strings mean "left to the provider's default". */
 export type ProviderForm = Readonly<{
@@ -14,6 +15,8 @@ export type ProviderForm = Readonly<{
   permissionMode: string;
   /** For a provider that runs Claude Code: whether the CLI suggests the next prompt after each turn. */
   promptSuggestions: boolean;
+  /** For a provider that runs Claude Code: the folder of its account (CLAUDE_CONFIG_DIR); blank for the folder of Claude Code. */
+  configDir: string;
 }>;
 
 /** The form for an existing provider, or a blank form for a new one. */
@@ -23,9 +26,9 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
-      promptSuggestions: provider.promptSuggestions === true }
+      promptSuggestions: provider.promptSuggestions === true, configDir: provider.configDir ?? "" }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "" };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -41,6 +44,7 @@ export function validateProviderForm(form: ProviderForm, providers: readonly Pic
   if (form.apiUrl.trim() && !/^https?:\/\/\S+$/i.test(form.apiUrl.trim())) return "The API URL must start with http:// or https://.";
   if (form.makeDefault && !form.enabled) return "Only an enabled provider can be the default.";
   if (form.color.trim() && !brandColor(form.color)) return "A color is written as #rgb or #rrggbb.";
+  if (runsOwnCli(form.type) && !validConfigDir(form.configDir)) return "A folder is a full path or starts with ~.";
   return null;
 }
 
@@ -55,8 +59,8 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
     icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null,
     // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.
     permissionMode: cli ? optional(form.permissionMode) : null,
-    // So are the prompt suggestions, which only Claude Code makes.
-    promptSuggestions: cli && form.promptSuggestions };
+    // So are the prompt suggestions, which only Claude Code makes, and the folder of its account.
+    promptSuggestions: cli && form.promptSuggestions, configDir: cli ? optional(form.configDir) : null };
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */
@@ -75,7 +79,7 @@ export function runsOwnCli(type: string): boolean {
 /** What to do about a provider that is not ready, when its test gave one of the reasons the host names. */
 export function providerProblem(reason: string | null | undefined): MessageKey | null {
   return reason === "claude-code-signed-out" ? "Claude Code is not signed in. Run claude in a terminal and use /login, then test again."
-    : reason === "claude-code-not-found" ? "Claude Code was not found. Install it, or set command of the provider to the path of its executable in the configuration file, then test again."
+    : reason === "claude-code-not-found" ? "Claude Code was not found. Download the version CodeAlta is tested with in the form of the provider, or install Claude Code, then test again."
     : reason === "claude-code-unavailable" ? "Claude Code did not start or did not answer. Run claude in a terminal to check it, then test again."
     : null;
 }

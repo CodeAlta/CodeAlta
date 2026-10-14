@@ -19,6 +19,8 @@ import { providerTourSteps, providerTourStorageKey, startsProviderTour } from ".
 import { SettingsFileLocations } from "./SettingsFileLocation";
 import { useSettingsFiles, type SettingsFilesApi } from "./settingsFiles";
 import { useShellLanguage } from "./shellLanguage";
+import { ClaudeCodeCli, type ClaudeCliApi } from "./claudeCli/ClaudeCodeCli";
+import { sameConfigDir } from "./claudeCli/claudeCli";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
@@ -41,9 +43,13 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi }: {
-  epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider">;
+export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions }: {
+  epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
+  /** The Claude Code CLI CodeAlta pins and its download; the host by default. */
+  cli?: ClaudeCliApi;
+  /** How many sessions use a provider, by its key: a change of the folder of its account asks first when it has some. */
+  providerSessions?: (key: string) => number;
   /** Reads the usage of the subscription of a provider that has one. */
   usage?: Pick<typeof providerUsage, "read">;
   readRuntime: (request: ModelCatalogProvidersRequest, options: CallOptions) => Promise<ModelCatalogProvidersResponse>;
@@ -150,8 +156,13 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       if (alive.current) setNotice({ key: "The save did not complete; reload to see what is on disk.", intent: "danger" });
     } finally { if (alive.current) setBusy(false); }
   }
+  // The sessions of a provider whose account folder changes keep their conversations in the old folder.
+  const movedSessions = original && form && runsOwnCli(form.type) && original.type === form.type && !sameConfigDir(original.configDir, form.configDir)
+    ? providerSessions?.(original.key) ?? 0 : 0;
+  const [confirmFolder, setConfirmFolder] = useState(false);
   function save() {
     if (!form || !listing || problem || busy) return;
+    setConfirmFolder(false);
     const wire = providerEdit(form);
     void settle(() => config.saveProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null,
       provider: wire, makeDefault: form.makeDefault, applyProviders: true }, { timeoutMilliseconds: 60000 }), wire.key);
@@ -160,6 +171,18 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   function addBuiltIn(key: string) {
     if (!listing || busy) return;
     void settle(() => config.addBuiltInProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key }, { timeoutMilliseconds: 60000 }), key);
+  }
+  // Another account of the same type: a copy without the folder of the account, selected for the user to give it one.
+  function duplicate() {
+    if (!original || !listing || busy || dirty) return;
+    setBusy(true); setNotice(null); setDiagnostic(null);
+    void config.duplicateProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key: original.key }, { timeoutMilliseconds: 60000 })
+      .then(result => {
+        if (!alive.current) return;
+        setNotice(configSaveNotice(result, true)); setDiagnostic(result.message);
+        if (result.status === "ok" || result.status === "apply_failed") { selectAfterLoad.current = result.key ?? null; setGeneration(value => value + 1); onApplied?.(); }
+      }, () => { if (alive.current) setNotice({ key: "The save did not complete; reload to see what is on disk.", intent: "danger" }); })
+      .finally(() => { if (alive.current) setBusy(false); });
   }
   function remove() {
     if (!original || !listing || busy) return;
@@ -264,6 +287,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
+            {runsOwnCli(form.type) && <FormGroup label={t("Account folder")} labelFor="provider-config-dir"
+              helperText={t("The folder of the Claude account of this provider (CLAUDE_CONFIG_DIR). A new folder starts without settings, memory or MCP servers.")}>
+              <InputGroup id="provider-config-dir" value={form.configDir} disabled={busy} spellCheck={false} placeholder={t("~/.claude, the folder of Claude Code")}
+                onChange={event => edit({ configDir: event.target.value })} /></FormGroup>}
             {runsOwnCli(form.type) && <FormGroup label="ANTHROPIC_API_KEY" labelFor="provider-anthropic-key"
               helperText={t("When this variable is set. Without an answer saved by Claude Code, sessions do not start.")}>
               <HTMLSelect id="provider-anthropic-key" fill value={form.anthropicApiKey} disabled={busy} onChange={event => edit({ anthropicApiKey: event.target.value })}>
@@ -284,7 +311,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
             {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
             {runsOwnCli(form.type)
-              ? <Callout compact className="provider-settings-wide" icon={<AppIcon name="terminal" size={16} />}>{t("This provider runs the Claude Code CLI installed on this computer. It signs in by itself: run claude in a terminal and use /login. CodeAlta never handles its credentials. The executable path and the other settings are in the configuration file.")}</Callout>
+              ? <ClaudeCodeCli epoch={epoch} api={cli} configDir={form.configDir} command={original?.type === form.type ? original.command : null} />
               : usesAccountSignIn(form.type)
               ? original && original.type === form.type
                 ? <ProviderAccount epoch={epoch} providerKey={original.key} api={login} blocked={dirty ? "Save before signing in." : null}
@@ -306,13 +333,23 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
           </SectionCard>
           <SectionCard className="provider-settings-footer">
             {problem && dirty && <span className="provider-settings-problem" role="alert">{t(problem)}</span>}
-            <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={save}>{t("Save and apply")}</Button>
+            {movedSessions > 0
+              // Their transcripts stay in the old folder: the CLI started with the new one does not find them.
+              ? <PopoverNext isOpen={confirmFolder} placement="top-start" onClose={() => setConfirmFolder(false)} content={<div className="provider-settings-confirm">
+                  <p>{movedSessions === 1 ? t("1 session uses this provider. Its conversation stays in the old folder, where Claude Code will no longer find it.")
+                    : t("{count} sessions use this provider. Their conversations stay in the old folder, where Claude Code will no longer find them.", { count: String(movedSessions) })}</p>
+                  <Button intent="primary" disabled={busy} onClick={save}>{t("Change the folder")}</Button></div>}>
+                  <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={() => setConfirmFolder(true)}>{t("Save and apply")}</Button>
+                </PopoverNext>
+              : <Button intent="primary" disabled={!dirty || !!problem || busy} onClick={save}>{t("Save and apply")}</Button>}
             <Button disabled={!dirty || busy} onClick={() => { if (baseline) setForm(baseline); }}>{t("Revert")}</Button>
             <span className="provider-settings-spacer" />
             {original && <Button icon={probing ? <ActivitySpinner size={14} /> : <AppIcon name="check" size={15} />} disabled={!original.enabled || probing || busy || dirty}
               title={dirty ? t("Save before testing.") : undefined} onClick={() => void test()}>{t(probing ? "Testing selected provider…" : "Test selected provider")}</Button>}
             <Button icon={<AppIcon name="model" size={15} />} onClick={onOpenModels}>{t("Browse models")}</Button>
             <Button variant="minimal" icon={<AppIcon name="edit" size={15} />} onClick={onOpenConfiguration} title={t("Every other provider setting is in the configuration file.")}>{t("Configuration file")}</Button>
+            {original && <Button variant="minimal" icon={<AppIcon name="duplicate" size={15} />} disabled={busy || dirty}
+              title={t(dirty ? "Save before duplicating." : "Another account of the same type: a copy of this provider with a folder of its own.")} onClick={duplicate}>{t("Duplicate")}</Button>}
             {original && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name} from the configuration? Sessions that use it keep their history.", { name: original.effectiveName })}</p>
               <Button intent="danger" disabled={busy} onClick={remove}>{t("Remove provider")}</Button></div>}>
               <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} aria-label={t("Remove provider")} title={t("Remove provider")} />

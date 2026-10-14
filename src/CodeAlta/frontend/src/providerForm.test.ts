@@ -7,15 +7,15 @@ const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
   reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", effectiveApiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, hasApiKey: true,
   defaults: { displayName: "local", model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null,
-  permissionMode: null, promptSuggestions: false };
+  permissionMode: null, promptSuggestions: false, configDir: null, command: null };
 
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(form, { key: "local", type: "openai-chat", enabled: true, displayName: "Local", model: "model-a", reasoningEffort: "",
-    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false });
+    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "" });
   assert.equal(providerForm(local, "other", types).makeDefault, false);
   assert.deepEqual(providerForm(null, "local", types), { key: "", type: "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "",
-    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false });
+    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "" });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
 });
@@ -39,7 +39,7 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   const form = providerForm(local, "local", types);
   assert.deepEqual(providerEdit({ ...form, key: " Local ", model: "  " }), { key: "local", type: "openai-chat", enabled: true, displayName: "Local",
     model: null, reasoningEffort: null, apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: null, apiKey: null, clearApiKey: false, icon: null, color: null, anthropicApiKey: null,
-    permissionMode: null, promptSuggestions: false });
+    permissionMode: null, promptSuggestions: false, configDir: null });
   assert.equal(providerEdit({ ...form, apiKey: "new-secret" }).apiKey, "new-secret");
   const cleared = providerEdit({ ...form, apiKey: "ignored", clearApiKey: true });
   assert.equal(cleared.apiKey, null);
@@ -113,9 +113,22 @@ test("the permission mode is read, sent for a CLI provider and left out for ever
 
 test("a failed test says what to do when the host names its reason", () => {
   assert.match(providerProblem("claude-code-signed-out") ?? "", /\/login/);
-  assert.match(providerProblem("claude-code-not-found") ?? "", /not found.*Install/);
+  assert.match(providerProblem("claude-code-not-found") ?? "", /not found.*Download.*install/);
   assert.match(providerProblem("claude-code-unavailable") ?? "", /did not start/);
   assert.equal(providerProblem("something-else"), null);
   assert.equal(providerProblem(null), null);
   assert.equal(providerProblem(undefined), null, "a host that gives no reason keeps the plain result");
+});
+
+test("the folder of the account is read, checked and sent for a provider that runs Claude Code only", () => {
+  const claude: GlobalConfigProvider = { ...local, type: "claude-code", apiUrl: null, effectiveApiUrl: null, hasApiKey: false, configDir: "~/.claude-business" };
+  const form = providerForm(claude, "local", types);
+  assert.equal(form.configDir, "~/.claude-business");
+  assert.equal(providerEdit(form).configDir, "~/.claude-business");
+  assert.equal(providerFormDirty({ ...form, configDir: "~/.claude-work" }, form), true);
+  assert.equal(providerEdit({ ...form, configDir: " " }).configDir, null, "blank is the folder of Claude Code");
+  assert.equal(providerEdit({ ...form, type: "anthropic" }).configDir, null, "another type does not take it");
+  for (const folder of ["~", "~/x", "~\\x", "/home/me/.claude", "C:\\Users\\me\\.claude", "D:/claude"]) assert.equal(validateProviderForm({ ...form, configDir: folder }, [], "local"), null, folder);
+  assert.equal(validateProviderForm({ ...form, configDir: ".claude-work" }, [], "local"), "A folder is a full path or starts with ~.");
+  assert.equal(validateProviderForm({ ...form, type: "anthropic", configDir: ".claude-work" }, [], "local"), null, "another type ignores it");
 });

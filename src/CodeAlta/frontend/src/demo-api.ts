@@ -151,6 +151,12 @@ export const speech = Object.freeze({
   listen: async () => (async function* (): AsyncGenerator<{ state: string; finalText: string; partialText: string; error: string | null }> { })(),
   stop: async () => ({ status: "unavailable", text: "", error: null }),
 });
+// A browser preview downloads nothing: the Claude Code CLI is not known there.
+export const claudeCli = Object.freeze({
+  read: async () => ({ status: "unavailable", supported: false, version: "", size: "0", pinnedPath: null, installedPath: null, installedVersion: null, windows: false, home: null }),
+  install: async () => ({ status: "unavailable" }), cancelInstall: async () => ({ status: "unavailable" }),
+  watch: async () => (async function* (): AsyncGenerator<{ state: string; receivedBytes: string; totalBytes: string; error: string | null }> { })(),
+});
 export const terminals = Object.freeze({ acknowledge: unavailable, attach: unavailable, close: unavailable, create: unavailable, detach: unavailable, input: unavailable,
   open: unavailable, profiles: unavailable, rename: unavailable, resize: unavailable, show: unavailable, watch: unavailable });
 // The demo starts no session by itself: its automations tab says so.

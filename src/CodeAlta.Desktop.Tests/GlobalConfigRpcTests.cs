@@ -423,6 +423,67 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_WritesTheConfigFolderOfClaudeCode_AndOfNoOtherType()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        var edit = new GlobalConfigProviderEdit("claude", "claude-code", true, null, null, null, null, null, null, true);
+
+        var relative = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { ConfigDir = "claude-business" }, false, false));
+        Assert.AreEqual("invalid", relative.Status, "A relative folder would depend on the folder CodeAlta was started in.");
+        StringAssert.Contains(relative.Message, "config_dir");
+        Assert.AreEqual(ProvidersConfig, File.ReadAllText(fixture.ConfigPath), "A refused edit must not write.");
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { ConfigDir = " ~/.claude-business " }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "config_dir = \"~/.claude-business\"");
+        var after = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual("~/.claude-business", after.Providers.Single(static provider => provider.Key == "claude").ConfigDir);
+        Assert.IsNull(after.Providers.Single(static provider => provider.Key == "local").ConfigDir);
+
+        // A type that does not run Claude Code does not keep it.
+        var retyped = fixture.Service.SaveProvider(new(Epoch, after.Revision, "claude",
+            edit with { Type = "anthropic", ApiKeyEnv = "CODEALTA_ANTHROPIC_API_KEY", ClearApiKey = false, ConfigDir = "~/.claude-business" }, false, false));
+        Assert.AreEqual("ok", retyped.Status, retyped.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("config_dir", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task DuplicateProvider_AddsANumberedCopyWithoutTheFolderOfTheAccount()
+    {
+        await using var fixture = new Fixture("""
+            [providers.claude-code]
+            type = "claude-code"
+            config_dir = "~/.claude"
+            args = ["--add-dir", "/data"]
+            permission_mode = "plan"
+
+            [providers.claude-code-2]
+            type = "claude-code"
+            display_name = "Claude Code 2"
+            """);
+        var listed = fixture.Service.Providers(new(Epoch));
+
+        var first = fixture.Service.DuplicateProvider(new(Epoch, listed.Revision, "claude-code"));
+        Assert.AreEqual("ok", first.Status, first.Message);
+        Assert.AreEqual("claude-code-3", first.Key, "The first free number.");
+        var second = fixture.Service.DuplicateProvider(new(Epoch, first.Revision, "claude-code-2"));
+        Assert.AreEqual("claude-code-4", second.Key, "The copy of a numbered provider is the next number, not a number of it.");
+
+        var providers = fixture.Service.Providers(new(Epoch)).Providers;
+        var copy = providers.Single(static provider => provider.Key == "claude-code-3");
+        Assert.AreEqual(("claude-code", "Claude Code 3", "plan", null), (copy.Type, copy.DisplayName, copy.PermissionMode, copy.ConfigDir));
+        Assert.AreEqual("Claude Code 4", providers.Single(static provider => provider.Key == "claude-code-4").DisplayName);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "[providers.claude-code-3]");
+        Assert.AreEqual(2, File.ReadAllText(fixture.ConfigPath).Split("--add-dir").Length - 1, "The settings the form does not show are copied too.");
+
+        var stale = fixture.Service.DuplicateProvider(new(Epoch, listed.Revision, "claude-code"));
+        Assert.AreEqual("conflict", stale.Status);
+        Assert.IsNull(stale.Key);
+        Assert.AreEqual("invalid", fixture.Service.DuplicateProvider(new(Epoch, second.Revision, "missing")).Status);
+    }
+
+    [TestMethod]
     public async Task SaveProvider_WritesThePermissionModeOfACliProvider_AndTakesItForNoOtherType()
     {
         await using var fixture = new Fixture(ProvidersConfig);

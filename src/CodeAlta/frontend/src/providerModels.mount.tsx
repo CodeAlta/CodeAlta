@@ -5,7 +5,7 @@ import { ProviderSettings } from "./ProviderSettings";
 
 const provider = (key: string): GlobalConfigProvider => ({ key, type: "openai-chat", enabled: true, displayName: key, effectiveName: key, model: null,
   reasoningEffort: null, apiUrl: "http://localhost/v1", effectiveApiUrl: "http://localhost/v1", apiKeyEnv: null, hasApiKey: false,
-  defaults: { displayName: key, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null, permissionMode: null, promptSuggestions: false });
+  defaults: { displayName: key, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null, permissionMode: null, promptSuggestions: false, configDir: null, command: null });
 const state = { calls: [] as ModelCatalogModelsRequest[], saved: [] as unknown[], status: "ok", hold: false, pending: [] as (() => void)[],
   replyEpoch: "epoch", replyProvider: null as string | null, empty: false, truncated: false };
 const providers = [provider("first"), provider("second")];
@@ -17,12 +17,12 @@ const readModels = async (request: ModelCatalogModelsRequest): Promise<ModelCata
   if (state.hold) await new Promise<void>(resolve => state.pending.push(resolve));
   return reply;
 };
-const result = { status: "ok", message: null, revision: "revision", line: null, column: null, providersApplied: 2 };
+const result = { status: "ok", message: null, revision: "revision", line: null, column: null, providersApplied: 2, key: null };
 const config = {
   providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "first", startingProvider: "first", providers,
     providerTypes: ["openai-chat"], reasoningEfforts: [], permissionModes: [], typeDefaults: [], builtIn: [], unsupported: [] }),
   saveProvider: async (request: unknown) => { state.saved.push(request); return result; },
-  deleteProvider: async () => result, addBuiltInProvider: async () => result,
+  deleteProvider: async () => result, addBuiltInProvider: async () => result, duplicateProvider: async () => result,
 };
 Object.assign(window, { modelsFixture: state });
 createRoot(document.getElementById("root")!).render(<StrictMode><ProviderSettings epoch="epoch" config={config} readModels={readModels}
