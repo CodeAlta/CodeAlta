@@ -55,6 +55,9 @@ public static class ModelTiers
 /// <param name="Reasoning">The reasoning efforts in order of preference; empty for the provider's own choice.</param>
 public sealed record ModelTierTarget(string ProviderKey, string ModelId, IReadOnlyList<AgentReasoningEffort> Reasoning)
 {
+    /// <summary>The longest text of a target.</summary>
+    public const int MaximumLength = 256;
+
     /// <summary>Gets the preferred reasoning effort, or <see langword="null"/> for the provider's own choice.</summary>
     public AgentReasoningEffort? PreferredReasoning => Reasoning.Count == 0 ? null : Reasoning[0];
 
@@ -82,13 +85,18 @@ public sealed record ModelTierTarget(string ProviderKey, string ModelId, IReadOn
         target = null!;
         var text = value?.Trim() ?? string.Empty;
         var colon = text.IndexOf(':', StringComparison.Ordinal);
-        if (colon <= 0 || colon == text.Length - 1)
+        if (colon <= 0 || colon == text.Length - 1 || text.Length > MaximumLength || text.Any(char.IsWhiteSpace))
         {
             error = $"'{text}' must be written '<provider>:<model>' or '<provider>:<model>@<reasoning>,<reasoning>'.";
             return false;
         }
 
         var providerKey = text[..colon].Trim();
+        if (!providerKey.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'))
+        {
+            error = $"'{text}': '{providerKey}' is not the key of a provider.";
+            return false;
+        }
         var modelAndReasoning = text[(colon + 1)..];
         var at = modelAndReasoning.LastIndexOf('@');
         var modelId = (at < 0 ? modelAndReasoning : modelAndReasoning[..at]).Trim();
@@ -133,6 +141,10 @@ public sealed record ModelTierTarget(string ProviderKey, string ModelId, IReadOn
 
     /// <inheritdoc />
     public override int GetHashCode() => HashCode.Combine(ProviderKey, ModelId, Reasoning.Count);
+
+    /// <summary>Writes the target as it is read (see <see cref="Format"/>).</summary>
+    /// <returns>The text of the target.</returns>
+    public override string ToString() => Format();
 }
 
 /// <summary>The ordered targets of each tier, from the <c>[models.tiers]</c> table.</summary>

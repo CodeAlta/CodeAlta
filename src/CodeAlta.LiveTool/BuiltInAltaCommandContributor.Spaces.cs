@@ -361,7 +361,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
 
         return await ResolveModelSelectionAsync(context, new AltaModelSelectionOptions { ProviderKey = chosen.ProviderId.Value, ReasoningEffort = request.ReasoningEffort },
-            "alta session create", projectRoot, sessionPreparation: true).ConfigureAwait(false);
+            "alta session create", projectRoot, sessionPreparation: true, space.Id, projectId: null).ConfigureAwait(false);
     }
 
     // Refuses, for an agent, a resource that its own space does not have. True when it was refused (written to stderr).

@@ -14,6 +14,7 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="Tier">The tier the session runs on, or <see langword="null"/> for a model chosen by hand.</param>
 /// <param name="Error">The error that ended the run.</param>
 /// <param name="HasQueuedPrompts">Whether prompts wait in the queue of the session.</param>
+/// <param name="Scope">The tiers of the space of the session, and the providers available there.</param>
 internal sealed record RunFailureNotice(
     string SessionId,
     string? ParentSessionId,
@@ -24,11 +25,8 @@ internal sealed record RunFailureNotice(
     string? AgentPromptId,
     ModelTier? Tier,
     CodeAlta.Agent.AgentErrorEvent Error,
-    bool HasQueuedPrompts)
-{
-    /// <summary>The space the session is in: a fallback only goes to a provider of that space.</summary>
-    public string? SpaceId { get; init; }
-}
+    bool HasQueuedPrompts,
+    ModelTierScope Scope);
 
 public sealed partial class SessionRuntimeService
 {
@@ -53,6 +51,22 @@ public sealed partial class SessionRuntimeService
         }
     }
 
+    /// <summary>
+    /// Reads the tiers of models of a space: its own when its file sets some, the global ones otherwise, with the
+    /// providers available there.
+    /// </summary>
+    /// <param name="spaceId">The space the session records, or <see langword="null"/>.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The tiers of the space.</returns>
+    public async Task<ModelTierScope> LoadModelTierScopeAsync(string? spaceId, string? projectId, CancellationToken cancellationToken = default)
+    {
+        // The space and the providers it has are those the sends and the provider switches of the session check.
+        var (id, space) = await ResolveSpaceAsync(spaceId, projectId, cancellationToken).ConfigureAwait(false);
+        var scope = ModelTierScope.Of(LoadModelSettings().Tiers, space, LoadSpaceAssignments());
+        return scope with { SpaceId = id };
+    }
+
     // Runs on the actor of the session, with the error of a run.
     private async ValueTask<Action<HeldRunFailure>?> TryClaimRunFailureAsync(string sessionId, RuntimeSessionEntry entry, CodeAlta.Agent.AgentErrorEvent error)
     {
@@ -62,6 +76,7 @@ public sealed partial class SessionRuntimeService
         try
         {
             var local = await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, CancellationToken.None).ConfigureAwait(false);
+            var scope = await LoadModelTierScopeAsync(entry.SpaceId, entry.ProjectId, CancellationToken.None).ConfigureAwait(false);
             return fallback(new RunFailureNotice(
                 sessionId,
                 entry.ParentSessionId,
@@ -72,10 +87,8 @@ public sealed partial class SessionRuntimeService
                 entry.PendingAgentPromptId ?? entry.AgentPromptId,
                 ModelTiers.Parse(local?.Tier),
                 error,
-                local?.QueuedPrompts.Any(static prompt => prompt.State != "submitted") ?? false)
-            {
-                SpaceId = await ResolveSpaceIdAsync(entry.SpaceId, entry.ProjectId, CancellationToken.None).ConfigureAwait(false),
-            });
+                local?.QueuedPrompts.Any(static prompt => prompt.State != "submitted") ?? false,
+                scope));
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {

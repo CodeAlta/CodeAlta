@@ -57,6 +57,66 @@ public sealed class SessionFallbackTests
     }
 
     [TestMethod]
+    public async Task SessionOfASpace_FallsBackAlongTheTiersOfItsSpace()
+    {
+        // The global tier has A only; the space lists B after it.
+        await using var f = await Fixture.CreateAsync("""
+            [models.tiers]
+            standard = ["prov-a:model-a@high"]
+
+            [models.fallback]
+            enabled = true
+            """, childSpace: async spaces =>
+        {
+            var created = (await spaces.CreateAsync("Business")).Space!;
+            var tiers = ModelSettings.Read(new CodeAltaModelSettingsDocument
+            {
+                Tiers = new CodeAltaModelTiersDocument { Standard = ["prov-a:model-a@high", "prov-b:model-b@high"] },
+            }).Tiers;
+            Assert.AreEqual(SpaceChangeStatus.Ok, (await spaces.UpdateSettingsAsync(created.Id, _ => new SpaceSettings(new SpaceNewSessions(null, SpaceModelTiers.From(tiers))))).Status);
+            return created.Id;
+        });
+        var scope = await f.Host.RuntimeService.LoadModelTierScopeAsync(f.Child.SpaceId, f.Child.ProjectRef);
+        Assert.IsTrue(scope.FromSpace, $"space {f.Child.SpaceId} {scope.SpaceId} {scope.Tiers.Standard.Count}");
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        var continuation = await f.NextSendAsync(f.B);
+
+        StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
+        Assert.AreEqual("model-b", continuation.Options.Model);
+    }
+
+    [TestMethod]
+    public async Task SessionOfASpace_NeverFallsBackToAProviderTheSpaceDoesNotHave()
+    {
+        // B is in the tier, but the space of the session has not got it: the failure goes through.
+        await using var f = await Fixture.CreateAsync(Tiers, childSpace: async spaces =>
+        {
+            var created = (await spaces.CreateAsync("Business")).Space!;
+            var tiers = ModelSettings.Read(new CodeAltaModelSettingsDocument
+            {
+                Tiers = new CodeAltaModelTiersDocument { Standard = ["prov-a:model-a@high", "prov-b:model-b@high"] },
+            }).Tiers;
+            await spaces.UpdateSettingsAsync(created.Id, _ => new SpaceSettings(new SpaceNewSessions(null, SpaceModelTiers.From(tiers))));
+            return created.Id;
+        }, providerSpaces: "[providers.prov-b]\ntype = \"openai-chat\"\nenabled = false\nspaces = [\"personal\"]\n");
+        var scope = await f.Host.RuntimeService.LoadModelTierScopeAsync(f.Child.SpaceId, f.Child.ProjectRef);
+        Assert.IsTrue(scope.FromSpace);
+        Assert.IsTrue(scope.IsProviderAvailable("prov-a"));
+        Assert.IsFalse(scope.IsProviderAvailable("prov-b"));
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+
+        var card = await f.WaitForCardAsync(AgentSessionUpdateKind.Warning);
+        StringAssert.Contains(card.Message, "no other model of the standard tier can take over");
+        Assert.AreEqual(0, f.B.SendCount);
+    }
+
+    [TestMethod]
     public async Task UnavailableProvider_TriesALowerReasoningOfTheSameModelFirst()
     {
         await using var f = await Fixture.CreateAsync(Tiers);
@@ -221,15 +281,16 @@ public sealed class SessionFallbackTests
         internal SessionViewDescriptor Parent { get; private set; } = null!;
         internal SessionViewDescriptor Child { get; private set; } = null!;
 
-        internal static async Task<Fixture> CreateAsync(string config, string? childPermissionMode = null, IReadOnlyList<string>? bModes = null)
+        internal static async Task<Fixture> CreateAsync(string config, string? childPermissionMode = null, IReadOnlyList<string>? bModes = null,
+            Func<SpaceCatalog, Task<string>>? childSpace = null, string? providerSpaces = null)
         {
             var f = new Fixture();
             f.B = new ScriptedProvider("prov-b", "model-b", bModes ?? [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass]);
-            await f.SetupAsync(config, childPermissionMode);
+            await f.SetupAsync(providerSpaces is null ? config : config + "\n" + providerSpaces, childPermissionMode, childSpace);
             return f;
         }
 
-        private async Task SetupAsync(string config, string? childPermissionMode)
+        private async Task SetupAsync(string config, string? childPermissionMode, Func<SpaceCatalog, Task<string>>? childSpace)
         {
             var home = Path.Combine(_root, "home");
             var global = Path.Combine(_root, "global");
@@ -245,7 +306,9 @@ public sealed class SessionFallbackTests
             var projectId = (await new ProjectCatalog(catalog).UpsertFromPathAsync(project, CancellationToken.None)).Id;
             Journal = new SessionViewJournalStore(catalog);
             Parent = await PersistAsync(projectId, project, "Parent", parentSessionId: null, permissionMode: null);
-            Child = await PersistAsync(projectId, project, "Child", Parent.SessionId, childPermissionMode);
+            // The space of the child, set up before the host reads it.
+            var spaceId = childSpace is null ? null : await childSpace(new SpaceCatalog(new ProjectCatalog(catalog)));
+            Child = await PersistAsync(projectId, project, "Child", Parent.SessionId, childPermissionMode, spaceId);
             Host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = global,
@@ -265,7 +328,8 @@ public sealed class SessionFallbackTests
             _collector = CollectAsync();
         }
 
-        private async Task<SessionViewDescriptor> PersistAsync(string projectId, string project, string title, string? parentSessionId, string? permissionMode)
+        private async Task<SessionViewDescriptor> PersistAsync(string projectId, string project, string title, string? parentSessionId, string? permissionMode,
+            string? spaceId = null)
         {
             var session = new SessionViewDescriptor
             {
@@ -281,6 +345,7 @@ public sealed class SessionFallbackTests
                 ReasoningEffort = AgentReasoningEffort.High,
                 AgentPromptId = "default",
                 CreatedAt = DateTimeOffset.UtcNow,
+                SpaceId = spaceId,
             };
             await Journal.EnsureHeaderAsync(session, CancellationToken.None);
             await Journal.CreateSessionStore().UpsertSessionAsync(new AgentSessionSummary

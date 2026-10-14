@@ -3,7 +3,6 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
-using ModelTierTarget = CodeAlta.Catalog.ModelTiers.ModelTierTarget;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -88,7 +87,9 @@ internal sealed class SessionFallbackCoordinator
         if (_closing.IsCancellationRequested || notice.Error.Failure is not { } failure) return null;
         var settings = _runtime.LoadModelSettings();
         if (!settings.Fallback.Enabled || !IsTrigger(settings.Fallback, failure)) return null;
-        var tier = notice.Tier ?? settings.Tiers.FindTierOf(notice.ProviderKey, notice.ModelId);
+        // The tiers of the space of the session: its own, or the global ones.
+        var tiers = notice.Scope.Tiers;
+        var tier = notice.Tier ?? tiers.FindTierOf(notice.ProviderKey, notice.ModelId);
         if (tier is null) return null;
         var now = Time.GetUtcNow();
         if (failure.Kind is AgentFailureKind.QuotaExhausted or AgentFailureKind.RateLimited)
@@ -100,7 +101,7 @@ internal sealed class SessionFallbackCoordinator
         }
 
         var states = ProviderStates?.Invoke() ?? [];
-        var next = FindNext(settings.Tiers, tier.Value, notice, failure, states, now);
+        var next = FindNext(tiers, tier.Value, notice, failure, states, now);
         return held => Start(notice, tier.Value, next, states, held);
     }
 
@@ -141,10 +142,10 @@ internal sealed class SessionFallbackCoordinator
             if (sameProvider && quota) continue;
             if (sameProvider && candidate.Is(notice.ProviderKey, notice.ModelId, notice.ReasoningEffort) && candidate.Reasoning == notice.ReasoningEffort) continue;
             if (IsExhausted(candidate.Target.ProviderKey, now)) continue;
-            // Only a provider of the space of the session is approved for it.
-            if (!_runtime.IsProviderInSpace(candidate.Target.ProviderKey, notice.SpaceId)) continue;
             // A queue that waits cannot follow the session to another provider: the switch is refused then.
             if (!sameProvider && notice.HasQueuedPrompts) continue;
+            // Only a provider of the space of the session is approved for it.
+            if (!notice.Scope.IsProviderAvailable(candidate.Target.ProviderKey)) continue;
             if (!IsUsable(candidate.Target, states)) continue;
             return candidate;
         }

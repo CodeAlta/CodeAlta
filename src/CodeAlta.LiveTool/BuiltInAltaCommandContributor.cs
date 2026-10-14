@@ -2675,7 +2675,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return parentResolution.ExitCode;
         }
 
-        var modelSelection = await ResolveModelSelectionAsync(context, options.Model, "alta session create", project?.ProjectPath, sessionPreparation: true).ConfigureAwait(false);
+        var modelSelection = await ResolveModelSelectionAsync(context, options.Model, "alta session create", project?.ProjectPath, sessionPreparation: true, space.SpaceId, project?.Id).ConfigureAwait(false);
         if (modelSelection.ExitCode != AltaExitCodes.Success)
         {
             return modelSelection.ExitCode;
@@ -4650,10 +4650,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     }
 
     private static Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath = "alta model resolve")
-        => ResolveModelSelectionAsync(context, request, commandPath, projectRoot: null, sessionPreparation: false);
+        => ResolveModelSelectionAsync(context, request, commandPath, projectRoot: null, sessionPreparation: false, spaceId: null, projectId: null);
 
     // projectRoot: the folder of the project a session is created in, whose configuration names the default provider first.
-    private static async Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath, string? projectRoot, bool sessionPreparation)
+    private static async Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath, string? projectRoot, bool sessionPreparation,
+        string? spaceId, string? projectId)
     {
         if (request.Tier is { } tier)
         {
@@ -4664,7 +4665,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     "Use --tier alone, or name the model with --model-ref, --provider and --model, or --same-model-as. --reasoning may go with --tier.", commandPath));
             }
 
-            return (await ResolveTierSelectionAsync(context, tier, request.ReasoningEffort, commandPath, sessionPreparation, required: true).ConfigureAwait(false))!;
+            return (await ResolveTierSelectionAsync(context, tier, request.ReasoningEffort, commandPath, sessionPreparation, required: true, spaceId, projectId).ConfigureAwait(false))!;
         }
 
         if (!string.IsNullOrWhiteSpace(request.ModelRef))
@@ -4703,7 +4704,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         // A session that names no model and inherits none starts on the standard tier, when the settings have tiers.
         if (inherited is null && string.IsNullOrWhiteSpace(request.ProviderKey) && string.IsNullOrWhiteSpace(request.ModelId)
-            && await ResolveTierSelectionAsync(context, ModelTier.Standard, request.ReasoningEffort, commandPath, sessionPreparation, required: false).ConfigureAwait(false) is { } standard)
+            && await ResolveTierSelectionAsync(context, ModelTier.Standard, request.ReasoningEffort, commandPath, sessionPreparation, required: false, spaceId, projectId).ConfigureAwait(false) is { } standard)
         {
             return standard;
         }
@@ -4731,9 +4732,20 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     // The first model of a tier whose provider is enabled and can answer, and lists the model when it lists models.
     // required: the tier was asked for, and its absence is an error; otherwise null lets the caller go on without it.
     private static async Task<ModelResolutionResult?> ResolveTierSelectionAsync(AltaCommandContext context, ModelTier tier,
-        AgentReasoningEffort? requestedReasoning, string commandPath, bool sessionPreparation, bool required)
+        AgentReasoningEffort? requestedReasoning, string commandPath, bool sessionPreparation, bool required, string? spaceId, string? projectId)
     {
-        var tiers = LoadModelSettings(context).Tiers;
+        // The tiers of the space of the session (its own, or the global ones), with the providers it has. Without a
+        // session to create, the space is the one of the caller, else the one the window shows.
+        var spaces = context.Services.Get<SpaceCatalog>();
+        if (spaceId is null && spaces is not null)
+        {
+            spaceId = (await ResolveNewSessionSpaceAsync(context, null, commandPath).ConfigureAwait(false)).SpaceId;
+        }
+
+        var scope = TierConfigStore(context) is { } store
+            ? await ModelTierScope.LoadAsync(store, spaces, spaceId, projectId, context.CancellationToken).ConfigureAwait(false)
+            : ModelTierScope.None;
+        var tiers = scope.Tiers;
         var name = ModelTiers.NameOf(tier);
         if (tiers.Get(tier).Count == 0)
         {
@@ -4746,6 +4758,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var states = context.Services.Get<IModelProviderInitializationService>()?.CurrentStates ?? [];
         foreach (var target in tiers.Get(tier))
         {
+            if (!scope.IsProviderAvailable(target.ProviderKey)) continue;
             if (FindProviderDescriptor(context, target.ProviderKey) is not { IsEnabled: true }) continue;
             var state = states.FirstOrDefault(state => string.Equals(state.ProviderId.Value, target.ProviderKey, StringComparison.OrdinalIgnoreCase));
             // A provider that was not probed yet may still answer; one that is known not to is skipped.
@@ -4773,24 +4786,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             : null;
     }
 
-    private static ModelSettings LoadModelSettings(AltaCommandContext context)
-    {
-        if (context.Services.Get<SessionRuntimeService>() is { } runtime)
-        {
-            return runtime.LoadModelSettings();
-        }
-
-        var store = context.Services.Get<CodeAltaConfigStore>()
-            ?? (context.Services.Get<CatalogOptions>() is { } options ? new CodeAltaConfigStore(options) : null);
-        try
-        {
-            return store?.LoadGlobalModelSettings() ?? ModelSettings.Default;
-        }
-        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
-        {
-            return ModelSettings.Default;
-        }
-    }
+    // The configuration the tiers are read from; null when the host has none.
+    private static CodeAltaConfigStore? TierConfigStore(AltaCommandContext context)
+        => context.Services.Get<CodeAltaConfigStore>()
+           ?? (context.Services.Get<CatalogOptions>() is { } options ? new CodeAltaConfigStore(options) : null);
 
     private static bool HasCompleteModelSelection(AltaModelSelectionOptions request)
         => !string.IsNullOrWhiteSpace(request.ProviderKey) &&

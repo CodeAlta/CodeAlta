@@ -68,6 +68,33 @@ public sealed class ModelTierResolverTests
         Assert.IsNull(ModelTierResolver.DescribeForAgents(ModelTierSettings.Empty));
     }
 
+    [TestMethod]
+    public void Scope_TakesTheTiersOfTheSpace_AndOnlyItsProviders()
+    {
+        var assignments = SpaceAssignments.Parse("[providers.codex]\nspaces = [\"personal\"]\n");
+        var business = new SpaceDescriptor { Id = "business", Name = "Business" };
+        var global = ModelTierScope.Of(Tiers, business, assignments);
+        Assert.IsFalse(global.FromSpace);
+        Assert.AreSame(Tiers, global.Tiers);
+        Assert.IsFalse(global.IsProviderAvailable("codex"));
+        Assert.IsTrue(global.IsProviderAvailable("claude-code"));
+        Assert.IsTrue(ModelTierScope.Of(Tiers, new SpaceDescriptor { Id = "personal", Name = "Personal" }, assignments).IsProviderAvailable("codex"));
+
+        var states = new[] { State("claude-code", ModelProviderAvailability.Failed, "opus"), State("codex", ModelProviderAvailability.Ready, "gpt-6.1") };
+        Assert.IsNull(ModelTierResolver.Resolve(global, ModelTier.Complex, states), "Codex is not a provider of Business.");
+        Assert.AreEqual("`complex` (claude-code:opus@xhigh), `standard` (claude-code:opus@medium), `quick` (claude-code:haiku)",
+            ModelTierResolver.DescribeForAgents(global.Tiers, global.IsProviderAvailable));
+
+        business.Settings = new SpaceSettings(new SpaceNewSessions(null, SpaceModelTiers.From(ModelSettings.Read(new CodeAltaModelSettingsDocument
+        {
+            Tiers = new CodeAltaModelTiersDocument { Quick = ["claude-code:haiku@low"] },
+        }).Tiers)));
+        var own = ModelTierScope.Of(Tiers, business, assignments);
+        Assert.IsTrue(own.FromSpace);
+        Assert.AreEqual(0, own.Tiers.Complex.Count, "The tiers of a space replace the global ones.");
+        Assert.AreEqual("haiku", own.Tiers.Quick.Single().ModelId);
+    }
+
     private static ModelProviderStateSnapshot State(string key, ModelProviderAvailability availability, string model, IReadOnlyList<AgentReasoningEffort>? reasoning = null)
         => new()
         {

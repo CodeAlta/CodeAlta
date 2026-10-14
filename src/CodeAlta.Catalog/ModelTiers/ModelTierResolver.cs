@@ -113,21 +113,46 @@ public static class ModelTierResolver
     /// <returns>The line, or <see langword="null"/> when no tier has a target.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="tiers"/> is null.</exception>
     public static string? DescribeForAgents(ModelTierSettings tiers)
+        => DescribeForAgents(tiers, isProviderAllowed: null);
+
+    /// <summary>
+    /// Describes the tiers in one line for the agents, with only the targets whose provider may be used: the first
+    /// target of each tier, in the order of the tiers.
+    /// </summary>
+    /// <param name="tiers">The tiers.</param>
+    /// <param name="isProviderAllowed">Says whether a provider may be used, for instance in the space of the session; every provider when null.</param>
+    /// <returns>The line, or <see langword="null"/> when no tier has a target that may be used.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="tiers"/> is null.</exception>
+    public static string? DescribeForAgents(ModelTierSettings tiers, Func<string, bool>? isProviderAllowed)
     {
         ArgumentNullException.ThrowIfNull(tiers);
-        if (tiers.IsEmpty) return null;
-        return string.Join(
-            ", ",
-            ModelTiers.All
-                .Where(tier => tiers.Get(tier).Count > 0)
-                .Select(tier =>
-                {
-                    var targets = tiers.Get(tier);
-                    var first = Candidates(tiers, tier)[0].Format();
-                    return targets.Count > 1
-                        ? $"`{ModelTiers.NameOf(tier)}` ({first}, then {targets.Count - 1} more)"
-                        : $"`{ModelTiers.NameOf(tier)}` ({first})";
-                }));
+        var described = ModelTiers.All
+            .Select(tier => (Tier: tier, Targets: tiers.Get(tier).Where(target => isProviderAllowed?.Invoke(target.ProviderKey) != false).ToArray()))
+            .Where(static entry => entry.Targets.Length > 0)
+            .Select(static entry =>
+            {
+                var first = entry.Targets[0];
+                var text = first.PreferredReasoning is { } effort
+                    ? $"{first.ProviderKey}:{first.ModelId}@{CodeAltaConfigStore.FormatReasoningEffort(effort)}"
+                    : $"{first.ProviderKey}:{first.ModelId}";
+                return entry.Targets.Length > 1
+                    ? $"`{ModelTiers.NameOf(entry.Tier)}` ({text}, then {entry.Targets.Length - 1} more)"
+                    : $"`{ModelTiers.NameOf(entry.Tier)}` ({text})";
+            })
+            .ToArray();
+        return described.Length == 0 ? null : string.Join(", ", described);
+    }
+
+    /// <summary>Finds the model a tier gives now in the space of a scope: its tiers, and its providers only.</summary>
+    /// <param name="scope">The tiers of the space.</param>
+    /// <param name="tier">The tier.</param>
+    /// <param name="states">The states of the configured providers.</param>
+    /// <returns>The first ready target of the tier that the space has, or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> or <paramref name="states"/> is null.</exception>
+    public static ModelTierChoice? Resolve(ModelTierScope scope, ModelTier tier, IReadOnlyList<ModelProviderStateSnapshot> states)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        return Resolve(scope.Tiers, tier, states, scope.IsProviderAvailable);
     }
 
     private static ModelTierChoice CreateChoice(

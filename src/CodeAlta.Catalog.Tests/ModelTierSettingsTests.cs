@@ -20,7 +20,7 @@ public sealed class ModelTierSettingsTests
     [TestMethod]
     public void Target_ParsesProviderModelAndOrderedReasoning()
     {
-        Assert.IsTrue(TierTarget.TryParse(" Claude-Code:opus@high, xhigh ", out var target, out var error), error);
+        Assert.IsTrue(TierTarget.TryParse(" Claude-Code:opus@high,xhigh ", out var target, out var error), error);
         Assert.AreEqual("claude-code", target.ProviderKey);
         Assert.AreEqual("opus", target.ModelId);
         CollectionAssert.AreEqual(new[] { AgentReasoningEffort.High, AgentReasoningEffort.XHigh }, target.Reasoning.ToArray());
@@ -41,6 +41,7 @@ public sealed class ModelTierSettingsTests
     [DataRow("codex:gpt-6.1@")]
     [DataRow("codex:gpt-6.1@huge")]
     [DataRow("codex:gpt-6.1@high,high")]
+    [DataRow("co dex:gpt-6.1")]
     public void Target_RefusesWhatIsNotATarget(string value)
     {
         Assert.IsFalse(TierTarget.TryParse(value, out _, out var error));

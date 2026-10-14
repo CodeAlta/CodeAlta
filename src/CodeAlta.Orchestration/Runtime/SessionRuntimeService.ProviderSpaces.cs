@@ -39,14 +39,20 @@ public sealed partial class SessionRuntimeService
 
     // The space a session is in: the one its journal records, else the only space of its project, else the default.
     private async Task<string> ResolveSpaceIdAsync(string? recordedSpaceId, string? projectId, CancellationToken cancellationToken)
+        => (await ResolveSpaceAsync(recordedSpaceId, projectId, cancellationToken).ConfigureAwait(false)).Id;
+
+    // The same, with the space as the catalog has it; none when the catalog cannot be read, and the id is then the one
+    // the session records, else the default.
+    private async Task<(string Id, SpaceDescriptor? Space)> ResolveSpaceAsync(string? recordedSpaceId, string? projectId, CancellationToken cancellationToken)
     {
         try
         {
-            return (await _spaceCatalog.ResolveSessionSpaceAsync(recordedSpaceId, projectId, cancellationToken).ConfigureAwait(false)).Id;
+            var space = await _spaceCatalog.ResolveSessionSpaceAsync(recordedSpaceId, projectId, cancellationToken).ConfigureAwait(false);
+            return (space.Id, space);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            return SpaceDescriptor.IsValidId(recordedSpaceId) ? recordedSpaceId! : SpaceDescriptor.DefaultId;
+            return (SpaceDescriptor.IsValidId(recordedSpaceId) ? recordedSpaceId! : SpaceDescriptor.DefaultId, null);
         }
     }
 

@@ -364,21 +364,21 @@ public sealed class SpaceCatalogTests
         Assert.IsTrue((await fixture.Spaces.ResolveSessionSpaceAsync(null, alone.Id)).IsDefault, "Its project left the space with it.");
     }
 
-    private static ModelTierTarget Target(string text)
-        => ModelTierTarget.TryParse(text, out var target) ? target! : throw new AssertFailedException($"'{text}' is a target.");
+    private static ModelTiers.ModelTierTarget Target(string text)
+        => ModelTiers.ModelTierTarget.TryParse(text, out var target, out _) ? target : throw new AssertFailedException($"'{text}' is a target.");
 
     [TestMethod]
     public void ATargetOfATier_IsAProviderAModelAndItsEfforts()
     {
-        Assert.AreEqual(new ModelTierTarget("copilot", "claude-opus-4.6", []), Target("copilot:claude-opus-4.6"));
+        Assert.AreEqual(new ModelTiers.ModelTierTarget("copilot", "claude-opus-4.6", []), Target("copilot:claude-opus-4.6"));
         var target = Target(" claude-code:opus@high,xhigh ");
-        Assert.AreEqual("claude-code", target.Provider);
-        Assert.AreEqual("opus", target.Model);
-        CollectionAssert.AreEqual(new[] { CodeAlta.Agent.AgentReasoningEffort.High, CodeAlta.Agent.AgentReasoningEffort.XHigh }, target.Efforts.ToArray());
-        Assert.AreEqual("openai:org/model:v2@low", Target("openai:org/model:v2@low").ToString(), "A model may have a colon of its own.");
-        foreach (var wrong in new[] { "", "opus", ":opus", "codex:", "codex:gpt@", "codex:gpt@high,high", "codex:gpt@fast", "co dex:gpt", "codex:g pt" })
+        Assert.AreEqual("claude-code", target.ProviderKey);
+        Assert.AreEqual("opus", target.ModelId);
+        CollectionAssert.AreEqual(new[] { CodeAlta.Agent.AgentReasoningEffort.High, CodeAlta.Agent.AgentReasoningEffort.XHigh }, target.Reasoning.ToArray());
+        Assert.AreEqual("openai:org/model:v2@low", Target("openai:org/model:v2@low").Format(), "A model may have a colon of its own.");
+        foreach (var wrong in new[] { "", "opus", ":opus", "codex:", "codex:gpt@", "codex:gpt@high,high", "codex:gpt@fast", "co dex:gpt", "codex:g pt", "co/dex:gpt" })
         {
-            Assert.IsFalse(ModelTierTarget.TryParse(wrong, out _), wrong);
+            Assert.IsFalse(ModelTiers.ModelTierTarget.TryParse(wrong, out _, out _), wrong);
         }
     }
 

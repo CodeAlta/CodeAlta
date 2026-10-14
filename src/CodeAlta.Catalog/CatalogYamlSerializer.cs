@@ -330,8 +330,8 @@ public sealed class CatalogYamlSerializer
     // The settings as the file writes them, before any validation: a target of a tier that cannot be read is left out.
     private static SpaceSettings ReadSpaceSettings(SpaceFrontMatter frontMatter)
     {
-        static IReadOnlyList<ModelTierTarget> Targets(List<string>? values)
-            => [.. (values ?? []).Select(static value => ModelTierTarget.TryParse(value, out var target) ? target : null).OfType<ModelTierTarget>()];
+        static IReadOnlyList<ModelTiers.ModelTierTarget> Targets(List<string>? values)
+            => [.. (values ?? []).Select(static value => ModelTiers.ModelTierTarget.TryParse(value, out var target, out _) ? target : null).OfType<ModelTiers.ModelTierTarget>()];
         static string? Text(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
         var sessions = frontMatter.NewSessions;
@@ -351,7 +351,7 @@ public sealed class CatalogYamlSerializer
     // What the file writes of the settings: nothing for what is not set.
     private static void WriteSpaceSettings(SpaceFrontMatter frontMatter, SpaceSettings settings)
     {
-        static List<string>? Targets(IReadOnlyList<ModelTierTarget> targets) => targets.Count == 0 ? null : [.. targets.Select(static target => target.ToString())];
+        static List<string>? Targets(IReadOnlyList<ModelTiers.ModelTierTarget> targets) => targets.Count == 0 ? null : [.. targets.Select(static target => target.Format())];
 
         if (settings.NewSessions is { IsEmpty: false } sessions)
         {

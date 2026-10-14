@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Catalog.ModelTiers;
 
 namespace CodeAlta.Catalog;
 
@@ -97,67 +98,20 @@ public sealed record SpaceModelTiers(IReadOnlyList<ModelTierTarget> Complex, IRe
         var kept = new SpaceModelTiers([.. Complex.Take(MaximumTargets)], [.. Standard.Take(MaximumTargets)], [.. Quick.Take(MaximumTargets)]);
         return kept.IsEmpty ? null : kept;
     }
-}
 
-/// <summary>
-/// One target of a model tier: a provider, a model of it, and the reasoning efforts to use in their order,
-/// written <c>provider:model@effort1,effort2</c> (the efforts are optional: <c>codex:gpt-6.1</c>).
-/// </summary>
-/// <param name="Provider">The key of the provider.</param>
-/// <param name="Model">The identifier of the model.</param>
-/// <param name="Efforts">The reasoning efforts in their order; empty for the usual one of the model.</param>
-public sealed record ModelTierTarget(string Provider, string Model, IReadOnlyList<AgentReasoningEffort> Efforts)
-{
-    /// <summary>The longest text of a target.</summary>
-    public const int MaximumLength = 256;
+    /// <summary>Gets the tiers as the session of the space uses them in place of the global ones.</summary>
+    /// <returns>The tiers.</returns>
+    public ModelTierSettings ToTierSettings() => new(Complex, Standard, Quick);
 
-    /// <summary>Reads a target written <c>provider:model@effort1,effort2</c>.</summary>
-    /// <param name="text">The text.</param>
-    /// <param name="target">The target read; <see langword="null"/> when the text is not one.</param>
-    /// <returns><see langword="true"/> when the text is a target.</returns>
-    public static bool TryParse(string? text, out ModelTierTarget? target)
+    /// <summary>Gets the tiers of the space from tiers as the settings edit them; null when none has a target.</summary>
+    /// <param name="tiers">The tiers.</param>
+    /// <returns>The tiers of the space, or <see langword="null"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="tiers"/> is null.</exception>
+    public static SpaceModelTiers? From(ModelTierSettings tiers)
     {
-        target = null;
-        var value = text?.Trim();
-        if (!SpaceSettings.IsLine(value, MaximumLength) || value!.Any(char.IsWhiteSpace)) return false;
-        var colon = value.IndexOf(':', StringComparison.Ordinal);
-        if (colon <= 0) return false;
-        var provider = value[..colon];
-        if (!provider.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.')) return false;
-        var rest = value[(colon + 1)..];
-        var at = rest.LastIndexOf('@');
-        var model = at < 0 ? rest : rest[..at];
-        if (model.Length == 0) return false;
-        var efforts = new List<AgentReasoningEffort>();
-        if (at >= 0)
-        {
-            foreach (var name in rest[(at + 1)..].Split(','))
-            {
-                if (CodeAltaConfigStore.ParseReasoningEffort(name) is not { } effort || efforts.Contains(effort)) return false;
-                efforts.Add(effort);
-            }
-        }
-
-        target = new ModelTierTarget(provider, model, efforts);
-        return true;
+        ArgumentNullException.ThrowIfNull(tiers);
+        return tiers.IsEmpty ? null : new SpaceModelTiers(tiers.Complex, tiers.Standard, tiers.Quick);
     }
-
-    /// <summary>Tells whether two targets name the same provider, model and efforts in the same order.</summary>
-    /// <param name="other">The other target.</param>
-    /// <returns><see langword="true"/> when they are the same.</returns>
-    public bool Equals(ModelTierTarget? other)
-        => other is not null && string.Equals(Provider, other.Provider, StringComparison.Ordinal)
-            && string.Equals(Model, other.Model, StringComparison.Ordinal) && Efforts.SequenceEqual(other.Efforts);
-
-    /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(Provider, Model, Efforts.Count);
-
-    /// <summary>Writes the target as it is read: <c>provider:model@effort1,effort2</c>.</summary>
-    /// <returns>The text of the target.</returns>
-    public override string ToString()
-        => Efforts.Count == 0
-            ? $"{Provider}:{Model}"
-            : $"{Provider}:{Model}@{string.Join(',', Efforts.Select(static effort => CodeAltaConfigStore.FormatReasoningEffort(effort)))}";
 }
 
 /// <summary>How a space signs its commits.</summary>

@@ -2549,6 +2549,80 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionCreate_WithATier_TakesTheTiersOfTheSpace_AndOnlyItsProviders()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
+        Directory.CreateDirectory(options.GlobalRoot);
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var spaces = new SpaceCatalog(projectCatalog);
+        await spaces.CreateAsync("Business").ConfigureAwait(false);
+        await spaces.CreateAsync("Personal").ConfigureAwait(false);
+        var sessionCatalog = new SessionViewCatalog(options);
+        var descriptors = new[]
+        {
+            new ModelProviderDescriptor(new ModelProviderId("alpha"), "Alpha"),
+            new ModelProviderDescriptor(new ModelProviderId("beta"), "Beta"),
+        };
+        var registry = new ModelProviderRegistry();
+        foreach (var descriptor in descriptors)
+        {
+            var providerRuntime = new StatefulProviderRuntime(descriptor.ProviderId);
+            registry.RegisterOrReplaceSessionRuntime(descriptor, () => providerRuntime);
+        }
+
+        var skillCatalog = new SkillCatalog();
+        var runtime = new SessionRuntimeService(
+            new AgentHub(registry),
+            new AgentSessionCatalog(sessionCatalog.JournalStore.CreateSessionStore()),
+            projectCatalog,
+            sessionCatalog,
+            new AgentInstructionTemplateProvider(skillCatalog, options),
+            options,
+            skillCatalog);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(spaces)
+            .Add(sessionCatalog)
+            .Add(runtime)
+            .Add<IReadOnlyList<ModelProviderDescriptor>>(descriptors)
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+        // Alpha is a provider of Personal only; Business has a quick tier of its own.
+        File.WriteAllText(options.ConfigPath, """
+            [providers.alpha]
+            type = "openai-chat"
+            enabled = false
+            spaces = ["personal"]
+
+            [models.tiers]
+            quick = ["alpha:small@low", "beta:mini@low"]
+            standard = ["alpha:big@medium", "beta:big@medium"]
+            """);
+        var tiers = ModelSettings.Read(new CodeAltaModelSettingsDocument { Tiers = new CodeAltaModelTiersDocument { Quick = ["beta:tiny@minimal"] } }).Tiers;
+        await spaces.UpdateSettingsAsync("business", settings => settings with { NewSessions = new SpaceNewSessions(null, SpaceModelTiers.From(tiers)) }).ConfigureAwait(false);
+
+        async Task<string?> Created(params string[] more)
+        {
+            var result = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, .. more], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout + result.Stderr);
+            return ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("modelSelection").GetProperty("modelRef").GetString();
+        }
+
+        Assert.AreEqual("beta:tiny@minimal", await Created("--space", "business", "--tier", "quick").ConfigureAwait(false), "The tiers of the space replace the global ones.");
+        Assert.AreEqual("alpha:small@low", await Created("--space", "personal", "--tier", "quick").ConfigureAwait(false));
+        // The default space has not got Alpha: the global standard tier gives Beta there.
+        Assert.AreEqual("beta:big@medium", await Created("--space", "default", "--tier", "standard").ConfigureAwait(false));
+        // Business has no standard tier of its own: none is taken there.
+        var none = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--space", "business", "--tier", "standard"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        StringAssert.Contains(none.Stdout + none.Stderr, "usage.noTier");
+    }
+
+    [TestMethod]
     public async Task SessionCreate_GivesASessionWithoutAModelTheOneItsProviderStartsWith()
     {
         using var root = TempDirectory.Create();
