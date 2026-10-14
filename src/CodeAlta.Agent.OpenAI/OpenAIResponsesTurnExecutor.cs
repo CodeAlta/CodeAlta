@@ -191,9 +191,16 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 continue;
                             }
 
-                            WriteCodexConsoleDiagnostic(
-                                provider,
-                                $"stream transport={transport} update={update.GetType().Name} payload={FormatCodexConsolePayload(SerializeModel(update))}");
+                            // The payload dump re-serializes the update, which some compatible providers
+                            // cannot round-trip (unknown response properties such as "output_text" make
+                            // the OpenAI client throw while writing). Only pay that cost when the Codex
+                            // console diagnostics are enabled, and never let the dump abort the turn.
+                            if (IsCodexConsoleDiagnosticEnabled(provider))
+                            {
+                                WriteCodexConsoleDiagnostic(
+                                    provider,
+                                    $"stream transport={transport} update={update.GetType().Name} payload={FormatStreamUpdatePayload(update)}");
+                            }
                             switch (update)
                             {
                                 case StreamingResponseCreatedUpdate created:
@@ -1076,15 +1083,31 @@ internal sealed class OpenAIResponsesTurnExecutor(
             errorType)}");
     }
 
+    private static bool IsCodexConsoleDiagnosticEnabled(OpenAIProviderOptions provider)
+        => provider.CodexSubscription is not null &&
+           !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CODEALTA_CODEX_SUB_DEBUG"));
+
     private static void WriteCodexConsoleDiagnostic(OpenAIProviderOptions provider, string message)
     {
-        if (provider.CodexSubscription is null ||
-            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CODEALTA_CODEX_SUB_DEBUG")))
+        if (!IsCodexConsoleDiagnosticEnabled(provider))
         {
             return;
         }
 
         Console.WriteLine($"[codex-sub-debug] {message}");
+    }
+
+    private static string FormatStreamUpdatePayload(StreamingResponseUpdate update)
+    {
+        try
+        {
+            return FormatCodexConsolePayload(SerializeModel(update));
+        }
+        catch (Exception exception)
+        {
+            // A console diagnostic must never abort the turn when a provider payload cannot be round-tripped.
+            return $"(payload unavailable: {exception.GetType().Name}: {exception.Message})";
+        }
     }
 
     private static string SerializeModel<T>(T model)

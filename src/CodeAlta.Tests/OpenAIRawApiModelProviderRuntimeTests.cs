@@ -1197,6 +1197,63 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_ToleratesUnknownResponsePropertiesWithoutCodexDebug()
+    {
+        // Some compatible providers (e.g. Neuralwatt) add their own properties such as
+        // "output_text" to the response payload. OpenAI 2.14 cannot re-serialize a response
+        // carrying such unknown data, so the debug payload dump must stay gated behind
+        // CODEALTA_CODEX_SUB_DEBUG instead of running for every streamed update.
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateCreatedResponseUpdate(
+                    responseId: "response-neuralwatt",
+                    modelId: "gpt-test"),
+                DeserializeStreamingResponseUpdate(
+                    """
+                    {
+                      "type": "response.completed",
+                      "sequence_number": 1,
+                      "response": {
+                        "id": "response-neuralwatt",
+                        "object": "response",
+                        "created_at": 1744060800,
+                        "model": "gpt-test",
+                        "status": "completed",
+                        "output_text": "Neuralwatt answer.",
+                        "output": [
+                          {
+                            "type": "message",
+                            "id": "msg-neuralwatt",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": [
+                              { "type": "output_text", "text": "Neuralwatt answer.", "annotations": [] }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                    """),
+            ],
+        ]);
+
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "neuralwatt",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        var text = response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value;
+        Assert.AreEqual("Neuralwatt answer.", text);
+        Assert.AreEqual("response-neuralwatt", response.ProviderSessionId);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_RejectsGenericEofAfterToolCall()
     {
         var toolCall = ResponseItem.CreateFunctionCallItem(
