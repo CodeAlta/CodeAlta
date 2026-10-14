@@ -44,11 +44,11 @@ public static class SR
     }
 
     /// <summary>
-    /// Auto-detects the language from the system UI culture.
+    /// Auto-detects the language from the default UI culture of the process threads, or the system UI culture when none is set.
     /// </summary>
     public static void AutoDetect()
     {
-        ApplyLanguage(CultureInfo.InstalledUICulture.Name);
+        ApplyLanguage(GetSystemUiCultureName());
     }
 
     internal static ImmutableDictionary<string, ImmutableDictionary<string, string>> LoadTranslationsFromFile(string path)
@@ -122,7 +122,7 @@ public static class SR
             languageName = languageName?.Trim();
             if (string.IsNullOrWhiteSpace(languageName) || string.Equals(languageName, "auto", StringComparison.OrdinalIgnoreCase))
             {
-                languageName = CultureInfo.InstalledUICulture.Name;
+                languageName = GetSystemUiCultureName();
             }
 
             var cultureName = GetSupportedLanguage(languageName);
@@ -133,6 +133,10 @@ public static class SR
             CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("en");
         }
     }
+
+    // The process-wide default lets a host (or a test run) choose the language without changing the system.
+    private static string GetSystemUiCultureName()
+        => (CultureInfo.DefaultThreadCurrentUICulture ?? CultureInfo.InstalledUICulture).Name;
 
     private static string GetResourceLanguage(string? languageName)
     {

@@ -1,3 +1,4 @@
+using System.Globalization;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Hosting.Tests;
@@ -12,6 +13,13 @@ public sealed class HostingTestLogging
     [AssemblyInitialize]
     public static void Initialize(TestContext context)
     {
+        // Tests assert English text and invariant-looking numbers: run them in en-US whatever the display language of the machine.
+        var culture = CultureInfo.GetCultureInfo("en-US");
+        CultureInfo.DefaultThreadCurrentCulture = culture;
+        CultureInfo.DefaultThreadCurrentUICulture = culture;
+        CultureInfo.CurrentCulture = culture;
+        CultureInfo.CurrentUICulture = culture;
+
         context.Properties[OwnershipKey] = false;
         if (!LogManager.IsInitialized)
         {

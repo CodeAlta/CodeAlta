@@ -2700,28 +2700,28 @@ public sealed class CodeAltaConfigStore
             compaction.SummaryOutputRatio > AgentCompactionSettings.MaxSummaryOutputRatio)
         {
             throw new InvalidOperationException(
-                $"provider compaction summary_output_ratio must be > 0 and <= {AgentCompactionSettings.MaxSummaryOutputRatio:0.##}.");
+                FormattableString.Invariant($"provider compaction summary_output_ratio must be > 0 and <= {AgentCompactionSettings.MaxSummaryOutputRatio:0.##}."));
         }
 
         if (compaction.PostCompactionTargetRatio is not > 0 ||
             compaction.PostCompactionTargetRatio > AgentCompactionSettings.MaxPostCompactionTargetRatio)
         {
             throw new InvalidOperationException(
-                $"provider compaction post_compaction_target_ratio must be > 0 and <= {AgentCompactionSettings.MaxPostCompactionTargetRatio:0.##}.");
+                FormattableString.Invariant($"provider compaction post_compaction_target_ratio must be > 0 and <= {AgentCompactionSettings.MaxPostCompactionTargetRatio:0.##}."));
         }
 
         if (compaction.SummaryShareOfTarget is not > 0 ||
             compaction.SummaryShareOfTarget > AgentCompactionSettings.MaxSummaryShareOfTarget)
         {
             throw new InvalidOperationException(
-                $"provider compaction summary_share_of_target must be > 0 and <= {AgentCompactionSettings.MaxSummaryShareOfTarget:0.##}.");
+                FormattableString.Invariant($"provider compaction summary_share_of_target must be > 0 and <= {AgentCompactionSettings.MaxSummaryShareOfTarget:0.##}."));
         }
 
         if (compaction.FileContextShareOfSummaryTarget is not >= 0 ||
             compaction.FileContextShareOfSummaryTarget > AgentCompactionSettings.MaxFileContextShareOfSummaryTarget)
         {
             throw new InvalidOperationException(
-                $"provider compaction file_context_share_of_summary_target must be >= 0 and <= {AgentCompactionSettings.MaxFileContextShareOfSummaryTarget:0.##}.");
+                FormattableString.Invariant($"provider compaction file_context_share_of_summary_target must be >= 0 and <= {AgentCompactionSettings.MaxFileContextShareOfSummaryTarget:0.##}."));
         }
     }
 

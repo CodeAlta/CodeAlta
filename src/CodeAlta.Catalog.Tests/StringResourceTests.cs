@@ -72,18 +72,42 @@ public sealed partial class StringResourceTests
     }
 
     [TestMethod]
-    public void AutoLanguageUsesInstalledUiCulture()
+    public void AutoLanguageUsesDefaultThreadUiCulture()
     {
         var originalCulture = CultureInfo.CurrentUICulture;
         try
         {
             SR.Language = "auto";
 
-            var expectedLanguage = GetExpectedLanguage(CultureInfo.InstalledUICulture.Name);
+            var expectedLanguage = GetExpectedLanguage((CultureInfo.DefaultThreadCurrentUICulture ?? CultureInfo.InstalledUICulture).Name);
             Assert.AreEqual(expectedLanguage, SR.Language);
+            Assert.AreEqual("Default", SR.T("Default"));
         }
         finally
         {
+            CultureInfo.CurrentUICulture = originalCulture;
+        }
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public void AutoDetectPrefersDefaultThreadUiCultureOverInstalledUiCulture()
+    {
+        var originalCulture = CultureInfo.CurrentUICulture;
+        var originalDefault = CultureInfo.DefaultThreadCurrentUICulture;
+        try
+        {
+            CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("de-DE");
+            SR.AutoDetect();
+            Assert.AreEqual("de", SR.Language);
+
+            CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.GetCultureInfo("en-US");
+            SR.AutoDetect();
+            Assert.AreEqual("en", SR.Language);
+        }
+        finally
+        {
+            CultureInfo.DefaultThreadCurrentUICulture = originalDefault;
             CultureInfo.CurrentUICulture = originalCulture;
         }
     }

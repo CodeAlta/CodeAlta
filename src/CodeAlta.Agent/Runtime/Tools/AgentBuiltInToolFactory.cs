@@ -606,7 +606,7 @@ public static class AgentBuiltInToolFactory
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return Failure($"webget timed out after {effectiveTimeout.TotalSeconds:0.###} seconds.");
+            return Failure(string.Create(CultureInfo.InvariantCulture, $"webget timed out after {effectiveTimeout.TotalSeconds:0.###} seconds."));
         }
         catch (HttpRequestException ex)
         {

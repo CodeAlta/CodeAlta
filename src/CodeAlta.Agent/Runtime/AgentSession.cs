@@ -3671,7 +3671,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private static string CreateModelVisibleToolResultExcerpt(string toolName, string output, int characterLimit)
     {
         var footer = Environment.NewLine + Environment.NewLine +
-            $"[CodeAlta: tool '{toolName}' output was truncated from {output.Length:#,0} characters to keep the active context within the model input limit. Re-run the tool with narrower arguments if more detail is needed.]";
+            FormattableString.Invariant($"[CodeAlta: tool '{toolName}' output was truncated from {output.Length:#,0} characters to keep the active context within the model input limit. Re-run the tool with narrower arguments if more detail is needed.]");
         if (characterLimit <= footer.Length + 32)
         {
             return footer.Trim();
