@@ -118,8 +118,8 @@ public sealed class SpacesRpcTests
             new("running", "p1", "Running", true, 0, false),
             new("background", "p2", "Background", false, 250, false),
             new("failed", null, new string('x', 300), false, 0, true),
-            new("asks", "p2", "Asks", false, 0, false),
-            new("reviews", "p1", "Reviews", true, 1, false),
+            new("asks", "p2", "Asks", false, 0, false) { SpaceId = "business" },
+            new("reviews", "p1", "Reviews", true, 1, false) { SpaceId = "Not An Id" },
         ];
         fixture.Waiting = ["asks", "reviews", "gone"];
         var reply = await fixture.Service.ActivityAsync(new(Epoch), default);
@@ -130,6 +130,8 @@ public sealed class SpacesRpcTests
         Assert.AreEqual((true, 1, true), (reply.Sessions[1].Running, reply.Sessions[1].BackgroundTasks, reply.Sessions[1].Waiting));
         Assert.AreEqual((null, 256, true), (reply.Sessions[2].ProjectId, reply.Sessions[2].Title.Length, reply.Sessions[2].Failed));
         Assert.AreEqual(99, reply.Sessions[3].BackgroundTasks);
+        // The space each session records, for the marks of the spaces: none for an older session or a wrong value.
+        CollectionAssert.AreEqual(new[] { "business", null, null, null, null }, reply.Sessions.Select(static session => session.SpaceId).ToArray());
         StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"waiting\":true");
 
         // More sessions than a reading holds: the ones that wait are kept.

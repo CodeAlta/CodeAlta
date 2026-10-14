@@ -299,6 +299,9 @@ public sealed record SessionViewDescriptorSnapshot
     /// <summary>Gets durable attribution for the actor that created this session.</summary>
     public AltaActorProvenance? CreatedBy { get; init; }
 
+    /// <summary>Gets the space the session records; <see langword="null"/> for a session that records none.</summary>
+    public string? SpaceId { get; init; }
+
     /// <summary>Gets the session working directory.</summary>
     public required string WorkingDirectory { get; init; }
 
@@ -351,6 +354,7 @@ public sealed record SessionViewDescriptorSnapshot
             ProjectRef = descriptor.ProjectRef,
             ParentSessionId = descriptor.ParentSessionId,
             CreatedBy = descriptor.CreatedBy,
+            SpaceId = descriptor.SpaceId,
             WorkingDirectory = descriptor.WorkingDirectory,
             Title = descriptor.Title,
             Status = descriptor.Status,

@@ -713,7 +713,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
                         return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews];
                     }, epoch));
-                    var sessionStarter = new WorkItems.SessionStarter(host, worktrees);
+                    var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
                     builder.AddBookmarksService(new BookmarksService(bookmarks,
                         BookmarksService.Sessions(host.WorkspaceReads, host.SessionViewCatalog.JournalStore), epoch, host.RetentionProtection));
@@ -759,7 +759,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch, canvases);
                     builder.AddPluginUiService(pluginCommands);
                     builder.AddCanvasesService(canvases is null ? new CanvasesService() : new CanvasesService(canvases, epoch));
-                    builder.AddDocumentationService(new DocumentationService(documentation, epoch, documentationView, new DocumentationAsker(host, documentation), shell.NotifySessionsChanged));
+                    builder.AddDocumentationService(new DocumentationService(documentation, epoch, documentationView, new DocumentationAsker(host, documentation, () => spaceView.ShownSpaceId), shell.NotifySessionsChanged));
                     builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
                     builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
                     builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));

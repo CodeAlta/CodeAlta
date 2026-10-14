@@ -184,6 +184,18 @@ public sealed class WorkspaceCreateSessionTests
             Assert.AreEqual(explicitProvider ? alternate.ProviderId.Value : Provider.ProviderId.Value,
                 snapshot.Sessions.Single(s => s.Id == created.SessionId).ProviderKey);
             Assert.IsTrue(snapshot.Sessions.Any(s => s.Id == globalCreated.SessionId && s.WorkspacePath == global));
+            Assert.IsNull(snapshot.Sessions.Single(s => s.Id == globalCreated.SessionId).SpaceId, "A page that names no space creates a session that records none.");
+
+            // The page names the space it shows: the session belongs to it, and a space that is gone creates nothing.
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+            var inSpace = await service.CreateSessionAsync(new(Epoch, "global", null, null, "In a space", SpaceId: "business"), CancellationToken.None);
+            Assert.AreEqual("ok", inSpace.Status);
+            Assert.AreEqual("business", (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(s => s.Id == inSpace.SessionId).SpaceId);
+            Assert.AreEqual("business", (await host.RuntimeService.GetSessionSpaceAsync(inSpace.SessionId!))!.SpaceId);
+            Assert.AreEqual("space_missing", (await service.CreateSessionAsync(new(Epoch, "global", null, null, null, SpaceId: "gone"), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.CreateSessionAsync(new(Epoch, "global", null, null, null, SpaceId: "Not An Id"), CancellationToken.None)).Status);
+            var sessionsBefore = (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Length;
+            Assert.AreEqual(3, sessionsBefore, "A refused space creates no session.");
             Assert.AreEqual(project.Id, (await host.RuntimeService.ResolveOwnedSessionAsync(created.SessionId!, CancellationToken.None))?.ProjectRef);
             Assert.AreEqual(SessionViewKind.GlobalSession,
                 (await host.RuntimeService.ResolveOwnedSessionAsync(globalCreated.SessionId!, CancellationToken.None))?.Kind);

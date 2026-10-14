@@ -595,6 +595,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         return ExistingWorktree(session?.WorktreeDirectory);
     }
 
+    /// <summary>
+    /// Reads what a session records of where it belongs: the space its journal names and its project. The space a
+    /// session is in follows from them (<see cref="SpaceCatalog.ResolveSessionSpace"/>).
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the session records, or <see langword="null"/> when no such session is known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
+    public async Task<SessionSpaceRecord?> GetSessionSpaceAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        // An attached session has what it was created with: it never changes while it runs.
+        if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return new(entry.SpaceId, entry.ProjectId);
+        var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return session is null ? null : new(session.SpaceId, session.ProjectRef);
+    }
+
     internal async Task<SessionViewDescriptor?> ResolveOwnedSessionAsync(string sessionId, CancellationToken cancellationToken)
         => await AdmitAsync(() => ResolveOwnedSessionBodyAsync(sessionId, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -1144,10 +1161,45 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string? parentSessionId,
         AltaActorProvenance? createdBy,
         CancellationToken cancellationToken = default)
-        => await AdmitAsync(() => CreateGlobalSessionOwnedBodyAsync(options, title, parentSessionId, createdBy, cancellationToken), cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+        => await CreateGlobalSessionAsync(options, title, parentSessionId, createdBy, spaceId: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new global session (a chat) in a space, with optional durable lineage, and returns its descriptor.
+    /// </summary>
+    /// <param name="options">How the session runs.</param>
+    /// <param name="title">The title, or null for the usual one.</param>
+    /// <param name="parentSessionId">The session that this one continues the work of, if any.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user.</param>
+    /// <param name="spaceId">
+    /// The space the session belongs to for its whole life, recorded in its journal; null records none, and the
+    /// session is then read as in the default space.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The descriptor of the session.</returns>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary, or the space is not a valid identifier.</exception>
+    public async Task<SessionViewDescriptor> CreateGlobalSessionAsync(
+        SessionExecutionOptions options,
+        string? title,
+        string? parentSessionId,
+        AltaActorProvenance? createdBy,
+        string? spaceId,
+        CancellationToken cancellationToken = default)
+    {
+        var space = NormalizeSpaceId(spaceId);
+        return await AdmitAsync(() => CreateGlobalSessionOwnedBodyAsync(options, title, parentSessionId, createdBy, space, cancellationToken), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // A space given to a new session is an identifier, or none at all.
+    private static string? NormalizeSpaceId(string? spaceId)
+    {
+        if (string.IsNullOrWhiteSpace(spaceId)) return null;
+        var id = spaceId.Trim();
+        return SpaceDescriptor.IsValidId(id) ? id : throw new ArgumentException($"'{id}' is not the identifier of a space.", nameof(spaceId));
+    }
 
     private async Task<SessionViewDescriptor> CreateGlobalSessionOwnedBodyAsync(SessionExecutionOptions options, string? title,
-        string? parentSessionId, AltaActorProvenance? createdBy, CancellationToken cancellationToken)
+        string? parentSessionId, AltaActorProvenance? createdBy, string? spaceId, CancellationToken cancellationToken)
     {
         using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(options);
@@ -1160,6 +1212,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Kind = SessionViewKind.GlobalSession,
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
+            SpaceId = spaceId,
             WorkingDirectory = options.WorkingDirectory,
             Title = string.IsNullOrWhiteSpace(title) ? UnnamedGlobalSessionTitle : title.Trim(),
             // A title that is given was chosen; without one, CodeAlta titles the session.
@@ -1243,15 +1296,47 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         AltaActorProvenance? createdBy,
         string? worktreeDirectory,
         CancellationToken cancellationToken = default)
+        => await CreateProjectSessionAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, spaceId: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Creates a new project session in a space, that works in a git worktree of its project or in the folder of
+    /// its project, and returns its descriptor.
+    /// </summary>
+    /// <param name="project">The project of the session.</param>
+    /// <param name="options">How the session runs; its working directory is the folder of the project.</param>
+    /// <param name="title">The title, or null for the name of the project.</param>
+    /// <param name="parentSessionId">The session that this one continues the work of, if any.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user.</param>
+    /// <param name="worktreeDirectory">The folder of the project in a git worktree, which exists; null for the folder of the project.</param>
+    /// <param name="spaceId">
+    /// The space the session belongs to for its whole life, recorded in its journal; null records none, and the
+    /// session is then read as in the space of its project when it is in exactly one, else in the default space.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The descriptor of the session.</returns>
+    /// <exception cref="ArgumentException">
+    /// A supplied scoped working or project path is invalid or outside the instruction boundary, the worktree is not
+    /// an absolute folder, or the space is not a valid identifier.
+    /// </exception>
+    public async Task<SessionViewDescriptor> CreateProjectSessionAsync(
+        ProjectDescriptor project,
+        SessionExecutionOptions options,
+        string? title,
+        string? parentSessionId,
+        AltaActorProvenance? createdBy,
+        string? worktreeDirectory,
+        string? spaceId,
+        CancellationToken cancellationToken = default)
     {
         if (worktreeDirectory is not null && !Path.IsPathFullyQualified(worktreeDirectory))
             throw new ArgumentException("A worktree is an absolute folder.", nameof(worktreeDirectory));
-        return await AdmitAsync(() => CreateProjectSessionOwnedBodyAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, cancellationToken), cancellationToken)
+        var space = NormalizeSpaceId(spaceId);
+        return await AdmitAsync(() => CreateProjectSessionOwnedBodyAsync(project, options, title, parentSessionId, createdBy, worktreeDirectory, space, cancellationToken), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SessionViewDescriptor> CreateProjectSessionOwnedBodyAsync(ProjectDescriptor project, SessionExecutionOptions options,
-        string? title, string? parentSessionId, AltaActorProvenance? createdBy, string? worktreeDirectory, CancellationToken cancellationToken)
+        string? title, string? parentSessionId, AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, CancellationToken cancellationToken)
     {
         using var lineage = ClaimRetentionWork(parentSessionId, createdBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(project);
@@ -1276,6 +1361,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ProviderId = options.ProviderId.Value,
             ProviderKey = options.ProviderKey ?? options.ProviderId.Value,
             ProjectRef = project.Id,
+            SpaceId = spaceId,
             WorkingDirectory = options.WorkingDirectory,
             WorktreeDirectory = NormalizeOptionalText(worktreeDirectory),
             Title = string.IsNullOrWhiteSpace(title) ? project.DisplayName : title.Trim(),
@@ -1751,6 +1837,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             WorktreeDirectory = worktree,
             ForkedFrom = session.ForkedFrom,
+            SpaceId = session.SpaceId,
             ProviderRegistrationVersion = providerVersion,
             PermissionMode = permissionMode,
             OwnTitleMode = ownTitleMode,
@@ -2695,7 +2782,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             .Where(static entry => !entry.IsTerminated)
             .Select(entry => new SessionRuntimeOverview(entry.SessionId, entry.ProjectId, entry.Title,
                 entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null) + Jobs.CountRunning(entry.SessionId), entry.LastRunFailed)
-            { ParentSessionId = entry.ParentSessionId })];
+            { ParentSessionId = entry.ParentSessionId, SpaceId = entry.SpaceId })];
 
     /// <summary>
     /// Lists the sessions that are at work right now, each with the folder it works in: its worktree when it has
@@ -3887,6 +3974,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ParentSessionId = entry.ParentSessionId,
                 CreatedBy = entry.CreatedBy,
                 ForkedFrom = entry.ForkedFrom,
+                SpaceId = entry.SpaceId,
                 WorkingDirectory = entry.WorkingDirectory,
                 WorktreeDirectory = entry.WorktreeDirectory,
                 Title = sessionId,
@@ -4208,6 +4296,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             CreatedBy = session.CreatedBy,
             ForkedFrom = session.ForkedFrom,
             RewindCount = session.RewindCount,
+            SpaceId = session.SpaceId,
             WorkingDirectory = session.WorkingDirectory,
             WorktreeDirectory = session.WorktreeDirectory,
             Title = session.Title,
@@ -4261,6 +4350,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ParentSessionId = parentSessionId,
                 ForkedFrom = session.ForkedFrom,
                 RewindCount = session.RewindCount,
+                SpaceId = session.SpaceId,
                 CreatedAt = session.CreatedAt,
                 UpdatedAt = session.UpdatedAt,
                 LastActiveAt = session.UpdatedAt,
@@ -4295,6 +4385,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ParentSessionId = parentSessionId,
             ForkedFrom = session.ForkedFrom,
             RewindCount = session.RewindCount,
+            SpaceId = session.SpaceId,
             CreatedAt = session.CreatedAt,
             UpdatedAt = session.UpdatedAt,
             LastActiveAt = session.UpdatedAt,
@@ -4646,6 +4737,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         /// <summary>Where the session comes from when it starts with the turns of another one.</summary>
         public CodeAlta.Agent.Runtime.AgentSessionForkOrigin? ForkedFrom { get; init; }
 
+        /// <summary>The space the session records, or null for a session that records none.</summary>
+        public string? SpaceId { get; init; }
+
         /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
         public long ProviderRegistrationVersion { get; init; }
 
@@ -4742,6 +4836,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ParentSessionId = ParentSessionId,
                 CreatedBy = CreatedBy,
                 ForkedFrom = ForkedFrom,
+                SpaceId = SpaceId,
                 WorkingDirectory = WorkingDirectory,
                 WorktreeDirectory = WorktreeDirectory,
                 Title = Title,

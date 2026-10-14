@@ -175,6 +175,8 @@ internal sealed partial class WorkspaceService
             string? scopeKind = null;
             string? projectId = null;
             string? automationId = null;
+            // The space the session records: a value that is no identifier names no space, which is the default one.
+            var recordedSpace = session.SpaceId;
             // The worktree the session works in, as the session records it: it is shown also once its folder is
             // gone, until the session continues in the folder of its project.
             string? worktreePath = null, worktreeRoot = null, worktreeName = null;
@@ -189,6 +191,7 @@ internal sealed partial class WorkspaceService
             {
                 // The automation that started the session, as the session itself records it.
                 if (header.CreatedBy is { Kind: AltaActorProvenance.AutomationKind, AutomationId: { Length: 36 } automation }) automationId = automation;
+                recordedSpace = header.SpaceId ?? recordedSpace;
                 if (header.Kind == SessionViewKind.GlobalSession && header.ProjectRef is null)
                     scopeKind = "global";
                 else if (header.Kind == SessionViewKind.ProjectSession && header.ProjectRef is { } reference
@@ -206,6 +209,8 @@ internal sealed partial class WorkspaceService
                 projectId is null ? null : projects.FirstOrDefault(project => project.Id == projectId));
             var title = DisplayText(sourceTitle, ref shortened);
             var fullTitle = DisplayTextBounded(sourceTitle, 4096, ref shortened);
+            var spaceId = string.IsNullOrWhiteSpace(recordedSpace) ? null
+                : SpaceDescriptor.IsValidId(recordedSpace.Trim()) ? recordedSpace.Trim() : SpaceDescriptor.DefaultId;
             string? forkedFrom = null, forkedTitle = null, forkKind = null;
             var forkTurns = 0;
             if (session.ForkedFrom is { } origin && ValidLineageId(origin.SessionId))
@@ -219,14 +224,14 @@ internal sealed partial class WorkspaceService
             var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
                 + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0)
                 + (worktreePath?.Length ?? 0) + (worktreeRoot?.Length ?? 0) + (worktreeName?.Length ?? 0)
-                + (forkedFrom?.Length ?? 0) + (forkedTitle?.Length ?? 0) + 24);
+                + (forkedFrom?.Length ?? 0) + (forkedTitle?.Length ?? 0) + (spaceId?.Length ?? 0) + 24);
             if (cost > remaining) break;
             remaining -= cost;
             displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
                 session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
                 automationId, worktreePath, worktreeRoot, worktreeName, worktreeMissing,
-                forkedFrom, forkedTitle, forkKind, forkTurns, Math.Max(0, session.RewindCount)));
+                forkedFrom, forkedTitle, forkKind, forkTurns, Math.Max(0, session.RewindCount), spaceId));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -287,4 +292,7 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     // keeps what a rewind removed. Lineage only: the session is not a child of that one.
     string? ForkedFromSessionId = null, string? ForkedFromTitle = null, string? ForkKind = null, int ForkTurnCount = 0,
     // The number of times the session was rewound: a pane that shows it reads its conversation again when it changes.
-    int RewindCount = 0);
+    int RewindCount = 0,
+    // The space the session records; null for a session created before sessions had a space, whose space follows
+    // from its project (see SpaceCatalog.ResolveSessionSpace).
+    string? SpaceId = null);

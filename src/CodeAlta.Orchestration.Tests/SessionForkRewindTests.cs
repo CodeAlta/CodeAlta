@@ -245,6 +245,56 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task TheSpaceOfASession_IsRecordedAtItsCreation_KeptByItsForksAndRewinds_AndNamedInItsInstructions()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business", "Projects of the Contoso contract.\nNo personal work.")).Succeeded);
+        var options = Options(temp, provider);
+        var chatOptions = new SessionExecutionOptions
+        {
+            ProviderId = options.ProviderId,
+            ProviderKey = options.ProviderKey,
+            WorkingDirectory = temp.GlobalRoot,
+            Model = options.Model,
+            OnPermissionRequest = options.OnPermissionRequest,
+        };
+        var source = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Review", null, null, null, "business", CancellationToken.None);
+        var chat = await host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Chat", null, null, "business", CancellationToken.None);
+        var older = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Older", CancellationToken.None);
+        await Assert.ThrowsExactlyAsync<ArgumentException>(() => host.RuntimeService.CreateGlobalSessionAsync(chatOptions, "Wrong", null, null, "Not a space", CancellationToken.None));
+        foreach (var session in new[] { source, chat, older }) await SendAsync(host, session, session == chat ? chatOptions : options, "one");
+
+        Assert.AreEqual("business", source.SpaceId);
+        Assert.AreEqual("business", (await host.SessionViewCatalog.JournalStore.ReadHeaderAsync(source.SessionId, source.CreatedAt))!.SpaceId);
+        Assert.AreEqual("business", (await ListedAsync(host, source.SessionId)).SpaceId);
+        Assert.AreEqual("business", (await ListedAsync(host, chat.SessionId)).SpaceId);
+        Assert.IsNull((await ListedAsync(host, older.SessionId)).SpaceId, "A session created without a space records none.");
+        Assert.AreEqual(new SessionSpaceRecord("business", null), await host.RuntimeService.GetSessionSpaceAsync(chat.SessionId));
+        Assert.AreEqual(new SessionSpaceRecord(null, host.CurrentProject.Id), await host.RuntimeService.GetSessionSpaceAsync(older.SessionId));
+        Assert.IsNull(await host.RuntimeService.GetSessionSpaceAsync("no-such-session"));
+        Assert.AreEqual("business", host.RuntimeService.ListOverview().Single(overview => overview.SessionId == source.SessionId).SpaceId);
+
+        // The agent is told the space it works in, what it is for on the same line; one in the default space too.
+        var request = provider.Requests.Last(value => value.SessionId == source.SessionId);
+        StringAssert.Contains(request.DeveloperInstructions + request.SystemMessage, "- Space: Business (business): Projects of the Contoso contract. No personal work.");
+        var olderRequest = provider.Requests.Last(value => value.SessionId == older.SessionId);
+        StringAssert.Contains(olderRequest.DeveloperInstructions + olderRequest.SystemMessage, "- Space: Default (default)");
+
+        // A fork and what a rewind keeps are in the space of the session they come from.
+        var fork = await host.RuntimeService.ForkSessionAsync(new SessionForkRequest { SessionId = source.SessionId });
+        Assert.AreEqual("business", fork.Session!.SpaceId);
+        Assert.AreEqual("business", (await ListedAsync(host, fork.Session.SessionId)).SpaceId);
+        await SendAsync(host, source, options, "two");
+        var turns = (await host.RuntimeService.ReadSessionTurnsAsync(source.SessionId))!.Turns.Turns;
+        var rewind = await host.RuntimeService.RewindSessionAsync(new SessionRewindRequest { SessionId = source.SessionId, BeforeRunId = turns[1].RunId });
+        Assert.AreEqual("ok", rewind.Status);
+        Assert.AreEqual("business", (await ListedAsync(host, source.SessionId)).SpaceId);
+        Assert.AreEqual("business", (await ListedAsync(host, rewind.RemovedTurns!.SessionId)).SpaceId);
+    }
+
+    [TestMethod]
     public void BranchTitle_CountsTheForksOfAFork()
     {
         Assert.AreEqual("Review (fork)", SessionRuntimeService.BranchTitle("Review", "fork"));

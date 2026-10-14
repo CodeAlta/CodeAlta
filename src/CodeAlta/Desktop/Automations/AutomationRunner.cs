@@ -101,6 +101,9 @@ internal sealed class AutomationRunner : IAutomationRunner
             cancellationToken.ThrowIfCancellationRequested();
             // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
             if (!_host.Commands.HasCapacity) return Refuse(NoCapacity);
+            // Nothing of the window decides where a run goes: the space of its project when the project is in
+            // exactly one, the default space otherwise.
+            var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
             var session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
             {
                 Kind = AltaActorProvenance.AutomationKind,
@@ -108,7 +111,7 @@ internal sealed class AutomationRunner : IAutomationRunner
                 SourceProjectId = project?.Id,
                 CorrelationId = runId,
                 CreatedAt = DateTimeOffset.UtcNow,
-            }).ConfigureAwait(false);
+            }, spaceId: spaceId).ConfigureAwait(false);
             sessionId = session.SessionId;
 
             // The effort of a model that reports its efforts is completed by the host when the automation names none.

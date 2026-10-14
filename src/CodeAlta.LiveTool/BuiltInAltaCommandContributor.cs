@@ -912,9 +912,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("worktree", "Create a git worktree for the session: a checkout of its own, on a new branch `alta/<name>`.", value => options.Worktree = value is not null);
         command.Add("base=", "Branch or commit a new worktree starts from. Defaults to the commit the project folder is on.", value => options.WorktreeBase = value);
         command.Add("no-worktree", "Work in the project folder, also when the calling session works in a worktree.", value => options.NoWorktree = value is not null);
+        command.Add("space=", "The space the session belongs to: id, start of id, or name. A session creates sessions only in its own space.", value => options.Space = value);
         command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
             command,
+            "A session belongs to one space for its whole life. A session created by a session is in the space of that",
+            "session, which is the only space it can name with `--space`; without a calling session, it is in the space",
+            "the window shows, or in the one `--space` names.",
             "A project session works in the project folder. With `--worktree` it works in a new git worktree instead,",
             "which starts from a commit: what is not committed in the project folder is not in it.",
             "A session created by a session that works in a worktree works in that same worktree, unless",
@@ -2621,6 +2625,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         }
 
+        var space = await ResolveNewSessionSpaceAsync(context, options.Space, "alta session create").ConfigureAwait(false);
+        if (space.ExitCode != AltaExitCodes.Success)
+        {
+            return space.ExitCode;
+        }
+
         var parentResolution = await ResolveParentSessionIdAsync(context, project, options).ConfigureAwait(false);
         if (parentResolution.ExitCode != AltaExitCodes.Success)
         {
@@ -2684,8 +2694,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         try
         {
             session = project is null
-                ? await runtime.CreateGlobalSessionAsync(executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, context.CancellationToken).ConfigureAwait(false)
-                : await runtime.CreateProjectSessionAsync(project, executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, worktreeDirectory, context.CancellationToken).ConfigureAwait(false);
+                ? await runtime.CreateGlobalSessionAsync(executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, space.SpaceId, context.CancellationToken).ConfigureAwait(false)
+                : await runtime.CreateProjectSessionAsync(project, executionOptions, options.Title, parentResolution.ParentSessionId, createdBy, worktreeDirectory, space.SpaceId, context.CancellationToken).ConfigureAwait(false);
         }
         catch (Exception) when (worktree is not null)
         {
@@ -2709,6 +2719,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ProviderId = session.ProviderId,
             providerKey = session.ResolvedProviderKey,
             projectId = session.ProjectRef,
+            spaceId = session.SpaceId,
             title = session.Title,
             parentSessionId = session.ParentSessionId,
             createdBy = session.CreatedBy,
@@ -6461,6 +6472,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? ParentSessionId { get; set; }
 
         public bool NoParent { get; set; }
+
+        public string? Space { get; set; }
     }
 
     private sealed class SessionForkOptions

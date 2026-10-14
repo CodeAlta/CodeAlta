@@ -46,6 +46,12 @@ public sealed record AgentSessionMetadata(
 
     /// <summary>Gets the number of times the session was rewound: its journal became shorter each time.</summary>
     public int RewindCount { get; init; }
+
+    /// <summary>
+    /// Gets the space the session belongs to, as the CodeAlta header of its journal records it; null for a session
+    /// that records none, such as one created before sessions had a space.
+    /// </summary>
+    public string? SpaceId { get; init; }
 }
 
 /// <summary>

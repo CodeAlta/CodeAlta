@@ -11,7 +11,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
     private const string Owner = "session_cache";
     private const string TablePrefix = "session_projection_cache";
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
     private const int ProjectionVersion = 1;
     private const string CacheCompleteMetadataKey = "session_projection_cache_complete";
     private const string CacheCompleteValue = "1";
@@ -239,6 +239,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                             cache_updated_utc_ticks = $cache_updated_utc_ticks,
                             kind = $kind,
                             project_ref = $project_ref,
+                            space_id = COALESCE($space_id, space_id),
                             local_parent_session_id = COALESCE(local_parent_session_id, $local_parent_session_id),
                             created_by_json = COALESCE(created_by_json, $created_by_json)
                         WHERE session_id = $session_id;
@@ -250,6 +251,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     AddParameter(command, "$cache_updated_utc_ticks", DateTimeOffset.UtcNow.UtcTicks);
                     AddParameter(command, "$kind", header.Kind.ToString());
                     AddParameter(command, "$project_ref", NormalizeOptionalText(header.ProjectRef));
+                    AddParameter(command, "$space_id", NormalizeOptionalText(header.SpaceId));
                     AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(header.ParentSessionId));
                     AddParameter(command, "$created_by_json", SerializeCreatedBy(header.CreatedBy));
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
@@ -800,7 +802,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     message_count INTEGER,
                     local_parent_session_id TEXT,
                     created_by_json TEXT,
-                    local_state_cached INTEGER NOT NULL DEFAULT 0
+                    local_state_cached INTEGER NOT NULL DEFAULT 0,
+                    space_id TEXT
                 );
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -819,6 +822,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         await AddPermissionModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddTitleModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddSpaceColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_updated ON session_projection_cache(updated_at_utc_ticks DESC);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
@@ -865,6 +869,32 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_title_mode TEXT;", cancellationToken).ConfigureAwait(false);
+    }
+
+    // A cache written before sessions had a space has no column for it. Its rows are read again from the journals:
+    // a build without the column may have cached a session whose header records a space, and the row of such a
+    // session would say none until its journal changes. It runs in the write transaction of the migration.
+    private static async Task AddSpaceColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'space_id';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                ALTER TABLE session_projection_cache ADD COLUMN space_id TEXT;
+                DELETE FROM session_projection_cache;
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
     }
 
     private static string? FormatTitleMode(string? name)
@@ -990,7 +1020,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 message_count,
                 local_parent_session_id,
                 created_by_json,
-                local_state_cached)
+                local_state_cached,
+                space_id)
             VALUES (
                 $session_id,
                 $journal_path,
@@ -1027,7 +1058,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $message_count,
                 $local_parent_session_id,
                 $created_by_json,
-                $local_state_cached)
+                $local_state_cached,
+                $space_id)
             ON CONFLICT(session_id) DO UPDATE SET
                 journal_path = excluded.journal_path,
                 journal_last_write_utc_ticks = excluded.journal_last_write_utc_ticks,
@@ -1053,6 +1085,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 state_json = excluded.state_json,
                 kind = excluded.kind,
                 project_ref = excluded.project_ref,
+                space_id = excluded.space_id,
                 local_provider_key = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_provider_key ELSE session_projection_cache.local_provider_key END,
                 local_model_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_model_id ELSE session_projection_cache.local_model_id END,
                 local_reasoning_effort = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_reasoning_effort ELSE session_projection_cache.local_reasoning_effort END,
@@ -1105,6 +1138,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(localState?.ParentSessionId));
         AddParameter(command, "$created_by_json", NormalizeOptionalText(localState?.CreatedByJson));
         AddParameter(command, "$local_state_cached", localState is null ? 0 : 1);
+        AddParameter(command, "$space_id", NormalizeOptionalText(projection.Header?.SpaceId ?? projection.Projection.SpaceId));
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1199,7 +1233,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 GetInt64(reader, "journal_length")),
             summary,
             state,
-            localState);
+            localState,
+            GetString(reader, "space_id"));
     }
 
     private static void AddParameter(SqliteCommand command, string name, object? value)
@@ -1303,7 +1338,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AgentSessionViewStateMetadata? LocalState)
     {
         public AgentSessionCacheProjection ToProjection()
-            => Projection with { ViewState = LocalState };
+            => Projection with { ViewState = LocalState, SpaceId = NormalizeOptionalText(Header?.SpaceId) ?? Projection.SpaceId };
     }
 
     private sealed record SqliteSessionProjectionRow(
@@ -1311,9 +1346,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AgentSessionCacheFileStamp Stamp,
         AgentSessionSummary Summary,
         AgentSessionState? State,
-        AgentSessionViewStateMetadata? LocalState)
+        AgentSessionViewStateMetadata? LocalState,
+        string? SpaceId)
     {
         public AgentSessionCacheProjection ToProjection()
-            => new(JournalPath, Stamp, Summary, State, LocalState);
+            => new(JournalPath, Stamp, Summary, State, LocalState) { SpaceId = SpaceId };
     }
 }

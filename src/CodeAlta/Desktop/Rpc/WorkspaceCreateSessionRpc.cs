@@ -13,10 +13,13 @@ internal sealed partial class WorkspaceService
     private readonly ModelProviderRegistry? _sessionProviders;
     // The provider of a session that names none: the default of the configuration, as the page shows it.
     private readonly DesktopDefaultProvider? _defaultProvider;
-    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, Task<SessionViewDescriptor>>? _createSession;
+    // Project, provider, title and the space of the session.
+    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, string?, Task<SessionViewDescriptor>>? _createSession;
+    // The spaces a new session can be created in: the one the page shows, which it names.
+    private readonly SpaceCatalog? _sessionSpaces;
     // A session that works in a worktree: the worktree is created first, and removed again when no session comes of it.
     private readonly GitWorktreeService? _worktrees;
-    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string?, string, Task<SessionViewDescriptor>>? _createInWorktree;
+    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string?, string, string?, Task<SessionViewDescriptor>>? _createInWorktree;
     private readonly Func<OwnedProjectReferenceScope?, CancellationToken, Task<IReadOnlyList<OwnedPromptChoice>?>>? _draftPrompts;
     private readonly Func<string, string?, string, string, Task<bool>>? _renameSession;
     private readonly Func<string, string?, string, string, Task<string>>? _deleteSession;
@@ -34,9 +37,10 @@ internal sealed partial class WorkspaceService
     {
         _sessionProviders = host.ModelProviderRegistry;
         _defaultProvider = new(host.CatalogOptions);
-        _createSession = (project, provider, title) => host.Commands.CreateDraftSessionAsync(project, provider, title);
+        _createSession = (project, provider, title, space) => host.Commands.CreateDraftSessionAsync(project, provider, title, spaceId: space);
+        _sessionSpaces = host.SpaceCatalog;
         _worktrees = worktrees;
-        _createInWorktree = (project, provider, title, folder) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder);
+        _createInWorktree = (project, provider, title, folder, space) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space);
         _draftPrompts = host.Commands.GetDraftPromptChoicesAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
@@ -72,19 +76,28 @@ internal sealed partial class WorkspaceService
 
     internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch,
         ModelProviderRegistry providers, Func<ProjectDescriptor?, ModelProviderDescriptor, string?, Task<SessionViewDescriptor>> createSession)
+        : this(reads, catalog, epoch, providers, (project, provider, title, _) => createSession(project, provider, title))
+    {
+        ArgumentNullException.ThrowIfNull(createSession);
+    }
+
+    internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch,
+        ModelProviderRegistry providers, Func<ProjectDescriptor?, ModelProviderDescriptor, string?, string?, Task<SessionViewDescriptor>> createSession)
         : this(reads, catalog, epoch)
     {
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(createSession);
         _sessionProviders = providers;
         _createSession = createSession;
+        _sessionSpaces = new SpaceCatalog(catalog);
     }
 
     /// <summary>Creates an owned global or exact-catalog-project session; never accepts a renderer-supplied project descriptor.</summary>
     /// <remarks>
     /// A project session can be asked to work in a new git worktree: the worktree is created first, from the
     /// commit the folder of the project is on or from a named branch, and the answer is <c>worktree_failed</c>
-    /// with the reason when git creates none.
+    /// with the reason when git creates none. The page names the space it shows: the session belongs to it for
+    /// its whole life, and the answer is <c>space_missing</c> when no such space exists (any more).
     /// </remarks>
     /// <param name="request">Exact scope, expected host epoch and optional canonical enabled provider identity. Null uses the default or first enabled provider.</param>
     /// <param name="cancellationToken">Cancels only the wait after admission, not the creation.</param>
@@ -104,7 +117,8 @@ internal sealed partial class WorkspaceService
             || request.Scope == "global" && (request.ProjectId is not null || request.ProjectPath is not null)
             || request.Scope == "project" && (!ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096))
             || request.Worktree && request.Scope != "project"
-            || request.BaseBranch is not null && (!request.Worktree || !GitWorktreeService.IsReferenceName(request.BaseBranch)))
+            || request.BaseBranch is not null && (!request.Worktree || !GitWorktreeService.IsReferenceName(request.BaseBranch))
+            || request.SpaceId is not null && !SpaceDescriptor.IsValidId(request.SpaceId))
             return Reply("invalid_scope");
         if (request.Worktree && (_worktrees is null || _createInWorktree is null)) return Reply("unconfigured");
         if (request.Scope == "project")
@@ -166,6 +180,12 @@ internal sealed partial class WorkspaceService
                     return;
                 }
             }
+            if (request.SpaceId is { } spaceId && _sessionSpaces is not null
+                && await _sessionSpaces.GetAsync(spaceId, CancellationToken.None).ConfigureAwait(false) is null)
+            {
+                completion.TrySetResult(Reply("space_missing"));
+                return;
+            }
             // Catalog resolution can yield. Revalidate the original descriptor, not a replacement
             // carrying the same key or a newly configured default. This read never starts a runtime.
             if (!_sessionProviders!.TryGetProvider(provider.ProviderId, out var current)
@@ -187,8 +207,8 @@ internal sealed partial class WorkspaceService
             SessionViewDescriptor session;
             try
             {
-                session = worktree is null ? await _createSession!(project, provider, request.Title).ConfigureAwait(false)
-                    : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!).ConfigureAwait(false);
+                session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId).ConfigureAwait(false)
+                    : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId).ConfigureAwait(false);
             }
             catch (Exception) when (worktree is not null)
             {
@@ -239,8 +259,9 @@ internal sealed partial class WorkspaceService
 
 /// <param name="Worktree">Creates a git worktree for a project session, which then works there.</param>
 /// <param name="BaseBranch">The branch the worktree starts from; the commit the folder of the project is on when null.</param>
+/// <param name="SpaceId">The space the page shows, which the session belongs to; null records none.</param>
 internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title,
-    string? ProviderId = null, bool Worktree = false, string? BaseBranch = null);
+    string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null);
 /// <param name="WorktreePath">The folder the session works in, when it is a worktree.</param>
 /// <param name="Reason">With <c>worktree_failed</c>: <c>not_repository</c>, <c>no_commit</c>, <c>git_unavailable</c>, <c>invalid</c>, <c>timeout</c> or <c>failed</c>.</param>
 /// <param name="Message">With <c>worktree_failed</c>: what git said.</param>

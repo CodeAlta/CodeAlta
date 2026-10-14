@@ -77,10 +77,12 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static Command CreateSpaceCurrentCommand(AltaCommandContext context)
     {
-        var command = Leaf("current", "Show the space the CodeAlta window shows, with its projects.");
+        var command = Leaf("current", "Show the space of the calling session, else the one the CodeAlta window shows, with its projects.");
         command.Add(async (_, _) => await HandleSpaceCurrentAsync(context).ConfigureAwait(false));
         AddHelpText(command,
-            "`shown` is true when a window shows this space. Without a window, the record is the default space, which holds every project, and `shown` is false.",
+            "A session belongs to one space for its whole life: the record is that space for a session that calls, whatever the window shows (`source` is `session`).",
+            "Without a calling session it is the space the window shows (`source` is `window`), else the default space, which holds every project (`source` is `default`).",
+            "`shown` is true when a window shows this space.",
             "Example: `alta space current`.");
         return command;
     }
@@ -235,6 +237,69 @@ internal sealed partial class BuiltInAltaCommandContributor
             ? await spaces.GetAsync(shown, context.CancellationToken).ConfigureAwait(false)
             : null;
 
+    // The space of the calling session; null when no session calls. A session belongs to the space its journal
+    // records, else to the space of its project when the project is in exactly one, else to the default space; a
+    // session that cannot be read is in the default space.
+    private static async Task<SpaceDescriptor?> CallerSpaceAsync(AltaCommandContext context, SpaceCatalog spaces)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } sessionId)
+        {
+            return null;
+        }
+
+        SessionSpaceRecord? record = null;
+        if (context.Services.Get<SessionRuntimeService>() is { } runtime)
+        {
+            try
+            {
+                record = await runtime.GetSessionSpaceAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+            }
+        }
+
+        return await spaces.ResolveSessionSpaceAsync(record?.SpaceId, record?.ProjectId ?? NormalizeOptionalText(context.Caller.SourceProjectId),
+            context.CancellationToken).ConfigureAwait(false);
+    }
+
+    // The space a new session goes to. A session that creates one creates it in its own space and can name no other
+    // one: what it cannot reach in its own space it does not reach through a session it creates. Without a calling
+    // session, the space named, else the one the window shows; null when there is neither (the session then records
+    // none). Refusals are written to stderr.
+    private static async Task<(string? SpaceId, int ExitCode)> ResolveNewSessionSpaceAsync(AltaCommandContext context, string? reference, string commandPath)
+    {
+        if (context.Services.Get<SpaceCatalog>() is not { } spaces)
+        {
+            // A host that keeps no spaces creates sessions that record none; one cannot be asked for there.
+            return NormalizeOptionalText(reference) is null || context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out _)
+                ? (null, AltaExitCodes.Success)
+                : (null, AltaExitCodes.ServiceUnavailable);
+        }
+
+        SpaceDescriptor? asked = null;
+        if (NormalizeOptionalText(reference) is not null)
+        {
+            var (resolved, exitCode) = await ResolveSpaceAsync(context, spaces, reference, commandPath).ConfigureAwait(false);
+            if (resolved is null)
+            {
+                return (null, exitCode);
+            }
+
+            asked = resolved;
+        }
+
+        var own = await CallerSpaceAsync(context, spaces).ConfigureAwait(false);
+        if (own is not null && asked is not null && !string.Equals(own.Id, asked.Id, StringComparison.Ordinal))
+        {
+            return (null, SpaceRefused(context, "space.notOwnSpace",
+                $"A session creates sessions only in its own space. This session is in the space '{own.Name}' ({own.Id}), not in '{asked.Name}' ({asked.Id}): " +
+                $"leave out --space to create the session in '{own.Name}', or ask the user to create it in '{asked.Name}' from the CodeAlta window."));
+        }
+
+        return ((own ?? asked ?? await ShownSpaceAsync(context, spaces).ConfigureAwait(false))?.Id, AltaExitCodes.Success);
+    }
+
     // What stands between a project and the user: the space the window shows, which does not have the project, and
     // the space to show for it (the first of its spaces, else the default one, which has every project). Null when
     // the window shows the project: its space has it, no window said what it shows, or the host keeps no spaces.
@@ -352,7 +417,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         => (await spaces.LoadMembersAsync(includeArchived: false, context.CancellationToken).ConfigureAwait(false))
             .FirstOrDefault(members => members.Space.Id == spaceId)?.ProjectIds.Count ?? 0;
 
-    private static async Task WriteSpaceDetailAsync(AltaCommandContext context, SpaceCatalog spaces, SpaceDescriptor space, bool includeArchived, bool current, bool? shown)
+    private static async Task WriteSpaceDetailAsync(AltaCommandContext context, SpaceCatalog spaces, SpaceDescriptor space, bool includeArchived, bool current, bool? shown,
+        string? source = null)
     {
         var projects = (await spaces.Projects.LoadAsync(context.CancellationToken).ConfigureAwait(false))
             .Where(project => (includeArchived || !project.Archived) && (space.IsDefault || project.Spaces.Contains(space.Id, StringComparer.Ordinal)))
@@ -360,6 +426,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             .ToArray();
         var record = SpaceRecord(context, "alta.space.detail", space, projects.Length, current);
         if (shown is not null) record["shown"] = shown.Value;
+        if (source is not null) record["source"] = source;
         record["projects"] = projects.Select(static project => new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["id"] = project.Id,
@@ -379,7 +446,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
 
         var members = await spaces.LoadMembersAsync(includeArchived: false, context.CancellationToken).ConfigureAwait(false);
-        var shown = NormalizeOptionalText(context.Services.Get<IAltaSpaceView>()?.ShownSpaceId);
+        var shown = (await CallerSpaceAsync(context, spaces).ConfigureAwait(false))?.Id ?? NormalizeOptionalText(context.Services.Get<IAltaSpaceView>()?.ShownSpaceId);
         var currentId = shown is not null && members.Any(item => item.Space.Id == shown) ? shown : SpaceDescriptor.DefaultId;
         foreach (var item in members)
         {
@@ -403,7 +470,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             return exitCode;
         }
 
-        var current = (await ShownSpaceAsync(context, spaces).ConfigureAwait(false))?.Id ?? SpaceDescriptor.DefaultId;
+        var current = ((await CallerSpaceAsync(context, spaces).ConfigureAwait(false)) ?? await ShownSpaceAsync(context, spaces).ConfigureAwait(false))?.Id
+            ?? SpaceDescriptor.DefaultId;
         await WriteSpaceDetailAsync(context, spaces, space, includeArchived, space.Id == current, shown: null).ConfigureAwait(false);
         return AltaExitCodes.Success;
     }
@@ -415,9 +483,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             return AltaExitCodes.ServiceUnavailable;
         }
 
+        var own = await CallerSpaceAsync(context, spaces).ConfigureAwait(false);
         var shown = await ShownSpaceAsync(context, spaces).ConfigureAwait(false);
-        var space = shown ?? (await spaces.LoadAsync(context.CancellationToken).ConfigureAwait(false))[0];
-        await WriteSpaceDetailAsync(context, spaces, space, includeArchived: false, current: true, shown: shown is not null).ConfigureAwait(false);
+        var space = own ?? shown ?? (await spaces.LoadAsync(context.CancellationToken).ConfigureAwait(false))[0];
+        await WriteSpaceDetailAsync(context, spaces, space, includeArchived: false, current: true, shown: shown?.Id == space.Id,
+            source: own is not null ? "session" : shown is not null ? "window" : "default").ConfigureAwait(false);
         return AltaExitCodes.Success;
     }
 

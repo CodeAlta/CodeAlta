@@ -13,7 +13,15 @@ public sealed record SessionRuntimeOverview(string SessionId, string? ProjectId,
 {
     /// <summary>Gets the session that created this one, when one did; <see langword="null"/> otherwise.</summary>
     public string? ParentSessionId { get; init; }
+
+    /// <summary>Gets the space the session records; <see langword="null"/> for a session that records none.</summary>
+    public string? SpaceId { get; init; }
 }
+
+/// <summary>What a session records of where it belongs.</summary>
+/// <param name="SpaceId">The space its journal names; <see langword="null"/> for a session created before sessions had a space.</param>
+/// <param name="ProjectId">Its project; <see langword="null"/> for a chat.</param>
+public sealed record SessionSpaceRecord(string? SpaceId, string? ProjectId);
 
 /// <summary>A session that is at work, and the folder it works in.</summary>
 /// <param name="SessionId">The session.</param>

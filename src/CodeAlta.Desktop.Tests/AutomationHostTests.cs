@@ -636,6 +636,9 @@ public sealed class AutomationHostTests
                 ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
             });
             var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            // The project is in one space: the runs of its automations are there; a chat run is in the default space.
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+            Assert.IsTrue((await host.SpaceCatalog.AssignAsync(project.Id, ["business"], null)).Succeeded);
             var runner = new AutomationRunner(host);
             var source = new AutomationSource(Path.Combine(global, "config.toml"), null, null);
             const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77";
@@ -669,6 +672,7 @@ public sealed class AutomationHostTests
 
             var session = (await workspace.SnapshotAsync(new(), default)).Sessions.Single();
             Assert.AreEqual((start.SessionId, "Nightly review", Id, project.Id, "automation-fixture"), (session.Id, session.Title, session.AutomationId, session.ProjectId, session.ProviderKey));
+            Assert.AreEqual("business", session.SpaceId);
 
             // As a chat, in no project, started by an event: what it was about names the session too.
             var chat = await runner.StartAsync(Entry(new(Id, "A chat"), inProject: false), "run-2", "Say hello.", "#12  Crash\non start", default);
@@ -677,10 +681,49 @@ public sealed class AutomationHostTests
             var sessions = (await workspace.SnapshotAsync(new(), default)).Sessions;
             var started = sessions.Single(candidate => candidate.Id == chat.SessionId);
             Assert.AreEqual((null, Id, "A chat · #12 Crash on start"), (started.ProjectId, started.AutomationId, started.Title));
+            Assert.AreEqual("default", started.SpaceId);
             Assert.AreEqual("Triage", AutomationRunner.SessionTitle("Triage", " "));
             Assert.AreEqual(8 + 3 + 80, AutomationRunner.SessionTitle("Triage 1", "#7 " + new string('x', 200)).Length, "A long title of an issue is cut.");
             await workspace.CloseSessionsAsync();
             await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task WorkStartedFromTheWindow_IsInTheSpaceTheWindowShows()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-work-space-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            provider.Release.SetResult();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Personal")).Succeeded);
+            var shown = "personal";
+            var starter = new CodeAlta.Desktop.WorkItems.SessionStarter(host, null, () => shown);
+
+            var started = await starter.StartAsync(project, "A task", _ => "Do the task.", false, null, "task", null);
+            Assert.IsNull(started.Problem);
+            Assert.AreEqual("personal", (await host.RuntimeService.GetSessionSpaceAsync(started.SessionId!))!.SpaceId);
+            await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
         }
         finally
         {

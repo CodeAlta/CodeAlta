@@ -36,7 +36,7 @@ public sealed partial class FileSystemAgentSessionStore
                     throw new IOException("A session journal has missing or ambiguous identity.");
                 if (string.IsNullOrWhiteSpace(summary.WorkingDirectory)) throw new IOException("A session journal has no workspace scope.");
                 _sessionFiles[summary.SessionId] = path;
-                yield return ToMetadata(summary, projection.State, projection.ViewState);
+                yield return ToMetadata(summary, projection.State, projection.ViewState, projection.SpaceId);
             }
         }
     }

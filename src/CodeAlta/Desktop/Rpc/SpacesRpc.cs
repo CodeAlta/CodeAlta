@@ -152,7 +152,8 @@ internal sealed class SpacesService
             .ToDictionary(static group => group.Key, static group => group.First().ParentSessionId!, StringComparer.OrdinalIgnoreCase);
         return new("ok", [.. sessions.Take(MaximumActivitySessions).Select(session => new SpaceSessionActivity(session.SessionId, session.ProjectId,
             Cut(session.Title, 256), session.Running, Math.Min(session.BackgroundTasks, 99), session.Failed, waiting.Contains(session.SessionId),
-            waiting.Contains(session.SessionId) ? Ancestors(session.SessionId, parents) : []))],
+            waiting.Contains(session.SessionId) ? Ancestors(session.SessionId, parents) : [],
+            SpaceDescriptor.IsValidId(session.SpaceId) ? session.SpaceId : null))],
             sessions.Length > MaximumActivitySessions);
     }
 
@@ -293,5 +294,6 @@ internal sealed record SpacesActivityResponse(string Status, IReadOnlyList<Space
 /// For a session that waits, the sessions above it, nearest first: the one that created it, the one that created that
 /// one… Empty otherwise, and for a session no other session created.
 /// </param>
+/// <param name="SpaceId">The space the session records; null for one created before sessions had a space.</param>
 internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed, bool Waiting,
-    IReadOnlyList<string> Ancestors);
+    IReadOnlyList<string> Ancestors, string? SpaceId = null);

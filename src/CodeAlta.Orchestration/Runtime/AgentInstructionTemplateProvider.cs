@@ -135,7 +135,27 @@ public sealed class AgentInstructionTemplateProvider
             InstanceStateRoot = _catalogOptions?.StateRoot,
             DiscoveryScope = DiscoveryScope,
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project),
+            Space = ResolveSpace(session, project),
         });
+    }
+
+    // The space of the session, for the Runtime Context; null while the catalog has no space but the default one,
+    // where saying it would tell nothing.
+    private SpaceDescriptor? ResolveSpace(SessionViewDescriptor session, ProjectDescriptor? project)
+    {
+        if (_catalogOptions is null || string.IsNullOrWhiteSpace(_catalogOptions.GlobalRoot) || !Directory.Exists(_catalogOptions.SpacesRoot))
+        {
+            return null;
+        }
+
+        var spaces = new SpaceCatalog(new ProjectCatalog(_catalogOptions)).LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        if (spaces.Count < 2)
+        {
+            return null;
+        }
+
+        var id = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
+        return spaces.First(space => string.Equals(space.Id, id, StringComparison.Ordinal));
     }
 
     private void ValidateDiscoveryPaths(SessionViewDescriptor session, ProjectDescriptor? project)

@@ -32,17 +32,20 @@ internal interface ISessionStarter
 /// <summary>
 /// Starts work in the host of the application, as a new session does when the user creates one: the session is
 /// the user's, runs the default agent prompt and can ask. Everything is checked before the session is created,
-/// so that a refusal leaves no empty session and no empty worktree behind.
+/// so that a refusal leaves no empty session and no empty worktree behind. The work is started from the window:
+/// the session belongs to the space the window shows.
 /// </summary>
 internal sealed class SessionStarter : ISessionStarter
 {
     private readonly CodeAltaHost _host;
     private readonly GitWorktreeService? _worktrees;
+    private readonly Func<string?> _shownSpace;
 
-    internal SessionStarter(CodeAltaHost host, GitWorktreeService? worktrees)
+    internal SessionStarter(CodeAltaHost host, GitWorktreeService? worktrees, Func<string?> shownSpace)
     {
         ArgumentNullException.ThrowIfNull(host);
-        (_host, _worktrees) = (host, worktrees);
+        ArgumentNullException.ThrowIfNull(shownSpace);
+        (_host, _worktrees, _shownSpace) = (host, worktrees, shownSpace);
     }
 
     /// <inheritdoc />
@@ -88,7 +91,7 @@ internal sealed class SessionStarter : ISessionStarter
                 if (!created.Succeeded) return new(null, created.Message ?? "The worktree could not be created.", "worktree_" + created.Status);
             }
 
-            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, created?.Folder).ConfigureAwait(false);
+            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, created?.Folder, _shownSpace()).ConfigureAwait(false);
             sessionId = session.SessionId;
             // The host completes what the choice leaves to the provider and to the model.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, choice.ModelId, choice.ModelId is null ? null : choice.Effort);

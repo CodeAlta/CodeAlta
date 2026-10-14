@@ -826,6 +826,13 @@ public sealed class SessionViewJournalHeader
     [JsonPropertyName("created_by")]
     public AltaActorProvenance? CreatedBy { get; set; }
 
+    /// <summary>
+    /// Gets or sets the space the session belongs to, written when it is created; absent for a session created
+    /// before sessions had a space (see <see cref="SpaceCatalog.ResolveSessionSpace"/>).
+    /// </summary>
+    [JsonPropertyName("space_id")]
+    public string? SpaceId { get; set; }
+
     /// <summary>Gets or sets where the session comes from when it starts with the turns of another one.</summary>
     [JsonPropertyName("forked_from")]
     public SessionViewJournalForkOrigin? ForkedFrom { get; set; }
@@ -860,6 +867,7 @@ public sealed class SessionViewJournalHeader
             ProjectRef = descriptor.ProjectRef,
             ParentSessionId = descriptor.ParentSessionId,
             CreatedBy = descriptor.CreatedBy,
+            SpaceId = string.IsNullOrWhiteSpace(descriptor.SpaceId) ? null : descriptor.SpaceId.Trim(),
             ForkedFrom = SessionViewJournalForkOrigin.From(descriptor.ForkedFrom),
             RewindCount = descriptor.RewindCount,
             WorkingDirectory = descriptor.WorkingDirectory,
@@ -878,6 +886,8 @@ public sealed class SessionViewJournalHeader
             ProjectRef = ProjectRef,
             ParentSessionId = ParentSessionId,
             CreatedBy = CreatedBy,
+            // As written, also when it names no space: SpaceCatalog.ResolveSessionSpace reads that as the default one.
+            SpaceId = string.IsNullOrWhiteSpace(SpaceId) ? null : SpaceId.Trim(),
             ForkedFrom = ForkedFrom?.ToOrigin(),
             RewindCount = RewindCount,
             WorkingDirectory = WorkingDirectory,

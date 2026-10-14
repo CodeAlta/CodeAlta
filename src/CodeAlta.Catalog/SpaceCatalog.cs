@@ -341,6 +341,54 @@ public sealed class SpaceCatalog
         }
     }
 
+    /// <summary>
+    /// Tells which space a session is in, from the space its journal records. A session created before sessions
+    /// had a space records none: it is in the space of its project when the project is in exactly one, and in
+    /// the default space otherwise. A recorded space that no longer exists (deleted, maybe by the other
+    /// instance) is read as the default space. Never throws for what a journal says.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="project">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="spaces">The spaces that exist.</param>
+    /// <returns>The identifier of an existing space, or <see cref="SpaceDescriptor.DefaultId"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="spaces"/> is <see langword="null"/>.</exception>
+    public static string ResolveSessionSpace(string? recordedSpaceId, ProjectDescriptor? project, IReadOnlyList<SpaceDescriptor> spaces)
+    {
+        ArgumentNullException.ThrowIfNull(spaces);
+        bool Exists(string id) => spaces.Any(space => string.Equals(space.Id, id, StringComparison.Ordinal));
+        if (!string.IsNullOrWhiteSpace(recordedSpaceId))
+        {
+            var id = recordedSpaceId.Trim();
+            return SpaceDescriptor.IsValidId(id) && Exists(id) ? id : SpaceDescriptor.DefaultId;
+        }
+
+        var own = SpaceDescriptor.NormalizeIds(project?.Spaces).Where(Exists).ToArray();
+        return own.Length == 1 ? own[0] : SpaceDescriptor.DefaultId;
+    }
+
+    /// <summary>
+    /// Tells which space a session is in, reading the spaces and the projects of the catalog. See
+    /// <see cref="ResolveSessionSpace(string?, ProjectDescriptor?, IReadOnlyList{SpaceDescriptor})"/>.
+    /// </summary>
+    /// <param name="recordedSpaceId">The space the journal of the session records, or <see langword="null"/>.</param>
+    /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The space the session is in; the default space when nothing else fits.</returns>
+    /// <exception cref="OperationCanceledException">The read was canceled.</exception>
+    public async Task<SpaceDescriptor> ResolveSessionSpaceAsync(string? recordedSpaceId, string? projectId, CancellationToken cancellationToken = default)
+    {
+        var spaces = await LoadAsync(cancellationToken).ConfigureAwait(false);
+        ProjectDescriptor? project = null;
+        if (string.IsNullOrWhiteSpace(recordedSpaceId) && !string.IsNullOrWhiteSpace(projectId))
+        {
+            project = (await _projects.LoadAsync(cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(candidate => string.Equals(candidate.Id, projectId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var id = ResolveSessionSpace(recordedSpaceId, project, spaces);
+        return spaces.First(space => string.Equals(space.Id, id, StringComparison.Ordinal));
+    }
+
     private string PathOf(string id) => Path.Combine(_options.SpacesRoot, $"{id}.md");
 
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

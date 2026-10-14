@@ -217,7 +217,7 @@ public sealed class SessionJournalSqliteCacheTests
         {
             await connection.OpenAsync().ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE app_meta SET version = 3 WHERE owner = 'session_cache';";
+            command.CommandText = "UPDATE app_meta SET version = 4 WHERE owner = 'session_cache';";
             Assert.AreEqual(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
             command.CommandText = "ALTER TABLE session_projection_cache RENAME COLUMN title TO title_of_the_newer_build;";
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -229,7 +229,7 @@ public sealed class SessionJournalSqliteCacheTests
 
         Assert.AreEqual(1, sessions.Length);
         Assert.AreEqual("session-downgrade", sessions[0].SessionId);
-        Assert.AreEqual(2, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
+        Assert.AreEqual(3, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
         await downgraded.UpsertSessionAsync(CreateSummary("session-after-the-downgrade", updatedAt: "2026-06-18T13:05:00+00:00")).ConfigureAwait(false);
         Assert.AreEqual(2, (await downgraded.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
         Assert.AreEqual(5L, await database.ReadAsync("plugin:test", async (connection, token) =>
@@ -830,10 +830,68 @@ public sealed class SessionJournalSqliteCacheTests
             .ConfigureAwait(false);
         Assert.AreEqual(AgentSessionTitleMode.FirstPrompt, (await ListSingleAsync().ConfigureAwait(false)).ViewState!.TitleMode);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(2, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(3, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
 
         async Task<AgentSessionMetadata> ListSingleAsync()
             => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
+    }
+
+    [TestMethod]
+    public async Task TheSpaceOfASession_IsReadFromItsHeader_ByTheCacheAndWithoutIt_AndAnOlderCacheIsReadAgain()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var inSpace = CreateSummary("session-in-space", updatedAt: "2026-06-18T17:00:00+00:00");
+        var older = CreateSummary("session-older", updatedAt: "2026-06-18T16:00:00+00:00");
+        foreach (var summary in new[] { inSpace, older })
+        {
+            await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(summary).ConfigureAwait(false);
+        }
+
+        var descriptor = CreateDescriptor(inSpace);
+        descriptor.SpaceId = "business";
+        await catalog.JournalStore.AppendStateAsync(descriptor, new SessionViewLocalState { ProviderKey = "openai" }).ConfigureAwait(false);
+        await catalog.JournalStore.AppendStateAsync(CreateDescriptor(older), new SessionViewLocalState { ProviderKey = "openai" }).ConfigureAwait(false);
+
+        Assert.AreEqual("business", (await catalog.JournalStore.ReadHeaderAsync(inSpace.SessionId, inSpace.CreatedAt).ConfigureAwait(false))!.SpaceId);
+        Assert.IsNull((await catalog.JournalStore.ReadHeaderAsync(older.SessionId, older.CreatedAt).ConfigureAwait(false))!.SpaceId);
+        var olderLine = File.ReadAllLines(new AgentRuntimePathLayout(temp.Path).GetSessionFilePath(older.SessionId, older.CreatedAt))[0];
+        Assert.IsFalse(olderLine.Contains("space_id", StringComparison.Ordinal), "A header without a space says nothing of it.");
+        await AssertSpacesAsync().ConfigureAwait(false);
+
+        // A later state written with a descriptor that does not know the space does not make the cache forget it.
+        await new SessionViewCatalog(options).JournalStore.AppendStateAsync(CreateDescriptor(inSpace), new SessionViewLocalState { ProviderKey = "openai", TitleMode = "model" })
+            .ConfigureAwait(false);
+        await AssertSpacesAsync().ConfigureAwait(false);
+
+        // The journals say it without the cache too.
+        var uncached = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path));
+        Assert.AreEqual("business", (await uncached.GetSessionAsync(inSpace.SessionId).ConfigureAwait(false))!.SpaceId);
+        Assert.IsNull((await uncached.GetSessionAsync(older.SessionId).ConfigureAwait(false))!.SpaceId);
+
+        // A cache written before sessions had a space: no column, and the version that build recorded. Its rows are
+        // read again from the journals, which a build without the column may have cached without their space.
+        await using (var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE session_projection_cache DROP COLUMN space_id; UPDATE app_meta SET version = 2 WHERE owner = 'session_cache';";
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        await AssertSpacesAsync().ConfigureAwait(false);
+        await using var database = ApplicationDatabase.Create(options);
+        Assert.AreEqual(3, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+
+        async Task AssertSpacesAsync()
+        {
+            var store = new SessionViewCatalog(options).JournalStore.CreateSessionStore();
+            var listed = await store.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+            Assert.AreEqual("business", listed.Single(session => session.SessionId == inSpace.SessionId).SpaceId);
+            Assert.IsNull(listed.Single(session => session.SessionId == older.SessionId).SpaceId);
+            Assert.AreEqual("business", (await store.GetSessionAsync(inSpace.SessionId).ConfigureAwait(false))!.SpaceId);
+        }
     }
 
     private static CatalogOptions CreateOptions(string globalRoot)

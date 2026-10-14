@@ -291,12 +291,16 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// The git worktree a project session works in, an existing folder; null for a session that works in the
     /// folder of its project.
     /// </param>
+    /// <param name="spaceId">
+    /// The space the session belongs to for its whole life, already validated by the caller; null records none
+    /// (the session is then read as in the space of its project when it is in exactly one, else the default one).
+    /// </param>
     /// <returns>The persisted session descriptor.</returns>
     /// <exception cref="ArgumentNullException">The provider is null.</exception>
-    /// <exception cref="ArgumentException">The provider is disabled, the project is invalid, or a worktree is named without a project.</exception>
+    /// <exception cref="ArgumentException">The provider is disabled, the project is invalid, a worktree is named without a project, or the space is not a valid identifier.</exception>
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
     public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
-        AltaActorProvenance? createdBy = null, string? worktreeDirectory = null)
+        AltaActorProvenance? createdBy = null, string? worktreeDirectory = null, string? spaceId = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
@@ -311,8 +315,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
         Task<SessionViewDescriptor> Create(SessionExecutionOptions options)
-            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, null, createdBy, CancellationToken.None)
-                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, worktreeDirectory, CancellationToken.None);
+            => project is null ? _runtime.CreateGlobalSessionAsync(options, title, null, createdBy, spaceId, CancellationToken.None)
+                : _runtime.CreateProjectSessionAsync(project, options, title, null, createdBy, worktreeDirectory, spaceId, CancellationToken.None);
 
         // With what plugins give every run of this scope, so the first send keeps this attachment.
         async Task<SessionViewDescriptor> CreateWithPluginsAsync(PluginOrchestrationBridge plugins, SessionExecutionOptions options)

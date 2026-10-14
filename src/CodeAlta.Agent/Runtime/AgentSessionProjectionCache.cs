@@ -109,7 +109,11 @@ public sealed record AgentSessionCacheProjection(
     AgentSessionCacheFileStamp Stamp,
     AgentSessionSummary Summary,
     AgentSessionState? State,
-    AgentSessionViewStateMetadata? ViewState = null);
+    AgentSessionViewStateMetadata? ViewState = null)
+{
+    /// <summary>Gets the space the CodeAlta header of the journal records; null when it records none.</summary>
+    public string? SpaceId { get; init; }
+}
 
 /// <summary>
 /// Describes a journal file stamp used to validate cached projections.

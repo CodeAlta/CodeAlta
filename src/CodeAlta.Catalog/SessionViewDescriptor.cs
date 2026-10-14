@@ -51,6 +51,14 @@ public sealed class SessionViewDescriptor
     public AltaActorProvenance? CreatedBy { get; set; }
 
     /// <summary>
+    /// Gets or sets the space the session belongs to, as its journal records it: written when the session is
+    /// created and kept for its whole life. <see langword="null"/> for a session created before sessions had a
+    /// space; <see cref="SpaceCatalog.ResolveSessionSpace"/> tells which space such a session is in.
+    /// </summary>
+    [JsonPropertyName("space_id")]
+    public string? SpaceId { get; set; }
+
+    /// <summary>
     /// Gets or sets where the session comes from when it starts with the turns of another one: the session it was
     /// forked from, or the session whose rewind it keeps. Lineage only; null for a session that started empty.
     /// </summary>

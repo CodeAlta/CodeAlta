@@ -14,6 +14,7 @@ namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 public sealed class SystemPromptBuilder
 {
     private const string DefaultName = "default";
+    private const int MaximumSpaceDescriptionLength = 300;
     private static readonly string[] KnownTopLevelEntries = ["system", "agents"];
     private readonly ISystemPromptContentLocator _contentLocator;
 
@@ -597,6 +598,11 @@ public sealed class SystemPromptBuilder
         }
 
         lines.Add($"- Session kind: {request.Session.Kind.ToString().ToLowerInvariant()}");
+        if (request.Space is { } space)
+        {
+            lines.Add(SpaceLine(space));
+        }
+
         // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
         // The agent names the file after the day and the request; the end of the name is a short hash of the session,
         // so that two agents never write the same file.
@@ -612,6 +618,27 @@ public sealed class SystemPromptBuilder
         }
 
         return string.Join(Environment.NewLine, lines);
+    }
+
+    // The space of the session, with what it is for on the same line: a description of several lines is joined, and
+    // a long one is cut, since it is read on every turn.
+    internal static string SpaceLine(SpaceDescriptor space)
+    {
+        var line = $"- Space: {space.Name} ({space.Id})";
+        if (string.IsNullOrWhiteSpace(space.Description))
+        {
+            return line;
+        }
+
+        var about = string.Join(' ', space.Description.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        if (about.Length > MaximumSpaceDescriptionLength)
+        {
+            var end = MaximumSpaceDescriptionLength - 1;
+            if (char.IsHighSurrogate(about[end - 1])) end--;
+            about = about[..end].TrimEnd() + "…";
+        }
+
+        return $"{line}: {about}";
     }
 
     private static string? ScratchpadFile(SystemPromptBuildRequest request)
@@ -1221,6 +1248,12 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets active-skills markdown restored from session state.</summary>
     public string? ActiveSkillsMarkdown { get; init; }
+
+    /// <summary>
+    /// Gets the space the session belongs to, which the Runtime Context names; null where the catalog has no space
+    /// but the default one.
+    /// </summary>
+    public SpaceDescriptor? Space { get; init; }
 }
 
 /// <summary>

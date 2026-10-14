@@ -114,7 +114,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         var projection = await TryProjectSessionAsync(sessionId, includeHistory: false, cancellationToken).ConfigureAwait(false);
         return projection?.Summary is null
             ? null
-            : ToMetadata(projection.Summary, projection.State, projection.ViewState);
+            : ToMetadata(projection.Summary, projection.State, projection.ViewState, projection.SpaceId);
     }
 
     /// <inheritdoc />
@@ -148,7 +148,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     {
         await foreach (var projection in ListSessionProjectionsAsync(cancellationToken).ConfigureAwait(false))
         {
-            var metadata = ToMetadata(projection.Projection.Summary!, projection.Projection.State, projection.Projection.ViewState);
+            var metadata = ToMetadata(projection.Projection.Summary!, projection.Projection.State, projection.Projection.ViewState, projection.Projection.SpaceId);
             if (MatchesFilter(metadata, filter))
             {
                 yield return metadata;
@@ -178,7 +178,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
                 _sessionFiles[projection.Summary.SessionId] = projection.JournalPath;
                 yield return new ListedSessionProjection(
                     projection.JournalPath,
-                    new SessionProjection(projection.Summary, projection.State, [], projection.ViewState));
+                    new SessionProjection(projection.Summary, projection.State, [], projection.ViewState) { SpaceId = projection.SpaceId });
             }
 
             yield break;
@@ -289,7 +289,10 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
                 new AgentSessionCacheFileStamp(stamp.LastWriteTimeUtc, stamp.Length),
                 projection.Summary,
                 projection.State,
-                projection.ViewState);
+                projection.ViewState)
+            {
+                SpaceId = projection.SpaceId,
+            };
         }
         catch (IOException) when (!ownsJournalGate)
         {
@@ -916,7 +919,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             if (cachedProjection is not null)
             {
                 _sessionFiles[cachedProjection.Summary.SessionId] = cachedProjection.JournalPath;
-                return new SessionProjection(cachedProjection.Summary, cachedProjection.State, [], cachedProjection.ViewState);
+                return new SessionProjection(cachedProjection.Summary, cachedProjection.State, [], cachedProjection.ViewState) { SpaceId = cachedProjection.SpaceId };
             }
         }
 
@@ -975,6 +978,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     {
         AgentSessionSummary? summary = null;
         AgentSessionState? state = null;
+        string? spaceId = null;
 
         foreach (var line in await ReadMetadataProbeLinesAsync(sessionFile, cancellationToken).ConfigureAwait(false))
         {
@@ -987,14 +991,14 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             try
             {
                 using var document = JsonDocument.Parse(line);
-                ProjectMetadataSnapshot(document.RootElement, ref summary, ref state);
+                ProjectMetadataSnapshot(document.RootElement, ref summary, ref state, ref spaceId);
             }
             catch (JsonException)
             {
             }
         }
 
-        return NormalizeProjection(new SessionProjection(summary, state, []));
+        return NormalizeProjection(new SessionProjection(summary, state, []) { SpaceId = spaceId });
     }
 
     private static async Task<IReadOnlyList<string>> ReadMetadataProbeLinesAsync(
@@ -1024,6 +1028,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     {
         AgentSessionSummary? summary = null;
         AgentSessionState? state = null;
+        string? spaceId = null;
         var history = new List<AgentEvent>();
 
         await using var stream = await OpenReadStreamAsync(sessionFile, cancellationToken).ConfigureAwait(false);
@@ -1053,7 +1058,13 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
                     continue;
                 }
 
-                if (rawEvent.BackendEventType is CodeAltaSessionHeaderEventType or CodeAltaSessionStateEventType)
+                if (rawEvent.BackendEventType == CodeAltaSessionHeaderEventType)
+                {
+                    spaceId = ReadHeaderSpaceId(rawEvent.Raw) ?? spaceId;
+                    continue;
+                }
+
+                if (rawEvent.BackendEventType == CodeAltaSessionStateEventType)
                 {
                     continue;
                 }
@@ -1062,13 +1073,23 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             history.Add(@event);
         }
 
-        return NormalizeProjection(new SessionProjection(summary, state, history));
+        return NormalizeProjection(new SessionProjection(summary, state, history) { SpaceId = spaceId });
     }
+
+    // The space a CodeAlta session header records; null when it records none, as the header of an older session.
+    private static string? ReadHeaderSpaceId(JsonElement header)
+        => header.ValueKind == JsonValueKind.Object
+            && header.TryGetProperty("space_id", out var value)
+            && value.ValueKind == JsonValueKind.String
+            && value.GetString() is { } text && !string.IsNullOrWhiteSpace(text)
+                ? text.Trim()
+                : null;
 
     private static void ProjectMetadataSnapshot(
         JsonElement element,
         ref AgentSessionSummary? summary,
-        ref AgentSessionState? state)
+        ref AgentSessionState? state,
+        ref string? spaceId)
     {
         if (!element.TryGetProperty("$type", out var typeElement) ||
             !string.Equals(typeElement.GetString(), "raw", StringComparison.Ordinal))
@@ -1101,6 +1122,13 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             {
                 state = snapshot;
             }
+
+            return;
+        }
+
+        if (string.Equals(eventType, CodeAltaSessionHeaderEventType, StringComparison.Ordinal))
+        {
+            spaceId = ReadHeaderSpaceId(rawElement) ?? spaceId;
         }
     }
 
@@ -1388,7 +1416,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     private static AgentSessionMetadata ToMetadata(
         AgentSessionSummary summary,
         AgentSessionState? state,
-        AgentSessionViewStateMetadata? localState = null)
+        AgentSessionViewStateMetadata? localState = null,
+        string? spaceId = null)
         => new(
             SessionId: summary.SessionId,
             CreatedAt: summary.CreatedAt,
@@ -1415,6 +1444,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         {
             ForkedFrom = summary.ForkedFrom,
             RewindCount = summary.RewindCount,
+            SpaceId = spaceId,
         };
 
     private void DeleteEmptySessionDirectories(string? directory)
@@ -1439,7 +1469,11 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         AgentSessionSummary? Summary,
         AgentSessionState? State,
         IReadOnlyList<AgentEvent> History,
-        AgentSessionViewStateMetadata? ViewState = null);
+        AgentSessionViewStateMetadata? ViewState = null)
+    {
+        // The space the CodeAlta header of the journal records; null when it records none.
+        public string? SpaceId { get; init; }
+    }
 
     private sealed record ListedSessionProjection(string SessionFile, SessionProjection Projection);
 

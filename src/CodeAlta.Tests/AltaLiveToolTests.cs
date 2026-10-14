@@ -2362,6 +2362,97 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionCreate_PutsTheSessionInTheSpaceOfItsCaller_AndAnAgentCreatesOnlyInItsOwnSpace()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
+        Directory.CreateDirectory(options.GlobalRoot);
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var spaces = new SpaceCatalog(projectCatalog);
+        await spaces.CreateAsync("Business").ConfigureAwait(false);
+        await spaces.CreateAsync("Personal").ConfigureAwait(false);
+        var sessionCatalog = new SessionViewCatalog(options);
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("alpha"), "Alpha");
+        var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplaceSessionRuntime(descriptor, () => new StatefulProviderRuntime(descriptor.ProviderId));
+        var skillCatalog = new SkillCatalog();
+        var runtime = new SessionRuntimeService(
+            new AgentHub(registry),
+            new AgentSessionCatalog(sessionCatalog.JournalStore.CreateSessionStore()),
+            projectCatalog,
+            sessionCatalog,
+            new AgentInstructionTemplateProvider(skillCatalog, options),
+            options,
+            skillCatalog);
+        await using var _ = runtime.ConfigureAwait(false);
+        var view = new ShownSpaceView { ShownSpaceId = "personal" };
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(spaces)
+            .Add<IAltaSpaceView>(view)
+            .Add(sessionCatalog)
+            .Add(runtime)
+            .Add<IReadOnlyList<ModelProviderDescriptor>>([descriptor])
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+
+        async Task<JsonElement> Create(AltaCallerIdentity caller, params string[] more)
+        {
+            var result = await dispatcher.InvokeAsync(["session", "create", .. more], caller: caller).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout + result.Stderr);
+            return ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+        }
+
+        // Without a calling session: the space the window shows, or the one named.
+        var shown = await Create(AltaCallerIdentity.Cli, "--project", project.Id).ConfigureAwait(false);
+        Assert.AreEqual("personal", shown.GetProperty("spaceId").GetString());
+        var named = await Create(AltaCallerIdentity.Cli, "--global", "--space", "Business").ConfigureAwait(false);
+        Assert.AreEqual("business", named.GetProperty("spaceId").GetString());
+        var sessionId = named.GetProperty("sessionId").GetString()!;
+        Assert.AreEqual("business", (await runtime.GetSessionSpaceAsync(sessionId).ConfigureAwait(false))!.SpaceId);
+
+        // A session creates sessions in its own space, whatever the window shows, and names no other one.
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId };
+        Assert.AreEqual("business", (await Create(agent, "--global", "--title", "Child").ConfigureAwait(false)).GetProperty("spaceId").GetString());
+        Assert.AreEqual("business", (await Create(agent, "--project", project.Id, "--space", "business").ConfigureAwait(false)).GetProperty("spaceId").GetString());
+        var refused = await dispatcher.InvokeAsync(["session", "create", "--global", "--space", "personal"], caller: agent).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Unsupported, refused.ExitCode);
+        var error = ReadJsonLines(refused.Stdout + refused.Stderr).Single(static line => line.GetProperty("type").GetString() == "alta.error");
+        Assert.AreEqual("space.notOwnSpace", error.GetProperty("code").GetString());
+        StringAssert.Contains(error.GetProperty("message").GetString(), "'Business' (business)");
+        var missing = await dispatcher.InvokeAsync(["session", "create", "--global", "--space", "nowhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode);
+
+        // `alta space current` answers the space of the calling session first.
+        var current = await dispatcher.InvokeAsync(["space", "current"], caller: agent).ConfigureAwait(false);
+        var detail = ReadJsonLines(current.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.space.detail");
+        Assert.AreEqual("business", detail.GetProperty("id").GetString());
+        Assert.AreEqual("session", detail.GetProperty("source").GetString());
+        Assert.IsFalse(detail.GetProperty("shown").GetBoolean(), "The window shows another space.");
+        var window = await dispatcher.InvokeAsync(["space", "current"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var windowDetail = ReadJsonLines(window.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.space.detail");
+        Assert.AreEqual("personal", windowDetail.GetProperty("id").GetString());
+        Assert.AreEqual("window", windowDetail.GetProperty("source").GetString());
+        var list = await dispatcher.InvokeAsync(["space", "list"], caller: agent).ConfigureAwait(false);
+        Assert.AreEqual("business", ReadJsonLines(list.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.space.item"
+            && line.GetProperty("current").GetBoolean()).GetProperty("id").GetString());
+    }
+
+    private sealed class ShownSpaceView : IAltaSpaceView
+    {
+        public string? ShownSpaceId { get; set; }
+
+        public bool Show(string spaceId) => false;
+
+        public void NotifyChanged()
+        {
+        }
+    }
+
+    [TestMethod]
     public async Task SessionCreate_GivesASessionWithoutAModelTheOneItsProviderStartsWith()
     {
         using var root = TempDirectory.Create();

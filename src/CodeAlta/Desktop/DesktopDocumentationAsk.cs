@@ -51,9 +51,12 @@ internal sealed class DocumentationAsker
     private readonly DocumentationAskOperations _operations;
 
     /// <summary>Creates the asker of a host.</summary>
+    /// <param name="host">The host the chat is created in.</param>
+    /// <param name="documentation">The user guide.</param>
+    /// <param name="shownSpace">The space the window shows, which the chat belongs to.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    internal DocumentationAsker(CodeAltaHost host, ShippedDocumentation documentation)
-        : this(documentation, Operations(host ?? throw new ArgumentNullException(nameof(host))))
+    internal DocumentationAsker(CodeAltaHost host, ShippedDocumentation documentation, Func<string?> shownSpace)
+        : this(documentation, Operations(host ?? throw new ArgumentNullException(nameof(host)), shownSpace ?? throw new ArgumentNullException(nameof(shownSpace))))
     {
     }
 
@@ -133,7 +136,7 @@ internal sealed class DocumentationAsker
         return line[..end].TrimEnd() + "…";
     }
 
-    private static DocumentationAskOperations Operations(CodeAltaHost host)
+    private static DocumentationAskOperations Operations(CodeAltaHost host, Func<string?> shownSpace)
     {
         var defaults = new DesktopDefaultProvider(host.CatalogOptions);
         return new(
@@ -145,7 +148,8 @@ internal sealed class DocumentationAsker
                 return prompts is null ? null : prompts.Any(static prompt => prompt.Id == AgentPromptCatalog.DefaultPromptName);
             },
             () => host.Commands.HasCapacity,
-            async (provider, title) => (await host.Commands.CreateDraftSessionAsync(null, provider, title).ConfigureAwait(false)).SessionId,
+            // The question is asked from the window: the chat is in the space it shows.
+            async (provider, title) => (await host.Commands.CreateDraftSessionAsync(null, provider, title, spaceId: shownSpace()).ConfigureAwait(false)).SessionId,
             request =>
             {
                 var admission = host.Commands.AdmitSend(request, CancellationToken.None);

@@ -207,12 +207,15 @@ alta space switch <space>
 
 - `list` emits one `alta.space.item` for each space, the default one first, then `alta.space.summary`:
   `id`, `name`, `description`, `icon`, `color`, `default`, `projectCount` (the projects that are not
-  archived) and `current` (true for the space the window shows, or for the default space when no
-  window says what it shows).
+  archived) and `current` (true for the space of the calling session, else for the space the window
+  shows, else for the default space).
 - `show` emits `alta.space.detail`: the same fields and `projects`, each with `id`, `slug`, `name`,
   `path` and `archived`. Archived projects are listed with `--include-archived`.
-- `current` emits the `alta.space.detail` of the space the window shows, with `shown: true`. Without a
-  window, or when that space is gone, it is the default space with `shown: false`.
+- `current` emits the `alta.space.detail` of the space of the calling session (`source: "session"`),
+  whatever the window shows: a session belongs to one space for its whole life. Without a calling
+  session it is the space the window shows (`source: "window"`), and without a window, or when that
+  space is gone, the default space (`source: "default"`). `shown` is true when the window shows that
+  space.
 - `create` emits `alta.space.created`, with the ids of the `--project` it was given in `projects`. The
   description comes from `--description` or from stdin with `--stdin`, not from both.
 - `update` changes what is given and leaves the rest; an empty value (`--description ""`, `--icon ""`,
@@ -259,6 +262,14 @@ alta session turns <session-id> --last 5
 
 `alta session current` is the shortest way for an agent-invoked live-tool call to discover its own CodeAlta session id. It does not require a session catalog lookup; outside a caller with session context it returns a usage diagnostic.
 
+A session belongs to one space for its whole life (see `doc/catalog-and-config.md`, "The space of a
+session"). `alta session create` puts the new session in the space of the calling session; that session
+can name only its own space with `--space <space>`, and another one is refused with `space.notOwnSpace`
+(exit code 7), so that an agent never reaches what its space does not have through a session it
+creates. A caller that is no session (the MCP server of the window, a terminal) creates the session in
+the space `--space` names, else in the space the window shows; without either the session records no
+space. The record `alta.session.created` names it as `spaceId`.
+
 A session of a project works in the folder of the project or in a git worktree of it (see
 `doc/desktop.md`, Worktrees). The records of a session (`alta.session.current`, `alta.session.item`,
 `alta.session.created`) name the worktree as `worktreeDirectory` while its folder exists;
@@ -269,6 +280,7 @@ Useful control commands:
 ```text
 alta session create --project <project> --title "Investigate parser"
 alta session create --project <project> --same-model-as <session-id>
+alta session create --global --space <space>
 alta session set_agent <session-id> --prompt-id <prompt-id>
 alta session title <session-id> --set "Parser rewrite"
 alta session title <session-id> --mode last_message
