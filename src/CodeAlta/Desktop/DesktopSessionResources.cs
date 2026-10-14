@@ -24,14 +24,16 @@ internal sealed class DesktopSessionResources
 
     private readonly CodeAltaHost _host;
     private readonly string? _home;
+    private readonly IReadOnlyList<BuiltInPluginDefinition> _builtIns;
 
     /// <summary>Initializes a new instance of the <see cref="DesktopSessionResources"/> class.</summary>
     /// <param name="host">The host of the window.</param>
     /// <param name="home">The home folder the MCP servers of the user are read from; null for the one of the process.</param>
-    internal DesktopSessionResources(CodeAltaHost host, string? home)
+    /// <param name="builtIns">The plugins that ship with the window, which its settings list whether they run or not.</param>
+    internal DesktopSessionResources(CodeAltaHost host, string? home, IReadOnlyList<BuiltInPluginDefinition>? builtIns = null)
     {
         ArgumentNullException.ThrowIfNull(host);
-        (_host, _home) = (host, home);
+        (_host, _home, _builtIns) = (host, home, builtIns ?? []);
     }
 
     /// <summary>Reads what a session can use.</summary>
@@ -67,12 +69,23 @@ internal sealed class DesktopSessionResources
                 && space.Allows(SpaceResourceKind.McpServer, server.Key)).Select(static server => server.Key)
             : [];
 
+        // The plugins its space has that are turned on, as the settings list them: those that run, and those that ship
+        // with the window and are enabled, which a window without plugins (explicit roots) does not start. A plugin
+        // assigned to other spaces is not among them, whatever its configuration says.
         var adapter = _host.PluginRuntime.Adapter;
-        var plugins = _host.PluginRuntime.ActivePlugins
+        var running = _host.PluginRuntime.ActivePlugins
             .Where(plugin => plugin.Instance is not null && plugin.RuntimeContext.IsValid
                 && adapter.IsAvailableInSpace(PluginContributionRegistry.PluginIdOf(plugin.Descriptor.RuntimeKey, plugin.SourcePackage?.PackageId), plugin.RuntimeContext.Scope, space.SpaceId)
                 && plugin.RuntimeContext.AppliesToProject(project?.Id, project?.ProjectPath))
-            .Select(static plugin => plugin.Descriptor.DisplayName ?? plugin.Descriptor.RuntimeKey);
+            .ToArray();
+        var global = new CodeAltaConfigStore(_host.CatalogOptions).LoadGlobal();
+        var resolver = new PluginRuntimeConfigResolver();
+        var shipped = _builtIns
+            .Where(definition => !running.Any(plugin => string.Equals(plugin.Descriptor.RuntimeKey, "builtin:" + definition.Id, StringComparison.Ordinal))
+                && resolver.ResolveBuiltInPlugin(definition, global).Enabled
+                && space.Allows(SpaceResourceKind.Plugin, definition.Id))
+            .Select(static definition => definition.DisplayName);
+        var plugins = running.Select(static plugin => plugin.Descriptor.DisplayName ?? plugin.Descriptor.RuntimeKey).Concat(shipped);
 
         static IReadOnlyList<string> Names(IEnumerable<string> names)
             => [.. names.Where(static name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase)

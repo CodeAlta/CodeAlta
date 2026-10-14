@@ -754,7 +754,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
-                        SessionResources = new DesktopSessionResources(host, roots.Home).ReadAsync,
+                        SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions)).ReadAsync,
                     });
                     builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);

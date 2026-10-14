@@ -510,6 +510,24 @@ public sealed class AutomationHostTests
         }, sessionPermissionModes: modes, inherit: () => inherit, review: () => review);
 
     [TestMethod]
+    public Task WhatASessionCanUse_ListsThePluginsOfItsSpaceThatAreTurnedOn_AlsoWhenNoPluginRuns()
+        => WithPermissionCallerAsync(SessionPermissionModes.Bypass, async (fixture, host, caller) =>
+        {
+            // A window with explicit roots starts no plugin: what its settings turn on is still what the session has.
+            Assert.AreEqual(0, host.PluginRuntime.ActivePlugins.Count);
+            await File.WriteAllTextAsync(Path.Combine(host.CatalogOptions.GlobalRoot!, "config.toml"),
+                "[plugins.jira]\nspaces = [\"work\"]\n\n[plugins.git]\nenabled = false\n");
+            var resources = await new DesktopSessionResources(host, null, DesktopPlugins.BuiltIns).ReadAsync(caller.SourceSessionId!, default);
+
+            Assert.IsNotNull(resources);
+            Assert.AreEqual("default", resources.SpaceId);
+            CollectionAssert.Contains(resources.Plugins.ToArray(), "MCP");
+            CollectionAssert.Contains(resources.Plugins.ToArray(), "Statistics");
+            CollectionAssert.DoesNotContain(resources.Plugins.ToArray(), "Jira", "Jira is in another space.");
+            CollectionAssert.DoesNotContain(resources.Plugins.ToArray(), "Git", "Git is turned off.");
+        });
+
+    [TestMethod]
     public Task ASessionWithoutTheShell_StartsNoCommand_InAJobOrAnAutomation()
         => WithPermissionCallerAsync(SessionPermissionModes.Bypass, async (fixture, host, caller) =>
         {
