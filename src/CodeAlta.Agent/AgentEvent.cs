@@ -27,6 +27,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentUserInputRequest), "userInputRequest")]
 [JsonDerivedType(typeof(AgentBackgroundTasksEvent), "backgroundTasks")]
 [JsonDerivedType(typeof(AgentRemoteControlEvent), "remoteControl")]
+[JsonDerivedType(typeof(AgentPromptSuggestionEvent), "promptSuggestion")]
 public abstract record AgentEvent(
     [property: JsonPropertyName("backendId")]
     ModelProviderId ProviderId,

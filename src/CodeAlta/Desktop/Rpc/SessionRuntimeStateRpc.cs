@@ -99,9 +99,11 @@ internal sealed class SessionRuntimeStateService
                 entry.ActiveRunId, entry.QueueDrainInProgress, entry.ProviderId, entry.ProviderKey, entry.ModelId,
                 entry.ReasoningEffort?.ToString(), entry.AgentPromptId, entry.PendingAgentPromptId)
             { Activity = activity, BackgroundTasks = [.. entry.BackgroundTasks.Select(ProjectTask).OfType<SessionRuntimeBackgroundTaskResponse>().Take(MaximumBackgroundTasks)],
-              RemoteControl = entry.RemoteControl.Status == CodeAlta.Agent.AgentRemoteControlStatus.Off ? null : SessionRemoteControlResponse.From(entry.RemoteControl) };
+              RemoteControl = entry.RemoteControl.Status == CodeAlta.Agent.AgentRemoteControlStatus.Off ? null : SessionRemoteControlResponse.From(entry.RemoteControl),
+              // A suggestion is sent as it is or not at all: one that is cut is not a prompt to send.
+              PromptSuggestion = entry.PromptSuggestion is { Length: > 0 } suggestion && Text(suggestion) ? suggestion : null };
         }
-        // Seven strings <=256 UTF-16 units at six-byte worst-case JSON escaping, fixed GUIDs,
+        // Eight strings <=256 UTF-16 units at six-byte worst-case JSON escaping, fixed GUIDs,
         // ordinal/enums/keys plus 4 KiB framing fit below 32 KiB. No values are truncated.
         return new("ok", _hostEpoch, state.SessionId, state.RuntimeInstanceId.ToString("D"), state.CoordinatorTransitionInProgress, projected);
     }
@@ -161,6 +163,10 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
     /// <summary>The Remote Control of the session (Claude Code's, from claude.ai); absent while it is off.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public SessionRemoteControlResponse? RemoteControl { get; init; }
+
+    /// <summary>What the provider suggested as the next prompt once the last turn ended (Claude Code's prompt suggestion); absent when there is none.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? PromptSuggestion { get; init; }
 }
 
 /// <summary>A background task of a session.</summary>

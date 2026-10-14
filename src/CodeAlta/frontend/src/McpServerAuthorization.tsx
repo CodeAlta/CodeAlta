@@ -4,7 +4,7 @@ import type { mcpServers as McpServersClient, McpServerEntry } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { Copyable } from "./ProviderAccount";
-import { authorizationAddress, authorizationFailure } from "./mcpAuthorization";
+import { authorizationAddress, authorizationDeadline, authorizationFailure, authorizationTimeLeft } from "./mcpAuthorization";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 
@@ -13,7 +13,8 @@ type Api = Pick<typeof McpServersClient, "login" | "logout">;
 /**
  * Browser authorization (OAuth) of a saved HTTP MCP server: whether tokens are stored, a button that starts the
  * authorization, and one that removes the tokens. While an authorization runs, the page shows the address the
- * host opened in the browser. Mount it with a key per server, so that leaving a server cancels its authorization.
+ * host opened in the browser and how long the host still waits for the browser to come back. Mount it with a key
+ * per server, so that leaving a server cancels its authorization.
  */
 export function McpServerAuthorization({ epoch, projectId, server, api, blocked, onChanged }: {
   epoch: string | null; projectId: string | null; server: Pick<McpServerEntry, "key" | "scope" | "origin" | "authorized" | "authorizationExpiresAt">; api: Api;
@@ -23,24 +24,32 @@ export function McpServerAuthorization({ epoch, projectId, server, api, blocked,
   onChanged: () => void;
 }) {
   const { t, locale } = useShellLanguage();
-  const [running, setRunning] = useState<{ prompted: boolean; url: string | null } | null>(null);
+  const [running, setRunning] = useState<{ prompted: boolean; url: string | null; deadline: number | null } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [notice, setNotice] = useState<{ key: MessageKey; intent: "success" | "warning" | "danger"; values?: Record<string, string | number> } | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const work = useRef<AbortController | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; work.current?.abort(); }; }, []);
+  const deadline = running?.deadline ?? null;
+  useEffect(() => {
+    if (deadline === null) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [deadline]);
   const request = { expectedEpoch: epoch, projectId, scope: server.scope, key: server.key, origin: server.origin };
 
   async function authorize() {
     if (work.current || blocked || signingOut) return;
     const abort = new AbortController();
     work.current = abort;
-    setRunning({ prompted: false, url: null }); setNotice(null);
+    setRunning({ prompted: false, url: null, deadline: null }); setNotice(null);
     try {
       const events = await api.login(request, { signal: abort.signal });
       for await (const event of events) {
         if (abort.signal.aborted || !alive.current) return;
-        if (event.kind === "prompt") setRunning({ prompted: true, url: authorizationAddress(event) });
+        if (event.kind === "prompt") setRunning({ prompted: true, url: authorizationAddress(event), deadline: authorizationDeadline(event) });
         else if (event.kind === "completed") setNotice({ key: "Authorized. The server lists {count} tools.", intent: "success", values: { count: event.tools } });
         else if (event.kind === "failed") { const failure = authorizationFailure(event.code, event.detail); setNotice({ ...failure, values: { detail: failure.detail ?? "" } }); }
       }
@@ -83,6 +92,8 @@ export function McpServerAuthorization({ epoch, projectId, server, api, blocked,
       <p>{t(!running.prompted ? "Starting the authorization…" : running.url
         ? "Finish the authorization in your browser. If no window opened, open this address:" : "Finish the authorization in the browser window that opened.")}</p>
       {running.url && <Copyable value={running.url} label={t("Copy address")} />}
+      {deadline !== null && <p className="bp6-text-muted" role="timer">{t("CodeAlta waits for the browser until {time} ({remaining} left).", {
+        time: new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(new Date(deadline)), remaining: authorizationTimeLeft(deadline, now) })}</p>}
       <Button size="small" onClick={cancel}>{t("Cancel")}</Button>
     </Callout>}
     {notice && !running && <Callout compact intent={notice.intent} role={notice.intent === "success" ? "status" : "alert"}>{t(notice.key, notice.values)}</Callout>}

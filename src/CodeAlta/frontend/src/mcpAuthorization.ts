@@ -5,6 +5,18 @@ export function authorizationAddress(event: { url: string | null }): string | nu
   return typeof event.url === "string" && /^https?:\/\/\S+$/u.test(event.url) && event.url.length <= 8192 ? event.url : null;
 }
 
+/** When the host stops waiting for the browser, from a `prompt` event, as milliseconds since the epoch, or null. */
+export function authorizationDeadline(event: { expiresAt?: string | null }): number | null {
+  const deadline = typeof event.expiresAt === "string" ? Date.parse(event.expiresAt) : Number.NaN;
+  return Number.isFinite(deadline) ? deadline : null;
+}
+
+/** The time the browser has left to come back, as `m:ss`, never below `0:00`. */
+export function authorizationTimeLeft(deadline: number, now: number): string {
+  const seconds = Math.max(0, Math.ceil((deadline - now) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
 /** Why an authorization is not offered for a server right now, or null. */
 export function authorizationBlocked(server: { enabled: boolean; shadowed: boolean }, dirty: boolean): MessageKey | null {
   return dirty ? "Save before authorizing."

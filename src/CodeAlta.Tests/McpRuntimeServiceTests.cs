@@ -980,15 +980,9 @@ public sealed partial class McpRuntimeServiceTests
         using var http = new HttpClient();
         var authorizationCallbacks = new List<Task>();
         var authorizationCallbacksLock = new object();
-        void ReportStatus(string message)
+        void ReportPrompt(McpOAuthBrowserPrompt prompt)
         {
-            const string prefix = "Open MCP authorization in your browser: ";
-            if (!message.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            var authorizationUri = new Uri(message[prefix.Length..], UriKind.Absolute);
+            var authorizationUri = prompt.AuthorizationUri;
             var callback = Task.Run(async () =>
             {
                 using var response = await http.GetAsync(authorizationUri).ConfigureAwait(false);
@@ -1013,7 +1007,7 @@ public sealed partial class McpRuntimeServiceTests
                         ForceOAuth = true,
                         AllowOAuthBrowserLogin = true,
                         OpenOAuthBrowser = false,
-                        OAuthStatus = ReportStatus,
+                        OAuthPrompt = ReportPrompt,
                     },
                     "remote",
                     CancellationToken.None);
@@ -1039,6 +1033,115 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual("server_authentication_failed", result.Diagnostics.Single().Code);
         Assert.IsTrue(server.AuthorizationRequestCount > 0, server.ErrorSummary);
         Assert.AreEqual(0, unobserved.Count, string.Join(Environment.NewLine, unobserved.Select(static exception => exception.ToString())));
+    }
+
+    [TestMethod]
+    public async Task HttpServer_OAuthLoginWaitsForTheBrowserBeyondTheDiscoverProbe()
+    {
+        using var home = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        await using var server = InvalidOAuthHttpMcpServer.StartAuthorizing();
+        WriteOAuthServerConfig(project.Path, server.Endpoint);
+        using var http = new HttpClient();
+        var prompts = new List<McpOAuthBrowserPrompt>();
+        Task? browser = null;
+        var startedAt = DateTimeOffset.UtcNow;
+
+        McpRuntimeServerTestResult result;
+        await using (var service = new McpRuntimeService(_home.Path))
+        {
+            result = await service.TestServerAsync(
+                new McpRuntimeRequest
+                {
+                    ProjectDirectory = project.Path,
+                    UserHomeDirectory = home.Path,
+                    ForceOAuth = true,
+                    AllowOAuthBrowserLogin = true,
+                    OpenOAuthBrowser = false,
+                    OAuthPrompt = prompt =>
+                    {
+                        prompts.Add(prompt);
+                        // A person signs in for longer than the SDK's 5-second server/discover probe.
+                        browser = Task.Run(async () =>
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(6)).ConfigureAwait(false);
+                            using var response = await http.GetAsync(prompt.AuthorizationUri).ConfigureAwait(false);
+                        });
+                    },
+                },
+                "remote",
+                CancellationToken.None);
+        }
+
+        await browser!.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(0, result.Diagnostics.Count, string.Join(Environment.NewLine, result.Diagnostics.Select(static diagnostic => diagnostic.Message)) + server.ErrorSummary);
+        Assert.AreEqual("echo", result.Tools.Single().Name);
+        var reported = prompts.Single();
+        Assert.AreEqual(McpOAuthBrowserAuthorization.DefaultTimeout, reported.Timeout);
+        Assert.IsTrue(reported.ExpiresAt >= startedAt + reported.Timeout && reported.ExpiresAt <= DateTimeOffset.UtcNow + reported.Timeout, "The deadline counts from when the address is reported.");
+    }
+
+    [TestMethod]
+    public async Task HttpServer_OAuthLoginTimesOutWhenTheBrowserDoesNotReturn()
+    {
+        using var home = TempDirectory.Create();
+        using var project = TempDirectory.Create();
+        await using var server = InvalidOAuthHttpMcpServer.StartAuthorizing();
+        WriteOAuthServerConfig(project.Path, server.Endpoint);
+        var messages = new List<string>();
+
+        McpRuntimeServerTestResult result;
+        await using (var service = new McpRuntimeService(_home.Path))
+        {
+            result = await service.TestServerAsync(
+                new McpRuntimeRequest
+                {
+                    ProjectDirectory = project.Path,
+                    UserHomeDirectory = home.Path,
+                    ForceOAuth = true,
+                    AllowOAuthBrowserLogin = true,
+                    OpenOAuthBrowser = false,
+                    OAuthStatus = messages.Add,
+                    OAuthBrowserTimeout = TimeSpan.FromSeconds(1),
+                },
+                "remote",
+                CancellationToken.None);
+        }
+
+        var diagnostic = result.Diagnostics.Single();
+        Assert.AreEqual("oauth_login_timeout", diagnostic.Code, diagnostic.Message);
+        Assert.AreEqual("MCP authorization timed out: the browser did not return to CodeAlta within 1 second.", diagnostic.Message);
+        StringAssert.StartsWith(messages[0], "Open MCP authorization in your browser within 1 second: http://127.0.0.1:");
+        Assert.AreEqual(diagnostic.Message, messages[^1]);
+    }
+
+    [TestMethod]
+    public void OAuthBrowserAuthorization_FormatsTheTimeLeftWithTheAddressLast()
+    {
+        var prompt = new McpOAuthBrowserPrompt(new Uri("https://auth.example.test/authorize?state=1"), DateTimeOffset.UnixEpoch, TimeSpan.FromMinutes(5));
+
+        Assert.AreEqual("Open MCP authorization in your browser within 5 minutes: https://auth.example.test/authorize?state=1", McpOAuthBrowserAuthorization.FormatPrompt(prompt));
+        Assert.AreEqual("1 minute", McpOAuthBrowserAuthorization.FormatDuration(TimeSpan.FromMinutes(1)));
+        Assert.AreEqual("90 seconds", McpOAuthBrowserAuthorization.FormatDuration(TimeSpan.FromSeconds(90)));
+        Assert.AreEqual("1 second", McpOAuthBrowserAuthorization.FormatDuration(TimeSpan.FromMilliseconds(200)));
+    }
+
+    private static void WriteOAuthServerConfig(string projectPath, string endpoint)
+    {
+        Directory.CreateDirectory(Path.Combine(projectPath, ".alta"));
+        File.WriteAllText(
+            McpConfigDiscovery.GetProjectConfigPath(projectPath),
+            JsonSerializer.Serialize(new
+            {
+                mcpServers = new Dictionary<string, object>
+                {
+                    ["remote"] = new
+                    {
+                        url = endpoint,
+                        auth = new { type = "oauth", client_id = "codealta-test-client", dynamic_client_registration = false },
+                    },
+                },
+            }));
     }
 
     [TestMethod]
@@ -1216,9 +1319,13 @@ public sealed partial class McpRuntimeServiceTests
         }
     }
 
+    // An OAuth-protected MCP server whose token is refused, or, when it accepts the tokens it issues, one that
+    // answers 401 to the first anonymous request as a real authorization server does (Polaris for example).
     private sealed class InvalidOAuthHttpMcpServer : IAsyncDisposable
     {
         private const string InvalidToken = "invalid-token";
+        private const string ValidToken = "valid-token";
+        private readonly bool _acceptIssuedToken;
         private readonly HttpListener _listener = new();
         private readonly CancellationTokenSource _shutdown = new();
         private readonly Task _acceptLoop;
@@ -1226,8 +1333,9 @@ public sealed partial class McpRuntimeServiceTests
         private readonly List<string> _errors = [];
         private int _authorizationRequestCount;
 
-        private InvalidOAuthHttpMcpServer()
+        private InvalidOAuthHttpMcpServer(bool acceptIssuedToken)
         {
+            _acceptIssuedToken = acceptIssuedToken;
             var port = GetFreeLoopbackPort();
             BaseUri = new Uri($"http://127.0.0.1:{port}/", UriKind.Absolute);
             Endpoint = new Uri(BaseUri, "mcp").ToString();
@@ -1243,7 +1351,10 @@ public sealed partial class McpRuntimeServiceTests
         private Uri BaseUri { get; }
 
         public static InvalidOAuthHttpMcpServer Start()
-            => new();
+            => new(acceptIssuedToken: false);
+
+        public static InvalidOAuthHttpMcpServer StartAuthorizing()
+            => new(acceptIssuedToken: true);
 
         public string ErrorSummary
         {
@@ -1305,7 +1416,11 @@ public sealed partial class McpRuntimeServiceTests
             try
             {
                 var path = context.Request.Url?.AbsolutePath ?? string.Empty;
-                if (string.Equals(path, "/mcp", StringComparison.Ordinal))
+                if (string.Equals(path, "/mcp", StringComparison.Ordinal) && _acceptIssuedToken)
+                {
+                    await WriteAuthorizedMcpResponseAsync(context, cancellationToken).ConfigureAwait(false);
+                }
+                else if (string.Equals(path, "/mcp", StringComparison.Ordinal))
                 {
                     await WriteMcpAuthenticationFailureAsync(context, cancellationToken).ConfigureAwait(false);
                 }
@@ -1350,7 +1465,7 @@ public sealed partial class McpRuntimeServiceTests
                         200,
                         JsonSerializer.Serialize(new
                         {
-                            access_token = InvalidToken,
+                            access_token = _acceptIssuedToken ? ValidToken : InvalidToken,
                             token_type = "Bearer",
                             expires_in = 3600,
                         }),
@@ -1374,6 +1489,27 @@ public sealed partial class McpRuntimeServiceTests
             {
                 TryClose(context);
             }
+        }
+
+        private async Task WriteAuthorizedMcpResponseAsync(HttpListenerContext context, CancellationToken cancellationToken)
+        {
+            if (!string.Equals(context.Request.Headers["Authorization"], "Bearer " + ValidToken, StringComparison.Ordinal))
+            {
+                context.Response.Headers["WWW-Authenticate"] = "Bearer resource_metadata=\"" + new Uri(BaseUri, ".well-known/oauth-protected-resource") + "\"";
+                await WriteJsonAsync(context, 401, "{\"error\":\"unauthorized\"}", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (!string.Equals(context.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteJsonAsync(context, 405, "{}", cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
+            var response = TinyHttpMcpServer.CreateJsonRpcResponse(await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false), out var isNotification);
+            context.Response.Headers["mcp-session-id"] = "codealta-test-session";
+            await WriteJsonAsync(context, isNotification ? 202 : 200, response, cancellationToken).ConfigureAwait(false);
         }
 
         private async Task WriteMcpAuthenticationFailureAsync(HttpListenerContext context, CancellationToken cancellationToken)
@@ -1589,7 +1725,7 @@ public sealed partial class McpRuntimeServiceTests
             }
         }
 
-        private static string CreateJsonRpcResponse(string body, out bool isNotification)
+        internal static string CreateJsonRpcResponse(string body, out bool isNotification)
         {
             using var document = JsonDocument.Parse(body);
             var root = document.RootElement;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authorizationAddress, authorizationBlocked, authorizationFailure } from "./mcpAuthorization";
+import { authorizationAddress, authorizationBlocked, authorizationDeadline, authorizationFailure, authorizationTimeLeft } from "./mcpAuthorization";
 
 test("an authorization prompt shows only an http or https address", () => {
   assert.equal(authorizationAddress({ url: "https://auth.example.test/authorize?state=1" }), "https://auth.example.test/authorize?state=1");
@@ -9,6 +9,18 @@ test("an authorization prompt shows only an http or https address", () => {
   assert.equal(authorizationAddress({ url: "file:///etc/passwd" }), null);
   assert.equal(authorizationAddress({ url: "https://auth.example.test/" + "a".repeat(8192) }), null);
   assert.equal(authorizationAddress({ url: null }), null);
+});
+
+test("an authorization prompt says how long the browser has to come back", () => {
+  const deadline = authorizationDeadline({ expiresAt: "2026-10-14T13:10:00+00:00" });
+  assert.equal(deadline, Date.parse("2026-10-14T13:10:00Z"));
+  assert.equal(authorizationDeadline({ expiresAt: null }), null);
+  assert.equal(authorizationDeadline({}), null, "a host without a deadline shows none");
+  assert.equal(authorizationDeadline({ expiresAt: "later" }), null);
+  assert.equal(authorizationTimeLeft(deadline!, deadline! - 300_000), "5:00");
+  assert.equal(authorizationTimeLeft(deadline!, deadline! - 61_500), "1:02", "a started second still counts");
+  assert.equal(authorizationTimeLeft(deadline!, deadline! - 9_000), "0:09");
+  assert.equal(authorizationTimeLeft(deadline!, deadline! + 5_000), "0:00");
 });
 
 test("an authorization is offered only for the saved, enabled definition in effect", () => {

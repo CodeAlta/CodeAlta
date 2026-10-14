@@ -28,6 +28,12 @@ internal sealed record McpRuntimeRequest
     public bool OpenOAuthBrowser { get; init; } = true;
 
     public Action<string>? OAuthStatus { get; init; }
+
+    /// <summary>Receives the address to open and the deadline of a browser login, beside the status text.</summary>
+    public Action<McpOAuthBrowserPrompt>? OAuthPrompt { get; init; }
+
+    /// <summary>How long a browser login waits for the browser; the connection's startup budget is extended by as much.</summary>
+    public TimeSpan OAuthBrowserTimeout { get; init; } = McpOAuthBrowserAuthorization.DefaultTimeout;
 }
 
 internal sealed record McpRuntimeDiagnostic
@@ -466,14 +472,17 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         }
 
         var timeoutMs = NormalizeTimeout(serverPolicy?.StartupTimeoutMs ?? context.Policy.StartupTimeoutMs, 30000);
+        // A browser login happens inside the first request of the connection: its wait comes on top of the startup budget.
+        var browserLogin = context.Request.AllowOAuthBrowserLogin && definition.Transport == McpTransportKind.Http;
+        var budget = TimeSpan.FromMilliseconds(timeoutMs) + (browserLogin ? context.Request.OAuthBrowserTimeout : TimeSpan.Zero);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
+        timeout.CancelAfter(budget);
         IClientTransport? transport = null;
         McpClient? client = null;
         try
         {
             transport = CreateTransport(definition, tokenUrl, context.Request, timeoutMs);
-            client = await McpClient.CreateAsync(transport, loggerFactory: NullLoggerFactory.Instance, cancellationToken: timeout.Token).ConfigureAwait(false);
+            client = await McpClient.CreateAsync(transport, CreateClientOptions(browserLogin, budget), NullLoggerFactory.Instance, timeout.Token).ConfigureAwait(false);
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
             var tools = ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy);
@@ -489,7 +498,18 @@ internal sealed class McpRuntimeService : IAsyncDisposable
                 Code = "server_startup_timeout",
                 Server = key,
                 Transport = FormatTransport(effective.Definition.Transport),
-                Message = $"MCP {FormatTransport(effective.Definition.Transport)} server '{key}' did not finish startup/tool discovery within {timeoutMs} ms.",
+                Message = $"MCP {FormatTransport(effective.Definition.Transport)} server '{key}' did not finish startup/tool discovery within {(long)budget.TotalMilliseconds} ms.",
+            }));
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested && FindBrowserTimeout(ex) is { } browserTimeout)
+        {
+            await DisposeFailedStartupAsync(client, transport).ConfigureAwait(false);
+            return Cache(cacheKey, ServerRuntimeState.Failed(new McpRuntimeDiagnostic
+            {
+                Code = "oauth_login_timeout",
+                Server = key,
+                Transport = FormatTransport(effective.Definition.Transport),
+                Message = browserTimeout.Message,
             }));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -712,7 +732,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         };
         if (request.AllowOAuthBrowserLogin)
         {
-            var browser = new McpOAuthBrowserAuthorization(request.OAuthStatus, request.OpenOAuthBrowser);
+            var browser = new McpOAuthBrowserAuthorization(request.OAuthStatus, request.OAuthPrompt, request.OpenOAuthBrowser, request.OAuthBrowserTimeout);
             options.AuthorizationCallbackHandler = browser.AuthorizeAsync;
         }
         else
@@ -721,6 +741,30 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         }
 
         return options;
+    }
+
+    // The SDK's defaults, except during a browser login: its first request (the server/discover probe, 5 seconds
+    // by default) carries the whole authorization, so neither the probe nor the initialization may end before the
+    // browser's wait does. An HTTP server answers an unknown method at once, so the probe needs no shorter bound.
+    private static McpClientOptions? CreateClientOptions(bool browserLogin, TimeSpan budget)
+        => browserLogin ? new McpClientOptions { InitializationTimeout = budget, DiscoverProbeTimeout = budget } : null;
+
+    private static McpOAuthBrowserTimeoutException? FindBrowserTimeout(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is McpOAuthBrowserTimeoutException timeout)
+            {
+                return timeout;
+            }
+
+            if (current is AggregateException aggregate)
+            {
+                return aggregate.InnerExceptions.Select(FindBrowserTimeout).FirstOrDefault(static found => found is not null);
+            }
+        }
+
+        return null;
     }
 
     private static Uri CreateDefaultOAuthRedirectUri()

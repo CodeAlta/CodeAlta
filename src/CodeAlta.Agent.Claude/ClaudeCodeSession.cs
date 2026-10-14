@@ -90,6 +90,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private bool _mcpInitialized;
     private Task? _interrupt;
     private bool _showReasoning = true;
+    // The CLI refused to start with the option of the prompt suggestions: it is not given it again.
+    private bool _promptSuggestionsRefused;
     private bool _withoutApiKey;
     private int _disposed;
 
@@ -382,7 +384,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         var key = new ClaudeCodeLaunchKey(
             string.IsNullOrWhiteSpace(request.WorkingDirectory) ? null : request.WorkingDirectory,
             ClaudeCodeLauncher.ToModelOption(request.ModelId),
-            effort);
+            effort,
+            _options.PromptSuggestions && request.PromptSuggestions && !_promptSuggestionsRefused);
         var permissionMode = NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
         lock (_gate)
         {
@@ -439,6 +442,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         var newSessionId = Guid.NewGuid().ToString();
+        // A resume the CLI refused the suggestions for does not ask for them again.
+        key = key with { PromptSuggestions = key.PromptSuggestions && !_promptSuggestionsRefused };
         try
         {
             await StartConnectionAsync(resolution.Path, key, newSessionId, resumeSessionId: null, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
@@ -572,24 +577,38 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         string appendSystemPrompt,
         CancellationToken cancellationToken)
     {
-        try
+        // A CLI that predates an option refuses to start with it, and names the first one it does not know: the
+        // session is started again without that one, until the CLI starts or refuses something else.
+        while (true)
         {
-            await StartConnectionCoreAsync(executable, key, newSessionId, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // A process given up before it was ready is not kept: the next start would take it as one that is, with
-            // a conversation it was never told it has.
+            try
+            {
+                await StartConnectionCoreAsync(executable, key, newSessionId, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // A process given up before it was ready is not kept: the next start would take it as one that is,
+                // with a conversation it was never told it has.
+                await CloseConnectionAsync().ConfigureAwait(false);
+                throw;
+            }
+            catch (IOException) when (_showReasoning && Refused(ReasoningDisplayOption))
+            {
+                // The session runs without the summaries of the thinking.
+                _showReasoning = false;
+            }
+            catch (IOException) when (key.PromptSuggestions && Refused(ClaudeCodeLauncher.PromptSuggestionsOption))
+            {
+                // The session runs without the prompt suggestions.
+                _promptSuggestionsRefused = true;
+                key = key with { PromptSuggestions = false };
+            }
+
             await CloseConnectionAsync().ConfigureAwait(false);
-            throw;
         }
-        catch (IOException) when (_showReasoning && _connection?.DescribeExit().Contains(ReasoningDisplayOption, StringComparison.Ordinal) == true)
-        {
-            // A CLI that predates the option refuses to start with it: the session runs without the summaries.
-            _showReasoning = false;
-            await CloseConnectionAsync().ConfigureAwait(false);
-            await StartConnectionCoreAsync(executable, key, newSessionId, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
-        }
+
+        bool Refused(string option) => _connection?.DescribeExit().Contains(option, StringComparison.Ordinal) == true;
     }
 
     private async Task StartConnectionCoreAsync(

@@ -1682,6 +1682,8 @@ public sealed class CodeAltaConfigStore
         definition.Command = NormalizeText(definition.Command);
         definition.PermissionMode = NormalizeText(definition.PermissionMode);
         definition.AnthropicApiKey = NormalizeText(definition.AnthropicApiKey);
+        // Off is the absence of the setting.
+        definition.PromptSuggestions = definition.PromptSuggestions == true ? true : null;
         if (definition.Arguments is { Count: 0 })
         {
             definition.Arguments = null;
@@ -1696,6 +1698,7 @@ public sealed class CodeAltaConfigStore
             RejectUnsupportedField(definition, "args", definition.Arguments is { Count: > 0 } ? definition.Arguments : null);
             RejectUnsupportedField(definition, "permission_mode", definition.PermissionMode);
             RejectUnsupportedField(definition, "anthropic_api_key", definition.AnthropicApiKey);
+            RejectUnsupportedField(definition, "prompt_suggestions", definition.PromptSuggestions);
         }
 
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
@@ -2334,6 +2337,7 @@ public sealed class CodeAltaConfigStore
                definition.Arguments is { Count: > 0 } ||
                !string.IsNullOrWhiteSpace(definition.PermissionMode) ||
                !string.IsNullOrWhiteSpace(definition.AnthropicApiKey) ||
+               definition.PromptSuggestions is not null ||
                !string.IsNullOrWhiteSpace(definition.GitHubEnterpriseUrl) ||
                !string.IsNullOrWhiteSpace(definition.GitHubTokenEnv) ||
                !string.IsNullOrWhiteSpace(definition.CopilotTokenEnv) ||
@@ -2430,6 +2434,7 @@ public sealed class CodeAltaConfigStore
             Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
             PermissionMode = definition.PermissionMode,
             AnthropicApiKey = definition.AnthropicApiKey,
+            PromptSuggestions = definition.PromptSuggestions,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,
             GitHubTokenEnv = definition.GitHubTokenEnv,
             CopilotTokenEnv = definition.CopilotTokenEnv,

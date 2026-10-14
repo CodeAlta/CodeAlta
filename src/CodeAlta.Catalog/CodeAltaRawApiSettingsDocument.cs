@@ -340,6 +340,13 @@ public sealed class CodeAltaProviderDocument
     public string? AnthropicApiKey { get; set; }
 
     /// <summary>
+    /// Gets or sets whether a <c>claude-code</c> provider asks the CLI to suggest the next prompt of the user after
+    /// each turn; false when absent. A suggestion costs a request of its own.
+    /// </summary>
+    [JsonPropertyName("prompt_suggestions")]
+    public bool? PromptSuggestions { get; set; }
+
+    /// <summary>
     /// Gets or sets the GitHub Enterprise URL or domain for the GitHub Copilot direct provider.
     /// </summary>
     [JsonPropertyName("github_enterprise_url")]

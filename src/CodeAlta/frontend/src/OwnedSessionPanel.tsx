@@ -29,6 +29,7 @@ import { RemoteControlButton } from "./RemoteControlButton";
 import { MicButton } from "./speech/MicButton";
 import { SpeechContext } from "./speech/speech";
 import { entryRemoteControl, remoteControlView, sameRemoteControl, type RemoteControlOpenRequest, type RemoteControlView } from "./remoteControl";
+import { entryPromptSuggestion, shownPromptSuggestion, takesPromptSuggestion } from "./promptSuggestion";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import { AppIcon } from "./AppIcon";
 import type { PromptInput } from "./PromptEditor";
@@ -445,6 +446,22 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const next = answeredRemote ?? observedRemote ?? remoteControlView(null);
     setShownRemote(current => sameRemoteControl(current, next) ? current : next);
   }, [answeredRemote, observedRemote?.status, observedRemote?.url, observedRemote?.error]);
+  // What the provider suggests as the next prompt (Claude Code), in place of the placeholder of an empty prompt.
+  // It comes back whenever the prompt is empty again. A prompt the host accepted ends it, before the host says so:
+  // the turn that follows brings another one, or none. It is ended where a prompt is accepted and not by the busy
+  // state, which lags the runtime state: a session shown again after its run ended would lose its suggestion.
+  const observedSuggestion = invalidEpoch || runtimeState?.kind !== "ready" ? null : entryPromptSuggestion(runtimeState.snapshot.entry);
+  const latestSuggestion = useRef(observedSuggestion); latestSuggestion.current = observedSuggestion;
+  const [answeredSuggestion, setAnsweredSuggestion] = useState<string | null>(null);
+  // Only a state that was read ends it: a reading that failed says nothing of the suggestion.
+  const suggestionRead = runtimeState?.kind === "ready";
+  useEffect(() => { if (suggestionRead && !observedSuggestion) setAnsweredSuggestion(null); }, [suggestionRead, observedSuggestion]);
+  const promptAccepted = useRef(() => {}); promptAccepted.current = () => {
+    if (latestSuggestion.current) setAnsweredSuggestion(latestSuggestion.current);
+    void runtimeScope.current?.refresh(true);
+  };
+  const suggestion = shownPromptSuggestion(observedSuggestion,
+    { text, images: images.length, busy: composerBusy || compacting || !!pending || expanded, answered: answeredSuggestion });
   const setRemoteControl = useCallback(async (enabled: boolean) => {
     if (!capability.canMutate()) return "unavailable";
     const result = await sessions.setRemoteControl({ expectedEpoch: epoch, sessionId, enabled }, { timeoutMilliseconds: 90_000 });
@@ -495,7 +512,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       observeEpoch(result);
       const accepted = result.status === "accepted" || result.status === "replay";
       if (!accepted || result.receipt?.state === "terminal") setSubmittedThinking(current => current?.key === key ? null : current);
-      if (accepted) { queue.composer.sent(id); void runtimeScope.current?.refresh(true); }
+      if (accepted) { queue.composer.sent(id); promptAccepted.current(); }
       else if (result.status === "uncertain" || result.status === "stale_epoch") queue.composer.uncertain(id, "reason" in result && result.reason ? result.reason : result.status);
       // The session was working after all: the prompt keeps its place and leaves at the next idle moment.
       else if (result.status === "busy" || result.status === "capacity") { queue.composer.release(id); retryLater(); }
@@ -648,7 +665,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       setMessage(failure ?? "Ready to send to this owned session.");
       // The prompt stays in the composer and the status line says why: a prompt is never answered with a toast.
       setSendFailure(failure ?? "");
-      if (result.status === "accepted" || result.status === "replay") void runtimeScope.current?.refresh(true);
+      if (result.status === "accepted" || result.status === "replay") promptAccepted.current();
       if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && canAdmit()
         // The composer still holds exactly what was sent (a choices refresh alone also bumps the revision).
         && (inputRevision.current === revision || latestText.current === request.text)
@@ -684,7 +701,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       observeEpoch(reply);
       result = reply.status === "accepted" || reply.status === "replay" ? true
         : reply.status === "uncertain" || reply.status === "stale_epoch" ? null : false;
-      if (result) void runtimeScope.current?.refresh(true);
+      if (result) promptAccepted.current();
     };
     // Do not acknowledge a React state update or a page-local queue as downstream ownership. These
     // helpers latch before dispatch and settle the original command's receipt. An aborted transport is
@@ -1041,12 +1058,20 @@ ${value}` : value);
         {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
         {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
-          : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : "Prompt ready")}</span>
+          : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span>
       <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
         renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
-      onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: t("Ask CodeAlta to work on this project…"), onKeyDown: event => {
+      onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: suggestion ?? t("Ask CodeAlta to work on this project…"), suggested: !!suggestion, onKeyDown: event => {
+        if (suggestion && takesPromptSuggestion({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey,
+          metaKey: event.metaKey, isComposing: event.nativeEvent.isComposing, keyCode: event.nativeEvent.keyCode })) {
+          event.preventDefault(); event.stopPropagation();
+          editText(suggestion);
+          // The prompt goes on after what was taken.
+          requestAnimationFrame(() => promptInput.current?.setSelectionRange(suggestion.length, suggestion.length));
+          return;
+        }
         if (event.altKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.key === "ArrowUp" || event.key === "ArrowDown")
           && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
           event.preventDefault(); event.stopPropagation();

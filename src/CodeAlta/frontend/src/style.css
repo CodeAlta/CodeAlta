@@ -916,6 +916,8 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .prompt-editor.expanded { height: 100%; min-height: 0; }
 .composer-region.resized .prompt-editor { flex: 1 0 auto; }
 .prompt-editor[data-placeholder]::after { content: attr(data-placeholder); position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: 13px; line-height: 20px; }
+/* A suggested prompt, which a key takes, is slanted: it does not read as the usual hint, nor as what was written. */
+.prompt-editor[data-suggested]::after { font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .prompt-editor .monaco-editor textarea { min-height: 0; padding: 0; margin: 0; border: 0; box-shadow: none; }
 .expanded-prompt-dialog .app-window-body > p { flex-shrink: 0; }
 .appearance-settings h2 { margin: 0 0 12px; font-size: var(--bp-typography-size-heading-medium); font-weight: var(--bp-typography-weight-bold); }

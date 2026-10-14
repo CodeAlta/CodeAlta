@@ -106,6 +106,27 @@ public sealed class SessionRuntimeStateRpcTests
     }
 
     [TestMethod]
+    public async Task PromptSuggestionIsSentAsItIsOrNotAtAll()
+    {
+        var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null);
+        var state = new SessionRuntimeCurrentState(Guid.NewGuid(), "session", false, entry);
+        var service = new SessionRuntimeStateService((_, _) => Task.FromResult(state), Epoch);
+        Assert.IsNull((await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.PromptSuggestion);
+
+        state = state with { Entry = entry with { PromptSuggestion = "go ahead with rope" } };
+        Assert.AreEqual("go ahead with rope", (await service.CurrentAsync(new(Epoch, "session"), default)).Entry!.PromptSuggestion);
+
+        // One that does not fit the wire is left out, never cut: the rest of the state is still read.
+        foreach (var unfit in new[] { "", new string('x', 257), "half \ud83d" })
+        {
+            state = state with { Entry = entry with { PromptSuggestion = unfit } };
+            var value = await service.CurrentAsync(new(Epoch, "session"), default);
+            Assert.AreEqual("ok", value.Status);
+            Assert.IsNull(value.Entry!.PromptSuggestion);
+        }
+    }
+
+    [TestMethod]
     public async Task ActivityProjectionPreservesOffsetAndExactCountsAndRejectsInvalidTime()
     {
         var entry = new SessionRuntimeCurrentEntry(1, false, false, null, false, "fake", "fake", null, null, null, null)

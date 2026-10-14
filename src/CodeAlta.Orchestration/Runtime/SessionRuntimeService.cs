@@ -140,6 +140,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private readonly bool _sessionPermissionModes;
 
     /// <summary>
+    /// Gets or initializes whether the host shows the prompts a provider suggests. False, the default: no session
+    /// asks its provider for suggestions, each of which costs a request.
+    /// </summary>
+    public bool ShowsPromptSuggestions { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether the permission mode of a session decides what the host does with its requests
     /// (<see cref="GetPermissionPolicy"/>). False, the default, leaves every session the one policy of the host.
     /// </summary>
@@ -1625,6 +1631,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             TitleSource = titleSource,
             TitleMode = titleMode,
             TitleInstructions = SessionTitleGuidance,
+            // A suggestion is for somebody who reads it and writes the next prompt: not in a host that shows none,
+            // and not for a session an agent drives.
+            PromptSuggestions = ShowsPromptSuggestions && string.IsNullOrWhiteSpace(session.ParentSessionId),
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
@@ -2628,7 +2637,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 entry.ActiveRunId?.Value, entry.QueueDrainInProgress, entry.ProviderId.Value, entry.ProviderKey,
                 entry.Model, entry.ReasoningEffort, entry.AgentPromptId, entry.PendingAgentPromptId)
             { Activity = new(entry.ActivityTimestamp, entry.ActivityEvents, entry.OmittedActivityEvents), BackgroundTasks = WithJobTasks(entry.BackgroundTasks, sessionId),
-              RemoteControl = entry.RemoteControl };
+              RemoteControl = entry.RemoteControl, PromptSuggestion = entry.PromptSuggestion };
         return new(_runtimeInstanceId, sessionId, _transitions.ContainsKey(sessionId), snapshot);
     }
 
@@ -4785,6 +4794,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 // A run that goes on after a failed one makes that failure a thing of the past.
                 if (ActiveRunId is null && @event is not AgentErrorEvent) LastRunFailed = false;
+                // What was suggested answered the turn before the run that starts.
+                if (ActiveRunId is null) PromptSuggestion = null;
                 ActiveRunId = runId;
             }
 
@@ -4800,6 +4811,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 RemoteControl = remote.RemoteControl;
             }
 
+            // The session tells a suggestion only between its runs; one that reaches this entry after the next run
+            // started all the same is not kept through it.
+            if (@event is AgentPromptSuggestionEvent suggested && ActiveRunId is null)
+            {
+                PromptSuggestion = suggested.Suggestion;
+            }
+
             if (@event is AgentErrorEvent or AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle or AgentSessionUpdateKind.Shutdown })
             {
                 ActiveRunId = null;
@@ -4811,6 +4829,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 IsTerminated = true;
                 BackgroundTasks = [];
                 RemoteControl = AgentRemoteControl.Off;
+                PromptSuggestion = null;
             }
         }
 
@@ -4819,6 +4838,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The remote control of the session, as its provider last told it.</summary>
         public AgentRemoteControl RemoteControl { get; private set; } = AgentRemoteControl.Off;
+
+        /// <summary>What the provider suggested as the next prompt once the last turn ended; null once a run started since.</summary>
+        public string? PromptSuggestion { get; private set; }
 
         // The tasks that go on are the ones the event lists, all of them. A task that failed or was stopped is
         // kept after them for the call that started it, which otherwise only says that it returned; a task that

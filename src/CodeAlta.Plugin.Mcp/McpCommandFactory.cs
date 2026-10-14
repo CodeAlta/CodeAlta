@@ -219,6 +219,17 @@ internal static class McpCommandFactory
                         server = serverKey,
                         message,
                     }),
+                    OAuthPrompt = prompt => WriteRecord(context.Stdout, new
+                    {
+                        type = "alta.mcp.auth.progress",
+                        version = 1,
+                        correlationId = context.CorrelationId,
+                        server = serverKey,
+                        message = McpOAuthBrowserAuthorization.FormatPrompt(prompt),
+                        authorizationUrl = prompt.AuthorizationUri.ToString(),
+                        expiresAt = prompt.ExpiresAt,
+                        timeoutSeconds = (long)prompt.Timeout.TotalSeconds,
+                    }),
                 },
                 serverKey,
                 context.CancellationToken).ConfigureAwait(false);
@@ -240,7 +251,7 @@ internal static class McpCommandFactory
             });
             return succeeded ? 0 : 1;
         });
-        AddHelpText(command, "Example: `alta mcp auth login docs`.");
+        AddHelpText(command, $"Opens the browser and waits up to {McpOAuthBrowserAuthorization.FormatDuration(McpOAuthBrowserAuthorization.DefaultTimeout)} for it to come back; the progress record gives `authorizationUrl` and `expiresAt`. Example: `alta mcp auth login docs`.");
         return command;
     }
 
