@@ -2906,6 +2906,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return AltaExitCodes.ServiceUnavailable;
         }
 
+        // A fork keeps the space of its source: an agent forks only the sessions of its own space.
+        if (await RefuseSessionOfOtherSpaceAsync(context, sessionId.Trim(), "forks").ConfigureAwait(false) is { } refused)
+        {
+            return refused;
+        }
+
         var read = await ReadSessionTurnsAsync(context, runtime, sessionId).ConfigureAwait(false);
         if (read.Snapshot is not { } snapshot)
         {
@@ -3251,6 +3257,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var info = infoResult.Info!;
+        if (await RefuseSessionOfOtherSpaceAsync(context, info.Session.SessionId, "sends prompts to").ConfigureAwait(false) is { } otherSpace)
+        {
+            return otherSpace;
+        }
+
         if (!runtime.AcceptsPromptFrom(context.Caller.SourceSessionId, info.Session))
         {
             return PromptDenied(context);
@@ -3609,6 +3620,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         // A reminder for another session is a prompt it is handed.
+        if (await RefuseSessionOfOtherSpaceAsync(context, infoResult.Info!.Session.SessionId, "sends prompts to").ConfigureAwait(false) is { } otherSpace)
+        {
+            return otherSpace;
+        }
+
         if (context.Services.Get<SessionRuntimeService>()?.AcceptsPromptFrom(context.Caller.SourceSessionId, infoResult.Info!.Session) == false)
         {
             return PromptDenied(context);

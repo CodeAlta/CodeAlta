@@ -65,6 +65,27 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(refused.Stdout + refused.Stderr, "space 'personal'");
     }
 
+    [TestMethod]
+    public async Task AnAgent_ForksAndSendsTo_OnlyTheSessionsOfItsOwnSpace()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
+        var business = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "business").ConfigureAwait(false);
+        var personal = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        var personalAgent = Agent(personal);
+
+        fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", "fork", Id(business)], caller: personalAgent).ConfigureAwait(false), "space.notOwnSpace");
+        foreach (var verb in new[] { "send", "queue", "message" })
+        {
+            fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", verb, Id(business), "--message", "hello"], caller: personalAgent).ConfigureAwait(false), "space.notOwnSpace");
+        }
+
+        fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["reminder", "create", "--session", Id(business), "--duration", "00:10:00", "--content", "check"], caller: personalAgent).ConfigureAwait(false), "space.notOwnSpace");
+
+        // The user reaches every session.
+        var queued = await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(business), "--message", "hello"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.IsFalse((queued.Stdout + queued.Stderr).Contains("space.notOwnSpace", StringComparison.Ordinal), queued.Stdout + queued.Stderr);
+    }
+
     private static string Id(JsonElement created) => created.GetProperty("sessionId").GetString()!;
 
     private static AltaCallerIdentity Agent(JsonElement created) => new() { Kind = "agent", SourceSessionId = Id(created) };

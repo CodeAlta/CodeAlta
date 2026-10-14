@@ -279,6 +279,38 @@ internal sealed partial class BuiltInAltaCommandContributor
         return SpaceFilter.Load(configStore, space?.Id);
     }
 
+    // Refuses, for an agent, a session of another space than its own: it forks it or hands it a prompt only in its own
+    // space, where what that session reaches is what it reaches itself. Null when allowed (and for the user).
+    private static async Task<int?> RefuseSessionOfOtherSpaceAsync(AltaCommandContext context, string targetSessionId, string what)
+    {
+        if (context.Services.Get<SpaceCatalog>() is not { } spaces
+            || NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || string.Equals(callerId, targetSessionId, StringComparison.OrdinalIgnoreCase)
+            || await CallerSpaceAsync(context, spaces).ConfigureAwait(false) is not { } own)
+        {
+            return null;
+        }
+
+        SessionSpaceRecord? record = null;
+        if (context.Services.Get<SessionRuntimeService>() is { } runtime)
+        {
+            try
+            {
+                record = await runtime.GetSessionSpaceAsync(targetSessionId, context.CancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+            }
+        }
+
+        var target = await spaces.ResolveSessionSpaceAsync(record?.SpaceId, record?.ProjectId, context.CancellationToken).ConfigureAwait(false);
+        return string.Equals(own.Id, target.Id, StringComparison.Ordinal)
+            ? null
+            : SpaceRefused(context, "space.notOwnSpace",
+                $"A session {what} only sessions of its own space. This session is in the space '{own.Name}' ({own.Id}); session '{targetSessionId}' is in '{target.Name}' ({target.Id}). " +
+                $"Ask the user to do it from the CodeAlta window.");
+    }
+
     // The space a new session created in `spaceId` is in: that space, else the only space of its project, else the
     // default one; null when the host keeps no spaces.
     private static async Task<SpaceDescriptor?> ResolveNewSessionSpaceDescriptorAsync(AltaCommandContext context, string? spaceId, ProjectDescriptor? project)
