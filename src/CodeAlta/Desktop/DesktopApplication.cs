@@ -693,11 +693,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // An instance on explicit roots is automation and stays off the network: it downloads no model.
                     speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
                     builder.AddSpeechService(speech);
-                    claudeCli = roots.Home is not null ? new ClaudeCliService() : new ClaudeCliService(catalog, epoch)
+                    // On explicit roots the state is read and checked, and nothing is downloaded.
+                    claudeCli = new ClaudeCliService(catalog, epoch)
                     {
                         FindProvider = key => configStore.LoadGlobalProviderDefinitions(includeDisabled: true)
                             .FirstOrDefault(definition => string.Equals(definition.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is { } definition
                             ? new ClaudeCliProvider(definition.ProviderType, definition.Command, definition.ConfigDir) : null,
+                        DownloadAllowed = roots.Home is null,
                     };
                     builder.AddClaudeCliService(claudeCli);
                     mcpServers = new McpServersService(host.ProjectCatalog, epoch, roots.Home);

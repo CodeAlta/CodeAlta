@@ -2524,7 +2524,7 @@ run (null when it has none), its `config_dir`, and the same version, size, `wind
 `read_failed`, `invalid_request` otherwise). `install` starts the download (`ok`, `busy`, `unsupported`), `cancelInstall` stops it, and
 `watch` replays and follows its state (`idle`, `downloading`, `installing`, `done`, `failed`, `canceled`, with the
 bytes and the reason of a failure). The download belongs to the application: closing the page does not stop it,
-closing the window does. An instance on explicit roots registers the service unavailable and downloads nothing. The
+closing the window does. An instance on explicit roots reads and checks, and downloads nothing: `install` answers `disabled`, which the page says. The
 download itself is described in "The pinned CLI" of [providers.md](providers.md).
 
 **The default provider.** `ModelProviderDescriptor.IsDefault` is true for every configured provider (it is

@@ -53,6 +53,12 @@ internal sealed class ClaudeCliService
     internal Func<string, ClaudeCliProvider?>? FindProvider { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether <c>install</c> downloads. An instance started on explicit roots is automation and
+    /// stays off the network: it reads and checks, and refuses the download (<c>disabled</c>).
+    /// </summary>
+    internal bool DownloadAllowed { get; init; } = true;
+
+    /// <summary>
     /// Says whether a provider runs Claude Code and, for one, which executable it would run, without starting it: the
     /// composer and the timeline propose the download where a provider has none.
     /// </summary>
@@ -101,7 +107,7 @@ internal sealed class ClaudeCliService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } status) return new(status);
-        return new(!_installer!.IsSupported ? "unsupported" : _installer.TryStart() ? "ok" : "busy");
+        return new(!DownloadAllowed ? "disabled" : !_installer!.IsSupported ? "unsupported" : _installer.TryStart() ? "ok" : "busy");
     }
 
     /// <summary>Stops the running download. What it wrote stays, and the next one goes on from it.</summary>
@@ -182,7 +188,7 @@ internal sealed record ClaudeCliCheckResponse(string Status, string? ProviderKey
         => new(status, providerKey, false, null, null, false, ConfiguredClaudeCodeCli.PinnedVersion, 0, OperatingSystem.IsWindows(), null);
 }
 
-/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>unsupported</c> or <c>busy</c>.</param>
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>unsupported</c>, <c>busy</c> or <c>disabled</c> (this instance downloads nothing).</param>
 internal sealed record ClaudeCliCommandResponse(string Status);
 
 /// <param name="Status"><c>ok</c>, <c>unavailable</c> or <c>stale_epoch</c>.</param>

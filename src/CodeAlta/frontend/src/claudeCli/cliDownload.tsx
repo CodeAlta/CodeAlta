@@ -41,6 +41,8 @@ export function useClaudeCliDownload(api: ClaudeCliDownloadApi, epoch: string, o
     start: async (size: string | null | undefined) => {
       const reply = await api.install({ expectedEpoch: epoch }, { timeoutMilliseconds: 15000 }).catch(() => null);
       if (reply?.status === "ok") setInstall({ state: "downloading", received: 0, total: cliBytes(size), error: null });
+      // Refused: the page says why instead of doing nothing.
+      else if (reply?.status === "disabled" || reply?.status === "unsupported") setInstall({ state: "failed", received: 0, total: 0, error: reply.status === "disabled" ? "disabled" : "unsupported_platform" });
     },
     cancel: () => void api.cancelInstall({ expectedEpoch: epoch }, { timeoutMilliseconds: 15000 }).catch(() => null),
   };

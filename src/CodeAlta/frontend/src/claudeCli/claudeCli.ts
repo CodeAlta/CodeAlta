@@ -88,6 +88,7 @@ const failures: Readonly<Record<string, MessageKey>> = Object.freeze({
   busy_elsewhere: "Another CodeAlta is downloading Claude Code.",
   disk: "Claude Code could not be written to the disk.",
   unsupported_platform: "Claude Code has no version for this system.",
+  disabled: "This CodeAlta downloads nothing: it was started on folders of its own.",
 });
 
 /** What to say of a download that failed. */

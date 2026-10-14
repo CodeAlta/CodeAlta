@@ -83,6 +83,18 @@ public sealed class ClaudeCliRpcTests
     }
 
     [TestMethod]
+    public async Task Install_OfAnInstanceOnExplicitRoots_IsRefused_AndItsStateIsStillRead()
+    {
+        using var fixture = new Fixture("win-x64");
+        var service = new ClaudeCliService(fixture.Service.Installer!, "host", static () => null, static (_, _) => Task.FromResult<string?>(null)) { DownloadAllowed = false };
+
+        Assert.AreEqual("ok", (await service.ReadAsync(new("host"), default)).Status);
+        Assert.AreEqual("disabled", service.Install(new("host")).Status);
+        Assert.AreEqual("idle", fixture.Service.Installer!.Current.State, "Nothing started.");
+        await fixture.Service.CloseAsync();
+    }
+
+    [TestMethod]
     public async Task Install_OfAPlatformWithoutCli_IsRefused()
     {
         using var fixture = new Fixture("freebsd-x64");
