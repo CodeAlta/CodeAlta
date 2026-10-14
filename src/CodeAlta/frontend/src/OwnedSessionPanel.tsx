@@ -194,6 +194,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const watching = observing || staged.length > 0;
   // What a Send that was not taken says, in the status line: a prompt is never answered with a toast.
   const [sendFailure, setSendFailure] = useState("");
+  // Asks the form of the session configuration to open: a send that needs another provider opens it.
+  const [selectionOpenRequest, setSelectionOpenRequest] = useState(0);
   const [retryTick, setRetryTick] = useState(0);
   const holdUntil = useRef(0);
   // The user messages on screen when a steering prompt left: a later one with its text is the agent taking it up.
@@ -620,6 +622,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       capabilityValid: capability.canMutate(), pending: !!submissions.pending(sessionId),
       inFlight: submissions.pending(sessionId)?.inFlight ?? false, enqueue: queuePrompt, busy: composerBusy, hasImages: images.length > 0 });
     if (!signal || signal.aborted || !capability.canMutate()) return;
+    // The provider was taken out of the space of the session: another one is chosen before anything is sent.
+    // The status line already says why; it goes once the session has another provider.
+    if (spaceProblem) { setSelectionOpenRequest(value => value + 1); return; }
     const retained = ownPending();
     if (!retained && !queuePrompt && composerBusy) { stagePrompt(images.length ? "Queue" : "Steer"); return; }
     // Enqueue waits for idle; normal Send keeps its place behind prompts already waiting.
@@ -946,6 +951,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
+  const spaceProblem = activeChoices?.providerOutsideSpace
+    ? t("{provider} is not available in the space of this session: choose another provider to send.", { provider: activeChoices.current?.providerKey ?? t("session provider") })
+    : null;
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
     if (field === "permissionMode") { void applyPermissionMode(activeChoices, selected, value, scope.current.signal); return; }
@@ -1131,7 +1139,7 @@ ${value}` : value);
         {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure ? "error" : "prompt"} size={14} />}
         {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
-          : !invalidEpoch && sendFailure ? sendFailure : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span>
+          : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span>
       <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
         renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
@@ -1161,7 +1169,7 @@ ${value}` : value);
            repeat: event.repeat, defaultPrevented: event.defaultPrevented }, () => submit(composerBusy), () => submit(false),
         navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); }
       } }}
-    options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy}
+    options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selected?.providerKey ?? t("session provider"), providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),

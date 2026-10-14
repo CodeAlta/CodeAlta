@@ -869,6 +869,11 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 {
                     result = new(OwnedSessionCommandOutcome.Cancelled);
                 }
+                else if (!await _runtime.IsSessionProviderInSpaceAsync(prepared.Session.SessionId).ConfigureAwait(false))
+                {
+                    // Its provider was taken out of the space of the session: it sends nothing until it switches.
+                    result = new(OwnedSessionCommandOutcome.Failed, Code: SessionRuntimeService.ProviderOutsideSpace);
+                }
                 else
                 {
                     // The policy of the session now that it is prepared (the mode a send chooses is saved by then)

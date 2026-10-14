@@ -12,6 +12,20 @@ public sealed partial class OwnedSessionCommandService
     }
 
     /// <summary>
+    /// Tells whether the provider of a session is available in the space of the session: a session whose provider was
+    /// taken out of its space sends nothing until it switches.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><see langword="true"/> when it is, or when the session is not known.</returns>
+    /// <exception cref="ArgumentException">The session identity is empty.</exception>
+    public Task<bool> IsSessionProviderInSpaceAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return _runtime.IsSessionProviderInSpaceAsync(sessionId, cancellationToken);
+    }
+
+    /// <summary>
     /// Asks the provider of a session to stop one of its background tasks. The end of the task is told by the
     /// state of the session; a task that already ended is not an error.
     /// </summary>

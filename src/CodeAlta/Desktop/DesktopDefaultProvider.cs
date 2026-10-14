@@ -4,16 +4,17 @@ using CodeAlta.Catalog;
 namespace CodeAlta.Desktop;
 
 /// <summary>
-/// Says which provider a new session starts with: the default provider of the configuration
-/// (<c>[chat].default_provider</c>, of the project then of the user) when it is enabled, otherwise the first
-/// enabled provider. The page, a new session, a work item and an automation all take it from here, so that they
-/// agree.
+/// Says which provider a new session starts with: among the enabled providers of its space, the default provider of
+/// the configuration (<c>[chat].default_provider</c>, of the project then of the user) when it is one of them,
+/// otherwise the first of them. The page, a new session, a work item and an automation all take it from here, so that
+/// they agree.
 /// </summary>
 internal sealed class DesktopDefaultProvider
 {
     private readonly CatalogOptions _options;
     private readonly Lock _gate = new();
     private (DateTime Written, long Length, string? Key)? _global;
+    private (DateTime Written, long Length, SpaceAssignments Assignments)? _assignments;
 
     internal DesktopDefaultProvider(CatalogOptions options)
     {
@@ -57,6 +58,61 @@ internal sealed class DesktopDefaultProvider
     /// <param name="projectPath">The folder of the project of the session; null for a session of no project.</param>
     internal ModelProviderDescriptor? Of(IReadOnlyList<ModelProviderDescriptor> enabled, string? projectPath = null)
         => Pick(enabled, Configured(projectPath));
+
+    /// <summary>
+    /// Gets the provider a new session of a space starts with among the enabled providers of that space; null when
+    /// none of them is.
+    /// </summary>
+    /// <param name="enabled">The enabled providers, in the order they are listed.</param>
+    /// <param name="projectPath">The folder of the project of the session; null for a session of no project.</param>
+    /// <param name="spaceId">The space of the session; null for the default space.</param>
+    internal ModelProviderDescriptor? Of(IReadOnlyList<ModelProviderDescriptor> enabled, string? projectPath, string? spaceId)
+        => Pick(InSpace(enabled, spaceId), Configured(projectPath));
+
+    /// <summary>Keeps the providers available in a space, in their order.</summary>
+    /// <param name="providers">The providers.</param>
+    /// <param name="spaceId">The space; null for the default space.</param>
+    internal IReadOnlyList<ModelProviderDescriptor> InSpace(IReadOnlyList<ModelProviderDescriptor> providers, string? spaceId)
+    {
+        ArgumentNullException.ThrowIfNull(providers);
+        var assignments = Assignments();
+        return [.. providers.Where(provider => assignments.IsAvailable(SpaceResourceKind.Provider, provider.ProviderId.Value, spaceId))];
+    }
+
+    /// <summary>Tells whether a provider is available in a space.</summary>
+    /// <param name="providerKey">The key of the provider.</param>
+    /// <param name="spaceId">The space; null for the default space.</param>
+    internal bool IsInSpace(string providerKey, string? spaceId)
+        => string.IsNullOrWhiteSpace(providerKey) || Assignments().IsAvailable(SpaceResourceKind.Provider, providerKey, spaceId);
+
+    /// <summary>
+    /// Gets the spaces each provider is assigned to in the user's configuration; a configuration that cannot be read
+    /// assigns none, so that every provider stays in every space.
+    /// </summary>
+    internal SpaceAssignments Assignments()
+    {
+        try
+        {
+            var file = new FileInfo(_options.ConfigPath);
+            var stamp = file.Exists ? (file.LastWriteTimeUtc, file.Length) : (default, -1L);
+            lock (_gate)
+            {
+                if (_assignments is { } known && (known.Written, known.Length) == stamp) return known.Assignments;
+            }
+
+            var assignments = new CodeAltaConfigStore(_options).LoadGlobalSpaceAssignments();
+            lock (_gate)
+            {
+                _assignments = (stamp.Item1, stamp.Item2, assignments);
+            }
+
+            return assignments;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return SpaceAssignments.Empty;
+        }
+    }
 
     /// <summary>
     /// Gets the configured provider when it is one of the enabled ones, otherwise the first of them that its own

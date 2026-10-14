@@ -120,6 +120,29 @@ public sealed class SessionFallbackTests
     }
 
     [TestMethod]
+    public async Task ProviderOfAnotherSpace_IsNotATargetOfTheFallback()
+    {
+        // The session is in the default space; the next target of its tier is a provider of Business alone.
+        await using var f = await Fixture.CreateAsync(Tiers + """
+
+            [providers.prov-b]
+            type = "openai-chat"
+            api_url = "http://127.0.0.1:9/v1"
+            api_key = "fixture"
+            spaces = ["business"]
+            """);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+
+        var card = await f.WaitForCardAsync(AgentSessionUpdateKind.Warning);
+        StringAssert.Contains(card.Message, "no other model of the standard tier can take over");
+        Assert.AreEqual(0, f.B.SendCount);
+        Assert.AreEqual("prov-a", (await f.ChildStateAsync()).ProviderKey);
+    }
+
+    [TestMethod]
     public async Task Switch_KeepsOrNarrowsThePermissionMode_NeverWidensIt()
     {
         await using var f = await Fixture.CreateAsync(Tiers, childPermissionMode: SessionPermissionModes.AcceptEdits,

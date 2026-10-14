@@ -16,9 +16,13 @@ public sealed partial class SessionRuntimeService
             var state = CaptureCurrentState(sessionId);
             if (state.CoordinatorTransitionInProgress || state.Entry is { ActiveRunId: not null } or { QueueDrainInProgress: true }
                 or { IsRetiring: true }) return null;
+            // The providers of the space of the session: one assigned to other spaces is not offered.
+            var space = await ResolveSpaceIdAsync(session.SpaceId, session.ProjectRef, token).ConfigureAwait(false);
+            var assignments = LoadSpaceAssignments();
             return new OwnedProviderSelectionContext(sessionId, _runtimeInstanceId, state.Entry?.AttachmentGeneration,
                 session.ResolvedProviderKey, session.UpdatedAt.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                _agentHub.SelectionProviders.Where(provider => provider.IsEnabled).ToArray());
+                _agentHub.SelectionProviders.Where(provider => provider.IsEnabled
+                    && assignments.IsAvailable(Catalog.SpaceResourceKind.Provider, provider.ProviderId.Value, space)).ToArray());
         }, CancellationToken.None).AsTask(), CancellationToken.None);
 
     internal Task<string> SelectOwnedProviderAsync(OwnedProviderSelectionContext expected, string providerKey)
@@ -47,6 +51,9 @@ public sealed partial class SessionRuntimeService
                 var target = _agentHub.SelectionProviders.SingleOrDefault(provider => provider.ProviderId.Value == providerKey && provider.IsEnabled);
                 if (target is null) return "provider_unavailable";
                 if (target.ProviderId.Value == session.ResolvedProviderKey) return "ok";
+                // A session belongs to its space: it only takes a provider of that space.
+                if (!IsProviderInSpace(target.ProviderId.Value, await ResolveSpaceIdAsync(session.SpaceId, session.ProjectRef, token).ConfigureAwait(false)))
+                    return ProviderOutsideSpace;
                 if (entry?.PendingAgentPromptId is not null) return "pending_selection";
                 // The original attachment stays intact through preparation and the atomic durable decision.
                 await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, carryOver, token).ConfigureAwait(false);

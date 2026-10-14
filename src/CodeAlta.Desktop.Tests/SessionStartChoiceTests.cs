@@ -151,6 +151,17 @@ public sealed class SessionStartChoiceTests
             File.WriteAllText(options.ConfigPath, "[chat]\ndefault_provider = \"zeta\"\n# disabled\n");
             CollectionAssert.AreEqual(new[] { "anthropic" }, Defaults());
 
+            // The page is told the spaces of each provider, and a space starts its sessions with a provider of its own.
+            File.WriteAllText(options.ConfigPath, "[chat]\ndefault_provider = \"codex\"\n\n[providers.codex]\ntype = \"codex\"\nspaces = [\"business\"]\n");
+            var snapshot = service.Snapshot(new()).Providers;
+            CollectionAssert.AreEqual(new[] { "business" }, snapshot.Single(static provider => provider.Id == "codex").Spaces!.ToArray());
+            Assert.IsNull(snapshot.Single(static provider => provider.Id == "anthropic").Spaces, "A provider of no space is in every space.");
+            var defaults = new DesktopDefaultProvider(options);
+            var listed = registry.ListProviders();
+            Assert.AreEqual("anthropic", defaults.Of(listed, null, null)?.ProviderId.Value, "The configured default is not in the default space.");
+            Assert.AreEqual("codex", defaults.Of(listed, null, "business")?.ProviderId.Value);
+            Assert.IsFalse(defaults.IsInSpace("codex", "personal"));
+
             var catalog = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch", new DesktopDefaultProvider(options));
             File.WriteAllText(options.ConfigPath, "[chat]\ndefault_provider = \"codex\"\n");
             CollectionAssert.AreEqual(new[] { "codex" },

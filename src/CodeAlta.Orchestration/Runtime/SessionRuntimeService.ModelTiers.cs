@@ -24,7 +24,11 @@ internal sealed record RunFailureNotice(
     string? AgentPromptId,
     ModelTier? Tier,
     CodeAlta.Agent.AgentErrorEvent Error,
-    bool HasQueuedPrompts);
+    bool HasQueuedPrompts)
+{
+    /// <summary>The space the session is in: a fallback only goes to a provider of that space.</summary>
+    public string? SpaceId { get; init; }
+}
 
 public sealed partial class SessionRuntimeService
 {
@@ -68,7 +72,10 @@ public sealed partial class SessionRuntimeService
                 entry.PendingAgentPromptId ?? entry.AgentPromptId,
                 ModelTiers.Parse(local?.Tier),
                 error,
-                local?.QueuedPrompts.Any(static prompt => prompt.State != "submitted") ?? false));
+                local?.QueuedPrompts.Any(static prompt => prompt.State != "submitted") ?? false)
+            {
+                SpaceId = await ResolveSpaceIdAsync(entry.SpaceId, entry.ProjectId, CancellationToken.None).ConfigureAwait(false),
+            });
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {

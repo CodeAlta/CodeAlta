@@ -141,6 +141,8 @@ internal sealed class SessionFallbackCoordinator
             if (sameProvider && quota) continue;
             if (sameProvider && candidate.Is(notice.ProviderKey, notice.ModelId, notice.ReasoningEffort) && candidate.Reasoning == notice.ReasoningEffort) continue;
             if (IsExhausted(candidate.Target.ProviderKey, now)) continue;
+            // Only a provider of the space of the session is approved for it.
+            if (!_runtime.IsProviderInSpace(candidate.Target.ProviderKey, notice.SpaceId)) continue;
             // A queue that waits cannot follow the session to another provider: the switch is refused then.
             if (!sameProvider && notice.HasQueuedPrompts) continue;
             if (!IsUsable(candidate.Target, states)) continue;

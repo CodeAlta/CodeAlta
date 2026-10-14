@@ -13,13 +13,15 @@ const edge = browserExecutable;
 
 // Mounts the production OwnedSessionPanel with the production styles. The fixture plays the host: it takes or
 // refuses a Send, starts and ends the run, and takes steering. The last scenario is the permission mode of a session
-// whose model and effort are no longer a pair its provider lists: the host is asked for the mode alone.
+// whose model and effort are no longer a pair its provider lists: the host is asked for the mode alone. The session
+// whose provider is no longer in its space sends nothing and opens its configuration.
 const scenarios = [
-  { name: "composer sends, enqueues and explicitly steers on Windows", mac: false, permission: false },
-  { name: "composer sends, enqueues and explicitly steers on macOS", mac: true, permission: false },
-  { name: "composer sends the permission mode of a session whose saved selection is not valid", mac: false, permission: true },
+  { name: "composer sends, enqueues and explicitly steers on Windows", mac: false, permission: false, outside: false },
+  { name: "composer sends, enqueues and explicitly steers on macOS", mac: true, permission: false, outside: false },
+  { name: "composer sends the permission mode of a session whose saved selection is not valid", mac: false, permission: true, outside: false },
+  { name: "composer asks for another provider when the one of the session is not in its space", mac: false, permission: false, outside: true },
 ];
-for (const { name, mac, permission } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -99,11 +101,25 @@ for (const { name, mac, permission } of scenarios) test(name, { skip: !edge, tim
     await command("Runtime.enable");
     await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'platform',{get:()=>${JSON.stringify(mac ? "MacIntel" : "Win32")}});
       window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ');
-      ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}` });
+      ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}
+      ${outside ? "window.fixtureOutsideSpace=true;" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
+
+    if (outside) {
+      // The status line says why nothing is sent; a Send keeps the prompt and opens the form to choose another provider.
+      const problem = "fixture-provider is not available in the space of this session: choose another provider to send.";
+      assert.equal(await wait(`document.querySelector('.composer-status-line')?.textContent===${JSON.stringify(problem)}`), true);
+      assert.equal(await evaluate("!!document.querySelector('.composer-selection-popover')"), false);
+      await write("not in this space"); await enter();
+      assert.equal(await wait("!!document.querySelector('.composer-selection-popover .composer-selection-form')"), true);
+      assert.deepEqual(await sends(), []);
+      assert.equal(await evaluate("promptText()"), "not in this space");
+      assert.deepEqual(exceptions, []);
+      return;
+    }
 
     if (permission) {
       // The session holds the effort "max", which its model does not list: nothing else of its selection can be

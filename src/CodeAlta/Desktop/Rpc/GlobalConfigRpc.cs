@@ -290,7 +290,11 @@ internal sealed partial class GlobalConfigService
             // A null key keeps the stored secret; the form never receives it back.
             if (edit.ClearApiKey) definition.ApiKey = null;
             else if (!string.IsNullOrEmpty(edit.ApiKey)) definition.ApiKey = edit.ApiKey;
+            // The spaces of a provider are written beside it: a provider given another key keeps them.
+            var renamedSpaces = !string.IsNullOrEmpty(original) && !string.Equals(original, key, StringComparison.OrdinalIgnoreCase)
+                ? store.LoadGlobalSpaceAssignments().Of(SpaceResourceKind.Provider, original) : [];
             store.SaveGlobalProviderDefinitions(definitions);
+            if (renamedSpaces.Count > 0) store.SaveGlobalSpaceAssignment(SpaceResourceKind.Provider, key, renamedSpaces);
             if (request.MakeDefault && edit.Enabled) store.SaveGlobalDefaultProvider(key);
             // A provider that is no longer the default, or no longer enabled, is not left named as the default.
             else if (store.GetEffectiveDefaultProvider() is { } current

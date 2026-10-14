@@ -449,6 +449,29 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_KeepsTheSpacesOfTheProvider_AlsoUnderANewKey()
+    {
+        await using var fixture = new Fixture("""
+            [providers.claude-work]
+            type = "claude-code"
+            spaces = ["business"]
+            """);
+        var listed = fixture.Service.Providers(new(Epoch));
+        var edit = new GlobalConfigProviderEdit("claude-work", "claude-code", true, "Work", null, null, null, null, null, true);
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "claude-work", edit, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        CollectionAssert.AreEqual(new[] { "business" }, fixture.Store.LoadGlobalSpaceAssignments()
+            .Of(SpaceResourceKind.Provider, "claude-work").ToArray(), "A save of the form leaves the spaces as they are.");
+
+        var renamed = fixture.Service.SaveProvider(new(Epoch, saved.Revision, "claude-work", edit with { Key = "claude-business" }, false, false));
+        Assert.AreEqual("ok", renamed.Status, renamed.Message);
+        var assignments = fixture.Store.LoadGlobalSpaceAssignments();
+        CollectionAssert.AreEqual(new[] { "business" }, assignments.Of(SpaceResourceKind.Provider, "claude-business").ToArray());
+        Assert.AreEqual(0, assignments.Of(SpaceResourceKind.Provider, "claude-work").Count);
+    }
+
+    [TestMethod]
     public async Task DuplicateProvider_AddsANumberedCopyWithoutTheFolderOfTheAccount()
     {
         await using var fixture = new Fixture("""

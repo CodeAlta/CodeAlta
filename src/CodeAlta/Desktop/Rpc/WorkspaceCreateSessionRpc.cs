@@ -141,8 +141,13 @@ internal sealed partial class WorkspaceService
             if (CatalogAdmissionBusy) return Reply("busy");
             var providers = _sessionProviders.ListProviders();
             var matches = request.ProviderId is null ? [] : providers.Where(value => value.ProviderId.Value == request.ProviderId).Take(2).ToArray();
+            // The providers of a session are those of its space: a provider assigned to other spaces is refused, and
+            // a session that names none starts with the default one of its space.
+            if (matches.Length == 1 && _defaultProvider is not null && !_defaultProvider.IsInSpace(matches[0].ProviderId.Value, request.SpaceId))
+                return Reply("provider_outside_space");
             var provider = request.ProviderId is null
-                ? _defaultProvider?.Of(providers, request.ProjectPath) ?? providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault()
+                ? _defaultProvider is not null ? _defaultProvider.Of(providers, request.ProjectPath, request.SpaceId)
+                    : providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault()
                 : matches.Length == 1 ? matches[0] : null;
             if (provider is null) return Reply("provider_unavailable");
             var completion = new TaskCompletionSource<WorkspaceCreateSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);

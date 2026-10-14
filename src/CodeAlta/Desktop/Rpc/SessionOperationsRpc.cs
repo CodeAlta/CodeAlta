@@ -198,6 +198,9 @@ internal sealed class SessionOperationsService
                 DefaultPermissionMode = choices.DefaultPermissionMode,
                 SupportsRemoteControl = choices.SupportsRemoteControl ? true : null,
                 Tier = choices.Tier,
+                // A provider taken out of the space of the session: the page asks for another one before a send.
+                ProviderOutsideSpace = _commands is not null && !await _commands.IsSessionProviderInSpaceAsync(request.SessionId, cancellationToken).ConfigureAwait(false)
+                    ? true : null,
             };
         }
         catch (OperationCanceledException) { throw; }
@@ -606,6 +609,10 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // True when the session can be followed and driven from claude.ai (Claude Code's Remote Control); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? SupportsRemoteControl { get; init; }
+    // True when the provider of the session was taken out of the space of the session: it sends nothing until it
+    // switches to another provider. Absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ProviderOutsideSpace { get; init; }
     // The tier of models the session runs on (complex, standard or quick); absent for a model chosen by hand.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Tier { get; init; }

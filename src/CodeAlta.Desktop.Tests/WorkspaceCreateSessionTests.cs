@@ -208,6 +208,79 @@ public sealed class WorkspaceCreateSessionTests
     }
 
     [TestMethod]
+    public async Task ASessionTakesOnlyTheProvidersOfItsSpace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-provider-spaces-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
+            var projectPath = Path.Combine(root, "project");
+            foreach (var path in new[] { global, home, builtin, projectPath }) Directory.CreateDirectory(path);
+            // The provider the configuration makes the default is assigned to Business alone.
+            File.WriteAllText(Path.Combine(global, "config.toml"), """
+                [chat]
+                default_provider = "business-only"
+
+                [providers.business-only]
+                type = "openai-chat"
+                api_url = "http://127.0.0.1:9/v1"
+                api_key = "fixture"
+                spaces = ["business"]
+                """);
+            var businessOnly = new ModelProviderDescriptor(new("business-only"), "Business only") { IsDefault = true, DefaultModelId = "fixture-model" };
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry =>
+                {
+                    registry.RegisterOrReplace(Provider, () => new DraftRuntime());
+                    registry.RegisterOrReplace(businessOnly, () => new DraftRuntime(null, businessOnly));
+                },
+            });
+            Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+            var service = new WorkspaceService(host, Epoch);
+
+            // Without a provider named, a session starts with the default of its space.
+            var inDefault = await service.CreateSessionAsync(new(Epoch, "global", null, null, "Default chat"), CancellationToken.None);
+            var inBusiness = await service.CreateSessionAsync(new(Epoch, "global", null, null, "Business chat", SpaceId: "business"), CancellationToken.None);
+            Assert.AreEqual(("ok", "ok"), (inDefault.Status, inBusiness.Status));
+            var sessions = (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions;
+            Assert.AreEqual(Provider.ProviderId.Value, sessions.Single(s => s.Id == inDefault.SessionId).ProviderKey, "The configured default is not in the default space.");
+            Assert.AreEqual("business-only", sessions.Single(s => s.Id == inBusiness.SessionId).ProviderKey);
+
+            // A provider named outside the space of the session is refused, and creates nothing.
+            Assert.AreEqual(SessionRuntimeService.ProviderOutsideSpace,
+                (await service.CreateSessionAsync(new(Epoch, "global", null, null, null, "business-only"), CancellationToken.None)).Status);
+            Assert.AreEqual("ok", (await service.CreateSessionAsync(new(Epoch, "global", null, null, null, Provider.ProviderId.Value, SpaceId: "business"),
+                CancellationToken.None)).Status, "A provider of no space is in every space.");
+            Assert.AreEqual(3, (await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Length);
+
+            // The choices of a session and its switch follow its space.
+            var choices = await host.Commands.GetProviderSelectionAsync(inDefault.SessionId!);
+            CollectionAssert.AreEqual(new[] { Provider.ProviderId.Value }, choices!.Providers.Select(static p => p.ProviderId.Value).ToArray());
+            Assert.AreEqual(SessionRuntimeService.ProviderOutsideSpace, await host.Commands.SelectProviderAsync(choices, "business-only"));
+            var businessChoices = await host.Commands.GetProviderSelectionAsync(inBusiness.SessionId!);
+            CollectionAssert.AreEquivalent(new[] { Provider.ProviderId.Value, "business-only" }, businessChoices!.Providers.Select(static p => p.ProviderId.Value).ToArray());
+            Assert.IsTrue(await host.RuntimeService.IsSessionProviderInSpaceAsync(inBusiness.SessionId!));
+
+            // A provider taken out of the space of a session leaves it without a provider to send with.
+            new CodeAltaConfigStore(host.CatalogOptions).SaveGlobalSpaceAssignment(SpaceResourceKind.Provider, "business-only", ["personal"]);
+            Assert.IsFalse(await host.RuntimeService.IsSessionProviderInSpaceAsync(inBusiness.SessionId!));
+            Assert.IsTrue(await host.RuntimeService.IsSessionProviderInSpaceAsync(inDefault.SessionId!));
+            var refused = host.Commands.AdmitSend(new OwnedTextSendRequest(Guid.NewGuid().ToString("N"), inBusiness.SessionId!, "hello"));
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, refused.Kind);
+            var outcome = await refused.Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.AreEqual((OwnedSessionCommandOutcome.Failed, SessionRuntimeService.ProviderOutsideSpace), (outcome.Outcome, outcome.Code),
+                "The session sends nothing until it switches to a provider of its space.");
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task EffectfulDraftCreation_IsSingleFlightButSettledIdenticalRequestCreatesAgain(bool projectScope)

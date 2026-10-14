@@ -1,4 +1,4 @@
-import { useContext, type ComponentProps, type ReactNode, type SyntheticEvent } from "react";
+import { useContext, useEffect, useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react";
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { modelBrand } from "./brands";
@@ -35,12 +35,16 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
 // Both draft and owned composers present their selection as one chip that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, summary, locked = false }: {
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, summary, locked = false, openRequest = 0 }: {
   sessionId: string; onOpenCatalog?: (page: "prompts" | "models") => void;
   agent: ReactNode; provider: ReactNode; model: ReactNode; reasoning: ReactNode;
   summary: ComposerSelectionSummary; locked?: boolean;
+  /** Opens the form each time it changes from what it was: the owner asks for another choice. */
+  openRequest?: number;
 }) {
   const { t } = useShellLanguage();
+  const [open, setOpen] = useState(false);
+  useEffect(() => { if (openRequest > 0) setOpen(true); }, [openRequest]);
   // The logo of the provider, and the one of the model when its family is another brand: a model of Anthropic
   // served by another provider shows both.
   const providerLogo = useProviderBrand(summary.providerKey);
@@ -57,8 +61,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     </div>
   </div>;
   return <PopoverNext content={form} placement="top-start" popoverClassName="composer-selection-popover"
-    canEscapeKeyClose={!locked}
-    {...(locked ? { isOpen: true, onInteraction: (next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (!next) event?.preventDefault(); } } : {})}>
+    canEscapeKeyClose={!locked} isOpen={locked || open}
+    onInteraction={(next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (locked && !next) { event?.preventDefault(); return; } setOpen(next); }}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}
       title={t("Agent, model and reasoning for the next Send")} endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>

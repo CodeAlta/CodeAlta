@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins;
@@ -30,6 +31,8 @@ internal sealed class ConfigurationService(
         var pluginInstances = pluginRuntime?.ActivePlugins ?? [];
         // One provider is the default: the one a new session starts with.
         var startsWith = defaultProvider?.Of([.. providerDescriptors.Where(static value => value.IsEnabled)])?.ProviderId.Value;
+        // The spaces each provider is in: the page offers a new session the providers of the space it shows.
+        var assignments = defaultProvider?.Assignments() ?? SpaceAssignments.Empty;
         var providers = providerDescriptors
             .Take(32)
             // Identity must never be truncated into another selectable provider key.
@@ -41,7 +44,10 @@ internal sealed class ConfigurationService(
                 value.IsEnabled,
                 defaultProvider is null ? value.IsDefault : string.Equals(value.ProviderId.Value, startsWith, StringComparison.Ordinal),
                 BoundOptional(value.DefaultModelId),
-                BoundOptional(value.DefaultReasoningEffort?.ToString())))
+                BoundOptional(value.DefaultReasoningEffort?.ToString()))
+            {
+                Spaces = assignments.Of(SpaceResourceKind.Provider, value.ProviderId.Value) is { Count: > 0 } spaces ? [.. spaces.Take(64)] : null,
+            })
             .ToArray();
         var plugins = pluginInstances
             .Take(32)
@@ -131,7 +137,12 @@ internal sealed record ConfigurationProvider(
     bool Enabled,
     bool IsDefault,
     string? DefaultModel,
-    string? DefaultReasoning);
+    string? DefaultReasoning)
+{
+    /// <summary>The spaces the provider is assigned to; absent when it is in every space.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Spaces { get; init; }
+}
 internal sealed record ConfigurationPlugin(
     string Id,
     string Name,
