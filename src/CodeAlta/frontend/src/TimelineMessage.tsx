@@ -23,7 +23,7 @@ import { useRowBookmark } from "./bookmarks/timelineBookmarks";
 import { SystemPromptReaderContext } from "./SystemPromptDialog";
 import { promptProblem, promptTokens } from "./systemPrompt";
 import { usePromptChange } from "./systemPromptReader";
-import { TimelineClaudeCli } from "./claudeCli/ClaudeCliFirstUse";
+import { TimelineClaudeCli } from "./claudeCli/timelineCard";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;

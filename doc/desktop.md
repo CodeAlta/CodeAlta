@@ -2514,7 +2514,7 @@ exception (or an inner one) is the not-found exception of the provider (`Configu
 row names its provider (`TimelineItem.missingCliProvider`). The card shows **Download &lt;version&gt; (&lt;size&gt;)**, the
 progress and **Cancel**, the reason of a failure, then tests the provider once (`modelCatalog.probe`): a CLI that is
 signed out gets the login command, with the account folder of the provider. The download and its progress are those of
-Settings (`claudeCli/cliDownload.tsx`). The timeline shows the card in an owned host only (`ClaudeCliEpochContext`).
+Settings (`claudeCli/cliDownload.tsx`). The timeline shows the card in an owned host only (`claudeCli/timelineCard.tsx`, which gets the card from the window so that a page without the host does not bundle it).
 
 **The `claudeCli` RPC** (`Desktop/Rpc/ClaudeCliRpc.cs`) serves that box, through `ConfiguredClaudeCodeCli` of
 `CodeAlta.Hosting`: the desktop assembly names no provider package. `read` gives the pinned `version`, the

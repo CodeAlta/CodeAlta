@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Callout } from "@blueprintjs/core";
 import { claudeCli as ClaudeCliClient, modelCatalog, type ClaudeCliCheckResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -75,22 +75,3 @@ export function ClaudeCliFirstUse({ epoch, providerKey, api = ClaudeCliClient, p
   </div></Callout>;
 }
 
-/**
- * What the timeline of a session needs for the card: the epoch of the host (null where nothing can be downloaded, a
- * demo or a fixture), and the provider whose card the composer of the session already shows.
- */
-export const ClaudeCliEpochContext = createContext<Readonly<{ epoch: string; composerProvider: string | null }> | null>(null);
-
-/**
- * The card of an error whose provider has no Claude Code CLI to run, in the timeline of its session. The composer
- * shows it for the provider of the session: the error of that provider does not show it twice.
- */
-export function TimelineClaudeCli({ providerKey }: { providerKey: string }) {
-  const host = useContext(ClaudeCliEpochContext);
-  return host && showsTimelineCard(host, providerKey) ? <ClaudeCliFirstUse epoch={host.epoch} providerKey={providerKey} /> : null;
-}
-
-/** Whether the error of a provider shows the card in the timeline: not when the composer of the session shows it. */
-export function showsTimelineCard(host: Readonly<{ composerProvider: string | null }>, providerKey: string): boolean {
-  return host.composerProvider?.toLowerCase() !== providerKey.toLowerCase();
-}
