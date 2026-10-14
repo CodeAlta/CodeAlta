@@ -6,7 +6,7 @@ export * from "../projectFocus.neoastra.mount";
 export { projectFiles, projectGit } from "../demo-api";
 
 const space = (id: string, name: string, projectIds: string[], look: Partial<SpaceItem> = {}): SpaceItem =>
-  ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, ...look });
+  ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, agentPrompt: null, ...look });
 // The default space holds both projects of the fixture; Work has the second one.
 const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work",
   localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" })];
@@ -28,6 +28,9 @@ export const spaces = {
     return done();
   },
   shown: async (request: SpaceShownRequest) => { fixture.shown.push(request.id ?? ""); return done(); },
+  assignments: async () => ({ status: "ok", providers: [], mcpServers: [], plugins: [], skills: [], prompts: [] }),
+  assignResource: done, setAgentPrompt: done,
+  sessionResources: async () => ({ status: "unavailable", spaceId: null, mcpServers: [], skills: [], prompts: [], plugins: [] }),
   watch: async (_request: object, options?: { signal?: AbortSignal }) => {
     const waiting: SpacesEvent[] = [];
     let wake = () => { };

@@ -1,8 +1,10 @@
 // The page's link to the spaces of the catalog: what they are now, what their sessions do, and the calls that change them.
-import type { spaces as spacesService, SpaceChangeResponse, SpaceSessionActivity } from "#neoastra";
-import { defaultSpace, readSessionActivity, readSpaces, sameSessions, sameSpaces, spaceActivities, type Space, type SpaceActivity } from "./spaces";
+import type { spaces as spacesService, SpaceChangeResponse, SpaceSessionActivity, SpaceSessionResourcesResponse } from "#neoastra";
+import { defaultSpace, noAssignments, readAssignments, readSessionActivity, readSpaces, sameSessions, sameSpaces, spaceActivities, type ResourceAssignments,
+  type Space, type SpaceActivity, type SpaceResourceKind } from "./spaces";
 
-export type SpacesApi = Pick<typeof spacesService, "list" | "create" | "update" | "delete" | "assign" | "reorder" | "shown" | "activity" | "watch">;
+export type SpacesApi = Pick<typeof spacesService, "list" | "create" | "update" | "delete" | "assign" | "reorder" | "shown" | "activity" | "watch"
+  | "assignments" | "assignResource" | "setAgentPrompt" | "sessionResources">;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** What the page shows of the spaces. `loaded` is false until the host answered once. */
@@ -15,6 +17,8 @@ export type SpacesState = Readonly<{
   sessions: readonly SpaceSessionActivity[];
   /** What the sessions of each space are doing, by the identifier of the space. */
   activity: ReadonlyMap<string, SpaceActivity>;
+  /** The spaces of the providers, MCP servers, plugins, skills and agent prompts that list some. */
+  assignments: ResourceAssignments;
 }>;
 
 /** How a change ended: done, or refused with what the host said. */
@@ -22,7 +26,12 @@ export type SpaceOutcome = Readonly<{ ok: boolean; status: string; message: stri
 
 const noActivity: ReadonlyMap<string, SpaceActivity> = new Map();
 const noSessions: readonly SpaceSessionActivity[] = Object.freeze([]);
-const empty: SpacesState = { loaded: false, available: false, spaces: [defaultSpace], sessions: noSessions, activity: noActivity };
+const empty: SpacesState = { loaded: false, available: false, spaces: [defaultSpace], sessions: noSessions, activity: noActivity, assignments: noAssignments };
+// Whether two readings assign the same resources to the same spaces.
+function sameAssignments(left: ResourceAssignments, right: ResourceAssignments): boolean {
+  return left === right || (Object.keys(left) as SpaceResourceKind[]).every(kind => left[kind].size === right[kind].size
+    && [...left[kind]].every(([key, spaces]) => { const other = right[kind].get(key); return !!other && other.length === spaces.length && other.every((id, at) => id === spaces[at]); }));
+}
 /** How long the page waits before it listens again after the host stopped telling. */
 export const reconnectMilliseconds = 2000;
 /** How often the page asks what the sessions do: which ones run, failed or wait for the user. */
@@ -60,17 +69,21 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
     const turn = ++listing;
     const own = (async () => {
       try {
-        const reply = await api.list({ expectedEpoch: host }, { timeoutMilliseconds: 15_000 });
+        const [reply, assigned] = await Promise.all([api.list({ expectedEpoch: host }, { timeoutMilliseconds: 15_000 }),
+          api.assignments({ expectedEpoch: host }, { timeoutMilliseconds: 15_000 }).catch(() => null)]);
         // A later listing already answered, or is about to: this one says nothing newer.
         if (turn !== listing || epoch !== host) return;
         // A host without spaces, or a catalog that cannot be read now: the window goes on with the default space, and forgets nothing.
         if (reply.status !== "ok") { show({ ...empty, loaded: true }); return; }
         const spaces = readSpaces(reply.spaces);
         const kept = sameSpaces(state.spaces, spaces) ? state.spaces : spaces;
-        if (state.loaded && state.available && kept === state.spaces) return;
+        // A reading of the assignments that failed keeps the last one.
+        const read = assigned ? readAssignments(assigned) : state.assignments;
+        const assignments = sameAssignments(state.assignments, read) ? state.assignments : read;
+        if (state.loaded && state.available && kept === state.spaces && assignments === state.assignments) return;
         // The spaces changed: what their sessions do is worked out again from the last reading.
         show({ loaded: true, available: true, spaces: kept, sessions: state.sessions,
-          activity: kept.length > 1 ? spaceActivities(kept, state.sessions) : noActivity });
+          activity: kept.length > 1 ? spaceActivities(kept, state.sessions) : noActivity, assignments });
       } catch {
         // The host is gone: the next connection lists again. Who waited for a first answer goes on with the default space.
         if (turn === listing && epoch === host && !state.loaded) show({ ...empty, loaded: true });
@@ -178,5 +191,22 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
     assign: (projectId: string, join: readonly string[], leave: readonly string[] = []) =>
       change(host => api.assign({ expectedEpoch: host, projectId, join, leave }, { timeoutMilliseconds: 30_000 })),
     reorder: (ids: readonly string[]) => change(host => api.reorder({ expectedEpoch: host, ids }, { timeoutMilliseconds: 30_000 })),
+    /** Assigns a resource to spaces; an empty list puts it in every space. */
+    assignResource: (kind: SpaceResourceKind, key: string, spaces: readonly string[]) =>
+      change(host => api.assignResource({ expectedEpoch: host, kind, key, spaces }, { timeoutMilliseconds: 30_000 })),
+    /** Sets the agent prompt the new sessions of a space start with; null for the default one. */
+    setAgentPrompt: (id: string, agentPrompt: string | null) =>
+      change(host => api.setAgentPrompt({ expectedEpoch: host, id, agentPrompt }, { timeoutMilliseconds: 30_000 })),
+    /** Reads what a session can use: its space and the resources of that space that are turned on. Null when the host cannot say. */
+    async sessionResources(sessionId: string): Promise<SpaceSessionResourcesResponse | null> {
+      const host = epoch;
+      if (!host || !state.available) return null;
+      try {
+        const reply = await api.sessionResources({ expectedEpoch: host, sessionId }, { timeoutMilliseconds: 15_000 });
+        return reply.status === "ok" ? reply : null;
+      } catch { return null; }
+    },
+    /** The host the hub listens to; null while it listens to none. */
+    hostEpoch: () => epoch,
   };
 }

@@ -10,7 +10,7 @@ import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpa
 import { activityMilliseconds, createSpacesHub, type SpacesApi, type SpacesHub } from "./spacesHub";
 
 const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem> = {}): SpaceItem =>
-  ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, ...changes });
+  ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, agentPrompt: null, ...changes });
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `C:\\code\\${id}`, archived });
 const session = (id: string, scopeKind: string | null, projectId: string | null, workspacePath: string | null): WorkspaceSession => ({ id, title: id, workspacePath, providerKey: "codex",
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
@@ -216,6 +216,10 @@ test("the hub lists the spaces once, follows what the host says, and says what e
     update: ok, delete: async () => ({ status: "invalid", message: "The default space holds every project and cannot be deleted.", space: null, movedSessions: 0 }),
     assign: async request => { calls.push(`assign ${request.projectId} +${request.join} -${request.leave}`); return ok(); }, reorder: ok,
     shown: async request => { calls.push(`shown ${request.id}`); return ok(); },
+    assignments: async () => ({ status: "ok", providers: [], mcpServers: [{ key: "Atlassian", spaces: ["work"] }], plugins: [], skills: [], prompts: [] }),
+    assignResource: async request => { calls.push(`assignResource ${request.kind} ${request.key} ${request.spaces}`); return ok(); },
+    setAgentPrompt: async request => { calls.push(`setAgentPrompt ${request.id} ${request.agentPrompt}`); return ok(); },
+    sessionResources: async () => ({ status: "ok", spaceId: "work", mcpServers: [], skills: [], prompts: [], plugins: [] }),
   };
   const timers: { run: () => void; milliseconds: number }[] = [];
   const hub = createSpacesHub(api, { set: (run, milliseconds) => { const timer = { run, milliseconds }; timers.push(timer); return timer; }, clear: timer => { timers.splice(timers.indexOf(timer as never), 1); } });
@@ -278,7 +282,8 @@ test("the hub lists the spaces once, follows what the host says, and says what e
 test("a host that keeps no spaces leaves the window with the default one, and nobody waits for more", async () => {
   const unavailable = async () => { throw new Error("no host"); };
   const hub = createSpacesHub({ list: async () => ({ status: "unavailable", spaces: [] }), activity: unavailable, watch: unavailable, create: unavailable, update: unavailable,
-    delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable });
+    delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable, assignments: unavailable, assignResource: unavailable, setAgentPrompt: unavailable,
+    sessionResources: unavailable });
   let done = false;
   const waited = hub.whenLoaded(60_000).then(() => { done = true; });
   hub.unavailable();
@@ -286,7 +291,8 @@ test("a host that keeps no spaces leaves the window with the default one, and no
   assert.equal(done, true);
   assert.deepEqual([hub.getSnapshot().loaded, hub.getSnapshot().available], [true, false]);
   const other = createSpacesHub({ list: async () => ({ status: "unavailable", spaces: [] }), activity: unavailable, watch: unavailable, create: unavailable, update: unavailable,
-    delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable });
+    delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable, assignments: unavailable, assignResource: unavailable, setAgentPrompt: unavailable,
+    sessionResources: unavailable });
   const disconnect = other.connect("epoch");
   await other.whenLoaded(60_000);
   assert.deepEqual([other.getSnapshot().loaded, other.getSnapshot().available], [true, false]);

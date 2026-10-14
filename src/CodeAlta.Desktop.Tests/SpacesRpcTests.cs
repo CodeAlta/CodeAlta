@@ -194,6 +194,41 @@ public sealed class SpacesRpcTests
     }
 
     [TestMethod]
+    public async Task TheSpacesOfAResource_AreReadAndWrittenInTheGlobalConfiguration_AndTheAgentPromptOfASpaceIsSaved()
+    {
+        using var fixture = new Fixture();
+        Assert.AreEqual("ok", (await fixture.Service.CreateAsync(new(Epoch, "Business", null, null, null, null), default)).Status);
+        var events = fixture.View.Watch(_ => fixture.Changed++);
+
+        Assert.AreEqual("ok", (await fixture.Service.AssignResourceAsync(new(Epoch, "mcp", "atlassian", ["business"]), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.AssignResourceAsync(new(Epoch, "skill", "terraform", ["business", "default"]), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.AssignResourceAsync(new(Epoch, "prompt", "reviewer", ["business"]), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.AssignResourceAsync(new(Epoch, "plugin", "jira", ["business"]), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.AssignResourceAsync(new(Epoch, "prompt", "reviewer", []), default)).Status, "An empty list puts it in every space.");
+        Assert.AreEqual(5, fixture.Changed, "The pages read the spaces of the resources again.");
+        var read = fixture.Service.Assignments(new(Epoch));
+        Assert.AreEqual("ok", read.Status);
+        Assert.AreEqual(("atlassian", "business"), (read.McpServers.Single().Key, read.McpServers.Single().Spaces.Single()));
+        CollectionAssert.AreEqual(new[] { "business", "default" }, read.Skills.Single().Spaces.ToArray());
+        Assert.AreEqual("jira", read.Plugins.Single().Key);
+        Assert.AreEqual(0, read.Prompts.Count);
+        StringAssert.Contains(File.ReadAllText(fixture.Options.ConfigPath), "[plugins.mcp.servers.atlassian]");
+
+        // What is not a resource, a space or a provider of the file is refused, and nothing is written.
+        Assert.AreEqual("invalid", (await fixture.Service.AssignResourceAsync(new(Epoch, "tool", "shell", ["business"]), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.AssignResourceAsync(new(Epoch, "mcp", "docs", ["Not A Space"]), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.AssignResourceAsync(new(Epoch, "provider", "claude-business", ["business"]), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.AssignResourceAsync(new("other", "mcp", "docs", ["business"]), default)).Status);
+
+        Assert.AreEqual("ok", (await fixture.Service.SetAgentPromptAsync(new(Epoch, "business", "reviewer"), default)).Status);
+        Assert.AreEqual("reviewer", (await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "business").AgentPrompt);
+        Assert.AreEqual("ok", (await fixture.Service.SetAgentPromptAsync(new(Epoch, "business", null), default)).Status);
+        Assert.IsNull((await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "business").AgentPrompt);
+        Assert.AreEqual("not_found", (await fixture.Service.SetAgentPromptAsync(new(Epoch, "missing", "reviewer"), default)).Status);
+        events.Dispose();
+    }
+
+    [TestMethod]
     public void TheSessionsAboveOne_StopAtALoopAndAtTheDepthLimit()
     {
         var loop = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["a"] = "b", ["b"] = "c", ["c"] = "A" };
@@ -219,12 +254,16 @@ public sealed class SpacesRpcTests
         public SpacesService Service { get; }
         public IReadOnlyList<SessionRuntimeOverview> Runs { get; set; } = [];
         public IReadOnlyList<string> Waiting { get; set; } = [];
+        public int Changed { get; set; }
 
         public Fixture()
         {
             Options = new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(Root, "global")).FullName };
             Projects = new ProjectCatalog(Options);
-            Service = new SpacesService(new SpaceCatalog(Projects), View, () => Runs, () => ValueTask.FromResult(Waiting), Epoch);
+            Service = new SpacesService(new SpaceCatalog(Projects), View, () => Runs, () => ValueTask.FromResult(Waiting), Epoch)
+            {
+                ConfigStore = new CodeAltaConfigStore(Options),
+            };
         }
 
         public string Folder(string name) => Directory.CreateDirectory(Path.Combine(Root, "folders", name)).FullName;

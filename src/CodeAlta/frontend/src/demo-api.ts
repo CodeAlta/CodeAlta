@@ -177,7 +177,9 @@ export const markdownLinks = Object.freeze({ open: async () => ({ status: "unava
 // The spaces need a host that keeps them: the demo has the default one alone.
 export const spaces = Object.freeze({ list: async () => ({ status: "unavailable", spaces: [] }), activity: async () => ({ status: "unavailable", sessions: [], truncated: false }),
   create: unavailable, update: unavailable, delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable,
-  watch: unavailable });
+  watch: unavailable, assignments: async () => ({ status: "unavailable", providers: [], mcpServers: [], plugins: [], skills: [], prompts: [] }),
+  assignResource: unavailable, setAgentPrompt: unavailable,
+  sessionResources: async () => ({ status: "unavailable", spaceId: null, mcpServers: [], skills: [], prompts: [], plugins: [] }) });
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const toolCalls = Object.freeze({ read: unavailable, readJob: unavailable, observe: unavailable });

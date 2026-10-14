@@ -1,4 +1,4 @@
-import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
+import type { SpaceAssignmentsResponse, SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
 import { isBrandIcon } from "../BrandIcon";
 import { brandColor, type Brand } from "../brands";
 import { isSymbolIcon } from "../symbolIcons";
@@ -21,6 +21,8 @@ export type Space = Readonly<{
   projectIds: readonly string[];
   /** The path of its file; null for a default space that was never described. */
   file: string | null;
+  /** The agent prompt its new sessions start with when none is chosen; null for the default one. */
+  agentPrompt: string | null;
 }>;
 
 /** The identifier of the default space, which holds every project and is always there. */
@@ -37,7 +39,7 @@ const identifier = (value: unknown): value is string => typeof value === "string
 
 /** The default space of a window whose host lists none: it holds every project. */
 export const defaultSpace: Space = Object.freeze({ id: defaultSpaceId, name: "Default", description: null, icon: null, color: null, isDefault: true,
-  projectIds: Object.freeze([]) as readonly string[], file: null });
+  projectIds: Object.freeze([]) as readonly string[], file: null, agentPrompt: null });
 
 /**
  * The spaces as the host lists them: the default one first, each once. What is not a space is left out, and a
@@ -51,7 +53,8 @@ export function readSpaces(items: readonly SpaceItem[] | null | undefined): read
     seen.add(item.id);
     spaces.push({ id: item.id, name: item.name, description: text(item.description, 4096) ? item.description : null,
       icon: text(item.icon, 64) ? item.icon : null, color: brandColor(item.color) ?? null, isDefault: item.id === defaultSpaceId,
-      projectIds: Array.isArray(item.projectIds) ? item.projectIds.filter((id: unknown) => text(id, 256)) : [], file: text(item.file, 4096) ? item.file : null });
+      projectIds: Array.isArray(item.projectIds) ? item.projectIds.filter((id: unknown) => text(id, 256)) : [], file: text(item.file, 4096) ? item.file : null,
+      agentPrompt: text(item.agentPrompt, 128) ? item.agentPrompt : null });
   }
   const first = spaces.findIndex(space => space.isDefault);
   if (first < 0) return [defaultSpace, ...spaces];
@@ -63,9 +66,57 @@ export function sameSpaces(left: readonly Space[], right: readonly Space[]): boo
   return left === right || left.length === right.length && left.every((space, index) => {
     const other = right[index];
     return space.id === other.id && space.name === other.name && space.description === other.description && space.icon === other.icon
-      && space.color === other.color && space.file === other.file && space.projectIds.length === other.projectIds.length
+      && space.color === other.color && space.file === other.file && space.agentPrompt === other.agentPrompt && space.projectIds.length === other.projectIds.length
       && space.projectIds.every((id, at) => id === other.projectIds[at]);
   });
+}
+
+/** The kinds of resource that are assigned to spaces, as the host names them. */
+export type SpaceResourceKind = "provider" | "mcp" | "plugin" | "skill" | "prompt";
+/** The spaces of the resources that list some, by kind and by key without case. A resource that is not there is in every space. */
+export type ResourceAssignments = Readonly<Record<SpaceResourceKind, ReadonlyMap<string, readonly string[]>>>;
+const noMap: ReadonlyMap<string, readonly string[]> = new Map();
+/** Assignments that list nothing: every resource is in every space. */
+export const noAssignments: ResourceAssignments = Object.freeze({ provider: noMap, mcp: noMap, plugin: noMap, skill: noMap, prompt: noMap });
+
+/** The assignments as the host lists them; what is not one is left out. */
+export function readAssignments(reply: SpaceAssignmentsResponse | null | undefined): ResourceAssignments {
+  if (!reply || reply.status !== "ok") return noAssignments;
+  const read = (items: SpaceAssignmentsResponse["mcpServers"] | null | undefined): ReadonlyMap<string, readonly string[]> => {
+    const map = new Map<string, readonly string[]>();
+    for (const item of Array.isArray(items) ? items.slice(0, 512) : []) {
+      if (!item || !text(item.key, 256) || !Array.isArray(item.spaces)) continue;
+      const spaces: string[] = [];
+      for (const id of item.spaces as readonly unknown[]) if (identifier(id) && !spaces.includes(id)) spaces.push(id);
+      if (spaces.length > 0) map.set(item.key.toLowerCase(), spaces);
+    }
+    return map;
+  };
+  return { provider: read(reply.providers), mcp: read(reply.mcpServers), plugin: read(reply.plugins), skill: read(reply.skills), prompt: read(reply.prompts) };
+}
+
+/** The spaces a resource is assigned to; empty when it is in every space. */
+export function resourceSpaces(assignments: ResourceAssignments, kind: SpaceResourceKind, key: string): readonly string[] {
+  return assignments[kind].get(key.toLowerCase()) ?? [];
+}
+
+/** Whether a resource is in a space: one that lists no space is in every space, the default space only when it is listed. */
+export function inSpace(spaces: readonly string[], spaceId: string): boolean {
+  return spaces.length === 0 || spaces.includes(spaceId);
+}
+
+/** The spaces of a resource once it is made available in one more space; a shared resource stays shared. */
+export function spacesWith(spaces: readonly string[], spaceId: string): readonly string[] {
+  return spaces.length === 0 || spaces.includes(spaceId) ? spaces : [...spaces, spaceId];
+}
+
+/**
+ * The spaces of a resource once it leaves one: a shared resource is then listed for every other space, the default
+ * one included, so a space created later does not get it. Null when it would be in no space, which no list can say.
+ */
+export function spacesWithout(spaces: readonly string[], spaceId: string, every: readonly string[]): readonly string[] | null {
+  const kept = [...new Set((spaces.length === 0 ? every : spaces).filter(id => id !== spaceId))];
+  return kept.length === 0 ? null : kept;
 }
 
 /** The space with an identifier; the default space for an identifier no space has. */

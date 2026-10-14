@@ -136,6 +136,106 @@ internal sealed class SpacesService
     }
 
     /// <summary>
+    /// The spaces each resource is assigned to in the global configuration: providers, MCP servers, plugins, skills
+    /// and agent prompts. A resource that is not listed is in every space.
+    /// </summary>
+    [NeoRpcMethod("assignments")]
+    public SpaceAssignmentsResponse Assignments(SpacesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return SpaceAssignmentsResponse.Failed(refused);
+        if (ConfigStore is not { } store) return SpaceAssignmentsResponse.Failed("unavailable");
+        try
+        {
+            var assignments = store.LoadGlobalSpaceAssignments();
+            static IReadOnlyList<SpaceResourceAssignment> Of(IReadOnlyDictionary<string, IReadOnlyList<string>> map)
+                => [.. map.Take(MaximumAssignments).Select(static pair => new SpaceResourceAssignment(pair.Key, [.. pair.Value]))];
+            return new("ok", Of(assignments.Providers), Of(assignments.McpServers), Of(assignments.Plugins), Of(assignments.Skills), Of(assignments.Prompts));
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return SpaceAssignmentsResponse.Failed("unreadable");
+        }
+    }
+
+    /// <summary>
+    /// Assigns a resource to spaces, beside its definition in the global configuration: an empty list puts it in
+    /// every space. Only the user does it, from the window: no command of an agent writes the spaces of a resource.
+    /// </summary>
+    [NeoRpcMethod("assignResource")]
+    public async Task<SpaceChangeResponse> AssignResourceAsync(SpaceResourceAssignRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (ConfigStore is not { } store) return new("unavailable", null, null);
+        if (ParseKind(request.Kind) is not { } kind || string.IsNullOrWhiteSpace(request.Key) || request.Key.Length > MaximumKeyUnits
+            || request.Key.Any(char.IsControl) || (request.Spaces ?? []).Count > MaximumAssignments)
+            return new("invalid", "The resource is not one that is assigned to spaces.", null);
+        if ((request.Spaces ?? []).FirstOrDefault(static id => !SpaceDescriptor.IsValidId(id)) is { } wrong)
+            return new("invalid", $"'{wrong}' is not the identifier of a space.", null);
+        await _assignGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            store.SaveGlobalSpaceAssignment(kind, request.Key.Trim(), request.Spaces);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return new("invalid", exception.Message, null);
+        }
+        catch (InvalidDataException exception)
+        {
+            return new("unreadable", exception.GetBaseException().Message, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new("write_failed", null, null);
+        }
+        finally
+        {
+            _assignGate.Release();
+        }
+
+        // The pages of the resources and of the spaces read them again.
+        _view!.NotifyChanged();
+        return new("ok", null, null);
+    }
+
+    /// <summary>
+    /// Sets the agent prompt the new sessions of a space start with when none is chosen; null for the default one.
+    /// </summary>
+    [NeoRpcMethod("setAgentPrompt")]
+    public Task<SpaceChangeResponse> SetAgentPromptAsync(SpaceAgentPromptRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var agentPrompt = string.IsNullOrWhiteSpace(request.AgentPrompt) ? null : request.AgentPrompt.Trim();
+        return ChangeAsync(request.ExpectedEpoch, () => _catalog!.UpdateSettingsAsync(request.Id ?? string.Empty, settings => settings with
+        {
+            NewSessions = (settings.NewSessions ?? new SpaceNewSessions()) with { AgentPrompt = agentPrompt } is { IsEmpty: false } kept ? kept : null,
+        }, cancellationToken));
+    }
+
+    /// <summary>What a session can use: the space it belongs to and the resources of that space that are turned on.</summary>
+    [NeoRpcMethod("sessionResources")]
+    public async Task<SpaceSessionResourcesResponse> SessionResourcesAsync(SpaceSessionResourcesRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        SpaceSessionResourcesResponse Failed(string status) => new(status, null, [], [], [], []);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return Failed(refused);
+        if (SessionResources is not { } read) return Failed("unavailable");
+        if (string.IsNullOrWhiteSpace(request.SessionId) || request.SessionId.Length > 128 || request.SessionId.Any(char.IsControl)) return Failed("invalid");
+        try
+        {
+            return await read(request.SessionId, cancellationToken).ConfigureAwait(false) is { } resources
+                ? new("ok", resources.SpaceId, resources.McpServers, resources.Skills, resources.Prompts, resources.Plugins)
+                : Failed("not_found");
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return Failed("unreadable");
+        }
+    }
+
+    /// <summary>
     /// The page says which space it shows: the commands of the sessions read it as their current space.
     /// </summary>
     [NeoRpcMethod("shown")]
@@ -245,6 +345,31 @@ internal sealed class SpacesService
         }
     }
 
+    /// <summary>Gets the store of the global configuration, where the spaces of the resources are written; null where the host keeps none.</summary>
+    internal CodeAltaConfigStore? ConfigStore { get; init; }
+
+    /// <summary>Gets what reads the resources a session can use; null where the host keeps none.</summary>
+    internal Func<string, CancellationToken, Task<SessionResources?>>? SessionResources { get; init; }
+
+    /// <summary>The most resources of one kind the assignments name, and the most spaces one resource lists.</summary>
+    internal const int MaximumAssignments = 512;
+
+    private const int MaximumKeyUnits = 256;
+
+    // One write of the configuration at a time from this window.
+    private readonly SemaphoreSlim _assignGate = new(1, 1);
+
+    private static SpaceResourceKind? ParseKind(string? kind)
+        => kind switch
+        {
+            "provider" => SpaceResourceKind.Provider,
+            "mcp" => SpaceResourceKind.McpServer,
+            "plugin" => SpaceResourceKind.Plugin,
+            "skill" => SpaceResourceKind.Skill,
+            "prompt" => SpaceResourceKind.Prompt,
+            _ => null,
+        };
+
     private string? Refuse(string? expectedEpoch)
         => _catalog is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
@@ -254,7 +379,10 @@ internal sealed class SpacesService
 
     private static SpaceItem Item(SpaceMembers members)
         => new(members.Space.Id, members.Space.Name, members.Space.Description, members.Space.Icon, members.Space.Color, members.Space.IsDefault,
-            [.. members.ProjectIds], members.Space.SourcePath);
+            [.. members.ProjectIds], members.Space.SourcePath)
+        {
+            AgentPrompt = members.Space.Settings.NewSessions?.AgentPrompt,
+        };
 
     private static string Cut(string value, int maximum)
         => value.Length <= maximum ? value : value[..(char.IsHighSurrogate(value[maximum - 1]) ? maximum - 1 : maximum)];
@@ -277,7 +405,55 @@ internal sealed record SpacesResponse(string Status, IReadOnlyList<SpaceItem> Sp
 /// <param name="ProjectIds">The identifiers of its projects, archived ones included.</param>
 /// <param name="File">The path of its file; null for a default space that was never described.</param>
 internal sealed record SpaceItem(string Id, string Name, string? Description, string? Icon, string? Color, bool IsDefault,
-    IReadOnlyList<string> ProjectIds, string? File);
+    IReadOnlyList<string> ProjectIds, string? File)
+{
+    /// <summary>Gets the agent prompt the new sessions of the space start with when none is chosen; null for the default one.</summary>
+    public string? AgentPrompt { get; init; }
+}
+
+/// <summary>The spaces of the resources that list some; a resource that is not listed is in every space.</summary>
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>unreadable</c> (the configuration).</param>
+/// <param name="Providers">The providers, by key.</param>
+/// <param name="McpServers">The MCP servers, by key.</param>
+/// <param name="Plugins">The plugins, by id.</param>
+/// <param name="Skills">The skills, by name.</param>
+/// <param name="Prompts">The agent prompts, by id.</param>
+internal sealed record SpaceAssignmentsResponse(string Status, IReadOnlyList<SpaceResourceAssignment> Providers, IReadOnlyList<SpaceResourceAssignment> McpServers,
+    IReadOnlyList<SpaceResourceAssignment> Plugins, IReadOnlyList<SpaceResourceAssignment> Skills, IReadOnlyList<SpaceResourceAssignment> Prompts)
+{
+    internal static SpaceAssignmentsResponse Failed(string status) => new(status, [], [], [], [], []);
+}
+
+/// <summary>The spaces of one resource.</summary>
+/// <param name="Key">Its key, name or id.</param>
+/// <param name="Spaces">The identifiers of its spaces, in the order written.</param>
+internal sealed record SpaceResourceAssignment(string Key, IReadOnlyList<string> Spaces);
+
+/// <summary>Assigns a resource to spaces.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="Kind"><c>provider</c>, <c>mcp</c>, <c>plugin</c>, <c>skill</c> or <c>prompt</c>.</param>
+/// <param name="Key">Its key, name or id.</param>
+/// <param name="Spaces">The identifiers of its spaces; empty for every space.</param>
+internal sealed record SpaceResourceAssignRequest(string ExpectedEpoch, string? Kind, string? Key, IReadOnlyList<string>? Spaces);
+
+/// <summary>Names a session whose resources are read.</summary>
+internal sealed record SpaceSessionResourcesRequest(string ExpectedEpoch, string? SessionId);
+
+/// <summary>What a session can use. Names only.</summary>
+/// <param name="Status"><c>ok</c>, <c>not_found</c>, <c>invalid</c>, <c>unreadable</c>, <c>unavailable</c> or <c>stale_epoch</c>.</param>
+/// <param name="SpaceId">The space of the session.</param>
+/// <param name="McpServers">The MCP servers it can activate.</param>
+/// <param name="Skills">The skills it is offered.</param>
+/// <param name="Prompts">The agent prompts it can run with.</param>
+/// <param name="Plugins">The plugins that add to it.</param>
+internal sealed record SpaceSessionResourcesResponse(string Status, string? SpaceId, IReadOnlyList<string> McpServers, IReadOnlyList<string> Skills,
+    IReadOnlyList<string> Prompts, IReadOnlyList<string> Plugins);
+
+/// <summary>Sets the agent prompt the new sessions of a space start with.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="Id">The space.</param>
+/// <param name="AgentPrompt">The id of the agent prompt; null or empty for the default one.</param>
+internal sealed record SpaceAgentPromptRequest(string ExpectedEpoch, string? Id, string? AgentPrompt);
 
 /// <summary>Creates a space.</summary>
 internal sealed record SpaceCreateRequest(string ExpectedEpoch, string? Name, string? Description, string? Icon, string? Color, IReadOnlyList<string>? ProjectIds);
