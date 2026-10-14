@@ -556,6 +556,33 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task Search_StartsAStdioServerWithTheEnvironmentOfTheSession_OneServerPerIdentity()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null);
+        await using var service = new McpRuntimeService(_home.Path);
+        static CodeAlta.Agent.AgentProcessEnvironment Identity(string tool) => new([new("MCP_TEST_EXTRA_TOOL", tool), new("GIT_AUTHOR_EMAIL", tool + "@contoso.example")]);
+
+        var business = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path, Environment = Identity("from_business") }, "tiny", null, CancellationToken.None);
+        var personal = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path, Environment = Identity("from_personal") }, "tiny", null, CancellationToken.None);
+        var usual = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, "tiny", null, CancellationToken.None);
+
+        Assert.AreEqual(0, business.Diagnostics.Count, string.Join(Environment.NewLine, business.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        Assert.IsTrue(business.Tools.Any(static tool => tool.Name == "from_business"));
+        // The same service, the same definition: another identity is another server, never the first one.
+        Assert.IsTrue(personal.Tools.Any(static tool => tool.Name == "from_personal"));
+        Assert.IsFalse(personal.Tools.Any(static tool => tool.Name == "from_business"));
+        Assert.IsFalse(usual.Tools.Any(static tool => tool.Name.StartsWith("from_", StringComparison.Ordinal)), "Without an identity, the server gets none.");
+
+        // What the definition of the server names comes before the identity of the session.
+        using var named = TempDirectory.Create();
+        WriteTinyServerConfig(named.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "from_definition" });
+        var own = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = named.Path, Environment = Identity("from_business") }, "tiny", null, CancellationToken.None);
+        Assert.IsTrue(own.Tools.Any(static tool => tool.Name == "from_definition"));
+        Assert.IsFalse(own.Tools.Any(static tool => tool.Name == "from_business"));
+    }
+
+    [TestMethod]
     public async Task Search_StartsTheServersOfOtherToolsFiles_ResolvingVariablesInTheirCommandLine()
     {
         using var project = TempDirectory.Create();

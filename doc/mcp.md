@@ -183,7 +183,7 @@ alta mcp auth logout <server>
 
 `McpRuntimeService` owns finite MCP runtime state for direct MCP agent tools, the `alta mcp tool ...` commands, and the dialog's Test Server action. It supports:
 
-- stdio servers launched from JSON `command`, `args`, optional `cwd`, and optional `env`;
+- stdio servers launched from JSON `command`, `args`, optional `cwd`, and optional `env`. A server started for a session also gets the variables of the identity of its space (`McpRuntimeRequest.Environment`, see "The identity of a session" in `catalog-and-config.md`), under its own `env`, which wins; the identity is part of the key of the connection (`CreateServerCacheKey`, and the per-session entry of `McpSessionConnections`), so two identities never share a server process. An HTTP/SSE server is not started by CodeAlta and is not keyed on it;
 - HTTP/SSE servers using absolute `http`/`https` URLs, SDK transport auto-detection, connection timeout, JSON `headers` with optional `${NAME}` environment-variable expansion, and CodeAlta-managed OAuth/Authv2 tokens when authorized;
 - bounded startup/tool discovery with effective global or per-server startup timeout;
 - bounded tool calls with effective global or per-server tool timeout;

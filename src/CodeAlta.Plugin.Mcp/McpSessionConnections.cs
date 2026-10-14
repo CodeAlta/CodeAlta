@@ -50,7 +50,8 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
-        var key = string.Join('\n', sessionId, request.ProjectDirectory, request.UserHomeDirectory);
+        // A session attached again with another identity has other servers: the ones of its last identity close when idle.
+        var key = string.Join('\n', sessionId, request.ProjectDirectory, request.UserHomeDirectory, McpRuntimeService.EnvironmentKey(request.Environment));
         while (true)
         {
             Entry entry;

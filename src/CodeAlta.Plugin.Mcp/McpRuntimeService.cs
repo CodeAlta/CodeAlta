@@ -25,6 +25,10 @@ internal sealed record McpRuntimeRequest
     // space does not have is refused whatever defines it and whatever its policy says.
     public string? SpaceId { get; init; }
 
+    // The variables of the session a stdio server is started for (the Git and GitHub identity of its space), under
+    // the variables the server's own definition gives; null for none. A server is never shared between two of them.
+    public CodeAlta.Agent.AgentProcessEnvironment? Environment { get; init; }
+
     public bool AllowOAuthBrowserLogin { get; init; }
 
     public bool ForceOAuth { get; init; }
@@ -458,7 +462,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     {
         var key = effective.Definition.Key;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
-        var cacheKey = CreateServerCacheKey(effective.Definition, serverAliasPart);
+        var cacheKey = CreateServerCacheKey(effective.Definition, serverAliasPart, context.Request.Environment);
         // The space first, and never cached: a connection made for one space is not reached from another.
         if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId))
         {
@@ -586,7 +590,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
                 Command = definition.Command!,
                 Arguments = definition.Args.ToArray(),
                 WorkingDirectory = definition.Cwd,
-                EnvironmentVariables = ExpandDictionary(definition.Env).ToDictionary(static pair => pair.Key, static pair => (string?)pair.Value, StringComparer.Ordinal),
+                EnvironmentVariables = StdioEnvironment(definition, request.Environment),
                 ShutdownTimeout = CreateStdioShutdownTimeout(timeoutMs),
             };
             return new ObservingClientTransport(new StdioClientTransport(options, NullLoggerFactory.Instance));
@@ -853,9 +857,26 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         return state;
     }
 
-    private static string CreateServerCacheKey(McpServerDefinition definition, string serverAliasPart)
+    // The variables of a stdio server: those of the session first, then those its definition names, which win.
+    private static Dictionary<string, string?> StdioEnvironment(McpServerDefinition definition, CodeAlta.Agent.AgentProcessEnvironment? session)
+    {
+        var variables = new Dictionary<string, string?>(StringComparer.Ordinal);
+        session?.ApplyTo(variables);
+        foreach (var (name, value) in ExpandDictionary(definition.Env)) variables[name] = value;
+        return variables;
+    }
+
+    /// <summary>Writes the variables of an environment as a part of a key: the same variables give the same text.</summary>
+    internal static string EnvironmentKey(CodeAlta.Agent.AgentProcessEnvironment? environment)
+        => environment is null || environment.IsEmpty ? string.Empty
+            : string.Join('\0', environment.Variables.Select(static variable => string.Concat(variable.Key, "\0", variable.Value)));
+
+    // A stdio server is started with the variables of its session: two sessions of two identities never share one.
+    // An HTTP server is not started by CodeAlta, so its connection does not depend on them.
+    private static string CreateServerCacheKey(McpServerDefinition definition, string serverAliasPart, CodeAlta.Agent.AgentProcessEnvironment? environment)
         => string.Join(
             '\0',
+            definition.Transport == McpTransportKind.Stdio ? EnvironmentKey(environment) : string.Empty,
             definition.Key,
             serverAliasPart,
             definition.SourcePath,

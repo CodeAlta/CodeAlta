@@ -251,7 +251,10 @@ public sealed class McpPlugin : PluginBase
         }
 
         await using var runtime = new McpRuntimeService(_userHomeDirectory);
-        var direct = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId }, activeServers, cancellationToken).ConfigureAwait(false);
+        // The servers are started as the session's own commands are: with the identity of its space.
+        var environment = await SessionEnvironmentAsync(context.SessionId, cancellationToken).ConfigureAwait(false);
+        var direct = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId, Environment = environment },
+            activeServers, cancellationToken).ConfigureAwait(false);
         _activationState.UpdateToolCounts(
             activationScope,
             direct.Tools
@@ -264,7 +267,7 @@ public sealed class McpPlugin : PluginBase
 
         return new PluginBeforeAgentRunResult
         {
-            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId)).ToArray(),
+            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId, SessionEnvironmentAsync)).ToArray(),
             TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
         };
     }
@@ -354,7 +357,7 @@ public sealed class McpPlugin : PluginBase
     }
 
     internal static AgentToolDefinition CreateAgentTool(McpRuntimeTool tool, string? projectPath, string? userHomeDirectory, McpSessionConnections? connections,
-        string? spaceId = null)
+        string? spaceId = null, Func<string?, CancellationToken, ValueTask<AgentProcessEnvironment>>? environment = null)
     {
         var description = CreateToolDescription(tool);
         var useArgumentsJsonWrapper = RequiresArgumentsJsonWrapper(tool.InputSchema);
@@ -372,7 +375,18 @@ public sealed class McpPlugin : PluginBase
                 connections,
                 invocation,
                 spaceId,
+                environment,
                 cancellationToken).ConfigureAwait(false));
+    }
+
+    // The variables of the identity of a session; none for no session, or outside a host.
+    private async ValueTask<AgentProcessEnvironment> SessionEnvironmentAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return AgentProcessEnvironment.Empty;
+        IPluginIdentityService identities;
+        try { identities = Services.Identity; }
+        catch (InvalidOperationException) { return AgentProcessEnvironment.Empty; }
+        return (await identities.GetIdentityAsync(sessionId, cancellationToken).ConfigureAwait(false)).Environment;
     }
 
     internal static bool RequiresArgumentsJsonWrapper(JsonElement schema)
@@ -585,6 +599,7 @@ public sealed class McpPlugin : PluginBase
         McpSessionConnections? connections,
         AgentToolInvocation invocation,
         string? spaceId,
+        Func<string?, CancellationToken, ValueTask<AgentProcessEnvironment>>? environment,
         CancellationToken cancellationToken)
     {
         if (!TryReadArguments(invocation.Arguments, useArgumentsJsonWrapper, out var arguments, out var error))
@@ -593,7 +608,11 @@ public sealed class McpPlugin : PluginBase
         }
 
         var diagnostics = new List<McpRuntimeDiagnostic>();
-        var request = new McpRuntimeRequest { ProjectDirectory = projectPath, UserHomeDirectory = userHomeDirectory, SpaceId = spaceId };
+        var request = new McpRuntimeRequest
+        {
+            ProjectDirectory = projectPath, UserHomeDirectory = userHomeDirectory, SpaceId = spaceId,
+            Environment = environment is null ? null : await environment(invocation.SessionId, cancellationToken).ConfigureAwait(false),
+        };
         McpRuntimeToolCallResult? result;
         if (connections is not null && !string.IsNullOrWhiteSpace(invocation.SessionId))
         {
