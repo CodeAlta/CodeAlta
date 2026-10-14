@@ -335,7 +335,7 @@ CodeAlta starts** in Settings > General > Startup and closing: the sessions that
 
 ## Session notes
 
-Each session has sticky Markdown notes that agents keep up to date with a checklist, a status or next actions. The TUI shows them in the **Notes** panel of the sidebar. The desktop app shows them in a **Notes** window over the timeline, which you can move, resize, collapse, copy and clear; `Ctrl+Shift+N` shows or hides it.
+Each session has sticky Markdown notes that agents keep up to date with a checklist, a status or next actions. The TUI shows them in the **Notes** panel of the sidebar. The desktop app shows them in a **Notes** window over the timeline, which you can move, resize, collapse, copy and clear. Collapsed, the window becomes a small **Notes** tab that you can drag to any edge of the session pane; a click on the tab opens the window again, inside the pane. `Ctrl+Shift+N` (or `/notes`) hides the Notes window, or its tab, in every session, and shows it again where it was; the notes are kept while it is hidden.
 
 {{ alta_shot "alta-desktop-notes.webp" "alta-notes.png" "Session notes with a Markdown checklist" "Notes belong to the session and stay visible while the agent works." }}
 

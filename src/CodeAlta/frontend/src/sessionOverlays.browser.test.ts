@@ -9,11 +9,11 @@ import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number };
-type Layout = { pane: Box; notes: Box; window: Box; timestamp: Box; tasks: Box | null; collapsed: string; stored: string | null };
+type Layout = { pane: Box; area: Box; notes: Box; window: Box; timestamp: Box; tasks: Box | null; collapsed: string; stored: string | null };
 const inspect = `(() => {
   const box = element => { const {left,top,right,bottom,width,height}=element.getBoundingClientRect();return {left,top,right,bottom,width,height}; };
   const notes=document.querySelector('.session-notes-overlay');
-  return { pane:box(document.querySelector('.session-timeline-area')), window:box(document.querySelector('.session-notes-window')),
+  return { pane:box(document.querySelector('.session-timeline-area')), area:box(notes), window:box(document.querySelector('.session-notes-window')),
     notes:box(notes.querySelector(notes.dataset.collapsed==='true'?'.session-notes-toggle':'.notes-pane')),
     timestamp:box(document.querySelector('.message-actions time')), collapsed:notes.dataset.collapsed,
     tasks:document.querySelector('.work-cards')?box(document.querySelector('.work-cards')):null, stored:overlays.stored() };
@@ -130,6 +130,62 @@ test("mounted production Notes and proposal overlays cooperate without replacing
       readable(left);
       assert.ok(left.tasks!.left >= left.notes.right, "A restored left-side Notes window is not moved for proposals");
       assert.equal(Math.round(left.window.left - left.pane.left), 126);
+    });
+    // A real pointer drag, as react-rnd listens to the mouse events of the document.
+    const drag = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+      await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
+      await command("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1 });
+      for (let step = 1; step <= 8; step++)
+        await command("Input.dispatchMouseEvent", { type: "mouseMoved", button: "left", buttons: 1,
+          x: from.x + (to.x - from.x) * step / 8, y: from.y + (to.y - from.y) * step / 8 });
+      await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1 });
+      return layout();
+    };
+    const center = (box: Box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 });
+    const inside = (box: Box, area: Box) => box.left >= area.left - 1 && box.right <= area.right + 1 && box.top >= area.top - 1 && box.bottom <= area.bottom + 1;
+    await t.test("the collapsed Notes tab drags to every edge of its pane and expands back inside it", async () => {
+      let value = await reset({ width: 1080 });
+      assert.equal(value.collapsed, "true");
+      assert.ok(Math.abs(value.window.width - value.notes.width) <= 1 && Math.abs(value.window.height - value.notes.height) <= 1,
+        `Collapsed, the window is the size of its tab: ${JSON.stringify(value)}`);
+      assert.ok(Math.abs(value.notes.right - value.area.right) <= 1, "The default tab sits at the right edge");
+      value = await drag(center(value.notes), { x: 2, y: center(value.notes).y });
+      assert.ok(Math.abs(value.notes.left - value.area.left) <= 1, `The tab reaches the left edge: ${JSON.stringify(value)}`);
+      assert.equal(value.collapsed, "true", "Dragging the tab does not expand it");
+      value = await drag(center(value.notes), { x: center(value.notes).x, y: 790 });
+      assert.ok(Math.abs(value.notes.bottom - value.area.bottom) <= 1 && Math.abs(value.notes.left - value.area.left) <= 1,
+        `The tab reaches the bottom-left corner: ${JSON.stringify(value)}`);
+      const corner = value.notes;
+      value = await click(".session-notes-toggle");
+      assert.equal(value.collapsed, "false");
+      assert.ok(inside(value.window, value.area), `Expanded Notes open inside the pane: ${JSON.stringify(value)}`);
+      assert.ok(Math.abs(value.window.left - value.area.left) <= 1 && Math.abs(value.window.bottom - value.area.bottom) <= 1, "Expanded Notes stay in the corner");
+      value = await click('[aria-label="Collapse notes"]');
+      assert.deepEqual(value.notes, corner, "Collapsing returns the tab to where it was dragged");
+      value = await drag(center(value.notes), { x: 1270, y: 2 });
+      assert.ok(Math.abs(value.notes.right - value.area.right) <= 1 && Math.abs(value.notes.top - value.area.top) <= 1,
+        `The tab goes back to the top-right corner: ${JSON.stringify(value)}`);
+      value = await click(".session-notes-toggle");
+      assert.ok(inside(value.window, value.area) && Math.abs(value.window.right - value.area.right) <= 1, "Expanded at the right edge, inside the pane");
+    });
+    await t.test("hiding Notes removes the window and its tab and keeps the loaded notes", async () => {
+      for (const notes of ["", "Keep these notes while hidden"]) {
+        const before = await reset({ width: 1080, notes });
+        assert.equal(before.collapsed, notes ? "false" : "true");
+        await evaluate("window.notesOwner=document.querySelector('.notes-pane');window.notesReads=overlays.reads()");
+        await evaluate("overlays.hide(true)");
+        const target = center(before.notes);
+        const hidden = await evaluate(`(() => { const hit=document.elementFromPoint(${target.x},${target.y});
+          return { hit: !!hit?.closest('.session-notes-overlay'), visibility: getComputedStyle(document.querySelector('.session-notes-toggle')).visibility,
+            inert: document.querySelector('.session-notes-overlay').inert }; })()`);
+        assert.deepEqual(hidden, { hit: false, visibility: "hidden", inert: true }, "Hidden Notes can be neither seen nor reached");
+        await evaluate("overlays.hide(false)");
+        const after = await layout();
+        assert.deepEqual(after.notes, before.notes, "Showing Notes again restores the same window");
+        assert.equal(after.collapsed, before.collapsed, "Hiding is not collapsing");
+        assert.equal(await evaluate("notesOwner===document.querySelector('.notes-pane') && notesReads===overlays.reads()"), true, "Hiding does not remount or re-read Notes");
+        assert.equal(await evaluate(`!!document.elementFromPoint(${target.x},${target.y})?.closest('.session-notes-overlay')`), true);
+      }
     });
     await evaluate("overlays.unmount()");
   } finally {

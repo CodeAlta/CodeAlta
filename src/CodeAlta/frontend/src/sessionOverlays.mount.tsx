@@ -13,7 +13,7 @@ import type { WorkItemsHub } from "./workItems/workItemsHub";
 const storageKey = "codealta.desktop.notes-window.v1";
 const root = createRoot(document.getElementById("app")!);
 const epoch = "11111111-1111-4111-8111-111111111111";
-let generation = 0, width = 1080, height = 600, proposals = false, markdown = "", reads = 0;
+let generation = 0, width = 1080, height = 600, proposals = false, markdown = "", reads = 0, hidden = false;
 const forbidden = () => { throw Error("The layout fixture must not act on real state."); };
 const reader = createNotesReader(async request => {
   reads++;
@@ -42,7 +42,7 @@ function render() {
     <div className="session-workspace" style={{ width: "100%" }} key={generation}>
       <div className="session-timeline-area">
         <div className="timeline-scroll"><div className="messages"><TimelineMessage item={message} onBranch={forbidden} /></div></div>
-        <SessionNotesOverlay sessionId="fixture" epoch={epoch} capability={capability} reader={reader} fallbackMarkdown="" />
+        <SessionNotesOverlay sessionId="fixture" epoch={epoch} capability={capability} reader={reader} fallbackMarkdown="" hidden={hidden} />
         <WorkItemCards hub={hub} items={proposals ? items : []} preferredStart="worktree" busy={busy} onStart={forbidden} onOpenList={forbidden} />
       </div>
     </div>
@@ -50,11 +50,12 @@ function render() {
 }
 Object.assign(window, { overlays: {
   reset(options: { width: number; height?: number; stored?: WindowGeometry; notes?: string; proposals?: boolean }) {
-    width = options.width; height = options.height ?? 600; markdown = options.notes ?? ""; proposals = options.proposals ?? false;
+    width = options.width; height = options.height ?? 600; markdown = options.notes ?? ""; proposals = options.proposals ?? false; hidden = false;
     saveWindowGeometry(storageKey, options.stored ?? null); generation++; render();
   },
   resize(value: number, tall = height) { width = value; height = tall; render(); },
   proposals(value: boolean) { proposals = value; render(); },
+  hide(value: boolean) { hidden = value; render(); },
   reads: () => reads,
   stored: () => localStorage.getItem(storageKey),
   unmount() { flushSync(() => root.unmount()); },

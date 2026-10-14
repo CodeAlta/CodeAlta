@@ -382,7 +382,9 @@ to each session, start collapsed when empty, and open when meaningful content ar
 at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
 composer. The panel (or its collapsed disclosure) can be dragged anywhere over the timeline and the open
 panel resized; its size and position are kept across collapse/expand and saved locally, relative to the
-pane's top-right corner, and its header restores the default. There is no nested notes dock or notes divider.
+pane's top-right corner, and its header restores the default. Collapsed, the draggable window is the size
+of the disclosure, which keeps the right edge of the panel: it reaches every edge of the pane, and the
+panel opened from it is clamped back inside the pane. There is no nested notes dock or notes divider.
 Project and session rows open floating action menus from their **…** button, context menu or Shift+F10. On
 macOS a Ctrl+click is a context-menu request like a right click: WebKit also sends the `click` of that press,
 which `contextClickGuard.ts` stops for the whole window, so the row is not opened behind its menu. The
@@ -1996,8 +1998,10 @@ reasons a rewind is not offered, and the request each action sends.
 ### Notes
 
 Each open owned-host session has a read-only **Notes** overlay at the top right above its timeline.
-It travels with that session pane, starts collapsed when empty, and can be expanded/collapsed with its
-labelled buttons or the existing notes shortcut. It does not consume composer space. It reads current durable notes
+It travels with that session pane, starts collapsed when empty, and is expanded/collapsed with its
+labelled buttons. The notes shortcut (`Ctrl+Shift+N`) hides the overlay of every session, collapsed tab
+included, and shows it again: a hidden overlay keeps its layout and its panel mounted (`visibility: hidden`
+and `inert`), so its notes are not read again and it comes back where it was. It does not consume composer space. It reads current durable notes
 automatically, refreshes every ten seconds after the previous read completes, and supports explicit
 **Refresh notes**. It displays the latest stored notes as sanitized Markdown. Complete notes up to
 262,144 UTF-16 units are shown without truncation; larger or invalid text produces an error. Empty
