@@ -73,6 +73,67 @@ public sealed partial class OwnedSessionCommandService
         return completion.Task;
     }
 
+    /// <summary>
+    /// Deletes an exact confirmed session with every session below it (<see cref="SessionLineage.Descendants"/>), in
+    /// any project, chat or space; never a project or its files.
+    /// </summary>
+    /// <remarks>Reserves command admission until completion. Nothing is deleted while one of the sessions is at work,
+    /// or when its descendants are no longer the ones that were shown. A failure after the first removal can leave some
+    /// sessions deleted; it must not be retried automatically.</remarks>
+    /// <param name="sessionId">Exact catalog session identity.</param>
+    /// <param name="projectId">Exact project identity, or null for global scope.</param>
+    /// <param name="workspacePath">Exact catalog workspace path.</param>
+    /// <param name="confirmedTitle">User-confirmed current title.</param>
+    /// <param name="expectedDescendants">The descendants the user saw and confirmed.</param>
+    /// <returns>What was deleted; see <see cref="OwnedSessionTreeDeletion"/> for the statuses.</returns>
+    /// <exception cref="ArgumentException">A required identity or confirmation is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="expectedDescendants"/> is null.</exception>
+    public Task<OwnedSessionTreeDeletion> DeleteCatalogSessionTreeAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle,
+        IReadOnlyCollection<string> expectedDescendants)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspacePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(confirmedTitle);
+        ArgumentNullException.ThrowIfNull(expectedDescendants);
+        lock (_gate)
+        {
+            if (_closed || _retained) return Task.FromResult(OwnedSessionTreeDeletion.Refused("closed"));
+            if (_deleteWork is not null) return Task.FromResult(OwnedSessionTreeDeletion.Refused("busy"));
+            var completion = new TaskCompletionSource<OwnedSessionTreeDeletion>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var reservation = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _deleteWork = reservation.Task;
+            _ = DeleteCatalogSessionTreeOwnedAsync(sessionId, projectId, workspacePath, confirmedTitle, [.. expectedDescendants], completion, reservation);
+            return completion.Task;
+        }
+    }
+
+    private async Task DeleteCatalogSessionTreeOwnedAsync(string sessionId, string? projectId, string workspacePath, string confirmedTitle,
+        string[] expectedDescendants, TaskCompletionSource<OwnedSessionTreeDeletion> completion, TaskCompletionSource<string> reservation)
+    {
+        try
+        {
+            completion.TrySetResult(await _runtime.DeleteOwnedCatalogSessionTreeAsync(sessionId, projectId, workspacePath, confirmedTitle, expectedDescendants,
+                OwnerBusyOrAsking).ConfigureAwait(false));
+        }
+        // Some journals may already have been removed. The caller must inspect, never retry automatically.
+        catch (Exception) { completion.TrySetResult(OwnedSessionTreeDeletion.Refused("delete_unconfirmed")); }
+        finally
+        {
+            lock (_gate) { if (ReferenceEquals(_deleteWork, reservation.Task)) _deleteWork = null; }
+            reservation.TrySetResult(completion.Task.IsCompletedSuccessfully ? completion.Task.Result.Status : "delete_unconfirmed");
+        }
+    }
+
+    /// <summary>Tells which of these sessions something goes on in: a run, a queue, a question, a job, background work.</summary>
+    /// <param name="sessionIds">The sessions to look at.</param>
+    /// <returns>Those at work; a deletion of several sessions is refused while one of them is.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="sessionIds"/> is null.</exception>
+    public Task<IReadOnlySet<string>> ReadSessionsAtWorkAsync(IReadOnlyCollection<string> sessionIds)
+    {
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        return _runtime.ReadSessionsAtWorkAsync(sessionIds, OwnerBusyOrAsking);
+    }
+
     private async Task DeleteCatalogSessionOwnedAsync(string sessionId, string? projectId, string workspacePath,
         string confirmedTitle, TaskCompletionSource<string> completion)
     {

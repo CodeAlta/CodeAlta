@@ -44,6 +44,8 @@ internal sealed partial class WorkspaceService
         _draftPrompts = host.Commands.GetDraftPromptsAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
+        _sessionsAtWork = host.Commands.ReadSessionsAtWorkAsync;
+        _deleteSessionTree = host.Commands.DeleteCatalogSessionTreeAsync;
         _deleteProject = host.Commands.DeleteCatalogProjectAsync;
         _readTurns = host.Commands.ReadSessionTurnsAsync;
         _readRecord = host.WorkspaceReads.ReadHistoryRecordAsync;

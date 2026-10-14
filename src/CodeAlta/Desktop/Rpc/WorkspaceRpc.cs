@@ -25,6 +25,7 @@ internal sealed partial class WorkspaceService
         _readHistoryTail = reads.ReadHistoryTailPageAsync;
         _readTimeline = reads.ReadTimelinePageAsync;
         _readHistorySource = reads.ReadHistorySourceAsync;
+        _readAllSessions = reads.ReadSnapshotAsync;
         _read = async token =>
         {
             var actual = reads.ReadSnapshotAsync(token);

@@ -89,23 +89,7 @@ public sealed partial class SessionRuntimeService
                 foreach (var leaf in leaves) { ordered.Add(leaf); remaining.Remove(leaf.SessionId); }
             }
             foreach (var session in sessions)
-            {
-                if (isBusy(session.SessionId)) return "session_in_use";
-                var jobClaim = Jobs.TryReserveDeletion(session.SessionId);
-                if (jobClaim is null) return "session_in_use";
-                claims.Add(jobClaim);
-                var runtimeClaim = TryClaimRuntimeRetirement(session.SessionId);
-                if (runtimeClaim is null) return "session_in_use";
-                claims.Add(runtimeClaim);
-                if ((await Permissions.ListWaitingSessionsAsync().ConfigureAwait(false)).Contains(session.SessionId, StringComparer.OrdinalIgnoreCase)
-                    || (await Permissions.ListAsync().ConfigureAwait(false)).Any(item => string.Equals(item.Handle.SessionId, session.SessionId, StringComparison.OrdinalIgnoreCase)))
-                    return "session_in_use";
-                var busy = await GetActorForWork(session.SessionId).QueryAsync(_ => ValueTask.FromResult(
-                    _transitions.ContainsKey(session.SessionId) || _remoteControlWanted.ContainsKey(session.SessionId)
-                    || _entries.TryGetValue(session.SessionId, out var entry)
-                    && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.BackgroundTasks.Any(task => task.Outcome is null))), CancellationToken.None).ConfigureAwait(false);
-                if (busy) return "session_in_use";
-            }
+                if (!await ClaimIdleForDeletionAsync(session.SessionId, isBusy, claims).ConfigureAwait(false)) return "session_in_use";
             var removed = false;
             foreach (var session in ordered)
             {
@@ -131,6 +115,32 @@ public sealed partial class SessionRuntimeService
             foreach (var claim in claims) claim.Dispose();
             lock (_identityGate) _deletingProjectPaths.Remove(projectPath);
         }
+    }
+
+    // Holds the session for a deletion of several sessions: no job, no retention, no run can start in it. False when
+    // something goes on in it, its claims taken so far being in claims all the same.
+    private async Task<bool> ClaimIdleForDeletionAsync(string sessionId, Func<string, bool> isBusy, List<IDisposable> claims)
+    {
+        if (isBusy(sessionId)) return false;
+        var jobClaim = Jobs.TryReserveDeletion(sessionId);
+        if (jobClaim is null) return false;
+        claims.Add(jobClaim);
+        var runtimeClaim = TryClaimRuntimeRetirement(sessionId);
+        if (runtimeClaim is null) return false;
+        claims.Add(runtimeClaim);
+        return !await IsAtWorkAsync(sessionId).ConfigureAwait(false);
+    }
+
+    // What a deletion of several sessions waits for in one of them: a question, a run, a queue, background work.
+    private async Task<bool> IsAtWorkAsync(string sessionId)
+    {
+        if ((await Permissions.ListWaitingSessionsAsync().ConfigureAwait(false)).Contains(sessionId, StringComparer.OrdinalIgnoreCase)
+            || (await Permissions.ListAsync().ConfigureAwait(false)).Any(item => string.Equals(item.Handle.SessionId, sessionId, StringComparison.OrdinalIgnoreCase)))
+            return true;
+        return await GetActorForWork(sessionId).QueryAsync(_ => ValueTask.FromResult(
+            _transitions.ContainsKey(sessionId) || _remoteControlWanted.ContainsKey(sessionId)
+            || _entries.TryGetValue(sessionId, out var entry)
+            && (entry.HasActiveRun || entry.QueueDrainInProgress || entry.BackgroundTasks.Any(task => task.Outcome is null))), CancellationToken.None).ConfigureAwait(false);
     }
 
     private static bool ProjectSession(AgentSessionMetadata metadata, string projectPath)
@@ -159,17 +169,8 @@ public sealed partial class SessionRuntimeService
             {
                 if (!projectSessions.Contains(sessionId) || !ProjectSession(metadata, workspacePath)) return "session_missing";
             }
-            else
-            {
-                if (metadata.WorkspacePath != workspacePath) return "session_missing";
-                var projects = await _projectCatalog.LoadAsync(token).ConfigureAwait(false);
-                var session = TryCreateRecoverableSession(metadata, projects);
-                if (session is null || session.SessionId != sessionId || session.ProjectRef != projectId
-                    || session.Kind != (projectId is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession))
-                    return "session_missing";
-                // The title the list shows: for a session that was never named, the first line of its summary.
-                if (ListedTitle(metadata, session.Kind, ProjectOf(session, projects)) != confirmedTitle) return "session_missing";
-            }
+            else if (await ValidateListedSessionAsync(metadata, projectId, workspacePath, confirmedTitle, token).ConfigureAwait(false) != "ok")
+                return "session_missing";
             // The project worker already checked every descendant from disk and holds all
             // lineage claims. Do not reparse the entire store once for every batch member.
             if (projectSessions is not null) return "ok";
