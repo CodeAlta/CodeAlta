@@ -135,6 +135,12 @@ public sealed class SessionRuntimeMoveTests
 
         Assert.AreEqual("ok", result.Status, string.Join(" ", result.Warnings));
         Assert.AreEqual(target.ProjectPath, (await store.GetSessionSummaryAsync(sessionId))!.WorkingDirectory);
+
+        // And to another space.
+        var space = (await host.SpaceCatalog.CreateAsync("Business")).Space!;
+        var toSpace = await host.Commands.MoveSessionToSpaceAsync(sessionId, space.Id);
+        Assert.AreEqual("ok", toSpace.Status, string.Join(" ", toSpace.Warnings));
+        Assert.AreEqual(space.Id, (await host.SessionViewCatalog.JournalStore.ReadHeaderAsync(sessionId, (await store.GetSessionSummaryAsync(sessionId))!.CreatedAt))!.SpaceId);
     }
 
     [TestMethod]
@@ -151,6 +157,14 @@ public sealed class SessionRuntimeMoveTests
         var store = f.Journal.CreateSessionStore();
         Assert.AreEqual("openai-chat", (await store.GetSessionSummaryAsync("session"))!.ProtocolFamily);
         Assert.AreEqual("opaque", (await store.GetStateAsync("session"))!.ProviderSessionId, "The conversation goes on.");
+
+        // Such a session also changes space.
+        await f.CreateSessionAsync("spaced", f.Source, title: "Spaced", provider: "neuralwatt", summaryFamily: "neuralwatt", stateFamily: "openai-chat");
+        var toSpace = await f.Runtime.MoveOwnedSessionToSpaceAsync("spaced", "business", static _ => false);
+        Assert.AreEqual("ok", toSpace.Status, string.Join(" ", toSpace.Warnings));
+        Assert.AreEqual("business", (await f.Journal.ReadHeaderAsync("spaced", CreatedAt))!.SpaceId);
+        Assert.AreEqual("openai-chat", (await store.GetSessionSummaryAsync("spaced"))!.ProtocolFamily);
+        Assert.AreEqual("opaque", (await store.GetStateAsync("spaced"))!.ProviderSessionId);
     }
 
     [TestMethod]

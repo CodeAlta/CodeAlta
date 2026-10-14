@@ -19,14 +19,28 @@ public sealed partial class SessionViewJournalStore
     /// work, or requires recovery.</exception>
     /// <exception cref="IOException">Preparing or replacing the journal failed.</exception>
     /// <exception cref="OperationCanceledException">Canceled before the commit point.</exception>
-    public async Task MoveSessionToSpaceAsync(SessionViewDescriptor session, string spaceId, CancellationToken cancellationToken = default)
+    public Task MoveSessionToSpaceAsync(SessionViewDescriptor session, string spaceId, CancellationToken cancellationToken = default)
+        => MoveSessionToSpaceAsync(session, spaceId, providerFamily: null, cancellationToken);
+
+    /// <summary>
+    /// Atomically gives an idle session another space, knowing the protocol family of the runtime of its provider: a
+    /// summary that names the provider key as family, as CodeAlta 1.8 wrote it, does not make the session need
+    /// recovery, and is written with that family.
+    /// </summary>
+    /// <param name="session">The session as the runtime knows it.</param>
+    /// <param name="spaceId">The identifier of the space the session belongs to from now on.</param>
+    /// <param name="providerFamily">The protocol family of the runtime of the session's provider; null when unknown.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A task that completes once the session has its new space.</returns>
+    /// <inheritdoc cref="MoveSessionToSpaceAsync(SessionViewDescriptor, string, CancellationToken)" path="/exception"/>
+    public async Task MoveSessionToSpaceAsync(SessionViewDescriptor session, string spaceId, string? providerFamily, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         if (!SpaceDescriptor.IsValidId(spaceId)) throw new ArgumentException($"'{spaceId}' is not the identifier of a space.", nameof(spaceId));
         if (session.Kind is not (SessionViewKind.GlobalSession or SessionViewKind.ProjectSession))
             throw new InvalidOperationException("Only a chat or a project session belongs to a space.");
         var store = CreateSessionStore();
-        var original = await store.ReadTransferSnapshotAsync(session.SessionId, requireState: false, cancellationToken).ConfigureAwait(false);
+        var original = await store.ReadTransferSnapshotAsync(session.SessionId, requireState: false, providerFamily, cancellationToken).ConfigureAwait(false);
         // Replacement rewrites the existing first-line view header; never discard a history record from an
         // unsupported/headerless journal in order to manufacture one.
         if (await ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) is not { } header

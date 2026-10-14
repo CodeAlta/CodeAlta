@@ -138,7 +138,9 @@ public sealed partial class SessionRuntimeService
             if (await MoveRefusalAsync(sessionId, token).ConfigureAwait(false) is { } refusal) return refusal;
             if (await ResolveOwnedSessionBodyAsync(sessionId, token).ConfigureAwait(false) is not { } session) return "session_missing";
             if (string.Equals(session.SpaceId, spaceId, StringComparison.Ordinal)) return "ok";
-            await _sessionViewCatalog.JournalStore.MoveSessionToSpaceAsync(session, spaceId, token).ConfigureAwait(false);
+            var family = await RuntimeFamilyOfKeyWrittenAsFamilyAsync(
+                await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionSummaryAsync(sessionId, token).ConfigureAwait(false), token).ConfigureAwait(false);
+            await _sessionViewCatalog.JournalStore.MoveSessionToSpaceAsync(session, spaceId, family, token).ConfigureAwait(false);
             changed = true;
             if (_entries.TryGetValue(sessionId, out var entry))
             {
