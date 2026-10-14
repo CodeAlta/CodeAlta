@@ -1,0 +1,30 @@
+// English source keys; translations in es, fr, de, ja, zh-CN order.
+export const spaceIdentityMessages = {
+  // Settings > Spaces > a space > Identity: the Git, GitHub and Jira identity of its sessions.
+  "Identity": ["Identidad", "Identité", "Identität", "アイデンティティ", "身份"],
+  "Usual settings": ["Ajustes habituales", "Réglages habituels", "Übliche Einstellungen", "通常の設定", "常用设置"],
+  "Usual": ["Habitual", "Habituel", "Üblich", "通常", "常用"],
+  "Email": ["Correo", "E-mail", "E-Mail", "メール", "邮箱"],
+  "SSH key for fetch and push": ["Clave SSH para fetch y push", "Clé SSH pour fetch et push", "SSH-Schlüssel für Fetch und Push", "fetch と push の SSH キー", "用于 fetch 和 push 的 SSH 密钥"],
+  "Signing": ["Firma", "Signature", "Signierung", "署名", "签名"],
+  "Off": ["Desactivada", "Désactivée", "Aus", "オフ", "关闭"],
+  "Signing key": ["Clave de firma", "Clé de signature", "Signaturschlüssel", "署名キー", "签名密钥"],
+  "GPG key id": ["Id de la clave GPG", "Id de la clé GPG", "GPG-Schlüssel-ID", "GPG キー ID", "GPG 密钥 ID"],
+  "Signed-off-by": ["Signed-off-by", "Signed-off-by", "Signed-off-by", "Signed-off-by", "Signed-off-by"],
+  "Profile folder": ["Carpeta del perfil", "Dossier du profil", "Profilordner", "プロファイルのフォルダー", "配置文件夹"],
+  "GitHub profile folder": ["Carpeta del perfil de GitHub", "Dossier du profil GitHub", "Ordner des GitHub-Profils", "GitHub プロファイルのフォルダー", "GitHub 配置文件夹"],
+  "Sign in with this profile": ["Iniciar sesión con este perfil", "Se connecter avec ce profil", "Mit diesem Profil anmelden", "このプロファイルでサインイン", "使用此配置登录"],
+  "Site": ["Sitio", "Site", "Website", "サイト", "站点"],
+  "Token variable": ["Variable del token", "Variable du jeton", "Token-Variable", "トークンの変数", "令牌变量"],
+  "Check of {name}": ["Comprobación de {name}", "Vérification de {name}", "Prüfung von {name}", "{name} の確認", "{name} 的检查"],
+  "The check did not complete.": ["La comprobación no terminó.", "La vérification n’a pas abouti.", "Die Prüfung wurde nicht abgeschlossen.", "確認が完了しませんでした。", "检查未完成。"],
+  "This is not an email.": ["No es un correo.", "Ce n’est pas un e-mail.", "Das ist keine E-Mail-Adresse.", "メールアドレスではありません。", "这不是邮箱地址。"],
+  "The name of a variable: letters, digits and _, such as CONTOSO_JIRA_TOKEN.": ["El nombre de una variable: letras, cifras y _, como CONTOSO_JIRA_TOKEN.", "Le nom d’une variable : lettres, chiffres et _, comme CONTOSO_JIRA_TOKEN.", "Der Name einer Variablen: Buchstaben, Ziffern und _, etwa CONTOSO_JIRA_TOKEN.", "変数名：英字・数字・_（例：CONTOSO_JIRA_TOKEN）。", "变量名：字母、数字和 _，例如 CONTOSO_JIRA_TOKEN。"],
+  "Signing needs the key to sign with.": ["Firmar necesita la clave con la que firmar.", "La signature a besoin de la clé avec laquelle signer.", "Zum Signieren wird der Schlüssel benötigt.", "署名には署名に使うキーが必要です。", "签名需要用于签名的密钥。"],
+  "The address of a Jira site, such as contoso.atlassian.net.": ["La dirección de un sitio Jira, como contoso.atlassian.net.", "L’adresse d’un site Jira, comme contoso.atlassian.net.", "Die Adresse einer Jira-Website, etwa contoso.atlassian.net.", "Jira サイトのアドレス（例：contoso.atlassian.net）。", "Jira 站点地址，例如 contoso.atlassian.net。"],
+  // The information window of a session.
+  "Git author": ["Autor de Git", "Auteur Git", "Git-Autor", "Git の作成者", "Git 作者"],
+  "GitHub profile": ["Perfil de GitHub", "Profil GitHub", "GitHub-Profil", "GitHub プロファイル", "GitHub 配置"],
+  "Jira account": ["Cuenta de Jira", "Compte Jira", "Jira-Konto", "Jira アカウント", "Jira 账户"],
+  "Commit signing": ["Firma de commits", "Signature des commits", "Commit-Signierung", "コミットの署名", "提交签名"],
+} as const;

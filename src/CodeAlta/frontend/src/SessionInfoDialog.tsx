@@ -16,6 +16,7 @@ import { findSpace, type Space } from "./spaces/spaces";
 
 /** The space of a session and what it can use there, which the panel reads when it opens; null where the host keeps no spaces. */
 export type SessionSpaceResources = Readonly<{ spaces: readonly Space[]; read: () => Promise<SpaceSessionResourcesResponse | null> }> | null;
+import { SessionIdentityInfo } from "./spaces/SessionIdentityInfo";
 
 export type SessionInfoLifetime = { revision: number; current: () => boolean };
 
@@ -166,6 +167,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
         {([["MCP Servers", resources.mcpServers], ["Skills", resources.skills], ["Agent prompts", resources.prompts], ["Plugins", resources.plugins]] as const)
           .map(([label, names]) => <div key={label}><dt>{t(label)}</dt><dd>{names.length ? names.join(", ") : t("None")}</dd></div>)}
       </dl></section>}
+    {target && !demo && <SessionIdentityInfo epoch={target.request.expectedHostEpoch} sessionId={info.id} />}
     <section data-info-copy aria-labelledby="session-info-runtime"><h3 id="session-info-runtime">{t("Observed runtime configuration")}</h3>
       {fields(observations.runtime)}</section>
     <section data-info-copy aria-labelledby="session-info-usage"><h3 id="session-info-usage">{t("Last-observed usage")}</h3>

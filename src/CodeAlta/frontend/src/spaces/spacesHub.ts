@@ -169,6 +169,8 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
         if (epoch === hostEpoch) { epoch = null; state = { ...empty, loaded: state.loaded }; notify(); }
       };
     },
+    /** The epoch of the host the hub listens to, for a section that calls a service of its own; null without one. */
+    hostEpoch: (): string | null => epoch,
     /** A window without a host of its own: it has the default space alone, and nobody waits for more. */
     unavailable() { if (!epoch && !state.loaded) show({ ...empty, loaded: true }); },
     /** Reads the spaces again. */

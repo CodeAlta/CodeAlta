@@ -10,6 +10,7 @@ import { modelTierMessages } from "./modelTierMessages";
 import { claudeCliMessages } from "./claudeCli/messages";
 import { spaceResourceMessages } from "./spaces/resourceMessages";
 import { providerSpaceMessages } from "./providerSpaces/messages";
+import { spaceIdentityMessages } from "./spaces/spaceIdentityMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2500,6 +2501,7 @@ export const messages = dictionary({
   ...claudeCliMessages,
   ...spaceResourceMessages,
   ...providerSpaceMessages,
+  ...spaceIdentityMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

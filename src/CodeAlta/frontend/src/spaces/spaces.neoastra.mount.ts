@@ -1,6 +1,6 @@
 // Isolated bridge for mounting the actual main.tsx with spaces: the catalog of the project fixture, and a host
 // that keeps two spaces in memory. No native bridge or user data is touched.
-import type { SpaceAssignRequest, SpaceItem, SpaceShownRequest, SpacesEvent } from "#neoastra";
+import type { SpaceAssignRequest, SpaceIdentityCheckRequest, SpaceIdentityItem, SpaceIdentityUpdateRequest, SpaceItem, SpaceShownRequest, SpacesEvent } from "#neoastra";
 export * from "../projectFocus.neoastra.mount";
 // The real editor can open an in-memory file; disk and git operations remain unavailable.
 export { projectFiles, projectGit } from "../demo-api";
@@ -22,6 +22,25 @@ const account = (key: string, name: string) => ({ key, type: "claude-code", enab
 export const globalConfig = { ...demoConfig, providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "claude-business", startingProvider: "claude-business",
   providers: [account("claude-business", "Claude Business"), account("claude-home", "Claude Home"), account("codex", "Codex")],
   providerTypes: ["claude-code"], reasoningEfforts: [], permissionModes: [], typeDefaults: [], builtIn: [], unsupported: [] }) };
+
+// The identity of the spaces, kept in memory: what the page saved and checked is recorded for the test.
+const identityFixture: { identity: SpaceIdentityItem | null; updates: SpaceIdentityUpdateRequest[]; checks: SpaceIdentityCheckRequest[] } = { identity: null, updates: [], checks: [] };
+Object.assign(window, { identityFixture });
+export const spaceIdentity = {
+  get: async () => ({ status: "ok", message: null, identity: identityFixture.identity, usual: { gitName: "Usual Name", gitEmail: "usual@example.com", signingKey: null,
+    signingFormat: null, gitHubFolder: "C:\\Users\\me\\AppData\\Roaming\\GitHub CLI", jiraEmail: null, jiraTokenVariable: "JIRA_API_TOKEN", home: "C:\\Users\\me", platform: "windows" } }),
+  update: async (request: SpaceIdentityUpdateRequest) => {
+    identityFixture.updates.push(request);
+    const known = identityFixture.identity ?? { git: null, gitHub: null, jira: null };
+    identityFixture.identity = { ...known, ...(request.part === "git" ? { git: request.git } : request.part === "github" ? { gitHub: request.gitHub } : { jira: request.jira }) };
+    return { status: "ok", message: null, identity: identityFixture.identity, usual: null };
+  },
+  check: async (request: SpaceIdentityCheckRequest) => {
+    identityFixture.checks.push(request);
+    return { status: "ok", lines: [{ kind: "ok", text: `Commits as A. Mutel <${request.git?.email ?? "usual@example.com"}>` }] };
+  },
+  session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null }),
+};
 
 export const spaces = {
   list: async () => ({ status: "ok", spaces: listed }),

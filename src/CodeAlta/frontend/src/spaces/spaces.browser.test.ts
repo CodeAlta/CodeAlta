@@ -247,8 +247,7 @@ test("the window shows one space at a time: its projects, its sessions and its o
 
       await evaluate("document.querySelector('.space-card .space-open').click()");
       assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work'"), true);
-      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects", "Available here", "New sessions"],
-        "Identity, with nothing to show yet, is left out.");
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects", "Available here", "New sessions", "Identity"]);
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-available-tabs .bp6-tab')].map(tab=>tab.firstChild.textContent)"),
         ["Providers", "MCP Servers", "Skills", "Agent prompts", "Plugins"]);
       // The providers come first: the account of Work and the one of every space are here, the one of the default space is not.
@@ -269,6 +268,48 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await wait("!!document.querySelector('.space-card')"), true);
       await evaluate("document.querySelector('.space-card .space-show').click()");
       assert.equal(await evaluate("!!document.querySelector('.space-page')"), false);
+      assert.deepEqual(exceptions, []);
+    });
+
+    await t.test("the Identity of a space has a card for Git, GitHub and Jira, each saved when it is left and checked with its tool", async () => {
+      await resetWork();
+      await evaluate("document.querySelector('.space-switch').click()");
+      assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
+      await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
+      assert.equal(await wait("!!document.querySelector('.space-card .space-open')"), true);
+      await evaluate("document.querySelector('.space-card .space-open').click()");
+      assert.equal(await wait("document.querySelectorAll('.space-identity-card').length===3"), true);
+      const card = (part: string) => `document.querySelector('.space-identity-card[data-part="${part}"]')`;
+      const type = (part: string, name: string, value: string) => evaluate(`(()=>{const input=document.querySelector('#space-work-identity-${part}-${name}');input.focus();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));input.blur();})()`);
+
+      // An empty card keeps the usual settings, and shows them.
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-identity-card h3')].map(title=>title.textContent)"), ["Git", "GitHub", "Jira"]);
+      assert.equal(await evaluate(`${card("git")}.querySelector('.space-identity-usual')?.textContent`), "Usual settings");
+      assert.equal(await evaluate("document.querySelector('#space-work-identity-git-email').placeholder"), "usual@example.com");
+
+      await type("git", "email", "alex@contoso.example");
+      assert.equal(await wait("identityFixture.updates.length===1"), true);
+      assert.deepEqual(await evaluate("[identityFixture.updates[0].part, identityFixture.updates[0].git.email, identityFixture.updates[0].git.name, identityFixture.updates[0].gitHub]"),
+        ["git", "alex@contoso.example", null, null], "Only the card that changed is saved, and an empty field is the usual setting.");
+      assert.equal(await wait(`!${card("git")}.querySelector('.space-identity-usual')`), true);
+
+      // The check runs with the card as it is written, and says what it found.
+      await evaluate(`${card("git")}.querySelector('.space-identity-check').click()`);
+      assert.equal(await wait(`${card("git")}.querySelector('.space-identity-result')?.textContent.includes('Commits as A. Mutel <alex@contoso.example>')`), true);
+
+      // A GitHub profile gives the command that signs it in, for the shell of the platform.
+      await type("github", "folder", "~/.config/gh-contoso");
+      const login = "$env:GH_CONFIG_DIR='C:\\Users\\me\\.config\\gh-contoso'; gh auth login";
+      assert.equal(await wait(`${card("github")}.querySelector('.space-identity-login code')?.textContent===${JSON.stringify(login)}`), true);
+      assert.equal(await wait("identityFixture.updates.at(-1)?.gitHub?.configDir==='~/.config/gh-contoso'"), true);
+
+      // What cannot be saved is said in its card, and neither saved nor checked.
+      const saved = await evaluate("identityFixture.updates.length");
+      await type("jira", "token", "not a variable");
+      assert.equal(await wait(`!!${card("jira")}.querySelector('[role=alert]')`), true);
+      assert.equal(await evaluate(`${card("jira")}.querySelector('.space-identity-check').disabled`), true);
+      assert.equal(await evaluate("identityFixture.updates.length"), saved);
       assert.deepEqual(exceptions, []);
     });
   } finally {

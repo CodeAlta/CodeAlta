@@ -754,6 +754,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, roots.Home).ReadAsync,
                     });
+                    builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
                     builder.AddBookmarksService(new BookmarksService(bookmarks,
@@ -1004,6 +1005,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddIssuesService(new IssuesService());
             builder.AddPullRequestPromptsService(new PullRequestPromptsService());
             builder.AddSpacesService(new SpacesService());
+            builder.AddSpaceIdentityService(new SpaceIdentityService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
             builder.AddComposerStatusService(new ComposerStatusService());

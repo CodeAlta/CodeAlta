@@ -167,6 +167,31 @@
   .space-resource-tags { grid-column: 2 / 3; justify-content: flex-start; }
 }
 
+/* The identity of a space: a card for Git, GitHub and Jira, side by side while they fit. An empty field shows the
+   usual setting it keeps. */
+.space-identity-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.space-identity-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.space-identity-card > header { display: flex; align-items: center; gap: 7px; min-height: 24px; }
+.space-identity-card h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.space-identity-usual { padding: 1px 7px; border-radius: 9px; background: var(--panel-3); color: var(--muted); font-size: 11px; white-space: nowrap; }
+.space-identity-check.bp6-button { margin-left: auto; }
+.space-identity-field { display: grid; gap: 3px; min-width: 0; }
+.space-identity-field > span:first-child { color: var(--muted); font-size: 11.5px; }
+.space-identity-control { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.space-identity-control .bp6-input::placeholder { color: color-mix(in srgb, var(--muted) 75%, transparent); font-style: italic; }
+.space-identity-field .bp6-html-select select { height: 24px; font-size: 12px; }
+.space-identity-switch.bp6-control { margin: 2px 0 0; font-size: 12.5px; }
+.space-identity-login { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 4px; }
+.space-identity-login > span { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; }
+.space-identity-login code { overflow: hidden; padding: 4px 7px; border-radius: 5px; background: var(--panel-3); font-family: var(--bp-typography-family-mono); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
+.space-identity-problem { margin: 0; color: var(--red); font-size: 12px; }
+.space-identity-result { display: grid; gap: 4px; margin: 2px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); list-style: none; font-size: 12px; }
+.space-identity-result li { display: flex; align-items: flex-start; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.space-identity-result li > svg { flex: none; margin-top: 2px; color: var(--muted); }
+.space-identity-result li[data-kind="ok"] > svg { color: var(--green); }
+.space-identity-result li[data-kind="error"] { color: var(--red); }
+.space-identity-result li[data-kind="error"] > svg { color: var(--red); }
+
 @media (max-width: 900px) {
   .space-board { grid-template-columns: minmax(0, 1fr); }
   .space-pool { position: static; max-height: 320px; }

@@ -174,6 +174,10 @@ export const bookmarks = Object.freeze({ list: async () => ({ status: "unavailab
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
 export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }) });
 // The demo has no host to keep the instructions for a pull request.
+// The identity of a space needs a host that keeps spaces.
+export const spaceIdentity = Object.freeze({ get: async () => ({ status: "unavailable", message: null, identity: null, usual: null }),
+  update: async () => ({ status: "unavailable", message: null, identity: null, usual: null }), check: async () => ({ status: "unavailable", lines: [] }),
+  session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null }) });
 // The spaces need a host that keeps them: the demo has the default one alone.
 export const spaces = Object.freeze({ list: async () => ({ status: "unavailable", spaces: [] }), activity: async () => ({ status: "unavailable", sessions: [], truncated: false }),
   create: unavailable, update: unavailable, delete: unavailable, assign: unavailable, reorder: unavailable, shown: unavailable,
