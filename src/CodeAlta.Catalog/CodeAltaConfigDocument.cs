@@ -69,6 +69,10 @@ public sealed class CodeAltaConfigDocument
     /// <summary>Gets or sets the choices for speech to prompt. Read from the user's file only.</summary>
     [JsonPropertyName("speech")]
     public CodeAltaSpeechSettingsDocument? Speech { get; set; }
+
+    /// <summary>Gets or sets the model tiers and the provider fallback. Read from the user's file only.</summary>
+    [JsonPropertyName("models")]
+    public CodeAltaModelSettingsDocument? Models { get; set; }
 }
 
 /// <summary>Represents the choices for speech to prompt.</summary>

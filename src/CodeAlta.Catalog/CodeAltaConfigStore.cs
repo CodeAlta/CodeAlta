@@ -122,6 +122,26 @@ public sealed class CodeAltaConfigStore
     public Speech.SpeechSettings LoadGlobalSpeechSettings()
         => Speech.SpeechSettings.Read(LoadGlobal().Speech);
 
+    /// <summary>Reads the global model tiers and provider fallback. A missing file gives no tier, fallback off.</summary>
+    /// <exception cref="InvalidDataException">The configuration, a target or a fallback trigger is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public ModelTiers.ModelSettings LoadGlobalModelSettings()
+        => ModelTiers.ModelSettings.Read(LoadGlobal().Models);
+
+    /// <summary>Saves the global model tiers and provider fallback. Defaults are not written.</summary>
+    /// <exception cref="ArgumentNullException">The settings are null.</exception>
+    /// <exception cref="InvalidDataException">The existing configuration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public void SaveGlobalModelSettings(ModelTiers.ModelSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        var document = LoadGlobal();
+        document.Models = settings.ToDocument();
+        SaveDocument(_options.ConfigPath, document);
+    }
+
     /// <summary>Reads global cleanup policy. Only an actually missing file uses the enabled defaults.</summary>
     /// <remarks>Unlike a File.Exists probe, an inaccessible file must not look like permission to delete.</remarks>
     /// <exception cref="InvalidDataException">The configuration or duration is invalid.</exception>
@@ -966,6 +986,7 @@ public sealed class CodeAltaConfigStore
         NormalizeDocument(document);
         _ = Storage.StorageSettings.Read(document.Storage);
         _ = Speech.SpeechSettings.Read(document.Speech);
+        _ = ModelTiers.ModelSettings.Read(document.Models);
         var definitions = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
             .Values
             .Select(CloneProviderDefinition)
@@ -1330,6 +1351,21 @@ public sealed class CodeAltaConfigStore
             if (speech.Model == Speech.SpeechSettings.DefaultModel) speech.Model = null;
             if (speech.Send == Speech.SpeechSettings.ManualSend) speech.Send = null;
             if (speech is { Enabled: null, Model: null, Send: null }) document.Speech = null;
+        }
+
+        if (document.Models is { } models)
+        {
+            // Only empty tables are omitted: an invalid target survives, so that validation reports it.
+            if (models.Tiers is { } tiers)
+            {
+                if (tiers.Complex is { Count: 0 }) tiers.Complex = null;
+                if (tiers.Standard is { Count: 0 }) tiers.Standard = null;
+                if (tiers.Quick is { Count: 0 }) tiers.Quick = null;
+                if (tiers is { Complex: null, Standard: null, Quick: null }) models.Tiers = null;
+            }
+
+            if (models.Fallback is { Enabled: null or false, On: null }) models.Fallback = null;
+            if (models is { Tiers: null, Fallback: null }) document.Models = null;
         }
 
         if (document.Skills is not null)
