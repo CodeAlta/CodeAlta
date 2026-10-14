@@ -264,6 +264,37 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task PromptSuggestion_IsTakenByASessionWithoutParent_AndKeptUntilTheNextRun() => Fixture.RunAsync(async f =>
+    {
+        async Task<string?> SuggestionAsync() => (await f.Observe(f.Host.RuntimeService.GetCurrentStateAsync(f.SessionId))).Entry!.PromptSuggestion;
+
+        var first = f.AdmitSend(new OwnedTextSendRequest("suggested-send", f.SessionId, "input"));
+        Assert.IsNotNull(first.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, first.Receipt, "first send");
+        Assert.IsTrue(f.Provider.Options!.PromptSuggestions, "A session somebody writes in takes suggestions.");
+        Assert.IsNull(await SuggestionAsync());
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(first.Receipt.Completion)).Outcome);
+
+        // What the provider suggests once the turn ended is the state of the session, until a run starts.
+        f.Provider.RecordIdle("marker");
+        f.Provider.Suggest("go ahead");
+        Assert.AreEqual("go ahead", await SuggestionAsync());
+        f.Provider.RecordRun("later-run", "marker");
+        Assert.IsNull(await SuggestionAsync());
+        f.Provider.RecordIdle("marker");
+        f.Provider.Suggest("run the tests");
+        Assert.AreEqual("run the tests", await SuggestionAsync());
+
+        // One that reaches the runtime while a run goes on is not kept through it.
+        f.Provider.RecordRun("last-run", "marker");
+        f.Provider.Suggest("too late");
+        Assert.IsNull(await SuggestionAsync());
+        f.Provider.RecordIdle("marker");
+        Assert.IsNull(await SuggestionAsync());
+    });
+
+    [TestMethod]
     public Task SelectedConfiguration_ReachesProviderAndRetriesKeepExactSettings() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
@@ -2164,6 +2195,8 @@ public sealed class OwnedSessionCommandServiceTests
                 // The host of the desktop: it approves by itself, and the mode of a session comes first.
                 AutoApproveOwnedPermissions = sessionPermissionModes,
                 SessionPermissionModes = sessionPermissionModes,
+                // Like the desktop, the host of the fixture shows what a provider suggests.
+                ShowsPromptSuggestions = true,
                 ReviewOwnedPermissionsPolicy = sessionPermissionModes ? () => ReviewByDefault : null,
                 InheritPermissionModePolicy = () => InheritPermissions,
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty,
@@ -2427,6 +2460,8 @@ public sealed class OwnedSessionCommandServiceTests
             _handler!(new AgentContentCompletedEvent(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow,
                 new AgentRunId(run), AgentContentKind.Notice, marker, null, "inert steering readiness"));
         }
+        internal void Suggest(string suggestion)
+            => _handler!(new AgentPromptSuggestionEvent(Descriptor.ProviderId, LastSessionId!, DateTimeOffset.UtcNow, suggestion));
         internal void RecordIdle(string marker)
         {
             CurrentRun = null;

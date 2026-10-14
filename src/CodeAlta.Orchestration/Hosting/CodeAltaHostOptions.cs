@@ -90,6 +90,13 @@ public sealed class CodeAltaHostOptions
     public bool SessionPermissionModes { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the host shows the prompts a provider suggests
+    /// (<see cref="CodeAlta.Agent.AgentPromptSuggestionEvent"/>). Default false: a provider is not asked for
+    /// suggestions nobody would see, each of which costs a request.
+    /// </summary>
+    public bool ShowsPromptSuggestions { get; init; }
+
+    /// <summary>
     /// Gets a policy read at every creation of a session by another session, for a host with
     /// <see cref="SessionPermissionModes"/>: whether the new session takes the permission mode of its creator.
     /// Null, the default, or false: a session another session creates does not ask.

@@ -777,6 +777,35 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task CliWithoutThePromptSuggestionsOption_IsStartedWithoutIt_AlsoWhenItKnowsNeitherOption(bool refusesReasoningDisplay)
+    {
+        // The CLI names one unknown option at a time: each is left out in its turn, and the conversation is kept.
+        var cli = new ClaudeCodeFakeCli { RefusePromptSuggestions = true, RefuseReasoningDisplay = refusesReasoningDisplay };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions(promptSuggestions: true));
+        static bool Suggests(ClaudeCodeFakeProcess process) => process.Launch.Arguments.Any(static argument => argument.StartsWith("--prompt-suggestions", StringComparison.Ordinal));
+
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { PromptSuggestions = true });
+
+        Assert.AreEqual(refusesReasoningDisplay ? 3 : 2, cli.Processes.Count);
+        Assert.IsTrue(Suggests(cli.Processes[0]));
+        Assert.IsFalse(Suggests(cli.Last));
+        Assert.AreEqual(!refusesReasoningDisplay, cli.Last.Launch.Arguments.Contains("--thinking-display"));
+        Assert.IsTrue(cli.Processes.All(process => process.SessionId == cli.Processes[0].SessionId), "The conversation is the one that was being started.");
+        Assert.AreEqual("ok", first.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+
+        // The session remembers: its next turn goes on in the same process, and a restart does not try the option again.
+        var started = cli.Processes.Count;
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { PromptSuggestions = true });
+        Assert.AreEqual(started, cli.Processes.Count);
+        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second) with { PromptSuggestions = true, ModelId = "opus" });
+        Assert.AreEqual(started + 1, cli.Processes.Count);
+        Assert.IsFalse(Suggests(cli.Last));
+        Assert.AreEqual(cli.Processes[0].SessionId, cli.Last.ResumedSessionId, "The conversation is resumed, not started again.");
+    }
+
+    [TestMethod]
     public async Task IdleSession_ClosesItsProcessAndResumesWithTheNextTurn()
     {
         var cli = new ClaudeCodeFakeCli();

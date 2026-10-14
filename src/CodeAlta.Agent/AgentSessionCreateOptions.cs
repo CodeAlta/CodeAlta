@@ -58,6 +58,13 @@ public class AgentSessionCreateOptions
     public string? TitleInstructions { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether the session takes the suggestions its provider makes for the next prompt of the
+    /// user (<see cref="AgentPromptSuggestionEvent"/>): a session somebody writes in, not one an agent drives.
+    /// Whether the provider makes suggestions is its own setting; one that has none ignores this.
+    /// </summary>
+    public bool PromptSuggestions { get; init; }
+
+    /// <summary>
     /// Gets or initializes the configured provider key.
     /// </summary>
     public string? ProviderKey { get; init; }

@@ -182,7 +182,8 @@ internal sealed class GlobalConfigService
                             Bound(definition?.Model), Bound(definition?.ReasoningEffort),
                             Bound(definition?.ApiUrl), Bound(effective.ApiUrl), Bound(definition?.ApiKeyEnv),
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
-                        { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode) };
+                        { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
+                          PromptSuggestions = definition?.PromptSuggestions == true };
                     }).ToArray();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
                 var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
@@ -279,6 +280,8 @@ internal sealed class GlobalConfigService
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
             // Only the CLI of Claude Code reads that variable by itself.
             definition.AnthropicApiKey = definition.ProviderType == "claude-code" ? anthropicApiKey : null;
+            // So are its prompt suggestions; off is the absence of the setting.
+            definition.PromptSuggestions = definition.ProviderType == "claude-code" && edit.PromptSuggestions ? true : null;
             // Only a provider that runs the CLI takes a permission mode; the store refuses the field for any
             // other type, so a type changed away from it leaves the mode behind.
             definition.PermissionMode = TakesPermissionMode(definition.ProviderType) ? permissionMode : null;
@@ -570,6 +573,9 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// to the settings of the CLI, and always null for the other provider types.
     /// </summary>
     public string? PermissionMode { get; init; }
+
+    /// <summary>Whether a <c>claude-code</c> provider asks the CLI to suggest the next prompt after each turn.</summary>
+    public bool PromptSuggestions { get; init; }
 }
 
 /// <summary>What each blank field of a provider falls back to; null when nothing is known for the field.</summary>
@@ -593,6 +599,9 @@ internal sealed record GlobalConfigProviderEdit(string? Key, string? Type, bool 
     /// CLI. A provider of another type sends null: the configuration file takes the field for no other type.
     /// </summary>
     public string? PermissionMode { get; init; }
+
+    /// <summary>Whether the CLI suggests the next prompt after each turn. Kept for <c>claude-code</c> only.</summary>
+    public bool PromptSuggestions { get; init; }
 }
 internal sealed record GlobalConfigSaveProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? OriginalKey,
     GlobalConfigProviderEdit? Provider, bool MakeDefault, bool ApplyProviders);

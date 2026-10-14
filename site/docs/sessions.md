@@ -72,6 +72,23 @@ alta session title --mode last_message      # the title of this session follows 
 alta session title --mode default           # this session follows your choice in Settings again
 ```
 
+## Prompt suggestions
+
+After a turn, Claude Code can suggest what you may write next: a short prompt such as `go ahead` or `run the tests`. CodeAlta Desktop shows it in the empty prompt, in place of the usual hint, and the line above the prompt says **Tab or → takes the suggestion**.
+
+- Press Tab or the right arrow to put the suggestion in the prompt. Nothing is sent: edit it, or press Enter.
+- Write something else and the suggestion gives way; empty the prompt and it is back. Sending a prompt ends it: the next turn brings another one, or none.
+
+Only the [Claude Code provider](model-providers.md#claude-code) suggests prompts, so the choice is a setting of that provider. Suggestions are off by default, because each one is a request of its own to the model after the turn. Turn them on with **Suggest the next prompt** in the dialog of the provider (**Settings > Providers**), or in `~/.alta/config.toml`:
+
+```toml
+[providers.claude-code]
+type = "claude-code"
+prompt_suggestions = true
+```
+
+The sessions of the provider take the choice with their next prompt. CodeAlta TUI shows no suggestions and asks for none, so the setting costs nothing there. Claude Code makes no suggestion after the first turn of a session, nor when it has nothing to propose, and the [sub-agents](#sub-agents) of a session are never asked for one.
+
 ## Move a session to another project
 
 In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.

@@ -6,7 +6,7 @@ namespace CodeAlta.Agent.Claude;
 /// What one CLI process of a session is started with. A change of any of these starts another process, which
 /// resumes the conversation.
 /// </summary>
-internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort);
+internal sealed record ClaudeCodeLaunchKey(string? WorkingDirectory, string? Model, string? Effort, bool PromptSuggestions = false);
 
 /// <summary>
 /// Builds the command line and the environment of a CLI process.
@@ -18,6 +18,9 @@ internal static class ClaudeCodeLauncher
 
     /// <summary>The prefix the CLI gives the tools of that server.</summary>
     public const string McpToolPrefix = "mcp__" + McpServerName + "__";
+
+    /// <summary>The option that makes the CLI suggest the next prompt of the user after each turn.</summary>
+    public const string PromptSuggestionsOption = "--prompt-suggestions";
 
     // The tools that start agents inside the CLI: a subagent, by its name and by the one older versions gave it,
     // and the agents of a workflow script.
@@ -154,6 +157,14 @@ internal static class ClaudeCodeLauncher
             // Without it the thinking blocks of the model are written empty: the timeline shows their summary.
             arguments.Add("--thinking-display");
             arguments.Add("summarized");
+        }
+
+        if (key.PromptSuggestions)
+        {
+            // After each turn the CLI asks the model what the user may write next, and says it (`prompt_suggestion`).
+            // With its value: the option takes an optional one, and the first argument of the user that follows
+            // must not be read as it.
+            arguments.Add(PromptSuggestionsOption + "=true");
         }
 
         arguments.AddRange(options.ExtraArguments);
