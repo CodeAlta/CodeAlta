@@ -27,16 +27,22 @@ function absolute(path: string): boolean {
   return path.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(path) || /^\\\\[^\\]+\\[^\\]+/u.test(path);
 }
 
+/** Whether a text can be the identifier of a space, as the catalog writes them. */
+export function validSpaceId(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._-]{1,63}$/u.test(value);
+}
+
 export function createSessionCreation(invoke: Invoke) {
   let active = false;
+  /** `spaceId` is the space the window shows: the session belongs to it for its whole life. */
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
-    capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null): Promise<Result> {
+    capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null, spaceId: string | null = null): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
     const worktree = place?.worktree === true, base = worktree ? place.base : null;
     if (!["global", "project"].includes(target.scope)
       || target.scope === "project" && (!valid(target.projectId, 256)
       || !valid(target.projectPath, 4096) || !absolute(target.projectPath)) || title !== null && !valid(title, 256)
-      || worktree && target.scope !== "project" || base !== null && !valid(base, 200))
+      || worktree && target.scope !== "project" || base !== null && !valid(base, 200) || spaceId !== null && !validSpaceId(spaceId))
       return { kind: "error", code: "invalid_scope" };
     if (active) return { kind: "error", code: "busy" };
     if (providerId !== null && !valid(providerId, 256)) return { kind: "error", code: "provider_unavailable" };
@@ -45,7 +51,7 @@ export function createSessionCreation(invoke: Invoke) {
       : { scope: "project", projectId: target.projectId, projectPath: target.projectPath };
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
-      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base });
+      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId });
     try {
       const response = await invoke(request, { timeoutMilliseconds: worktree ? worktreeTimeoutMilliseconds : 10_000 });
       if (!response || !valid(response.status, 64) || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(response.hostEpoch ?? ""))
@@ -105,6 +111,7 @@ export function sessionCreationMessage(code: string): string {
     case "stale_epoch": return "The host changed. Reload before creating a session.";
     case "busy": return "A session creation is already in progress.";
     case "closed": return "The host is closing; no new creation was admitted.";
+    case "space_missing": return "The space this window shows no longer exists. Show another space and create the session there.";
     default: return "Creation may have completed. Refresh and inspect sessions before requesting another; there is no automatic retry.";
   }
 }

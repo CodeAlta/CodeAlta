@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { createMutationCapability } from "./sessionOperations";
-import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage } from "./sessionCreation";
+import { createSessionCreation, createdSessionSelection, sessionCreationMessage, validSpaceId, worktreeCreationMessage } from "./sessionCreation";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
@@ -39,18 +39,18 @@ test("exact selected project and global requests produce switchable persisted ca
   const capability = createMutationCapability(epoch);
   const projectResult = await create(epoch, project, "My draft", capability);
   assert.equal(projectResult.kind, "created");
-  const globalResult = await create(epoch, global, null, capability);
+  const globalResult = await create(epoch, global, null, capability, null, null, "business");
   assert.equal(globalResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business" },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
     projects: [{ id: project.projectId, path: project.projectPath, name: "Project", archived: false }],
     sessions: [
-      { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, createdAt: null, id: "draft-1", title: "My draft", fullTitle: "My draft", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: project.projectId, lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
-      { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, createdAt: null, id: "global-1", title: "Global Session", fullTitle: "Global Session", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: "C:\\test-owned\\global", providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+      { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null, createdAt: null, id: "draft-1", title: "My draft", fullTitle: "My draft", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: project.projectId, lineageIssue: null, workspacePath: project.projectPath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
+      { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null, createdAt: null, id: "global-1", title: "Global Session", fullTitle: "Global Session", fullTitleTruncated: false, parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, workspacePath: "C:\\test-owned\\global", providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" },
     ],
   };
   assert.deepEqual(createdSessionSelection(snapshot, projectResult), { projectId: project.projectId, sessionId: "draft-1" });
@@ -108,7 +108,7 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
   assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
-    providerId: null, worktree: true, baseBranch: "main" }, timeout: 600_000 }]);
+    providerId: null, worktree: true, baseBranch: "main", spaceId: null }, timeout: 600_000 }]);
 
   // The place of a project that chose none is its folder: nothing is asked of git.
   answer = reply("ok");
@@ -133,4 +133,24 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   assert.deepEqual(await create(epoch, global, null, capability, null, { worktree: true, base: null }), { kind: "error", code: "invalid_scope" });
   assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: " main" }), { kind: "error", code: "invalid_scope" });
   assert.equal(calls.length, count);
+});
+
+test("a new session names the space the window shows, which the host may no longer have", async () => {
+  const requests: unknown[] = [];
+  let answer = reply("ok");
+  const create = createSessionCreation(async request => { requests.push(request); return answer; });
+  const capability = createMutationCapability(epoch);
+
+  assert.equal((await create(epoch, project, null, capability, null, null, "work")).kind, "created");
+  assert.equal((requests[0] as { spaceId: string | null }).spaceId, "work");
+
+  // What is no identifier of a space is not sent.
+  assert.deepEqual(await create(epoch, project, null, capability, null, null, "Not A Space"), { kind: "error", code: "invalid_scope" });
+  assert.equal(requests.length, 1);
+  assert.equal(validSpaceId("default"), true);
+  assert.equal(validSpaceId("a"), false);
+
+  answer = reply("space_missing");
+  assert.deepEqual(await create(epoch, project, null, capability, null, null, "gone"), { kind: "error", code: "space_missing" });
+  assert.match(sessionCreationMessage("space_missing"), /no longer exists/);
 });

@@ -231,6 +231,31 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await evaluate("document.querySelector('.project-editor .view-lines').textContent.replaceAll('\\u00a0',' ')"), "keep these unsaved edits");
       assert.deepEqual(exceptions, []);
     });
+
+    await t.test("a card of Settings > Spaces opens the page of its space, and Spaces above its title brings the cards back", async () => {
+      await resetWork();
+      await evaluate("document.querySelector('.space-switch').click()");
+      assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
+      await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
+      assert.equal(await wait("!!document.querySelector('.space-card .space-open')"), true);
+
+      await evaluate("document.querySelector('.space-card .space-open').click()");
+      assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work'"), true);
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects"],
+        "The sections with nothing to show yet are left out.");
+      assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
+      await evaluate("document.querySelector('.space-page-back').click()");
+      assert.equal(await wait("!document.querySelector('.space-page') && !!document.querySelector('.space-card')"), true);
+
+      // A click on the card where it has no control opens it too; a click on a control of the card does not.
+      await evaluate("document.querySelector('.space-card .space-card-count').click()");
+      assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work'"), true);
+      await evaluate("document.querySelector('.space-page-back').click()");
+      assert.equal(await wait("!!document.querySelector('.space-card')"), true);
+      await evaluate("document.querySelector('.space-card .space-show').click()");
+      assert.equal(await evaluate("!!document.querySelector('.space-page')"), false);
+      assert.deepEqual(exceptions, []);
+    });
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

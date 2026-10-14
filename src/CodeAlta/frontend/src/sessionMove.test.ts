@@ -15,7 +15,7 @@ const reply = (request: WorkspaceMoveSessionRequest, status = "ok", overrides = 
   projectId: request.projectId, projectPath: request.projectPath, targetProjectId: request.targetProjectId, targetProjectPath: request.targetProjectPath,
   moved: status === "ok" ? [moved("child"), moved(request.sessionId)] : [], warnings: [], ...overrides });
 const session = (id: string, projectId: string, workspacePath: string): WorkspaceSession => ({ messageCount: null, automationId: null, worktreePath: null,
-  worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0,
+  worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null,
   createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false, parentSessionId: null,
   scopeKind: "project", projectId, lineageIssue: null, workspacePath, providerKey: "fixture", updatedAt: "2026-01-01T00:00:00Z" });
 const snapshot = (sessions: WorkspaceSession[]): WorkspaceSnapshot => ({ configured: true, sessions,

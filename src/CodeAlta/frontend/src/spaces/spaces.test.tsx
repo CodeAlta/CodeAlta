@@ -2,20 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
-import { dropChange, movedOrder } from "./SpaceSettings";
+import { SpacePage } from "./SpacePage";
+import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameMembers, sameSpaces, scopeSnapshot,
   spaceActivities, spaceBrand, spaceCalls, spaceMembers, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey } from "./spaces";
-import { activityMilliseconds, createSpacesHub, type SpacesApi } from "./spacesHub";
+import { activityMilliseconds, createSpacesHub, type SpacesApi, type SpacesHub } from "./spacesHub";
 
 const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem> = {}): SpaceItem =>
   ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, ...changes });
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `C:\\code\\${id}`, archived });
 const session = (id: string, scopeKind: string | null, projectId: string | null, workspacePath: string | null): WorkspaceSession => ({ id, title: id, workspacePath, providerKey: "codex",
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
-  messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0 });
+  messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null });
 const doing = (sessionId: string, projectId: string | null, changes: Partial<SpaceSessionActivity> = {}): SpaceSessionActivity =>
-  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], ...changes });
+  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, ...changes });
 
 test("the spaces are read as the host lists them, the default one first, and what is not a space is left out", () => {
   const spaces = readSpaces([item("work", ["a", "b"], { icon: "briefcase", color: "#2D72D2", description: "Paid work" }), item("default", ["a", "b", "c"]),
@@ -312,4 +313,34 @@ test("the sessions that wait are listed under every session above them, the near
   assert.deepEqual(below.get("root")?.[0], { sessionId: "other", title: "Title of other" });
   assert.equal(below.has("self"), false);
   assert.equal(below.has("busy"), false);
+});
+
+test("a card of the overview opens the page of its space, which shows what it is and its projects, and not the sections that have nothing yet", () => {
+  const never = () => assert.fail("rendering must not act");
+  const hub = {} as SpacesHub;
+  const spaces = readSpaces([item("default"), item("work", ["alpha"], { description: "The projects of my job." })]);
+  const projects = [project("alpha"), project("beta")];
+
+  const overview = renderToStaticMarkup(<SpaceSettings hub={hub} spaces={spaces} projects={projects} shownId="default" activity={new Map()} canEdit onShow={never} onCreate={never} />);
+  assert.match(overview, /class="space-open" title="Open Work"/);
+  assert.match(overview, /class="space-open" title="Open Default"/);
+  assert.match(overview, /The projects of my job\./);
+  assert.doesNotMatch(overview, /space-name/, "A card is no longer where a space is named: its page is.");
+
+  const page = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[1]} spaces={spaces} projects={projects} shown={false} activity={undefined} canEdit
+    onBack={never} onShow={never} onDeleted={never} />);
+  assert.match(page, /<h1>Work<\/h1>/);
+  assert.match(page, />Spaces</, "Back leads to the spaces.");
+  assert.match(page, /<h2[^>]*>General</);
+  assert.match(page, /<h2[^>]*>Projects<span class="space-section-count">1</);
+  assert.match(page, /value="Work"/);
+  assert.match(page, />Delete</);
+  for (const absent of ["Available here", "New sessions", "Identity"]) assert.doesNotMatch(page, new RegExp(absent), `${absent} has nothing to show yet.`);
+
+  const pool = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[0]} spaces={spaces} projects={projects} shown activity={undefined} canEdit
+    onBack={never} onShow={never} onDeleted={never} />);
+  assert.match(pool, /Every project is in this space\./);
+  assert.match(pool, /<h2[^>]*>Projects<span class="space-section-count">2</);
+  assert.doesNotMatch(pool, />Delete</, "The default space cannot be deleted.");
+  assert.match(pool, />Shown</);
 });

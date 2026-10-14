@@ -910,6 +910,11 @@ a workspace, which here is the catalog of projects and sessions and the main are
   **Work** and **Personal** (`SpaceCatalog.SeedAsync`, called in `DesktopApplication` before the page
   reads the spaces). It does nothing once `~/.alta/spaces/` exists, so what the user deleted does not
   come back.
+- A session belongs to one space for its whole life, recorded in its journal: a session created in the
+  window is in the space the window shows (the page names it in `workspace.createSession`), as are the
+  tasks, issues and questions about the guide started there; one an agent creates is in the space of that
+  agent; an automation's is in the only space of its project, else Default (see "The space of a session"
+  in `doc/catalog-and-config.md`). The agent is told its space in the Runtime Context.
 - Chats, the sessions of no project, are shown in every space.
 - Deleting a space deletes its file, then its id in the file of each of its projects. The projects,
   their folders and their sessions stay, in the Default space and in their other spaces.
@@ -2340,13 +2345,23 @@ The command approval policy is edited in **Settings → Configuration file**.
 space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSettings.tsx`, see "Spaces").
 
 - On the left, the Default space with the list of every project, each with the icons of the other spaces
-  it is in. Its name, icon, color and description can be changed like those of the others.
-- On the right, one card for each space: icon, name, color swatches, "What it is for", its projects,
-  **Projects** (a checklist of all the projects, to add or remove them with the keyboard), **Show**, move
-  before and after, and remove, which asks to confirm. The `×` of a project removes it from that space.
-  **New space** opens the window that creates one.
+  it is in.
+- On the right, one card for each space: its icon and name, what it is for (two lines at most), its
+  projects, what its sessions do, **Show**, and move before and after. The `×` of a project removes it
+  from that space. **New space** opens the window that creates one.
 - Drag a project from the list onto a card to add it; from a card onto another card to move it, or to
   keep it in both with `Ctrl` or `Alt` held; from a card back to the list to remove it from that space.
+- The name of a space, or a click on its card (the Default one included) where there is no control, opens
+  the **page of that space** (`SpacePage.tsx`); **Spaces** above its title returns to the cards. Its head
+  has the icon, the name and the description of the space, what its sessions do, **Show**, and **Delete**
+  for a space other than Default, which asks to confirm in a popover beside the button. Its sections are
+  each a component of their own file under `frontend/src/spaces/`, given the same `SpaceSectionProps`:
+  - **General** (`SpaceGeneral`): name, icon, color and "What it is for", each saved when it changes;
+  - **Projects** (`SpaceProjects` in the same file): the checklist of every project, with a search above
+    eight; the Default space says that every project is in it;
+  - **Available here** (`SpaceAvailable`), **New sessions** (`SpaceNewSessions`) and **Identity**
+    (`SpaceIdentity`) have their place in the page and render nothing yet: a section shows only once it
+    has something to show.
 - Every change is saved at once, through the `spaces` RPC service. Nothing is kept by the page.
 
 ### About

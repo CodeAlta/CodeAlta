@@ -61,16 +61,22 @@ Add a folder with the `+` button of the Explorer, or with [Open project](workspa
 **Settings > Spaces** shows every space with its projects. Open it with **Organize spaces…** in the space switch, or with `/spaces`.
 
 - On the left, the Default space lists every project, each with the icons of the spaces it is in.
-- On the right, each space has a card: its icon, its name, its color, **What it is for**, and its projects.
+- On the right, each space has a card: its icon, its name, **What it is for**, and its projects.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-space-settings.webp" alt="The Spaces page of Settings: the Default space with every project on the left, and the cards of the Work, Personal and Open source spaces with their descriptions and projects" loading="lazy">
   <figcaption class="small text-secondary mt-2">Settings > Spaces: every project on the left, and a card for each space with what it is for and its projects.</figcaption>
 </figure>
 
-Change the name, the icon, the color or the description on the card. The Default space can be changed the same way. Every change is saved at once.
+Click the name of a space, or its card, to open the page of that space. **Spaces**, above its title, brings you back to the cards. On the page of a space:
 
-To choose the projects of a space with the mouse:
+- **General**: its name, its icon, its color and **What it is for**;
+- **Projects**: a checklist of all the projects, to tick the ones the space holds;
+- **Show**, to show that space in the window, and **Delete**, which asks before it deletes the space.
+
+The Default space has a page too, with every project in it. Every change is saved at once.
+
+To choose the projects of a space with the mouse, on the cards:
 
 {.table}
 | Drag a project | What happens |
@@ -79,13 +85,7 @@ To choose the projects of a space with the mouse:
 | From a card onto another card | The project moves to the other space. With `Ctrl` or `Alt` held, it stays in both. |
 | From a card back to the list | The project leaves that space. |
 
-With the keyboard, **Projects** on a card opens a checklist of all the projects: tick the ones the space holds. The `×` of a project on a card removes it from that space.
-
-A card also has:
-
-- **Show**, to show that space in the window;
-- two arrows, to move the space before or after its neighbor in the list;
-- a remove button, which asks before it deletes the space.
+The `×` of a project on a card removes it from that space. A card also has **Show**, and two arrows that move the space before or after its neighbor in the list.
 
 Deleting a space leaves its projects, their folders and their sessions alone. The projects stay in the Default space and in their other spaces.
 

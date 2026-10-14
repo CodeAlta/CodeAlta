@@ -3104,7 +3104,7 @@ function App() {
     setCreatingMessage("");
     if (handoff) setDraftHandoffNotice("");
     try {
-      const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId, place);
+      const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId, place, spacesState.available ? spaceId : null);
       if (!creationAlive.current) return;
       if (result.kind === "created") {
         if (!isCurrent()) { setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); return; }

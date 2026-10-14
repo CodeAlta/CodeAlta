@@ -7,7 +7,7 @@ import { SessionInfoDialog } from "./SessionInfoDialog";
 import { copySessionId, dismissSessionInfoOnKey, restoreSessionInfoFocus, selectedSessionInfoAvailable, sessionInfoCopyFeedback, sessionInfoView } from "./sessionInfo";
 
 const session: WorkspaceSession = {
-  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, createdAt: null, id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
+  messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null, createdAt: null, id: "session-1", title: "Recorded title", fullTitle: "Recorded title", fullTitleTruncated: false,
   parentSessionId: null, scopeKind: "project", projectId: "p", lineageIssue: null,
   workspacePath: "/exact/p", providerKey: "recorded-provider", updatedAt: "2026-09-23T01:02:03+00:00",
 };

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
-import { Button, Checkbox, InputGroup, PopoverNext, TextArea } from "@blueprintjs/core";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { Button, InputGroup } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { brandColor } from "../brands";
-import { ProviderIconPicker } from "../ProviderIconFields";
-import { RemoveButton, SettingsPage } from "../SettingsPage";
+import { SettingsPage } from "../SettingsPage";
 import { settingsFailure, type SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
 import type { SpaceProject } from "./SpaceDialog";
+import { SpacePage } from "./SpacePage";
 import { SpaceActivityMarks, SpaceIcon } from "./SpaceViews";
-import { maximumSpaceDescription, maximumSpaceName, spaceBrand, spaceColors, spaceNameProblem, type Space, type SpaceActivity } from "./spaces";
+import type { Space, SpaceActivity } from "./spaces";
 import type { SpaceOutcome, SpacesHub } from "./spacesHub";
 
 /** What a drag of a project carries: the project, and the space it is dragged out of (null from the list of every project). */
@@ -38,11 +38,16 @@ export function movedOrder(spaces: readonly Space[], id: string, delta: 1 | -1):
   return ids;
 }
 
+/** Whether a click on a card lands on nothing of its own (a button, a field, a project): it then opens the space. */
+export function opensSpace(target: EventTarget | null, card: Element): boolean {
+  return target instanceof Element && card.contains(target) && !target.closest("button, a, input, textarea, select, label, [draggable=true], [role=group], .bp6-popover-target");
+}
+
 /**
  * The page of Settings that organizes the spaces: the list of every project, which is the default space, and
- * a card for each other space with its name, its icon, its color, what it is for and its projects. A project
- * is dragged onto a space to join it, from a space to another to move (with Ctrl, to be in both), and back to
- * the list to leave. Everything is also done with the buttons of each card, and saved at once.
+ * a card for each other space with its name, its icon, what it is for and its projects. A project is dragged
+ * onto a space to join it, from a space to another to move (with Ctrl, to be in both), and back to the list to
+ * leave. A click on a space opens its page, where it is named, described, given its projects and set up.
  */
 export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdit, onShow, onCreate }: {
   hub: SpacesHub; spaces: readonly Space[];
@@ -58,6 +63,8 @@ export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdi
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const [filter, setFilter] = useState("");
   const [over, setOver] = useState<string | null>(null);
+  // The space whose page is open; null for the cards of every space.
+  const [openId, setOpenId] = useState<string | null>(null);
   const drag = useRef<ProjectDrag | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
@@ -113,13 +120,22 @@ export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdi
     onDragEnd: () => { drag.current = null; setOver(null); },
   } : {};
 
+  const open = openId === null ? undefined : spaces.find(space => space.id === openId);
+  // A space deleted elsewhere closes its page.
+  useEffect(() => { if (openId !== null && !open) setOpenId(null); }, [openId, open]);
+  if (open) {
+    return <SpacePage hub={hub} space={open} spaces={spaces} projects={projects} shown={shownId === open.id} activity={activity.get(open.id)} canEdit={canEdit}
+      onBack={() => setOpenId(null)} onShow={() => onShow(open.id)} onDeleted={() => setOpenId(null)} />;
+  }
+
+  const opener = (id: string) => ({ onClick: (event: MouseEvent<HTMLElement>) => { if (opensSpace(event.target, event.currentTarget)) setOpenId(id); } });
   return <SettingsPage className="space-settings" label={t("Spaces")} group="Personalization" title="Spaces"
     description="Group your projects into spaces. The window shows one space at a time, and a project can be in several."
     notice={notice} loading={false} busy={busy} onReload={() => void hub.refresh()}
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!canEdit} onClick={onCreate}>{t("New space")}</Button>}>
     <div className="space-board">
-      <section className="space-pool" aria-label={pool.name} {...dropTarget(null)}>
-        <SpaceHeading space={pool} spaces={spaces} disabled={!canEdit || busy} activity={activity.get(pool.id)} save={edit => run(() => hub.update(pool.id, edit))} />
+      <section className="space-pool" aria-label={pool.name} {...dropTarget(null)} {...opener(pool.id)}>
+        <SpaceCardHeading space={pool} activity={activity.get(pool.id)} onOpen={() => setOpenId(pool.id)} />
         <p className="space-pool-note">{t("Every project is here. Drag a project onto a space to add it.")}</p>
         {projects.length > 8 && <InputGroup type="search" size="small" value={filter} placeholder={t("Search")} aria-label={t("Search")}
           leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} onChange={event => setFilter(event.target.value)} />}
@@ -142,14 +158,13 @@ export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdi
           const members = space.projectIds.map(id => byId.get(id)).filter(project => project !== undefined);
           const left = movedOrder(spaces, space.id, -1), right = movedOrder(spaces, space.id, 1);
           return <section key={space.id} className="space-card" aria-label={space.name} style={{ "--space-color": brandColor(space.color) ?? "var(--line-strong)" } as CSSProperties}
-            {...dropTarget(space.id)}>
-            <SpaceHeading space={space} spaces={spaces} disabled={!canEdit || busy} activity={activity.get(space.id)} save={edit => run(() => hub.update(space.id, edit))}
+            {...dropTarget(space.id)} {...opener(space.id)}>
+            <SpaceCardHeading space={space} activity={activity.get(space.id)} onOpen={() => setOpenId(space.id)}
               tools={<>
                 <Button variant="minimal" size="small" icon={<AppIcon name="arrowLeft" size={14} />} disabled={!canEdit || busy || !left}
                   aria-label={t("Move {name} before", { name: space.name })} title={t("Move before")} onClick={() => left && void run(() => hub.reorder(left))} />
                 <Button variant="minimal" size="small" icon={<AppIcon name="arrowRight" size={14} />} disabled={!canEdit || busy || !right}
                   aria-label={t("Move {name} after", { name: space.name })} title={t("Move after")} onClick={() => right && void run(() => hub.reorder(right))} />
-                <RemoveButton name={space.name} disabled={!canEdit || busy} onRemove={() => void run(() => hub.remove(space.id))} />
               </>} />
             <ul className="space-projects">
               {members.map(project => <li key={project.id} className="space-project" data-archived={project.archived ? "true" : undefined} title={project.path} {...dragSource(project.id, space.id)}>
@@ -162,14 +177,6 @@ export function SpaceSettings({ hub, spaces, projects, shownId, activity, canEdi
               {members.length === 0 && <li className="space-projects-empty">{t("Drop projects here")}</li>}
             </ul>
             <footer>
-              <PopoverNext placement="bottom-start" content={<div className="space-add-list" role="group" aria-label={t("Projects of {name}", { name: space.name })}>
-                {projects.filter(project => !project.archived || space.projectIds.includes(project.id)).map(project => <Checkbox key={project.id} disabled={busy}
-                  checked={space.projectIds.includes(project.id)} title={project.path} label={project.name}
-                  onChange={event => { const join = event.currentTarget.checked; void run(() => hub.assign(project.id, join ? [space.id] : [], join ? [] : [space.id])); }} />)}
-                {projects.length === 0 && <p className="bp6-text-muted">{t("No project yet.")}</p>}
-              </div>}>
-                <Button size="small" variant="outlined" icon={<AppIcon name="plus" size={14} />} disabled={!canEdit} text={t("Projects")} />
-              </PopoverNext>
               <span className="space-card-count">{t(members.length === 1 ? "1 project" : "{count} projects", { count: members.length })}</span>
               <ShowSpace shown={shownId === space.id} onShow={() => onShow(space.id)} />
             </footer>
@@ -188,40 +195,23 @@ function ShowSpace({ shown, onShow }: { shown: boolean; onShow: () => void }) {
     icon={<AppIcon name={shown ? "check" : "eye"} size={13} />} text={t(shown ? "Shown" : "Show")} onClick={onShow} />;
 }
 
-// The head of a space: its icon, its name, its color and what it is for, each saved when it changes.
-function SpaceHeading({ space, spaces, disabled, activity, save, tools }: {
-  space: Space; spaces: readonly Space[]; disabled: boolean; activity: SpaceActivity | undefined;
-  save: (edit: Readonly<{ name?: string; description?: string; icon?: string; color?: string }>) => Promise<SpaceOutcome>;
-  tools?: ReactNode;
+// The head of a card: the icon and the name of the space, which open its page, and what it is for.
+function SpaceCardHeading({ space, activity, onOpen, tools }: {
+  space: Space; activity: SpaceActivity | undefined; onOpen: () => void; tools?: ReactNode;
 }) {
   const { t } = useShellLanguage();
-  const [name, setName] = useState(space.name);
-  const [description, setDescription] = useState(space.description ?? "");
-  useEffect(() => setName(space.name), [space.name]);
-  useEffect(() => setDescription(space.description ?? ""), [space.description]);
-  const problem = spaceNameProblem(name, spaces, space.id);
-  const commitName = () => { if (problem || name.trim() === space.name) setName(space.name); else void save({ name: name.trim() }); };
-  const commitDescription = () => { if (description.trim() !== (space.description ?? "")) void save({ description: description.trim() }); };
   return <header className="space-heading">
     <div className="space-heading-row">
-      <ProviderIconPicker id={`space-icon-${space.id}`} compact value={space.icon ?? ""} automatic={{ icon: null }} shown={spaceBrand(space)} disabled={disabled}
-        fallback="space" symbolsFirst onChange={icon => void save({ icon })} />
-      <InputGroup className="space-name" value={name} disabled={disabled} maxLength={maximumSpaceName + 16} aria-label={t("Name")} spellCheck={false} autoComplete="off"
-        intent={problem && name.trim() !== space.name ? "danger" : undefined} title={problem === "taken" ? t("A space already has this name.") : undefined}
-        onChange={event => setName(event.target.value)} onBlur={commitName}
-        onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); else if (event.key === "Escape") { event.stopPropagation(); setName(space.name); } }} />
+      <button type="button" className="space-open" title={t("Open {name}", { name: space.name })} onClick={onOpen}>
+        <SpaceIcon space={space} size={18} />
+        <span className="space-open-name">{space.name}</span>
+        <AppIcon name="chevronRight" size={14} className="space-open-chevron" />
+      </button>
       <span className="space-heading-tools">
         <SpaceActivityMarks activity={activity} />
         {tools}
       </span>
     </div>
-    <div className="space-heading-row">
-      <span className="space-color-swatches" role="group" aria-label={t("Color")}>
-        {spaceColors.map(color => <button type="button" key={color} className="space-color" style={{ background: color }} disabled={disabled}
-          aria-pressed={space.color?.toLowerCase() === color} aria-label={color} title={color} onClick={() => void save({ color: space.color?.toLowerCase() === color ? "" : color })} />)}
-      </span>
-    </div>
-    <TextArea className="space-description" fill value={description} disabled={disabled} rows={1} maxLength={maximumSpaceDescription} aria-label={t("What it is for")}
-      placeholder={t("What it is for")} onChange={event => setDescription(event.target.value)} onBlur={commitDescription} />
+    {space.description && <p className="space-card-description">{space.description}</p>}
   </header>;
 }

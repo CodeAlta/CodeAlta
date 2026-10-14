@@ -187,7 +187,9 @@ export function readSessionActivity(value: SpaceSessionActivity | null | undefin
     running: value.running === true, backgroundTasks: Number.isInteger(value.backgroundTasks) && value.backgroundTasks > 0 ? Math.min(value.backgroundTasks, 99) : 0,
     failed: value.failed === true, waiting: value.waiting === true,
     // The sessions above one that waits, nearest first: the session that created it, and so on.
-    ancestors: value.waiting === true && Array.isArray(value.ancestors) ? value.ancestors.filter(id => text(id, 256)).slice(0, maximumAncestors) : [] };
+    ancestors: value.waiting === true && Array.isArray(value.ancestors) ? value.ancestors.filter(id => text(id, 256)).slice(0, maximumAncestors) : [],
+    // The space the session records; null for one created before sessions had a space.
+    spaceId: text(value.spaceId, 64) ? value.spaceId : null };
 }
 
 /** A session that waits for the user, as the session above it shows it. */
