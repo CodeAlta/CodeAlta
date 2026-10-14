@@ -215,7 +215,9 @@ The **Identity** section of a space has three optional cards. Empty means "your 
 
 Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high) in its own worktree, branch `alta/<name>`, merged to `main` when its build, tests and UI check pass. **A1** lands first, because every other workstream builds on it.
 
-- [ ] 1. **G — Quick items**: PR #127 fixes on the contributor branch, squash-merge (this session); culture fix of the tests (child session). #117 stays open until you have checked a dictation in French (no question is asked: the user is away).
+- [x] 1. **G — Quick items**: PR #127 fixes on the contributor branch, squash-merge (this session); culture fix of the tests (child session). #117 stays open until you have checked a dictation in French (no question is asked: the user is away).
+  - PR #127 merged as `4b6480ba` after CI (the fork run needed approval); #103 closed.
+  - Culture fix merged as `baed80cd`: `SR` reads `DefaultThreadCurrentUICulture` before `InstalledUICulture`, every test project sets en-US; full suite 0 failures normally and with German simulated (108 failures reproduced before the fix).
 - [ ] 2. **A1 — Space foundation** (`alta/spaces-core`):
   - `space_id` in header, cache, descriptors and RPC; inheritance rules; `alta session create --space` and the own-space rule; Runtime Context line.
   - `SpaceScope` and the reader/writer of `spaces` in `config.toml` for all kinds.
@@ -235,6 +237,11 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
 ### Discovered tasks
 
 - [ ] 12. **H — Ask answers shown as not confirmed** (found 2026-10-14 during this plan's review): after the user answers the questions of an `alta ask` in a Claude Code provider session, the cards stay "Answer not confirmed · submitting" and "Answer not confirmed", although the answers reached the session as the next prompt. Regression test first, then fix (`alta/ask-confirmation`).
+  - Cause: the host settled an answer only when the run it started ended, and the page gave up after 8 s and never took the later outcome of its ask list. Fixed on `alta/sleek-linnet-gzqs` (admitted when the carrying run starts; the page reads `latest`); UI check running.
+- [ ] 13. **I — Test stability** (after the spaces workstreams, to avoid conflicts): the pending tasks under `.alta/tasks/` about flaky tests, so that 1.9.0 ships with a quiet suite:
+  - `2026-10-14-fix-the-landing-card-invalidation-test-racing-its-event-watc-n8jp` (found by G: the fixture registers its watcher on a `Task.Run`, the event is dropped);
+  - `2026-10-10-stabilize-orchestration-lifecycle-tests-under-full-suite-loa-thb2`, `2026-10-13-find-why-orchestration-tests-time-out-when-the-whole-net-sui-6zqz`, `2026-10-13-stabilize-the-system-prompt-dialog-browser-test-under-load-9k4x`.
+- [ ] 14. **J — Other pending tasks** worth 1.9.0, triaged after I: `2026-10-13-send-the-queued-prompts-of-a-session-whose-tab-was-closed-or-xgjx`, `2026-10-13-remove-the-pane-owners-of-sessions-that-no-longer-have-a-pan-fm5t`, `2026-10-11-handle-unavailable-codex-defaults-when-the-live-catalog-chan-p9zh`, `2026-10-11-allow-provider-refresh-after-synchronous-initialization-qbpw`, `2026-10-10-fix-the-native-split-right-crash-in-narrow-panes-6xsd`, and the doc corrections of 2026-10-10.
 
 ### How the work is run
 
