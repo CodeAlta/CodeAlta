@@ -210,7 +210,8 @@ public sealed class SessionDisplayRpcTests
                 activity.ActivityId.Length == 256 && activity.Name!.Length == 128 && activity.Phase == "Progressed"));
             // Maximize even the boolean encodings (false is longer), without reducing any retained string/counter.
             item = item with { Session = item.Session with { MetadataTruncated = false, TransportTruncated = false,
-                Text = item.Session.Text.Select(text => text with { IsComplete = false, IsTruncated = false, StartedWithDelta = false }).ToArray() } };
+                Text = item.Session.Text.Select(text => text with { IsComplete = false, IsTruncated = false, StartedWithDelta = false }).ToArray(),
+                ConversationWait = new(new string('\0', RuntimeDisplayProjection.MaxConversationWaitOriginCharacters)) } };
             var json = JsonSerializer.SerializeToUtf8Bytes(item, DesktopJsonContext.Default.SessionDisplayItem);
             Console.WriteLine($"Worst-case escaped selected item: {json.Length} bytes; with framing allowance: {json.Length + 4096}; budget: {SessionDisplayService.MaximumItemBytes}.");
             Assert.IsTrue(json.Length + 4096 < SessionDisplayService.MaximumItemBytes, $"Escaped item plus framing allowance: {json.Length + 4096}");

@@ -107,6 +107,7 @@ export const sessionRuntimeState = Object.freeze({ current: unavailable });
 export const sessionRetentionProtection = Object.freeze({ publish: async () => ({ accepted: true, reason: null }) });
 export const sessionUsage = Object.freeze({ read: unavailable });
 export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable });
+export const conversationHeld = Object.freeze({ list: async () => ({ status: "ok", hostEpoch: "demo", sessionId: null, entries: [] }), resolve: unavailable });
 export const sessionOperations = Object.freeze({
   abort: unavailable, abortRun: unavailable, cancelQueue: unavailable, compact: unavailable,
   queue: unavailable, receipts: emptyPage, send: unavailable, steer: unavailable,

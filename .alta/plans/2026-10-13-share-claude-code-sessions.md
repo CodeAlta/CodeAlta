@@ -302,12 +302,30 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
       and with its attachment; counted in the waiting sessions of `spaces.activity`. RPC `sessionConversationHeld`
       (`ConversationHeldService`: `list`, `resolve`; typed client `conversationHeld`). Tests:
       `SessionConversationHeldServiceTests` (8), `ConversationHeldRpcTests` (4).
-- [ ] Desktop card in the timeline notices (3 buttons, then the waiting state with Stop); strings in 5
-      languages; frontend test + browser mount test.
-- [ ] TUI: a dialog with the same three choices, through its permission-request flow
-      (`SessionPermissionRequestCoordinator`); test. Until then the TUI host leaves `AskWhenConversationHeld` off:
-      a held conversation fails the run with the message (wait until released, or continue from CodeAlta Desktop as
-      a copy / open anyway).
+- [x] Desktop card in the timeline notices (3 buttons, then the waiting state with Stop); strings in 5
+      languages; frontend test + browser mount test. Done: `frontend/src/conversationHeld/` (reviewer
+      `createConversationHeldReviewer`, `ConversationHeldPanel`, css, messages, `conversationHeld.test.ts`,
+      `conversationHeld.mount.tsx` + `.browser.test.ts`), rendered by `OwnedSessionPanel` in the timeline notices
+      portal; only the offered choices, Cancel quiet and last; an answer is sent once and the list is read again
+      whatever the reply (rejected/uncertain show a line, stale epoch asks for a reload); `conversationHeld` in the demo
+      API. Deviation: the Info updates of the wait are not in the timeline (it skips Info rows), so the live display
+      carries them: `RuntimeDisplaySession.ConversationWait` (set by a `conversationHeld` waiting update, cleared by
+      released and by the end of the run) → `SessionDisplayView.conversationWait {originText ≤ 64}`; tests in
+      `RuntimeDisplayProjectionTests` and the display wire budget. Checked live in the developer instance (a
+      throwaway Claude Code session; holder: a print-mode `claude --resume` with stdin open, shown as "another
+      application (sdk-cli)" since print mode ignores `CLAUDE_CODE_ENTRYPOINT`): Wait (the line, then the run went on
+      by itself once the holder exited), Open here anyway (resumed while held), Cancel (run ended as stopped), Stop
+      on the waiting line, Continue as a copy (new CLI conversation id); both themes and 900×650. Note: after a
+      Cancel or a Stop the next turn sends the prompts of the stopped runs again with its own (as designed above).
+- [x] TUI: a dialog with the same three choices, through its permission-request flow
+      (`SessionPermissionRequestCoordinator`); test. Done: the TUI host turns `AskWhenConversationHeld` on;
+      `SessionConversationHeldCoordinator` shows `ConversationHeldDialog` (offered choices as buttons, Escape =
+      Cancel) and answers with `ConversationHolds.ResolveAsync`; the dialog closes when the question ends without it.
+      The questions reach it through a new `SessionConversationHeldService.Observe(onAsked)` (callback per question
+      with a token cancelled when it ends; a failing observer changes nothing): the TUI's permission flow is a
+      per-send handler, the held handler is the runtime's. The wait shows in the status line (its Info message), as
+      before. Tests: `SessionConversationHeldCoordinatorTests` (4), observer test in
+      `SessionConversationHeldServiceTests`; strings in `SR.yml`.
 
 ### Phase 3: transcript reader (commit)
 - [x] `ClaudeCodeTranscriptReader` with synthetic fixture transcripts (no real content): repeated

@@ -100,7 +100,7 @@ test("completed calls whose background work fails or stops protect their entire 
 });
 const update = (offset: string, kind: string): Entry => entry(offset, { eventType: "sessionUpdate", kind, contentId: null });
 const view = (kind: string, text: string): SessionDisplayView => ({ sessionId: "session", revision: "1", lifecycle: null, queuedPromptCount: null,
-  configuration: { providerId: "provider", providerKey: null, modelId: null, reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null,
+  configuration: { providerId: "provider", providerKey: null, modelId: null, reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null, conversationWait: null,
   text: [{ timestamp: "2026-10-08T00:01:00Z", sequence: "1", runId: "run", contentId: "streamed", kind, text, isComplete: false,
     isTruncated: false, startedWithDelta: true }], toolActivities: [], metadataTruncated: false,
   transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0" });

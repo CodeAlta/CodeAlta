@@ -32,6 +32,8 @@ public sealed class RuntimeDisplayProjection
     public const int MaxIdentifierCharacters = 256;
     /// <summary>Maximum UTF-16 code units per status/configuration/lifecycle label.</summary>
     public const int MaxMetadataCharacters = 512;
+    /// <summary>Maximum UTF-16 code units of where the process that holds a waited-for conversation runs.</summary>
+    public const int MaxConversationWaitOriginCharacters = 64;
     /// <summary>Maximum simultaneous observations, each with one payload-free wakeup slot and no replay buffer.</summary>
     public const int MaxSubscribers = 32;
 
@@ -302,7 +304,19 @@ public sealed class RuntimeDisplayProjection
         {
             case SessionLifecycleRuntimeEvent { Event: not null } lifecycle:
                 session = session with { Lifecycle = new(lifecycle.Event.Kind, Label(lifecycle.Event.RunId), Label(lifecycle.Event.Message)) };
+                // A run that ends no longer waits for anything.
+                if (lifecycle.Event.Kind is SessionLifecycleEventKind.RunCompleted or SessionLifecycleEventKind.RunFailed or SessionLifecycleEventKind.RunAborted)
+                    session = session with { ConversationWait = null };
                 break;
+            case SessionAgentEvent { Event: AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Info } update }
+                when AgentConversationHeldUpdates.TryRead(update.Details, out var waitState, out var originText):
+                // A run that waits for another process to release its conversation, until it is released.
+                return session with
+                {
+                    ConversationWait = waitState == AgentConversationHeldUpdates.Waiting
+                        ? new RuntimeDisplayConversationWait(Prefix(originText, MaxConversationWaitOriginCharacters))
+                        : null,
+                };
             case SessionQueueRuntimeEvent queue:
                 session = session with { QueuedPromptCount = queue.QueuedPromptCount };
                 break;

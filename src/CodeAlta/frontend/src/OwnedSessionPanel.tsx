@@ -26,6 +26,8 @@ import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancel
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
+import { ConversationHeldPanel } from "./conversationHeld/ConversationHeldPanel";
+import type { createConversationHeldReviewer } from "./conversationHeld/conversationHeld";
 import { WaitingSubSessionsPanel } from "./WaitingSubSessionsPanel";
 import { HostReadsContext } from "./hostReadsContext";
 import type { WaitingSubSession } from "./spaces/spaces";
@@ -86,7 +88,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
 
 const noWaitingSubSessions: readonly WaitingSubSession[] = [];
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
   /** The folder the session works in: the folder dialog of the attach menu opens there, and a folder chosen in it is a project reference. */
   sessionFolder?: string | null;
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
@@ -105,6 +107,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
+  /** Reads and answers the question of a run whose Claude Code conversation another process holds. */
+  heldReviewer?: ReturnType<typeof createConversationHeldReviewer> | null;
   /** The sessions under this one that wait for the user: named above the composer, their permissions answered there. */
   waitingSubSessions?: readonly WaitingSubSession[];
   /** Makes a reviewer for the permissions of a session under this one; null when the host reviews no command. */
@@ -1363,6 +1367,11 @@ ${value}` : value);
       </SendSplitButton>
     </ComposerSurface>
     {timelineNotices && createPortal(<>
+    {heldReviewer && <ConversationHeldPanel reviewer={heldReviewer} epoch={epoch} sessionId={sessionId} running={composerBusy}
+      wait={liveConnected ? currentLive.snapshot?.session?.conversationWait ?? null : null}
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onStop={abortRun}
+      stopDisabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
+        ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))} />}
     {pendingQueueCancellations.map(value => <Button key={value.intent.request.clientRequestId} icon={<AppIcon name="refresh" size={14} />}
       disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
       {t("Retry exact queued-operation cancellation")}</Button>)}
