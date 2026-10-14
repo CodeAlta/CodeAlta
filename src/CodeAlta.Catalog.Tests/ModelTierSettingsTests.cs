@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog.ModelTiers;
+using TierTarget = CodeAlta.Catalog.ModelTiers.ModelTierTarget;
 
 namespace CodeAlta.Catalog.Tests;
 
@@ -19,14 +20,14 @@ public sealed class ModelTierSettingsTests
     [TestMethod]
     public void Target_ParsesProviderModelAndOrderedReasoning()
     {
-        Assert.IsTrue(ModelTierTarget.TryParse(" Claude-Code:opus@high, xhigh ", out var target, out var error), error);
+        Assert.IsTrue(TierTarget.TryParse(" Claude-Code:opus@high, xhigh ", out var target, out var error), error);
         Assert.AreEqual("claude-code", target.ProviderKey);
         Assert.AreEqual("opus", target.ModelId);
         CollectionAssert.AreEqual(new[] { AgentReasoningEffort.High, AgentReasoningEffort.XHigh }, target.Reasoning.ToArray());
         Assert.AreEqual(AgentReasoningEffort.High, target.PreferredReasoning);
         Assert.AreEqual("claude-code:opus@high,xhigh", target.Format());
 
-        Assert.IsTrue(ModelTierTarget.TryParse("ollama:llama3:8b", out target, out _));
+        Assert.IsTrue(TierTarget.TryParse("ollama:llama3:8b", out target, out _));
         Assert.AreEqual("llama3:8b", target.ModelId);
         Assert.IsNull(target.PreferredReasoning);
         Assert.AreEqual("ollama:llama3:8b", target.Format());
@@ -42,7 +43,7 @@ public sealed class ModelTierSettingsTests
     [DataRow("codex:gpt-6.1@high,high")]
     public void Target_RefusesWhatIsNotATarget(string value)
     {
-        Assert.IsFalse(ModelTierTarget.TryParse(value, out _, out var error));
+        Assert.IsFalse(TierTarget.TryParse(value, out _, out var error));
         Assert.IsFalse(string.IsNullOrWhiteSpace(error));
     }
 

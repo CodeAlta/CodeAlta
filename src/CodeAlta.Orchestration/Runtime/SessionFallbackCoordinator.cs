@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
+using ModelTierTarget = CodeAlta.Catalog.ModelTiers.ModelTierTarget;
 
 namespace CodeAlta.Orchestration.Runtime;
 
