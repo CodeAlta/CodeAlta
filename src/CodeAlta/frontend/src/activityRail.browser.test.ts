@@ -15,6 +15,11 @@ test("the buttons of the title bar stay reachable at the narrowest Explorer and 
       return { name: button.getAttribute('aria-label'), hit: !!document.elementFromPoint(x, y)?.closest('button') && document.elementFromPoint(x, y).closest('button') === button, width: Math.round(r.width) };
     })`) as Promise<{ name: string; hit: boolean; width: number }[]>;
     const toggle = `document.querySelector('.activity-rail button[aria-controls="project-rail"]')`;
+    // The focus ring of a button (2px, 2px away) is clipped by nothing under the mark, and the mark has room for it.
+    const ringsShown = () => evaluate(`[...document.querySelectorAll('.activity-rail button')].filter(b => b.getBoundingClientRect().width > 0).every(b => {
+      const brand = b.closest('.window-brand'), r = b.getBoundingClientRect(), box = brand.getBoundingClientRect();
+      for (let e = b.parentElement; e !== brand; e = e.parentElement) if (getComputedStyle(e).overflow !== 'visible') return false;
+      return r.left - 4 >= box.left && r.right + 4 <= box.right && r.top - 4 >= box.top && r.bottom + 4 <= box.bottom; })`) as Promise<boolean>;
     const menu = `[...document.querySelectorAll('.bp6-popover .bp6-menu-item')].map(item => item.textContent.trim())`;
 
     await until(`${toggle}?.getAttribute('aria-expanded')==='true' && Math.round(document.querySelector('.window-brand').getBoundingClientRect().width)===222`, "the Explorer at its narrowest width");
@@ -23,6 +28,7 @@ test("the buttons of the title bar stay reachable at the narrowest Explorer and 
     assert.equal(buttons[0].name, "Explorer");
     assert.equal(buttons.at(-1)!.name, "Settings & extensions", "Settings is always in the bar");
     assert.equal(buttons.at(-2)!.name, "More", "what has no room is in the menu");
+    assert.equal(await ringsShown(), true, "the focus ring of every button shows whole at the narrowest Explorer");
     await press(`document.querySelector('.activity-rail .activity-more')`);
     await until(`${menu}.length > 0`, "the menu of the buttons that have no room");
     const folded = await evaluate(menu) as string[];
@@ -39,6 +45,7 @@ test("the buttons of the title bar stay reachable at the narrowest Explorer and 
     buttons = await rail();
     assert.deepEqual(buttons.map(button => button.name), names);
     assert.ok(buttons.every(button => button.hit), `every button can be clicked: ${JSON.stringify(buttons)}`);
+    assert.equal(await ringsShown(), true, "the focus ring of every button shows whole without the Explorer");
     const brand = await evaluate(`(() => { const r = document.querySelector('.window-brand').getBoundingClientRect(), s = document.querySelector('.activity-settings').getBoundingClientRect(); return { right: r.right, settings: s.right }; })()`);
     assert.ok(brand.settings <= brand.right, `Settings ends inside the mark: ${JSON.stringify(brand)}`);
 

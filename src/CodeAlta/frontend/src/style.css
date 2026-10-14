@@ -1599,7 +1599,8 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body {
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
 .window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 6px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
 /* The rail takes the room the mark leaves: what does not fit folds into its "…" menu (ActivityRail.tsx). */
-.window-brand .activity-rail { flex: 1 1 0; display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; overflow: hidden; }
+/* Nothing of the rail is clipped but by the mark itself: the focus ring of its buttons goes past their box. */
+.window-brand .activity-rail { flex: 1 1 0; display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
 .window-brand .activity-rail > .bp6-button, .window-brand .activity-rail > .bp6-popover-target > .bp6-button { flex: none; min-width: 26px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-brand .activity-rail > .bp6-popover-target { display: flex; flex: none; }
 .window-brand .activity-rail > .bp6-button:hover, .window-brand .activity-rail > .bp6-button.bp6-active, .window-brand .activity-rail > .bp6-popover-open > .bp6-button { color: var(--text); }
