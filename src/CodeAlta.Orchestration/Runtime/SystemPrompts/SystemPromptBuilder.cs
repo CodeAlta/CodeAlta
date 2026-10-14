@@ -603,6 +603,13 @@ public sealed class SystemPromptBuilder
             lines.Add(SpaceLine(space));
         }
 
+        // The models the user prefers for each kind of work: an agent asks for a tier instead of naming a model.
+        if (!string.IsNullOrWhiteSpace(request.ModelTiers))
+        {
+            lines.Add($"- Model tiers: {request.ModelTiers}. Give a session one with `alta session create --tier <name>` instead of naming a model."
+                + (request.ModelFallback ? " When its provider fails (quota, outage), a session goes on with the next model of its tier." : string.Empty));
+        }
+
         // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
         // The agent names the file after the day and the request; the end of the name is a short hash of the session,
         // so that two agents never write the same file.
@@ -1245,6 +1252,14 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets available-skills markdown produced by the skill catalog.</summary>
     public string? AvailableSkillsMarkdown { get; init; }
+
+    /// <summary>
+    /// Gets the tiers of models of the settings, described in one line for the agents, or null when the user set none.
+    /// </summary>
+    public string? ModelTiers { get; init; }
+
+    /// <summary>Gets whether a session goes on with the next model of its tier when its provider fails.</summary>
+    public bool ModelFallback { get; init; }
 
     /// <summary>Gets active-skills markdown restored from session state.</summary>
     public string? ActiveSkillsMarkdown { get; init; }

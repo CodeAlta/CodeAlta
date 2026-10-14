@@ -424,6 +424,29 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_ListsTheModelTiers_OnlyWhenTheUserSetSome()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+        string Build(string? tiers, bool fallback) => builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex",
+            ModelTiers = tiers, ModelFallback = fallback,
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = temp.Path, Kind = SessionViewKind.GlobalSession },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
+        }).DeveloperInstructions!;
+
+        Assert.IsFalse(Build(null, fallback: true).Contains("Model tiers", StringComparison.Ordinal));
+        var listed = Build("`quick` (claude-code:haiku@low)", fallback: false);
+        StringAssert.Contains(listed, "- Model tiers: `quick` (claude-code:haiku@low). Give a session one with `alta session create --tier <name>` instead of naming a model.");
+        Assert.IsFalse(listed.Contains("goes on with the next model", StringComparison.Ordinal));
+        StringAssert.Contains(Build("`quick` (claude-code:haiku@low)", fallback: true), "a session goes on with the next model of its tier");
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_NamesTheWorktreeASessionWorksIn_AndReadsItsInstructionFiles()
     {
         using var temp = TempDirectory.Create();

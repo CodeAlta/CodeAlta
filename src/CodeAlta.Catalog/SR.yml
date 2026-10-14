@@ -3960,6 +3960,12 @@
   fr: "Modèle"
   ja: "モデル"
   zh: "模型"
+"Model Changed After A Failure":
+  de: "Modell nach einem Fehler gewechselt"
+  es: "Modelo cambiado tras un fallo"
+  fr: "Modèle changé après un échec"
+  ja: "失敗後にモデルを変更"
+  zh: "失败后已更换模型"
 "Model Discovery":
   de: "Modellerkennung"
   es: "Descubrimiento de modelos"

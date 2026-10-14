@@ -201,6 +201,7 @@ import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
 import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, sameMembers, scopeSnapshot, shownSpaceKey, spaceCalls, spaceMembers, spaceShows,
   spaceStorageKey, waitingSubSessions, type WaitingSubSession } from "./spaces/spaces";
+import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -1226,6 +1227,17 @@ function App() {
         action: { text: translate(shownLocale.current, "Show"), onClick: () => { selectProject(session.projectId, session.sessionId); focusPromptSoon(); } } });
     }
   }, [waitingSessions]);
+  // A session that went on with another model after a failure of its provider is said once, with what happened.
+  const saidFallbacks = useRef<ReadonlySet<string> | null>(null);
+  useEffect(() => {
+    const { notices, said } = newFallbackNotices(saidFallbacks.current, spacesState.sessions);
+    saidFallbacks.current = said;
+    for (const notice of notices) {
+      showToast({ intent: "primary", icon: "swap-horizontal", timeout: 12_000,
+        message: translate(shownLocale.current, "{title}: {message}", { title: notice.title || translate(shownLocale.current, "A session"), message: notice.message }),
+        action: { text: translate(shownLocale.current, "Show"), onClick: () => { selectProject(notice.projectId, notice.sessionId); focusPromptSoon(); } } });
+    }
+  }, [spacesState.sessions]);
   function activateFile(tab: FileTab | null) { setFileTabs(state => activateFileTab(state, tab)); }
   function openFile(tab: FileTab) {
     // At the tab limit a file with unsaved edits is never the one that makes room.

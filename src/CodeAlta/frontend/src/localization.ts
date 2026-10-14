@@ -2427,6 +2427,7 @@ export const messages = dictionary({
   "The agents of the space read it.": ["Los agentes del espacio lo leen.", "Les agents de l'espace le lisent.", "Die Agenten des Bereichs lesen es.", "このスペースのエージェントが読みます。", "此空间的代理会读取它。"],
   "Delete {name}? Its projects stay in the other spaces they are in.": ["¿Eliminar {name}? Sus proyectos siguen en los demás espacios en los que están.", "Supprimer {name} ? Ses projets restent dans les autres espaces où ils sont.", "{name} löschen? Seine Projekte bleiben in den anderen Bereichen, in denen sie sind.", "{name} を削除しますか？プロジェクトは所属する他のスペースに残ります。", "删除 {name}？其项目仍保留在它们所在的其他空间中。"],
   "{count} session waits for you": ["{count} sesión te espera", "{count} session vous attend", "{count} Sitzung wartet auf Sie", "{count} 件のセッションが応答待ち", "{count} 个会话在等待你"],
+  "{title}: {message}": ["{title}: {message}", "{title} : {message}", "{title}: {message}", "{title}: {message}", "{title}：{message}"],
   "{title} waits for you": ["{title} te espera", "{title} vous attend", "{title} wartet auf Sie", "{title} が応答を待っています", "{title} 正在等待你"],
   "Waits for your answer": ["Espera tu respuesta", "Attend votre réponse", "Wartet auf Ihre Antwort", "応答待ち", "正在等待你的答复"],
   "A sub-session waits for you": ["Una subsesión te espera", "Une sous-session vous attend", "Eine Untersitzung wartet auf Sie", "サブセッションが応答を待っています", "有一个子会话在等待你"],

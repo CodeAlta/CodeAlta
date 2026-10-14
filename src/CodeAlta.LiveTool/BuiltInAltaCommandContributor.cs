@@ -6,6 +6,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime;
@@ -924,7 +925,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "A session created by a session that works in a worktree works in that same worktree, unless",
             "`--worktree` gives it one of its own or `--no-worktree` sends it to the project folder.",
             "The record names the folder as `worktreeDirectory`.",
+            "With `--tier` the session runs on the first ready model of that tier of the settings, and falls back",
+            "along it when the fallback is on. A session that names no model and inherits none starts on `standard`.",
             "Examples:",
+            "  `alta session create --project CodeAlta --tier quick`",
             "  `alta session create --project CodeAlta --prompt-id default --reasoning low`",
             "  `alta session create --project CodeAlta --same-model-as <session-id>`",
             "  `alta session create --project CodeAlta --worktree --base main`",
@@ -1624,7 +1628,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("model=", "Model id.", value => options.ModelId = value);
         command.Add("reasoning=", "Reasoning effort: minimal, low, medium, high, xhigh, max, or none.", value => options.ReasoningEffort = ParseReasoningOption(value));
         command.Add("prompt-id=", "Agent prompt id from `alta prompt list`. Defaults to `default` for new sessions.", value => options.PromptId = value);
+        command.Add("tier=", "Tier of models from the settings: complex, standard or quick. Takes its first ready model.", value => options.Tier = ParseTierOption(value));
     }
+
+    private static ModelTier ParseTierOption(string? value)
+        => ModelTiers.Parse(value) ?? throw new CommandOptionException(
+            $"Tier '{value}' is not valid. Use complex, standard or quick.",
+            "--tier");
 
     private static AgentReasoningEffort? ParseReasoningOption(string? value)
     {
@@ -2709,6 +2719,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         session.AgentPromptId = promptId;
         await runtime.PersistSessionLocalStateAsync(session, context.CancellationToken).ConfigureAwait(false);
         await PersistSessionPreferenceAsync(context, session, modelSelection.Selection!, promptId).ConfigureAwait(false);
+        // A session that runs on a tier falls back along it.
+        if (modelSelection.Tier is { } tier)
+        {
+            await runtime.SetSessionTierAsync(session.SessionId, tier, context.CancellationToken).ConfigureAwait(false);
+        }
 
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
@@ -2727,6 +2742,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             worktreeDirectory = session.WorktreeDirectory,
             worktreeBranch = worktree?.Branch,
             modelSelection = ToModelSelectionPayload(modelSelection.Selection!, promptId),
+            tier = modelSelection.Tier is { } chosenTier ? ModelTiers.NameOf(chosenTier) : null,
             permissionMode = session.PermissionMode,
         });
         return AltaExitCodes.Success;
@@ -4567,6 +4583,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     // projectRoot: the folder of the project a session is created in, whose configuration names the default provider first.
     private static async Task<ModelResolutionResult> ResolveModelSelectionAsync(AltaCommandContext context, AltaModelSelectionOptions request, string commandPath, string? projectRoot, bool sessionPreparation)
     {
+        if (request.Tier is { } tier)
+        {
+            if (!string.IsNullOrWhiteSpace(request.ModelRef) || !string.IsNullOrWhiteSpace(request.SameModelAsSessionId)
+                || !string.IsNullOrWhiteSpace(request.ProviderKey) || !string.IsNullOrWhiteSpace(request.ModelId))
+            {
+                return ModelResolutionResult.Fail(UsageError(context, "usage.tierConflict",
+                    "Use --tier alone, or name the model with --model-ref, --provider and --model, or --same-model-as. --reasoning may go with --tier.", commandPath));
+            }
+
+            return (await ResolveTierSelectionAsync(context, tier, request.ReasoningEffort, commandPath, sessionPreparation, required: true).ConfigureAwait(false))!;
+        }
+
         if (!string.IsNullOrWhiteSpace(request.ModelRef))
         {
             if (!AltaModelRef.TryParse(request.ModelRef, out var parsed, out var error))
@@ -4600,6 +4628,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 inherited = inheritedResult.Selection;
             }
         }
+
+        // A session that names no model and inherits none starts on the standard tier, when the settings have tiers.
+        if (inherited is null && string.IsNullOrWhiteSpace(request.ProviderKey) && string.IsNullOrWhiteSpace(request.ModelId)
+            && await ResolveTierSelectionAsync(context, ModelTier.Standard, request.ReasoningEffort, commandPath, sessionPreparation, required: false).ConfigureAwait(false) is { } standard)
+        {
+            return standard;
+        }
+
         var providerKey = FirstNonEmpty(request.ProviderKey, inherited?.ProviderKey, GetDefaultProviderKey(context, projectRoot));
         if (string.IsNullOrWhiteSpace(providerKey))
         {
@@ -4618,6 +4654,70 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             ModelRef = AltaModelRef.Format(providerKey, modelId, reasoning),
         };
         return await ValidateAndCompleteModelSelectionAsync(context, selection, request.ReasoningEffort, commandPath, sessionPreparation).ConfigureAwait(false);
+    }
+
+    // The first model of a tier whose provider is enabled and can answer, and lists the model when it lists models.
+    // required: the tier was asked for, and its absence is an error; otherwise null lets the caller go on without it.
+    private static async Task<ModelResolutionResult?> ResolveTierSelectionAsync(AltaCommandContext context, ModelTier tier,
+        AgentReasoningEffort? requestedReasoning, string commandPath, bool sessionPreparation, bool required)
+    {
+        var tiers = LoadModelSettings(context).Tiers;
+        var name = ModelTiers.NameOf(tier);
+        if (tiers.Get(tier).Count == 0)
+        {
+            return required
+                ? ModelResolutionResult.Fail(UsageError(context, "usage.noTier",
+                    $"The {name} tier has no model: the user sets the tiers in Settings > Models. Name a model with --model-ref instead.", commandPath))
+                : null;
+        }
+
+        var states = context.Services.Get<IModelProviderInitializationService>()?.CurrentStates ?? [];
+        foreach (var target in tiers.Get(tier))
+        {
+            if (FindProviderDescriptor(context, target.ProviderKey) is not { IsEnabled: true }) continue;
+            var state = states.FirstOrDefault(state => string.Equals(state.ProviderId.Value, target.ProviderKey, StringComparison.OrdinalIgnoreCase));
+            // A provider that was not probed yet may still answer; one that is known not to is skipped.
+            if (state is not null && state.Availability is not (ModelProviderAvailability.Ready or ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing)) continue;
+            var model = state?.Models.FirstOrDefault(model => string.Equals(model.Id, target.ModelId, StringComparison.OrdinalIgnoreCase));
+            if (state is { Availability: ModelProviderAvailability.Ready, Models.Count: > 0 } && model is null) continue;
+            var reasoning = requestedReasoning
+                ?? (model?.SupportedReasoningEfforts is { Count: > 0 } supported && target.Reasoning.Count > 0
+                    ? target.Reasoning.FirstOrDefault(supported.Contains, target.Reasoning[0])
+                    : target.PreferredReasoning);
+            var selection = new AltaModelSelection
+            {
+                ProviderKey = target.ProviderKey,
+                ModelId = target.ModelId,
+                ReasoningEffort = reasoning,
+                ModelRef = AltaModelRef.Format(target.ProviderKey, target.ModelId, reasoning),
+            };
+            var result = await ValidateAndCompleteModelSelectionAsync(context, selection, requestedReasoning, commandPath, sessionPreparation).ConfigureAwait(false);
+            return result with { Tier = tier };
+        }
+
+        return required
+            ? ModelResolutionResult.Fail(NotFound(context, "tier.unavailable",
+                $"No model of the {name} tier is ready ({string.Join(", ", tiers.Get(tier).Select(static target => target.Format()))}). Name a model with --model-ref instead."))
+            : null;
+    }
+
+    private static ModelSettings LoadModelSettings(AltaCommandContext context)
+    {
+        if (context.Services.Get<SessionRuntimeService>() is { } runtime)
+        {
+            return runtime.LoadModelSettings();
+        }
+
+        var store = context.Services.Get<CodeAltaConfigStore>()
+            ?? (context.Services.Get<CatalogOptions>() is { } options ? new CodeAltaConfigStore(options) : null);
+        try
+        {
+            return store?.LoadGlobalModelSettings() ?? ModelSettings.Default;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return ModelSettings.Default;
+        }
     }
 
     private static bool HasCompleteModelSelection(AltaModelSelectionOptions request)
@@ -6451,6 +6551,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public AgentReasoningEffort? ReasoningEffort { get; set; }
 
         public string? PromptId { get; set; }
+
+        public ModelTier? Tier { get; set; }
     }
 
     private sealed class SessionCreateOptions
@@ -6663,6 +6765,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private sealed record ModelResolutionResult(int ExitCode, AltaModelSelection? Selection)
     {
+        // The tier the selection comes from, when it comes from one.
+        public ModelTier? Tier { get; init; }
+
         public static ModelResolutionResult Success(AltaModelSelection selection) => new(AltaExitCodes.Success, selection);
 
         public static ModelResolutionResult Fail(int exitCode) => new(exitCode, null);

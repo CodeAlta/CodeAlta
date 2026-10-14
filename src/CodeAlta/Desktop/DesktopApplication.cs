@@ -712,7 +712,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         // A question a session asked, a command to review, a form to fill.
                         var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
                         return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews];
-                    }, epoch));
+                    }, epoch) { Fallbacks = () => host.Commands.LastFallbacks });
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
                     builder.AddBookmarksService(new BookmarksService(bookmarks,

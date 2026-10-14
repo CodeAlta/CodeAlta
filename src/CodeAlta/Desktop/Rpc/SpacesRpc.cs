@@ -140,8 +140,13 @@ internal sealed class SpacesService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false);
         var waiting = (await _waiting!().ConfigureAwait(false)).ToHashSet(StringComparer.Ordinal);
         var runs = _runs!();
+        // A fallback is news for a short while: the page says it once.
+        var since = DateTimeOffset.UtcNow - RecentFallback;
+        var fallbacks = (Fallbacks?.Invoke() ?? []).Where(fallback => fallback.At >= since)
+            .ToDictionary(static fallback => fallback.SessionId, StringComparer.OrdinalIgnoreCase);
         var sessions = runs
-            .Where(session => session.Running || session.BackgroundTasks > 0 || session.Failed || waiting.Contains(session.SessionId))
+            .Where(session => session.Running || session.BackgroundTasks > 0 || session.Failed || waiting.Contains(session.SessionId)
+                || fallbacks.ContainsKey(session.SessionId))
             // The ones that wait for the user first: a reading cut short keeps what matters most.
             .OrderByDescending(session => waiting.Contains(session.SessionId)).ThenByDescending(static session => session.Failed)
             .ThenBy(static session => session.SessionId, StringComparer.Ordinal)
@@ -153,9 +158,20 @@ internal sealed class SpacesService
         return new("ok", [.. sessions.Take(MaximumActivitySessions).Select(session => new SpaceSessionActivity(session.SessionId, session.ProjectId,
             Cut(session.Title, 256), session.Running, Math.Min(session.BackgroundTasks, 99), session.Failed, waiting.Contains(session.SessionId),
             waiting.Contains(session.SessionId) ? Ancestors(session.SessionId, parents) : [],
-            SpaceDescriptor.IsValidId(session.SpaceId) ? session.SpaceId : null))],
+            SpaceDescriptor.IsValidId(session.SpaceId) ? session.SpaceId : null)
+            {
+                Fallback = fallbacks.TryGetValue(session.SessionId, out var fallback)
+                    ? new SpaceSessionFallback(fallback.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture), Cut(fallback.Message, 512))
+                    : null,
+            })],
             sessions.Length > MaximumActivitySessions);
     }
+
+    /// <summary>How long a fallback of a session is listed with its activity.</summary>
+    internal static readonly TimeSpan RecentFallback = TimeSpan.FromMinutes(10);
+
+    /// <summary>Gets the last fallback of each session since the start of the host; none when null.</summary>
+    internal Func<IReadOnlyList<SessionFallbackRecord>>? Fallbacks { get; init; }
 
     // The sessions above one, nearest first, as far as the runtime holds them: a chain that loops or goes deeper
     // than any real one stops.
@@ -296,4 +312,13 @@ internal sealed record SpacesActivityResponse(string Status, IReadOnlyList<Space
 /// </param>
 /// <param name="SpaceId">The space the session records; null for one created before sessions had a space.</param>
 internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed, bool Waiting,
-    IReadOnlyList<string> Ancestors, string? SpaceId = null);
+    IReadOnlyList<string> Ancestors, string? SpaceId = null)
+{
+    /// <summary>Gets the last fallback of the session, when it went on with another model a short while ago.</summary>
+    public SpaceSessionFallback? Fallback { get; init; }
+}
+
+/// <summary>A fallback of a session: it went on with the next model of its tier after a failure of its provider.</summary>
+/// <param name="At">When, as an ISO 8601 instant.</param>
+/// <param name="Message">What the timeline of the session says of it.</param>
+internal sealed record SpaceSessionFallback(string At, string Message);

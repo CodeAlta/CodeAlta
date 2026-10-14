@@ -707,6 +707,7 @@ internal static class ChatMarkdownFormatter
             AgentSessionUpdateKind.Shutdown => $"{TerminalIcons.MdClose} {SR.T("Session Shutdown")}",
             AgentSessionUpdateKind.TaskCompleted => $"{TerminalIcons.MdCheck} {SR.T("Task Completed")}",
             AgentSessionUpdateKind.DiffUpdated => $"{TerminalIcons.CodEdit} {SR.T("Diff Updated")}",
+            AgentSessionUpdateKind.ProviderFallback => $"{TerminalIcons.MdServerNetwork} {SR.T("Model Changed After A Failure")}",
             AgentSessionUpdateKind.Started => $"{TerminalIcons.MdTimerOutline} {SR.T("Session Started")}",
             AgentSessionUpdateKind.Resumed => $"{TerminalIcons.MdAccountArrowRight} {SR.T("Session Resumed")}",
             AgentSessionUpdateKind.Idle => $"{TerminalIcons.MdCat} {SR.T("Agent Idle")}",
@@ -886,6 +887,7 @@ internal static class ChatMarkdownFormatter
         return update.Kind is AgentSessionUpdateKind.Warning
             or AgentSessionUpdateKind.Reconnecting
             or AgentSessionUpdateKind.ModelChanged
+            or AgentSessionUpdateKind.ProviderFallback
             or AgentSessionUpdateKind.CompactionStarted
             or AgentSessionUpdateKind.CompactionCompleted;
     }

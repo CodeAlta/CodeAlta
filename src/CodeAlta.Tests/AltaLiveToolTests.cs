@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
@@ -2450,6 +2451,87 @@ public sealed partial class AltaLiveToolTests
         public void NotifyChanged()
         {
         }
+    }
+
+    [TestMethod]
+    public async Task SessionCreate_WithATier_TakesItsFirstReadyModel_AndRecordsTheTier()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
+        Directory.CreateDirectory(options.GlobalRoot);
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var sessionCatalog = new SessionViewCatalog(options);
+        var descriptors = new[]
+        {
+            new ModelProviderDescriptor(new ModelProviderId("alpha"), "Alpha"),
+            new ModelProviderDescriptor(new ModelProviderId("beta"), "Beta"),
+            new ModelProviderDescriptor(new ModelProviderId("gamma"), "Gamma"),
+            new ModelProviderDescriptor(new ModelProviderId("off"), "Off") { IsEnabled = false },
+        };
+        var registry = new ModelProviderRegistry();
+        foreach (var descriptor in descriptors.Where(static descriptor => descriptor.IsEnabled))
+        {
+            var providerRuntime = new StatefulProviderRuntime(descriptor.ProviderId);
+            registry.RegisterOrReplaceSessionRuntime(descriptor, () => providerRuntime);
+        }
+
+        var skillCatalog = new SkillCatalog();
+        var runtime = new SessionRuntimeService(
+            new AgentHub(registry),
+            new AgentSessionCatalog(sessionCatalog.JournalStore.CreateSessionStore()),
+            projectCatalog,
+            sessionCatalog,
+            new AgentInstructionTemplateProvider(skillCatalog, options),
+            options,
+            skillCatalog);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(sessionCatalog)
+            .Add(runtime)
+            .Add<IReadOnlyList<ModelProviderDescriptor>>(descriptors)
+            .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
+        File.WriteAllText(options.ConfigPath, """
+            [models.tiers]
+            quick = ["off:small@low", "beta:mini@low,minimal"]
+            standard = ["gamma:big@medium"]
+            """);
+
+        // A disabled provider is skipped: the quick tier gives the next one.
+        var quick = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Quick", "--tier", "quick"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, quick.ExitCode, quick.Stderr);
+        var created = ReadJsonLines(quick.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+        Assert.AreEqual("beta:mini@low", created.GetProperty("modelSelection").GetProperty("modelRef").GetString());
+        Assert.AreEqual("quick", created.GetProperty("tier").GetString());
+        Assert.AreEqual(ModelTier.Quick, await runtime.GetSessionTierAsync(created.GetProperty("sessionId").GetString()!).ConfigureAwait(false));
+
+        // A session that names no model and inherits none starts on the standard tier.
+        var plain = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Plain"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, plain.ExitCode, plain.Stderr);
+        var standard = ReadJsonLines(plain.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created");
+        Assert.AreEqual("gamma:big@medium", standard.GetProperty("modelSelection").GetProperty("modelRef").GetString());
+        Assert.AreEqual("standard", standard.GetProperty("tier").GetString());
+
+        // A model named by hand is not a tier.
+        var named = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--title", "Named", "--provider", "alpha"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.IsFalse(ReadJsonLines(named.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").TryGetProperty("tier", out var namedTier), namedTier.ToString());
+
+        var resolved = await dispatcher.InvokeAsync(["model", "resolve", "--tier", "quick", "--reasoning", "minimal"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, resolved.ExitCode, resolved.Stderr);
+        Assert.AreEqual("beta:mini@minimal", ReadJsonLines(resolved.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.model.selection").GetProperty("modelRef").GetString());
+
+        var empty = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--tier", "complex"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Usage, empty.ExitCode);
+        StringAssert.Contains(empty.Stdout + empty.Stderr, "usage.noTier");
+        var conflict = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--tier", "quick", "--provider", "alpha"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        StringAssert.Contains(conflict.Stdout + conflict.Stderr, "usage.tierConflict");
+        var invalid = await dispatcher.InvokeAsync(["session", "create", "--project", project.Id, "--tier", "fast"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreNotEqual(AltaExitCodes.Success, invalid.ExitCode);
+        StringAssert.Contains(invalid.Stdout + invalid.Stderr, "complex, standard or quick");
     }
 
     [TestMethod]

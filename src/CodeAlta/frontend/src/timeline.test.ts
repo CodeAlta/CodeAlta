@@ -411,6 +411,17 @@ test("model changes show provider, model, and reasoning without a verbose primar
   assert.equal(item.markdown, null);
 });
 
+test("a fallback after a failure shows why and the models left and taken", () => {
+  const [item] = buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "ProviderFallback",
+    text: "Claude Code quota reached until 18:00, continuing on Codex GPT-6.1 high.",
+    details: JSON.stringify({ reason: "QuotaExhausted", from: "claude-code:opus@high", to: "codex:gpt-6.1@high" }) })]);
+  assert.equal(item.title, "Model changed after a failure");
+  assert.equal(item.subtitle, "claude-code:opus@high → codex:gpt-6.1@high");
+  assert.equal(item.icon, "model");
+  assert.equal(item.category, "status");
+  assert.equal(item.markdown, "Claude Code quota reached until 18:00, continuing on Codex GPT-6.1 high.");
+});
+
 test("raw persistence records are not rendered as unavailable provider cards", () => {
   const items = buildTimelineItems([
     entry({ eventType: "raw", text: null, details: null, bodyOmitted: true }),

@@ -1,5 +1,6 @@
 using System.Text;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
@@ -119,6 +120,7 @@ public sealed class AgentInstructionTemplateProvider
         var projectRoots = string.IsNullOrWhiteSpace(project?.ProjectPath)
             ? Array.Empty<string>()
             : [project.ProjectPath];
+        var models = LoadModelSettings();
         return _promptBuilder.Build(new SystemPromptBuildRequest
         {
             ProviderKey = session.ResolvedProviderKey,
@@ -136,6 +138,8 @@ public sealed class AgentInstructionTemplateProvider
             DiscoveryScope = DiscoveryScope,
             AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project),
             Space = ResolveSpace(session, project),
+            ModelTiers = ModelTierResolver.DescribeForAgents(models.Tiers),
+            ModelFallback = models.Fallback.Enabled,
         });
     }
 
@@ -156,6 +160,17 @@ public sealed class AgentInstructionTemplateProvider
 
         var id = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
         return spaces.First(space => string.Equals(space.Id, id, StringComparison.Ordinal));
+    }
+
+    // The tiers of the settings; a file that cannot be read, or whose tiers are not valid, gives none.
+    private ModelSettings LoadModelSettings()
+    {
+        if (_catalogOptions is null) return ModelSettings.Default;
+        try { return new CodeAltaConfigStore(_catalogOptions).LoadGlobalModelSettings(); }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return ModelSettings.Default;
+        }
     }
 
     private void ValidateDiscoveryPaths(SessionViewDescriptor session, ProjectDescriptor? project)

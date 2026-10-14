@@ -112,7 +112,7 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     // activity events. The TUI intentionally keeps them out of its visual timeline too.
     if (entry.eventType === "raw" || entry.eventType === "notes") continue;
     // These update the TUI's status/usage surfaces, not its conversation timeline.
-    if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
+    if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
         isToolOutput(entry.kind) && entry.parentActivityId && calls.has(parentActivityKey(entry))) {
       // The text of an output is shown on the tile of its call; the images the model was given get a card.
@@ -269,6 +269,14 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       detailMarkdown = entry.text;
       markdown = null;
       detailsLabel = "Usage details";
+    } else if (normalizedKind === "providerfallback") {
+      // The session went on with the next model of its tier after a failure of its provider.
+      icon = "model";
+      title = "Model changed after a failure";
+      const from = stringAt(parsedDetails, "from");
+      const to = stringAt(parsedDetails, "to");
+      subtitle = from && to ? `${from} → ${to}` : null;
+      detailsLabel = "Fallback details";
     } else if (normalizedKind === "modelchanged") {
       const model = modelPresentation(entry.text, parsedDetails);
       title = model.title;

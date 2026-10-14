@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Orchestration.Runtime;
@@ -164,6 +165,32 @@ public sealed class SpacesRpcTests
         // Only a session that waits names them.
         Assert.AreEqual(0, sessions["busy"].Ancestors.Count);
         StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"ancestors\":[\"CHILD\",\"root\"]");
+    }
+
+    [TestMethod]
+    public async Task ARecentFallback_IsGivenWithTheActivityOfItsSession()
+    {
+        using var fixture = new Fixture();
+        var now = DateTimeOffset.UtcNow;
+        IReadOnlyList<SessionFallbackRecord> fallbacks =
+        [
+            new("idle", now.AddMinutes(-1), AgentFailureKind.QuotaExhausted, "claude-code:opus@high", "codex:gpt-6.1@high", "Claude Code quota reached, continuing on Codex GPT-6.1 high."),
+            new("old", now - SpacesService.RecentFallback - TimeSpan.FromMinutes(1), AgentFailureKind.Unavailable, "a:m", "b:m", "Old."),
+        ];
+        var service = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch)
+        {
+            Fallbacks = () => fallbacks,
+        };
+        fixture.Runs = [new("idle", "p1", "Idle", false, 0, false), new("old", "p1", "Old", false, 0, false), new("running", "p1", "Running", true, 0, false)];
+
+        var reply = await service.ActivityAsync(new(Epoch), default);
+
+        // A session that went on with another model a short while ago is listed, idle or not; an older fallback is not news.
+        CollectionAssert.AreEquivalent(new[] { "idle", "running" }, reply.Sessions.Select(static session => session.SessionId).ToArray());
+        var idle = reply.Sessions.Single(static session => session.SessionId == "idle");
+        Assert.AreEqual("Claude Code quota reached, continuing on Codex GPT-6.1 high.", idle.Fallback?.Message);
+        Assert.IsNull(reply.Sessions.Single(static session => session.SessionId == "running").Fallback);
+        StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"fallback\":{\"at\":");
     }
 
     [TestMethod]
