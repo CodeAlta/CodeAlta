@@ -104,6 +104,40 @@ public sealed class SessionRuntimeMoveTests
     }
 
     [TestMethod]
+    [DataRow(false, DisplayName = "after a turn")]
+    [DataRow(true, DisplayName = "after a turn that failed")]
+    public async Task MoveSessionAsync_MovesASessionThatRan_OnAProviderWhoseKeyIsNotItsType(bool fails)
+    {
+        // A second Claude Code account: the key names the entry, the protocol family is the one of its type.
+        using var temp = new TempDirectory();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var source = Directory.CreateDirectory(Path.Combine(temp.Path, "source")).FullName;
+        var provider = new AccountProvider { Fails = fails };
+        await using var host = await CodeAlta.Orchestration.Hosting.CodeAltaHost.CreateAsync(new()
+        {
+            GlobalRoot = global, CurrentProjectPath = source, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 8,
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        var target = await host.ProjectCatalog.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(temp.Path, "target")).FullName);
+        var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Fix the login error")).SessionId;
+        var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
+        Assert.IsNotNull(receipt);
+        var sent = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(fails ? OwnedSessionCommandOutcome.Failed : OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
+
+        var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        // No record says otherwise in between: a move or a resume read there would find the session needing recovery.
+        var journal = Directory.EnumerateFiles(global, sessionId + ".jsonl", SearchOption.AllDirectories).Single();
+        Assert.IsFalse(File.ReadLines(journal).Any(static line => line.Contains("\"protocolFamily\":\"claude-business\"", StringComparison.Ordinal)),
+            "The attachment records the family of the provider, not its key.");
+        Assert.AreEqual("claude-code", (await store.GetSessionSummaryAsync(sessionId))!.ProtocolFamily, "The summary records the family of the provider, not its key.");
+        var result = await host.Commands.MoveSessionAsync(sessionId, host.CurrentProject.Id, source, target.Id, target.ProjectPath);
+
+        Assert.AreEqual("ok", result.Status, string.Join(" ", result.Warnings));
+        Assert.AreEqual(target.ProjectPath, (await store.GetSessionSummaryAsync(sessionId))!.WorkingDirectory);
+    }
+
+    [TestMethod]
     public void KeptWorktree_KeepsAWorktreeOfTheRepositoryOfTheTarget_Only()
     {
         using var temp = new TempDirectory();
@@ -207,6 +241,44 @@ public sealed class SessionRuntimeMoveTests
         public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class AccountProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    {
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("claude-business"), "Claude Business", "claude-code") { DefaultModelId = "fake-model" };
+
+        public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
+        {
+            ProtocolFamily = "claude-code", ProviderKey = "claude-business", DisplayName = "Claude Business", TransportKind = AgentTransportKind.OpenAIResponses,
+        };
+
+        public IModelProviderModelCatalog? ModelCatalog => null;
+
+        public AgentRuntimeProviderRegistration CreateProviderRegistration() => new() { Provider = RuntimeDescriptor, TurnExecutor = this };
+
+        public IModelProviderTurnExecutor CreateTurnExecutor() => this;
+
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult
+            {
+                ProviderId = Descriptor.ProviderId, Availability = ModelProviderAvailability.Ready,
+                Models = [new AgentModelInfo("fake-model", DisplayName: "Fake Model")], SelectedModelId = "fake-model",
+            });
+
+        // A turn that fails, as the first one of an account that is not logged in yet.
+        public bool Fails { get; init; }
+
+        public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
+            => Fails ? throw new InvalidOperationException("Not logged in.") : Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+            });
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

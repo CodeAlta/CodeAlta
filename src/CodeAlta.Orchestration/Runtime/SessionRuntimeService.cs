@@ -4128,12 +4128,20 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
+        // The family is the one the runtime recorded when it started or resumed the session: the key of a provider
+        // (a second Claude Code account) is not its family, and a summary that disagrees with the provider state
+        // makes the session need recovery before a move or a switch.
+        var recorded = await store.GetSessionSummaryAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+        var protocolFamily = recorded is not null && !string.IsNullOrWhiteSpace(recorded.ProtocolFamily)
+            && string.Equals(recorded.ProviderKey, session.ResolvedProviderKey, StringComparison.OrdinalIgnoreCase)
+                ? recorded.ProtocolFamily
+                : options.ProviderId.Value;
         await store.UpsertSessionAsync(
                 new AgentSessionSummary
                 {
                     SessionId = session.SessionId,
                     ProviderId = new ModelProviderId(options.ProviderId.Value),
-                    ProtocolFamily = options.ProviderId.Value,
+                    ProtocolFamily = protocolFamily,
                     ProviderKey = session.ResolvedProviderKey,
                     ModelId = options.Model,
                     ReasoningEffort = options.ReasoningEffort,
