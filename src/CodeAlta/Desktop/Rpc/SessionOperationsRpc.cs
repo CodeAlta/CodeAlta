@@ -29,6 +29,10 @@ internal sealed class SessionOperationsService
     private bool _closed;
     private readonly Func<string, CancellationToken, Task<OwnedSelectionChoices?>>? _choices;
     private readonly OwnedSessionCommandService? _commands;
+    private readonly Func<string, Task<OwnedSharedConversationResult>>? _describeShared;
+    private readonly Func<string, Task<OwnedSharedConversationResult>>? _releaseShared;
+    // Opens an address with what the system registers for it. Tests replace it: nothing is opened on their screen.
+    private readonly Func<string, bool> _open = DesktopLinks.Open;
 
     internal SessionOperationsService() { }
 
@@ -48,7 +52,24 @@ internal sealed class SessionOperationsService
         _queue = commands.AdmitQueue;
         _cancelQueue = commands.AdmitCancelQueue;
         _choices = commands.GetObservedSelectionChoicesAsync;
+        _describeShared = commands.GetSharedConversationAsync;
+        _releaseShared = commands.ReleaseSharedConversationAsync;
     }
+
+    // The seam of the conversation a session shares with VS Code and a terminal: what the host says of it, and what opens
+    // an address. Tests give both; nothing else of the service is configured.
+    internal SessionOperationsService(string epoch, SharedConversationSeam seam)
+    {
+        ArgumentNullException.ThrowIfNull(seam);
+        _epoch = epoch;
+        _describeShared = seam.Describe;
+        _releaseShared = seam.Release;
+        _open = seam.Open;
+    }
+
+    /// <summary>What a test gives the service for the conversation a session shares: the host's answers, and the opener.</summary>
+    internal sealed record SharedConversationSeam(Func<string, Task<OwnedSharedConversationResult>> Describe,
+        Func<string, Task<OwnedSharedConversationResult>> Release, Func<string, bool> Open);
     // Mandatory rejection-route seam: tests use throwing literal callbacks, never fabricate receipts.
     internal SessionOperationsService(string epoch, Func<OwnedTextSendRequest, OwnedSessionCommandAdmission> send,
         Func<OwnedAbortRequest, OwnedSessionCommandAdmission> abort)
@@ -332,6 +353,84 @@ internal sealed class SessionOperationsService
         if (result.Status == "ok") RemoteControlChanged?.Invoke(request.SessionId, request.Enabled);
         return new(result.Status, _epoch, request.SessionId, result.RemoteControl is { } remote ? SessionRemoteControlResponse.From(remote) : null);
     }
+
+    // The conversation of the Claude Code CLI a session continues, which VS Code and a terminal resume: its identifier,
+    // the command that resumes it, the folder it is resumed from, and another Claude process that holds it now. Read
+    // only: it leaves no receipt.
+    [NeoRpcMethod("claudeCodeConversation")]
+    public async Task<SessionClaudeCodeConversationResult> ClaudeCodeConversationAsync(SessionClaudeCodeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return SessionClaudeCodeConversationResult.Refused(denied, _epoch, request.SessionId);
+            if (!Identity(request.SessionId, 256)) return SessionClaudeCodeConversationResult.Refused("invalid_request", _epoch, request.SessionId);
+            if (_describeShared is null) return SessionClaudeCodeConversationResult.Refused("unavailable", _epoch, request.SessionId);
+        }
+
+        return Project(await _describeShared(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false), request.SessionId);
+    }
+
+    // Before the conversation is resumed elsewhere (in the built-in terminal of the page), CodeAlta closes the process of
+    // the CLI it keeps for the session after a turn: the other process would otherwise find the conversation held by
+    // CodeAlta. Refused while the session works, runs tasks in the background or is controlled remotely. Admitted work is
+    // not cancelled by the page that asked.
+    [NeoRpcMethod("releaseClaudeCodeConversation")]
+    public async Task<SessionClaudeCodeConversationResult> ReleaseClaudeCodeConversationAsync(SessionClaudeCodeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return SessionClaudeCodeConversationResult.Refused(denied, _epoch, request.SessionId);
+            if (!Identity(request.SessionId, 256)) return SessionClaudeCodeConversationResult.Refused("invalid_request", _epoch, request.SessionId);
+            if (_releaseShared is null) return SessionClaudeCodeConversationResult.Refused("unavailable", _epoch, request.SessionId);
+        }
+
+        return Project(await _releaseShared(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false), request.SessionId);
+    }
+
+    // Opens the conversation of a session in the Claude Code extension of VS Code. The page names the session only: the
+    // address is the one the provider built from the identifier the session recorded, and only an address of that
+    // extension is opened. The conversation is released first, as for the terminal.
+    [NeoRpcMethod("openInVsCode")]
+    public async Task<SessionOpenInVsCodeResult> OpenInVsCodeAsync(SessionClaudeCodeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId);
+            if (_releaseShared is null) return new("unavailable", _epoch, request.SessionId);
+        }
+
+        // What the conversation is, before anything is released: a session of another provider keeps its process.
+        var described = Project(await _describeShared!(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false), request.SessionId);
+        if (described.Status != "ok") return new(described.Status, _epoch, request.SessionId);
+        var released = Project(await _releaseShared(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false), request.SessionId);
+        if (released.Status != "ok" || released.VsCodeUri is not { } address) return new(released.Status, _epoch, request.SessionId);
+        return new(_open(address) ? "opened" : "open_failed", _epoch, request.SessionId);
+    }
+
+    // What the page is told of a conversation: only one of the Claude Code CLI, whose address is the one of its VS Code
+    // extension for the identifier it names; anything else is "unsupported".
+    private SessionClaudeCodeConversationResult Project(OwnedSharedConversationResult result, string sessionId)
+    {
+        if (result.Status != "ok") return SessionClaudeCodeConversationResult.Refused(result.Status, _epoch, sessionId);
+        if (result.Conversation is not { } conversation || !ClaudeCodeConversationId(conversation.ConversationId)
+            || conversation.EditorUri != VsCodeUriPrefix + conversation.ConversationId
+            || conversation.ResumeCommand != "claude --resume " + conversation.ConversationId
+            || !Identity(conversation.WorkingDirectory, 4096))
+            return SessionClaudeCodeConversationResult.Refused("unsupported", _epoch, sessionId);
+        return new("ok", _epoch, sessionId, conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory,
+            conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null) { VsCodeUri = conversation.EditorUri };
+    }
+
+    private const string VsCodeUriPrefix = "vscode://anthropic.claude-code/open?session=";
+
+    private static bool ClaudeCodeConversationId(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out _);
 
     [NeoRpcMethod("abort")]
     public SessionAdmission Abort(SessionAbortRequest request, CancellationToken cancellationToken)
@@ -674,3 +773,23 @@ internal sealed record SessionReceiptView(string ClientRequestId, string Session
     public SessionQueueInsertionView? QueueInsertion { get; init; }
 }
 internal sealed record SessionQueueInsertionView(string State, bool? Accepted, string? Code);
+internal sealed record SessionClaudeCodeRequest(string ExpectedEpoch, string SessionId);
+/// <summary>
+/// The conversation of the Claude Code CLI a session continues. <paramref name="Status"/> is <c>ok</c>, or why there is
+/// none to open: <c>unavailable</c>, <c>unsupported</c> (another provider), <c>none</c> (no conversation yet), or, for a
+/// release, why it was refused (<c>busy</c>, <c>running</c>, <c>background_tasks</c>, <c>remote_control</c>,
+/// <c>interaction_pending</c>, <c>release_unconfirmed</c>); <c>closed</c>, <c>stale_epoch</c>, <c>invalid_request</c>.
+/// <paramref name="Held"/> is another Claude process that holds the conversation now, CodeAlta's own excluded.
+/// </summary>
+internal sealed record SessionClaudeCodeConversationResult(string Status, string? Epoch, string SessionId, string? CliSessionId,
+    string? ResumeCommand, string? WorkingDirectory, ConversationHeldHolder? Held)
+{
+    // Kept by the host for openInVsCode; the page never sends nor receives an address.
+    [JsonIgnore]
+    internal string? VsCodeUri { get; init; }
+
+    internal static SessionClaudeCodeConversationResult Refused(string status, string? epoch, string sessionId)
+        => new(status, epoch, sessionId, null, null, null, null);
+}
+/// <summary><paramref name="Status"/> is <c>opened</c>, <c>open_failed</c>, or why the conversation was not released.</summary>
+internal sealed record SessionOpenInVsCodeResult(string Status, string? Epoch, string SessionId);

@@ -19,6 +19,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderPromptSuggestions,
     IAgentProviderExternalTurns,
     IAgentProviderExternalConversations,
+    IAgentProviderSharedConversation,
     IAgentProviderStateUpdates,
     IAsyncDisposable
 {
@@ -30,13 +31,13 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         var probe = options.ProcessProbe ?? ClaudeCodeProcessProbe.Instance;
-        OwnProcesses = new ClaudeCodeOwnProcesses(probe);
+        OwnProcesses = options.OwnProcesses;
         var configRoot = ClaudeCodeProjectFolders.ResolveConfigRoot(options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable);
         LiveSessions = new ClaudeCodeLiveSessions(configRoot, OwnProcesses, probe, TimeProvider.System);
         ExternalConversations = new ClaudeCodeExternalConversations(configRoot, LiveSessions);
     }
 
-    /// <summary>Gets the CLI processes the sessions of this executor run.</summary>
+    /// <summary>Gets the CLI processes the sessions of the executors of these options run, this one's included.</summary>
     internal ClaudeCodeOwnProcesses OwnProcesses { get; }
 
     /// <summary>Gets the reader of the registry of live sessions of the CLI, which tells whether another process holds a conversation.</summary>
@@ -214,6 +215,40 @@ internal sealed class ClaudeCodeTurnExecutor :
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         return Task.Run(() => ExternalConversations.Read(workingDirectory, conversationId, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Describes the conversation of the CLI a session continues: the command and the VS Code address that open it, and
+    /// the other live Claude process that holds it now, if any. The processes CodeAlta runs are not holders.
+    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>
+    /// A session whose next turn forks or rewinds its conversation, or whose recorded identifier is not one the CLI
+    /// gives, has none to open. A registry of live sessions that cannot be read names no holder.
+    /// </remarks>
+    public Task<AgentSharedConversation?> DescribeSharedConversationAsync(AgentSessionState state, string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        if (state.ProviderBranch is not null ||
+            ClaudeCodeProviderState.Read(state) is not { } persisted ||
+            !ClaudeCodeConversationLinks.IsConversationId(persisted.SessionId))
+        {
+            return Task.FromResult<AgentSharedConversation?>(null);
+        }
+
+        // The registry is a folder of small files: read on the pool, not on the thread of the caller.
+        return Task.Run<AgentSharedConversation?>(() =>
+        {
+            var hold = LiveSessions.FindHolder(persisted.SessionId);
+            var holder = hold is { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { } held } ? ClaudeCodeSession.ToAgentHolder(held) : null;
+            return new AgentSharedConversation(
+                persisted.SessionId,
+                ClaudeCodeConversationLinks.ResumeCommand(persisted.SessionId),
+                workingDirectory,
+                ClaudeCodeConversationLinks.VsCodeUri(persisted.SessionId),
+                holder);
+        }, cancellationToken);
     }
 
     /// <inheritdoc />

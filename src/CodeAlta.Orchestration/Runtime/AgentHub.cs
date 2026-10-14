@@ -594,6 +594,29 @@ public sealed partial class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
+    /// Describes the conversation the provider of a session keeps of it where other programs continue it (Claude Code:
+    /// the conversation of the CLI, which VS Code and a terminal resume). Nothing of the provider is started.
+    /// </summary>
+    /// <returns>
+    /// Whether the provider keeps such conversations at all, and the conversation of the session, or null when its state
+    /// names none (no turn yet, a fork or a rewind its next turn takes up).
+    /// </returns>
+    /// <remarks>A provider whose descriptor does not say it shares its conversations is not asked: no runtime of it is created.</remarks>
+    internal async Task<(bool Shares, AgentSharedConversation? Conversation)> DescribeSharedConversationAsync(AgentSessionState state,
+        string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        var providerId = new ModelProviderId(state.ProviderKey);
+        if (!_modelProviderRegistry.TryGetProvider(providerId, out var descriptor) || !descriptor.SharesConversations) return (false, null);
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.GetOrCreateRuntimeAsync(providerId, cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return (false, null); }
+        return runtime is IAgentModelProviderRuntime agent && agent.CreateProviderRegistration().TurnExecutor is IAgentProviderSharedConversation shared
+            ? (true, await shared.DescribeSharedConversationAsync(state, workingDirectory, cancellationToken).ConfigureAwait(false))
+            : (false, null);
+    }
+
+    /// <summary>
     /// Lists the conversations a provider keeps that other programs started in a folder (Claude Code: in VS Code or a
     /// terminal) and that no session of CodeAlta continues. Nothing of the provider is started: the runtime the
     /// registry keeps is asked, and only reads.

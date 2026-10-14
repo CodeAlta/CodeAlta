@@ -7,6 +7,7 @@ import type {
   ConfigurationSnapshot,
   HistoryRequest,
   HistoryResponse,
+  SessionClaudeCodeRequest,
   WorkspaceClaudeCodeSessionsRequest,
   WorkspaceForkSessionRequest,
   WorkspaceImportClaudeCodeSessionRequest,
@@ -114,9 +115,14 @@ export const sessionRetentionProtection = Object.freeze({ publish: async () => (
 export const sessionUsage = Object.freeze({ read: unavailable });
 export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable });
 export const conversationHeld = Object.freeze({ list: async () => ({ status: "ok", hostEpoch: "demo", sessionId: null, entries: [] }), resolve: unavailable });
+// The demo has no Claude Code conversation to open in VS Code or a terminal.
+const noClaudeCodeConversation = async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId,
+  cliSessionId: null, resumeCommand: null, workingDirectory: null, held: null });
 export const sessionOperations = Object.freeze({
   abort: unavailable, abortRun: unavailable, cancelQueue: unavailable, compact: unavailable,
   queue: unavailable, receipts: emptyPage, send: unavailable, steer: unavailable,
+  claudeCodeConversation: noClaudeCodeConversation, releaseClaudeCodeConversation: noClaudeCodeConversation,
+  openInVsCode: async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId }),
 });
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });

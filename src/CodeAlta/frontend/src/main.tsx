@@ -146,6 +146,10 @@ import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
 import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
+import { copyResumeCommand, isOpenElsewhereAction, openElsewhereCommandAction, openSessionInVsCode, opensElsewhere, runSessionInTerminal,
+  readClaudeCodeConversation, type OpenElsewhereAction } from "./claudeCodeOpen/claudeCodeOpen";
+import { claudeCodeOpenHostApi } from "./claudeCodeOpen/hostApi";
+import { openElsewhereEntries } from "./claudeCodeOpen/openElsewhereEntries";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
 import { createTerminalWorkspace } from "./terminal/terminalWorkspace";
@@ -2517,13 +2521,22 @@ function App() {
       case "newSession": return owned && !!snapshot && !selectedProject?.archived;
       case "renameProject": return owned && !!selectedProject && !selectedProject.archived;
       // The session of a project, as its menu moves it, under the same locks.
-      case "moveSession": return ownedSession && !!selectedSession && sessionActionAccess(selectedSession,
-        { id: selectedSession.id, projectId, hostEpoch: status?.hostEpoch ?? null }, selectedSessionId.current, selectedScope.current, selectedProject,
-        currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
-        batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
-        renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current).move;
+      case "moveSession": return ownedSession && !!selectedSession && selectedSessionAccess(selectedSession).move;
+      // A Claude Code session that has a conversation of the CLI, as its menu opens it elsewhere.
+      case "openInVsCode": case "copyResumeCommand": case "runInTerminal": return ownedSession && !!selectedSession
+        && opensElsewhere(selectedSession, providerLogos.get(selectedSession.providerKey?.toLowerCase() ?? "")?.type)
+        && selectedSessionAccess(selectedSession)[openElsewhereCommandAction[command]];
       default: return true;
     }
+  }
+
+  // What the menu of the selected session allows, under the locks of its changes.
+  function selectedSessionAccess(session: WorkspaceSession) {
+    return sessionActionAccess(session,
+      { id: session.id, projectId, hostEpoch: status?.hostEpoch ?? null }, selectedSessionId.current, selectedScope.current, selectedProject,
+      currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
+      batchDeletion.locked() || renamingBusy || deletingBusy || movingBusy || renamingPending.current || deletingPending.current,
+      renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
   }
 
   // Commands the active session's composer carries out itself.
@@ -2587,6 +2600,9 @@ function App() {
         break;
       case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
       case "moveSession": if (selectedSession) beginSessionMove(selectedSession); break;
+      case "openInVsCode": case "copyResumeCommand": case "runInTerminal":
+        if (selectedSession) void openSessionElsewhere(openElsewhereCommandAction[command], selectedSession);
+        break;
       case "focusSidebar": runShortcut("focusProjects"); break;
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
       case "toggleNavigator": toggleProjects(); break;
@@ -2877,6 +2893,7 @@ function App() {
       mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access[pending.action]) return;
+    if (isOpenElsewhereAction(pending.action)) { void openSessionElsewhere(pending.action, rows[0]); return; }
     if (pending.action === "fork") { branchHost.requests.open(pending.sessionId, "fork"); return; }
     if (pending.action === "move") { beginSessionMove(rows[0]); return; }
     if (pending.action === "space") { beginSpaceMove(rows[0]); return; }
@@ -2941,6 +2958,29 @@ function App() {
     keptSession.current = session.id;
     revealSessionLatest.current(session);
     focusPromptSoon();
+  }
+
+  // A Claude Code session opened in VS Code or the built-in terminal, or its resume command copied. The host gives the
+  // command and builds the address of VS Code; before the conversation is opened elsewhere it closes the process it
+  // keeps for the session, or says why it cannot.
+  async function openSessionElsewhere(action: OpenElsewhereAction, session: WorkspaceSession) {
+    if (!owned) return;
+    const epoch = currentHostEpoch.current ?? null;
+    const outcome = action === "open-vs-code" ? await openSessionInVsCode(claudeCodeOpenHostApi, epoch, session.id)
+      : action === "copy-resume-command" ? await copyResumeCommand(claudeCodeOpenHostApi, epoch, session.id,
+        navigator.clipboard ? text => navigator.clipboard.writeText(text) : undefined)
+      : await runSessionInTerminal(claudeCodeOpenHostApi, epoch, session.id, {
+        create: async id => {
+          const reply = await terminalWorkspace.hub.create(session.scopeKind === "project" ? session.projectId : null, id,
+            terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
+          if (reply?.status !== "ok" || !reply.terminal) return null;
+          showTerminal(reply.terminal);
+          return reply.terminal.id;
+        },
+        input: (id, data) => terminalWorkspace.hub.input(id, data),
+      });
+    showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
+      icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 });
   }
 
   function dismissSessionMenu(restoreFocus: boolean) {
@@ -3012,6 +3052,7 @@ function App() {
     if (switching) setSessionId(row.id);
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
     if (action === "remote-control") { dismissSessionMenu(false); if (access["remote-control"]) askRemoteControl(row.id); return; }
+    if (isOpenElsewhereAction(action)) { dismissSessionMenu(false); if (access[action]) void openSessionElsewhere(action, row); return; }
     // The window of the fork is the one of the session's pane: the session is selected, and its pane shows it.
     if (action === "fork") { dismissSessionMenu(false); branchHost.requests.open(row.id, "fork"); return; }
     if (action === "move") { dismissSessionMenu(false); beginSessionMove(row); return; }
@@ -4280,6 +4321,7 @@ function App() {
                   { key: "fork", label: t("Fork…"), icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
+                  ...openElsewhereEntries(t, session, providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type, access, action => runSessionMenuAction(action, session, menu)),
                   ...sessionBookmarkEntries(session),
                   ...sessionLineageEntries(session),
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
@@ -5042,6 +5084,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   const cliHost = useMemo(() => cliEpoch ? { epoch: cliEpoch, composerProvider: session.providerKey ?? null, Card: ClaudeCliFirstUse } : null, [cliEpoch, session.providerKey]);
   return <MarkdownLinkScopeContext.Provider value={linkScope}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
+      // The conversation of the Claude Code CLI the session continues: read when the window opens; another provider has none.
+      conversation={ownedSession && !demoMode && session.providerConversation === true
+        ? () => readClaudeCodeConversation(claudeCodeOpenHostApi, status?.hostEpoch, session.id) : null}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       spaceResources={sessionSpaces && !demoMode ? { spaces: sessionSpaces.spaces, read: () => sessionSpaces.read(session.id) } : null}
       target={ownedSession && !demoMode && mutation?.capability.canMutate() ? runtimeTarget(snapshot, { sessionId: session.id, projectId: selectedProjectId, path: session.workspacePath }, status?.hostEpoch ?? undefined) : null} />}

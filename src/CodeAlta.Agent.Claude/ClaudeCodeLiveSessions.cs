@@ -283,7 +283,7 @@ internal sealed class ClaudeCodeProcessProbe : IClaudeCodeProcessProbe
 
 /// <summary>
 /// The CLI processes CodeAlta runs: an entry of the registry of one of them is CodeAlta's own, not another process
-/// that holds the conversation. A provider runtime keeps one.
+/// that holds the conversation. The options of a provider keep one, which all its runtimes share.
 /// </summary>
 internal sealed class ClaudeCodeOwnProcesses
 {

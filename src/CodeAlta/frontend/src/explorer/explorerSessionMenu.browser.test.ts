@@ -165,3 +165,34 @@ test("a menu with no line of a plugin is as it was, and a line a plugin cannot u
     assert.equal(await page.evaluate(`explorerFixture.state.activated.length`), 0);
   }, options);
 });
+
+test("the menu of a Claude Code session that has a conversation of the CLI opens it in VS Code or a terminal, or copies its resume command", { skip: !edge, timeout: 240_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`explorerFixture.setClaudeCode(true, { "open-vs-code": true, "run-in-terminal": false, "copy-resume-command": true }); explorerFixture.render()`);
+    await page.until(`document.querySelectorAll('.session-row').length === 6`, "the rows with the Claude Code sessions");
+
+    await openMenu(page, "project-b", "b-cc");
+    assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Remote Control…", "Open in VS Code", "Run in terminal", "Copy resume command", "Move to project…", "Archive", "Delete…"]);
+    // What the window does not allow now is shown disabled: the user sees the action and that it waits.
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].find(item => item.textContent.trim() === 'Run in terminal').getAttribute('aria-disabled')`), "true");
+    await page.clickText('.session-tab-popup [role="menuitem"]', "Open in VS Code");
+    await page.until(`explorerFixture.state.actions.length === 1`, "the action of the line");
+    assert.deepEqual(await page.evaluate(`explorerFixture.state.actions`), [{ session: "b-cc", action: "open-vs-code" }], "the row asks the window, which opens the session first");
+    await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed by its line");
+
+    await openMenu(page, "project-b", "b-cc");
+    await page.clickText('.session-tab-popup [role="menuitem"]', "Copy resume command");
+    await page.until(`explorerFixture.state.actions.length === 2`, "the copy");
+    assert.deepEqual(await page.evaluate(`explorerFixture.state.actions[1]`), { session: "b-cc", action: "copy-resume-command" });
+    await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed");
+
+    // Before its first turn a Claude Code session has no conversation to open elsewhere; a session of another provider has none either.
+    for (const [scope, id] of [["project-b", "b-new"], ["project-b", "b-1"], ["chats", "chat-1"]]) {
+      await openMenu(page, scope, id);
+      const lines = await menuLines(page);
+      assert.ok(!lines.includes("Open in VS Code") && !lines.includes("Run in terminal") && !lines.includes("Copy resume command"), `${id}: ${lines.join(", ")}`);
+      await page.key("Escape", 27);
+      await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed by Escape");
+    }
+  }, options);
+});

@@ -9,6 +9,7 @@ import type { SessionHierarchyRow } from "../sessionHierarchy";
 import { isSessionContextKey, isSessionDeleteKey, type SessionAction } from "../sessionRowActions";
 import { plainTitle } from "../sessionTitle";
 import { providerHasRemoteControl } from "../remoteControl";
+import { openElsewhereEntries } from "../claudeCodeOpen/openElsewhereEntries";
 import { useShellLanguage } from "../shellLanguage";
 import { sessionEntries, type SessionListEntry } from "./sessionTree";
 import type { SessionRowDrag } from "./sessionDrag";
@@ -85,7 +86,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
-  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; archive?: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean; space?: boolean }>;
+  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; archive?: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean; space?: boolean;
+    "open-vs-code"?: boolean; "copy-resume-command"?: boolean; "run-in-terminal"?: boolean }>;
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
@@ -159,6 +161,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
             { key: "fork", label: t("Fork…"), icon: "branch", disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
+            ...openElsewhereEntries(t, session, brands.get(session.providerKey?.toLowerCase() ?? "")?.type, allowed, action => onAction(session, action)),
             ...(actionEntries?.(session) ?? []),
             ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
             ...(spaces ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !allowed.space, onSelect: () => onAction(session, "space") }] : []),
