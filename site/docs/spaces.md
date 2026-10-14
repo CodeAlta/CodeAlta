@@ -75,6 +75,7 @@ Click the name of a space, or its card, to open the page of that space. **Spaces
 - **Projects**: a checklist of all the projects, to tick the ones the space holds;
 - **Available here**: the providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has));
 - **New sessions**: the agent prompt its new sessions start with;
+- **Identity**: the Git, GitHub and Jira identity of its sessions (see [Identity](#identity));
 - **Show**, to show that space in the window, and **Delete**, which asks before it deletes the space.
 
 The Default space has a page too, with every project in it. Every change is saved at once.
