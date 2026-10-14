@@ -295,8 +295,14 @@ anew, because the model is kept in memory only. See "Spaces" in
 
 ## Keyboard and indicators
 
-- Ctrl+Alt+Left/Right (TUI tab navigation) or Ctrl+PageUp/PageDown: previous/next,
-  wrapping. Ctrl+W closes; Ctrl+Shift+T reopens the last closed tab.
+- Ctrl+Shift+Tab/Ctrl+Tab, Ctrl+PageUp/PageDown or Ctrl+Alt+Left/Right (TUI tab
+  navigation): previous/next, wrapping, in the order of the dock model (`cycleDockTab`:
+  pane after pane as the layout places them, each from left to right), over the tabs
+  of tools, sessions, prompts and editors alike. Only nodes of the model are gone
+  through, so the transient new-session tab is reached only while it exists. In a code
+  editor (`[data-file-tab-keys]`) Ctrl+Tab and Ctrl+Shift+Tab are the editor's (its
+  files); a terminal leaves them to the application. Ctrl+W closes; Ctrl+Shift+T
+  reopens the last closed tab.
 - A middle click on a tab closes it as its close button does, through the same
   action (`tabMiddleClickAction` in `sessionTabLayout.ts`, called from the
   `onAuxMouseClick` of the dock), so a tab without a close button stays. A click

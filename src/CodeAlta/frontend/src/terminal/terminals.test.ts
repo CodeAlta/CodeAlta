@@ -29,7 +29,7 @@ test("the terminals of a project are listed in the order they were created; thos
 });
 
 test("a terminal takes the keyboard, but for the shortcuts that move around the application", () => {
-  for (const [name, modifiers] of [["p", "c"], ["P", "c"], ["g", "c"], [",", "c"], ["`", "c"], ["PageUp", "c"], ["PageDown", "c"],
+  for (const [name, modifiers] of [["p", "c"], ["P", "c"], ["g", "c"], [",", "c"], ["`", "c"], ["PageUp", "c"], ["PageDown", "c"], ["Tab", "c"], ["Tab", "cs"],
     ["T", "cs"], ["w", "cs"], ["N", "cs"], ["ArrowLeft", "ca"], ["ArrowRight", "ca"], ["b", "ca"]] as const) {
     assert.equal(applicationKey(key(name, modifiers)), true, `${modifiers}+${name}`);
   }

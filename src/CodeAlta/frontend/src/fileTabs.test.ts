@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, bookmarksTab, isBookmarksTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, bookmarksTab, isBookmarksTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
   skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
@@ -245,29 +245,6 @@ test("reopen follows the order in which session and project tabs were closed", (
   assert.equal(reopenTabKind([], 0, 2), "file");
   assert.equal(reopenTabKind([], 3, 0), "session");
   assert.equal(reopenTabKind(["file"], 0, 0), null);
-});
-
-test("next and previous tab walk one ring: the new-session tab, the sessions, then the tabs of projects", () => {
-  assert.deepEqual(cycleTab(2, 1, { kind: "draft" }, 1), { kind: "session", index: 0 });
-  assert.deepEqual(cycleTab(2, 1, { kind: "session", index: 1 }, 1), { kind: "file", index: 0 });
-  assert.deepEqual(cycleTab(2, 1, { kind: "file", index: 0 }, 1), { kind: "draft" });
-  assert.deepEqual(cycleTab(2, 1, { kind: "draft" }, -1), { kind: "file", index: 0 });
-  assert.deepEqual(cycleTab(0, 2, { kind: "file", index: 0 }, -1), { kind: "draft" });
-  assert.deepEqual(cycleTab(0, 2, { kind: "file", index: 0 }, 1), { kind: "file", index: 1 });
-  assert.deepEqual(cycleTab(1, 0, { kind: "session", index: 0 }, 1), { kind: "draft" });
-});
-
-test("the prompts that have a tab of their own are in the ring, after the sessions; the prompt of the selected scope is there once", () => {
-  // The transient prompt, a session, two prompts with their own tab, a file.
-  assert.deepEqual(cycleTab(1, 1, { kind: "session", index: 0 }, 1, 2), { kind: "prompt", index: 0 });
-  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 0 }, 1, 2), { kind: "prompt", index: 1 });
-  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 1 }, 1, 2), { kind: "file", index: 0 });
-  assert.deepEqual(cycleTab(1, 1, { kind: "file", index: 0 }, 1, 2), { kind: "draft" });
-  assert.deepEqual(cycleTab(1, 1, { kind: "prompt", index: 0 }, -1, 2), { kind: "session", index: 0 });
-  // The selected scope has its own tab: there is no transient prompt to stop at.
-  assert.deepEqual(cycleTab(1, 1, { kind: "file", index: 0 }, 1, 2, false), { kind: "session", index: 0 });
-  assert.deepEqual(cycleTab(1, 0, { kind: "session", index: 0 }, -1, 1, false), { kind: "prompt", index: 0 });
-  assert.deepEqual(cycleTab(0, 0, { kind: "prompt", index: 0 }, 1, 1, false), { kind: "prompt", index: 0 });
 });
 
 test("an editor tab is labeled with its project and marks unsaved edits in every language; a changes tab holds none", () => {

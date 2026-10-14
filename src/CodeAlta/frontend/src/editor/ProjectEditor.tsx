@@ -732,7 +732,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     </PopoverNext>
   </span>;
 
-  return <section ref={root} className="project-editor" data-active={active} data-side={side ?? "none"} data-narrow={narrow} tabIndex={-1}
+  return <section ref={root} className="project-editor" data-active={active} data-side={side ?? "none"} data-narrow={narrow} data-file-tab-keys tabIndex={-1}
     aria-label={`${t("Editor")} · ${projectName ?? tab.projectPath}`} onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={keyDown}>
     {side !== null && <>
       <aside className="editor-side" style={{ width: preferences.width }}>

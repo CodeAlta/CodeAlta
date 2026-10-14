@@ -3496,7 +3496,7 @@ pane of the sessions. The sources are in `Desktop/Terminals/` (host) and `fronte
   window and are kept in `codealta.desktop.terminal.v1`.
 - **Keys.** A terminal takes the keyboard: `Ctrl` with a letter, the function keys and `Alt` with an
   arrow go to the shell. The application keeps `Ctrl+P`, the `Ctrl+G` chords, `Ctrl+,`, ``Ctrl+` ``,
-  `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Alt+Left` / `Ctrl+Alt+Right`, `Ctrl+Alt+B`, `Ctrl+Shift+T`,
+  `Ctrl+Tab` / `Ctrl+Shift+Tab`, `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Alt+Left` / `Ctrl+Alt+Right`, `Ctrl+Alt+B`, `Ctrl+Shift+T`,
   `Ctrl+Shift+W` and `Ctrl+Shift+N`. `Ctrl+C` copies when text is selected and interrupts the program
   when none is; `Ctrl+V` and `Shift+Insert` paste; `Ctrl+Shift+C` / `Ctrl+Shift+V` copy and paste too;
   `Ctrl+F` finds; `Ctrl+Home` / `Ctrl+End` go to the top and the bottom. On macOS the Command key does
@@ -4262,7 +4262,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+=` (or `Ctrl+Plus`), `Ctrl+-`, `Ctrl+0` | Zoom in, zoom out, reset the zoom; kept for the next start |
 | `Ctrl+O` | Open project |
 | `Ctrl+E`, `Ctrl+E` `Ctrl+E` | Open a project file in the code editor (`/edit`), open the code editor with the files of the project (`/editor`) |
-| In a code editor: `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab` | Save the file, save every file, close the file shown, next file |
+| In a code editor: `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+W`, `Ctrl+Tab` / `Ctrl+Shift+Tab` | Save the file, save every file, close the file shown, next / previous file (before the tabs of the window) |
 | In a code editor: `Ctrl+N`, `Ctrl+K` `M` | Start a new file, select the language of the text |
 | In a code editor: `Ctrl+B`, `Ctrl+Shift+E`, `Ctrl+Shift+F` | Show or hide the side, go to the files, search in files |
 | In the text of a code editor: `Ctrl+G`, `Ctrl+F`, `Ctrl+H`, `F3`, `Alt+Z` | Go to line, find, replace, next match, wrap lines |
@@ -4282,7 +4282,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` (also from a terminal) | Previous / next space (`/space_prev`, `/space_next`) |
 | No key | New Space (`/new_space`), Spaces (`/spaces`, opens Settings → Spaces) |
 | No key | Worktrees (`/worktree`), the window of the git worktrees of the project in front |
-| `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+PageUp` / `Ctrl+PageDown`) | Previous / next tab |
+| `Ctrl+Shift+Tab` / `Ctrl+Tab`, `Ctrl+PageUp` / `Ctrl+PageDown`, `Ctrl+Alt+Left` / `Ctrl+Alt+Right` | Previous / next tab of the window, in the order of the dock (pane after pane, each from left to right), around it; the tools, the sessions and the editors alike, and only the tabs that are there (`cycleDockTab` in `sessionTabLayout.ts`) |
 | `Ctrl+W` (also `Ctrl+Shift+W`, which a terminal leaves to the application), `Ctrl+Shift+T` | Close tab, reopen the last closed tab |
 | `Enter`, `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows/Linux), `Shift+Enter` | Send when idle / enqueue while busy, send now (steer while a turn runs), new line |
 | `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |

@@ -4,6 +4,8 @@ import type { CanvasItem, PluginUiWindowButton, PluginUiButtonsRequest, PluginUi
 import { workspace as baseWorkspace } from "./projectFocus.neoastra.mount";
 import { pluginUi as basePluginUi, canvases as baseCanvases } from "./demo-api";
 export * from "./projectFocus.neoastra.mount";
+// The code editor of a project reads its files from the demo host.
+export { projectFiles, projectGit } from "./demo-api";
 
 const statistics: PluginUiWindowButton = {
   id: "builtin:statistics/statistics-session", pluginKey: "builtin:statistics", pluginId: "statistics", plugin: "Statistics",

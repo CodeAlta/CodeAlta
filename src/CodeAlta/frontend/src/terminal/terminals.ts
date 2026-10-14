@@ -33,9 +33,9 @@ export function applicationKey(event: TerminalKey): boolean {
   if (!event.ctrlKey || event.metaKey) return false;
   const key = letter(event);
   // The command palette, the prefix of the two-key shortcuts, the settings, a new terminal, and the tab before and after.
-  if (plain(event)) return key === "p" || key === "g" || key === "," || key === "`" || key === "PageUp" || key === "PageDown";
-  // The tabs: reopen, close, previous and next.
-  if (event.shiftKey && !event.altKey) return key === "t" || key === "w" || key === "n";
+  if (plain(event)) return key === "p" || key === "g" || key === "," || key === "`" || key === "PageUp" || key === "PageDown" || key === "Tab";
+  // The tabs: reopen, close and previous; the notes.
+  if (event.shiftKey && !event.altKey) return key === "t" || key === "w" || key === "Tab" || key === "n";
   // The tab before and after, the saved sessions, and the space before and after.
   return event.altKey && !event.shiftKey && (key === "ArrowLeft" || key === "ArrowRight" || key === "b" || key === "PageUp" || key === "PageDown");
 }

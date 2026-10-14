@@ -178,6 +178,24 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
     model.doAction(Actions.setActiveTabset(node.getParent()!.getId()));
 }
 
+/** The node of the tab in front: the active tab of a project, else the session shown, else the prompt shown. */
+export function activeDockNodeId(state: SessionTabView, files: FileTabs): string {
+  return files.active ? fileNodeId(files.active) : state.active ? sessionNodeId(state.active) : shownDraftNodeId(state);
+}
+
+/**
+ * The tab `delta` places after `current` among the tabs of the dock, around them: in the order they are shown, pane
+ * after pane as the layout places them, and in a pane from left to right. Only tabs that are there are gone through,
+ * so going through them opens none. Null when there is no other tab.
+ */
+export function cycleDockTab(model: Model, current: string, delta: 1 | -1): string | null {
+  const order: string[] = [];
+  model.visitNodes(node => { if (node instanceof TabNode && node.getParent() instanceof TabSetNode) order.push(node.getId()); });
+  const at = order.indexOf(current);
+  if (order.length === 0 || at >= 0 && order.length === 1) return null;
+  return order[at < 0 ? (delta > 0 ? 0 : order.length - 1) : (at + delta + order.length) % order.length];
+}
+
 export type SessionTabIntent = { kind: "select" | "close"; tab: SessionTab };
 export function sessionTabAction(action: Action, state: SessionTabs, snapshot: WorkspaceSnapshot | undefined,
   current: () => boolean): SessionTabIntent | null {

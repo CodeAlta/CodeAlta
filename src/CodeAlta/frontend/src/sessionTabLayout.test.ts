@@ -4,7 +4,7 @@ import { Actions, DockLocation, RowNode, TabNode, TabSetNode } from "flexlayout-
 import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeDraftTab, closePreviewTab, closeSessionTab, emptySessionTabs, openDraftTab, openSessionTab, pinSessionTab, sessionTabLimit, type DraftTab, type SessionTab, type SessionTabs } from "./sessionTabs";
-import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, draftTabAction, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
 import { activateFileTab, canvasTab, changesTab, closeFileTab, documentationTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
@@ -716,4 +716,26 @@ test("a single tab closes the other tabs of sessions and of prompts, and leaves 
   assert.deepEqual(strip(model), [sessionNodeId(tab("two")), sessionNodeId(tab("one"))]);
   assert.equal(model.getNodeById(sessionNodeId(tab("two"))), node);
   assert.deepEqual(transient(model), [sessionNodeId(tab("one"))]);
+});
+
+test("the next and previous tab of the dock follow the strip, pane after pane, around it, and only among the tabs that are there", () => {
+  const model = createSessionTabModel();
+  const files = openFileTab(openFileTab(emptyFileTabs(), documentationTab), editorTab({ id: "p", path: "/p" }));
+  const state = both();
+  reconcileSessionTabModel(model, state, label, files);
+  const ids = [sessionNodeId(tab("one")), sessionNodeId(tab("two")), fileNodeId(documentationTab), fileNodeId(editorTab({ id: "p", path: "/p" }))];
+  assert.equal(activeDockNodeId(state, files), ids[3], "the active tab of a project is in front of the session");
+  assert.equal(activeDockNodeId(state, activateFileTab(files, null)), ids[1]);
+  assert.equal(cycleDockTab(model, ids[0], 1), ids[1]);
+  assert.equal(cycleDockTab(model, ids[3], 1), ids[0], "forward from the last tab goes around to the first");
+  assert.equal(cycleDockTab(model, ids[0], -1), ids[3], "backward from the first tab goes around to the last");
+  assert.equal(cycleDockTab(model, sessionDraftNodeId, 1), ids[0], "a tab that is not there starts from an end: no transient tab is made");
+  // A tab moved to a pane on the right comes after the tabs of the pane on the left.
+  model.doAction(Actions.moveNode(ids[1], (model.getNodeById(ids[0]) as TabNode).getParent()!.getId(), DockLocation.RIGHT, -1, true));
+  assert.equal(cycleDockTab(model, ids[0], 1), ids[2]);
+  assert.equal(cycleDockTab(model, ids[3], 1), ids[1]);
+  assert.equal(cycleDockTab(model, ids[1], 1), ids[0]);
+  const single = createSessionTabModel();
+  reconcileSessionTabModel(single, openSessionTab(emptySessionTabs(), tab("one")), label);
+  assert.equal(cycleDockTab(single, sessionNodeId(tab("one")), 1), null, "a tab alone has no other to go to");
 });

@@ -43,7 +43,7 @@ import { SystemPromptDiff } from "./SystemPromptDiff";
 import { createToolOutputStore } from "./toolOutput";
 import { SessionContentLayout } from "./SessionContentLayout";
 import { SessionTabStrip } from "./SessionTabStrip";
-import { createSessionTabModel, sessionTabPresentation } from "./sessionTabLayout";
+import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
 import { SessionBrowser } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
@@ -52,7 +52,7 @@ import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget }
 import { browserActivation } from "./sessionBrowser";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, cycleTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, type FileTab, type FileTabs, type TabKind, type TabPosition } from "./fileTabs";
+import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -1827,24 +1827,21 @@ function App() {
       if (at >= 0) closedTabKinds.current = closedTabKinds.current.filter((_kind, index) => index !== at);
       tabFocusPending.current = true;
       if (kind === "file") openFile(fileTabs.closed.at(-1)!); else selectSessionTab(valid.closed.at(-1)!);
-    } else if (valid.open.length + fileTabs.open.length + (valid.drafts?.length ?? 0)) {
+    } else {
+      // The tabs are gone through as the strip shows them, the tools, the sessions and the editors alike: the transient
+      // tab of a new session is one of them only while it is there.
+      const shown = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
+      const next = cycleDockTab(spaceLayout(spaceId), activeDockNodeId(shown, fileTabs), action === "nextTab" ? 1 : -1);
+      if (next === null) return;
+      const file = fileTabs.open.find(tab => fileNodeId(tab) === next);
+      const session = valid.open.find(tab => sessionNodeId(tab) === next);
+      const prompt = valid.drafts?.find(draft => draftNodeId(draft) === next);
       tabFocusPending.current = true;
-      const prompts = valid.drafts ?? [];
-      const scope = draftTabOf(snapshot, projectId);
-      // The prompt of the selected scope is in the ring once: in its own tab when it has one, in the transient one otherwise.
-      const own = scope ? prompts.findIndex(draft => draftKey(draft) === draftKey(scope)) : -1;
-      const file = fileTabs.open.findIndex(tab => sameFileTab(tab, fileTabs.active));
-      const session = valid.open.findIndex(tab => valid.active && tabKey(tab) === tabKey(valid.active));
-      const current: TabPosition = file >= 0 ? { kind: "file", index: file } : session >= 0 ? { kind: "session", index: session }
-        : own >= 0 ? { kind: "prompt", index: own } : { kind: "draft" };
-      // With a single tab the prompt of a new session is in the ring only while it is the one shown: going through
-      // the tabs does not take the session out of its tab.
-      const next = cycleTab(valid.open.length, fileTabs.open.length, current, action === "nextTab" ? 1 : -1, prompts.length, own < 0 && !(singleTab && valid.open.length > 0));
-      if (next.kind === "file") activateFile(fileTabs.open[next.index]);
+      if (file) activateFile(file);
       // A tab that is shown again stays what it is: the transient one is not kept by going through the tabs.
-      else if (next.kind === "session") selectSessionTab(valid.open[next.index], "preview");
-      else if (next.kind === "prompt") selectProject(prompts[next.index].projectId);
-      else applyTabState({ ...valid, active: null });
+      else if (session) selectSessionTab(session, "preview");
+      else if (prompt) selectProject(prompt.projectId);
+      else if (next === sessionDraftNodeId) { if (fileTabs.active) activateFile(null); else applyTabState({ ...valid, active: null }); }
     }
   }
   // The macOS menu consumes Cmd+W before the webview. Use the current tab state and the same close path
@@ -2533,6 +2530,9 @@ function App() {
       // A Changes tab goes through its changes, or its files, with Alt+Down and Alt+Up: from its list of files as
       // well as from a diff, they are not the session shortcuts there.
       if (!commandChord.current && changeKeyKept(event, target)) return;
+      // The code editor goes through its own files with Ctrl+Tab and Ctrl+Shift+Tab; Ctrl+PageDown and Ctrl+PageUp
+      // still go through the tabs of the window from there.
+      if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
       if (editing && !commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "g") return;

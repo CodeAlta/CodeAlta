@@ -235,7 +235,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | [Fork a session, or rewind it](sessions.md#fork-and-rewind) to an earlier turn (desktop) | `/fork`, `/rewind` |
 | Clear prompt queue | `F10` |
 | Previous/next user or assistant message | `F3` / `F4` |
-| Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` |
+| Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+Shift+Tab` / `Ctrl+Tab` and `Ctrl+PageUp` / `Ctrl+PageDown` in the desktop app) |
 | Go to a [space](spaces.md) (desktop) | `Ctrl+G Ctrl+V` or `/space` |
 | Show the space at a place of the list (desktop) | `Ctrl+G 1` to `Ctrl+G 9` |
 | Previous / next space (desktop) | `Ctrl+Alt+PageUp` / `Ctrl+Alt+PageDown` |

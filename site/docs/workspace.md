@@ -24,7 +24,7 @@ The main screen has four important areas:
 
 In CodeAlta Desktop, the title bar has the space switch before the zoom and the theme switch. A [space](spaces.md) is a group of projects: the window shows the projects, the sessions and the tabs of one space at a time.
 
-Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. Use `Ctrl+T` (or `/next_prompt`) to cycle the current draft/session to the next agent prompt. Use `Ctrl+G Ctrl+G` to collapse or expand the navigator, `Ctrl+G Ctrl+S` to focus the sidebar, and `Ctrl+G Ctrl+P` to return to the prompt.
+Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. In CodeAlta Desktop, `Ctrl+Tab` and `Ctrl+Shift+Tab` (also `Ctrl+PageDown` and `Ctrl+PageUp`) do the same: they go to the next and the previous tab of the window in the order of the tab strip, the tools such as **Automations**, **Work items**, **Issues** and **Canvases** as well as the sessions and the editors, from the last tab back to the first; they only go through the tabs that are open. When the keyboard is in a code editor, `Ctrl+Tab` and `Ctrl+Shift+Tab` go through the files of that editor instead, and the other shortcuts still go to the other tabs of the window. Use `Ctrl+T` (or `/next_prompt`) to cycle the current draft/session to the next agent prompt. Use `Ctrl+G Ctrl+G` to collapse or expand the navigator, `Ctrl+G Ctrl+S` to focus the sidebar, and `Ctrl+G Ctrl+P` to return to the prompt.
 
 > [!TIP]
 > If these shortcuts do not work in Windows Terminal, see [Troubleshooting: Windows Terminal shortcuts do not reach CodeAlta]({{site.basepath}}/docs/troubleshooting/#windows-terminal-shortcuts-do-not-reach-codealta).
@@ -412,7 +412,7 @@ The full path of the project folder is written under the name of the project, at
 | Select the language of the text | `Ctrl+K` `M` |
 | Find / replace in the file, also with a regular expression | `Ctrl+F` / `Ctrl+H` |
 | Go to a line | `Ctrl+G` |
-| Next file | `Ctrl+Tab` |
+| Next file / previous file | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Close the file | `Ctrl+W` |
 | Show the files / search in files | `Ctrl+Shift+E` / `Ctrl+Shift+F` |
 | Wrap lines | `Alt+Z` |
