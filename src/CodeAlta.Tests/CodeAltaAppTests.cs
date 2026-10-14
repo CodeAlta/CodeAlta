@@ -2815,6 +2815,20 @@ public sealed class CodeAltaAppTests
     }
 
     [TestMethod]
+    public void CreateOperationUsage_LeavesTheTitleOfTheLastOperationToTheViews()
+    {
+        // The views title an operation without a label "Last operation" (#124): the model and the tokens are shown elsewhere.
+        var usage = CodeAlta.Agent.Runtime.AgentUsageFactory.CreateOperationUsage(
+            modelId: "claude-haiku-5-5", modelInfo: null, inputTokens: 13_601, outputTokens: 135, totalTokens: null,
+            cachedInputTokens: null, reasoningTokens: null, updatedAt: DateTimeOffset.Parse("2026-10-14T07:15:23+00:00"));
+
+        Assert.IsNull(usage.LastOperation!.Label);
+        Assert.AreEqual("claude-haiku-5-5", usage.LastOperation.Model);
+        Assert.AreEqual(13_601L, usage.LastOperation.InputTokens);
+        Assert.AreEqual(135L, usage.LastOperation.OutputTokens);
+    }
+
+    [TestMethod]
     public void BuildSessionUsageMarkdown_UsesInvariantCultureAndSections()
     {
         var previousCulture = CultureInfo.CurrentCulture;

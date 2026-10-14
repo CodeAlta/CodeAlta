@@ -36,10 +36,7 @@ internal static class AgentUsageFactory
                 OutputTokens: outputTokens,
                 CacheWriteTokens: cacheWriteTokens,
                 CachedInputTokens: cachedInputTokens,
-                ReasoningTokens: reasoningTokens,
-                Label: string.IsNullOrWhiteSpace(modelId)
-                    ? null
-                    : $"{modelId}: {inputTokens ?? 0}/{outputTokens ?? 0} tokens"),
+                ReasoningTokens: reasoningTokens),
             Scope: window is null ? AgentUsageScope.LastOperation : AgentUsageScope.CurrentWindow,
             Source: AgentUsageSource.ProviderUsage,
             UpdatedAt: updatedAt);
