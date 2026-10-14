@@ -57,6 +57,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     // gave it, and its hash, which the state of the session keeps.
     private string? _instructions;
     private string? _instructionsHash;
+    // The conversation was imported from VS Code or a terminal and was never given the instructions of CodeAlta.
+    private bool _instructionsNeverGiven;
     private string? _pendingInstructionsUpdate;
     private int _generation;
     private CancellationTokenSource? _idle;
@@ -364,6 +366,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 _pendingPreamble = null;
                 _instructions = null;
                 _instructionsHash = persisted.Instructions;
+                _instructionsNeverGiven = persisted.Imported && persisted.Instructions is null;
                 _leaf = persisted.Leaf;
                 _anchor = branch is null ? persisted.Anchor : null;
                 _transcriptPosition = branch is null ? persisted.Position : null;
@@ -569,6 +572,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _transcriptPosition = null;
         _instructions = appendSystemPrompt;
         _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
+        _instructionsNeverGiven = false;
         _costTotal = 0;
     }
 
@@ -704,9 +708,12 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             return null;
         }
 
-        var update = ClaudeCodePrompts.CreateInstructionsUpdate(_instructions, current);
+        var update = _instructionsNeverGiven && _instructions is null
+            ? ClaudeCodePrompts.CreateInstructionsForImportedConversation(current)
+            : ClaudeCodePrompts.CreateInstructionsUpdate(_instructions, current);
         _instructions = current;
         _instructionsHash = hash;
+        _instructionsNeverGiven = false;
         return update;
     }
 
@@ -971,7 +978,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private ClaudeCodeProviderState CurrentProviderState(string cliSessionId)
     {
         _transcriptPosition = _positions.Choose(cliSessionId, _transcriptPosition);
-        return new ClaudeCodeProviderState(cliSessionId, _syncedUsers, _syncedAssistants, _instructionsHash, _costTotal, _leaf, _transcriptPosition, _anchor);
+        return new ClaudeCodeProviderState(cliSessionId, _syncedUsers, _syncedAssistants, _instructionsHash, _costTotal, _leaf, _transcriptPosition, _anchor,
+            _instructionsNeverGiven);
     }
 
     // After a turn that ended without an answer, or a compaction: what the CLI of the session wrote after the recorded
@@ -1279,6 +1287,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 /// The identifier of the last assistant entry when the state was recorded: an entry the CLI writes, from which turns
 /// made outside CodeAlta are followed when <paramref name="Leaf"/> is one it did not write.
 /// </param>
+/// <param name="Imported">
+/// Whether the conversation was started outside CodeAlta (in VS Code or a terminal) and imported, and was never given
+/// the instructions of CodeAlta: its system prompt has no part of CodeAlta, so the first prompt gives them all as new.
+/// Kept only while <paramref name="Instructions"/> is null.
+/// </param>
 internal sealed record ClaudeCodeProviderState(
     string SessionId,
     int Users,
@@ -1287,7 +1300,8 @@ internal sealed record ClaudeCodeProviderState(
     double? Cost = null,
     string? Leaf = null,
     ClaudeCodeTranscriptPosition? Position = null,
-    string? Anchor = null)
+    string? Anchor = null,
+    bool Imported = false)
 {
     private const string Kind = "claude-code";
 
@@ -1310,7 +1324,8 @@ internal sealed record ClaudeCodeProviderState(
             ClaudeCodeJson.GetDouble(element, "cost"),
             ClaudeCodeJson.GetString(element, "leaf"),
             ClaudeCodeJson.TryGetObject(element, "transcript", out var transcript) ? ReadPosition(transcript) : null,
-            ClaudeCodeJson.GetString(element, "anchor"));
+            ClaudeCodeJson.GetString(element, "anchor"),
+            element.TryGetProperty("imported", out var imported) && imported.ValueKind == JsonValueKind.True);
     }
 
     // A position that does not have every field it needs is no position: the next read reads the whole file.
@@ -1393,6 +1408,11 @@ internal sealed record ClaudeCodeProviderState(
             if (Position is { } position)
             {
                 WritePosition(writer, position);
+            }
+
+            if (Imported && Instructions is null)
+            {
+                writer.WriteBoolean("imported", true);
             }
 
             writer.WriteEndObject();

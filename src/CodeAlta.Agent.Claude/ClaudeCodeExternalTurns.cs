@@ -170,7 +170,7 @@ internal static class ClaudeCodeExternalTurns
             Cost = result.TotalCostUsd ?? persisted.Cost,
         };
 
-    private static AgentExternalTurnOrigin ToOrigin(ClaudeCodeTranscriptOrigin origin)
+    internal static AgentExternalTurnOrigin ToOrigin(ClaudeCodeTranscriptOrigin origin)
         => origin switch
         {
             ClaudeCodeTranscriptOrigin.VsCode => AgentExternalTurnOrigin.VsCode,

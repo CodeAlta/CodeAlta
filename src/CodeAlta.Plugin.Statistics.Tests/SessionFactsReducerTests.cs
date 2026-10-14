@@ -101,6 +101,34 @@ public sealed class SessionFactsReducerTests
     }
 
     [TestMethod]
+    public void SessionImportedFromClaudeCode_CountsNoRunOfCodeAlta()
+    {
+        // A session imported from VS Code: its journal starts with the turns made there, each under a run made elsewhere and
+        // ended without usage, then its state.
+        var b = new JournalBuilder(provider: "claude-code");
+        b.Header(T0);
+        string[] runs = ["external:01a13a00-0000-7000-8000-000000000011", "external:01a13a00-0000-7000-8000-000000000012"];
+        for (var index = 0; index < runs.Length; index++)
+        {
+            var at = T0.AddMinutes(index + 1);
+            b.User(at, runs[index])
+                .Assistant(at.AddSeconds(1), runs[index])
+                .Requested(at.AddSeconds(1), runs[index], $"toolu_{index}", "Read")
+                .ToolStarted(at.AddSeconds(1), runs[index], $"toolu_{index}", "Read")
+                .ToolDone(at.AddSeconds(2), runs[index], $"toolu_{index}", "Read")
+                .ToolOutput(at.AddSeconds(2), runs[index], $"toolu_{index}")
+                .Idle(at.AddSeconds(3), runs[index]);
+        }
+
+        var batch = Reduce(b.State(T0.AddMinutes(5)));
+
+        Assert.AreEqual(0, batch.Runs.Count, "The imported turns are no runs of CodeAlta.");
+        Assert.AreEqual(0, Sum(batch.Activity, static measures => measures.RunsStarted));
+        Assert.AreEqual(0, Sum(batch.Tools, static measures => measures.Calls));
+        Assert.AreEqual(0, batch.Usage.Values.Sum(static measures => measures.InputTokens + measures.OutputTokens));
+    }
+
+    [TestMethod]
     public void Run_ActiveTimeIsCutAtTheLimitsOfQuarterHours()
     {
         var start = new DateTimeOffset(2026, 10, 9, 10, 14, 30, TimeSpan.Zero);

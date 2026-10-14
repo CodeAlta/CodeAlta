@@ -1,0 +1,11 @@
+/* The Claude Code sessions started in VS Code or a terminal, at the end of the sessions of a project. */
+.claude-code-sessions { display: grid; grid-template-columns: minmax(0, 1fr); }
+.claude-code-sessions-toggle { display: inline-flex; align-items: center; gap: 4px; }
+.claude-code-sessions-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+.ide-shell .claude-code-session-row > button:first-child { width: 100%; min-width: 0; overflow: hidden; text-align: left; }
+.claude-code-session-row .session-title { min-width: 0; }
+.claude-code-session-icon { color: var(--muted); }
+.claude-code-session-meta { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; color: var(--muted); font-size: var(--bp-typography-size-body-small, 11px); }
+.claude-code-session-held { padding: 0 5px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); white-space: nowrap; }
+.claude-code-sessions-more { padding-block: 3px; font-size: 11px; }
+.claude-code-sessions-error { margin: 4px 8px; font-size: 12px; }

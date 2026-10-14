@@ -593,6 +593,43 @@ public sealed partial class AgentHub : IAsyncDisposable
             : AgentExternalTurns.None;
     }
 
+    /// <summary>
+    /// Lists the conversations a provider keeps that other programs started in a folder (Claude Code: in VS Code or a
+    /// terminal) and that no session of CodeAlta continues. Nothing of the provider is started: the runtime the
+    /// registry keeps is asked, and only reads.
+    /// </summary>
+    /// <returns>An empty list when the provider keeps no such conversations or is not registered.</returns>
+    /// <remarks>A provider whose descriptor does not say it shares its conversations is not asked: no runtime of it is created.</remarks>
+    internal async Task<AgentExternalConversationList> ListExternalConversationsAsync(ModelProviderId providerId, string workingDirectory,
+        Func<string, bool> isKnown, int limit, CancellationToken cancellationToken)
+        => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
+            ? await external.Reader.ListExternalConversationsAsync(workingDirectory, isKnown, limit, cancellationToken).ConfigureAwait(false)
+            : AgentExternalConversationList.Empty;
+
+    /// <summary>Reads a whole conversation another program started, to import it as a session. Nothing of the provider is started.</summary>
+    /// <returns>
+    /// The conversation and the provider its session is written for (the protocol family and the key its records name),
+    /// or null when the provider keeps none of that identifier for the folder.
+    /// </returns>
+    internal async Task<(AgentExternalConversationImport Conversation, ModelProviderRuntimeDescriptor Provider)?> ReadExternalConversationAsync(
+        ModelProviderId providerId, string workingDirectory, string conversationId, CancellationToken cancellationToken)
+        => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
+           && await external.Reader.ReadExternalConversationAsync(workingDirectory, conversationId, cancellationToken).ConfigureAwait(false) is { } read
+            ? (read, external.Provider)
+            : null;
+
+    private async Task<(IAgentProviderExternalConversations Reader, ModelProviderRuntimeDescriptor Provider)?> GetExternalConversationsAsync(
+        ModelProviderId providerId, CancellationToken cancellationToken)
+    {
+        if (!_modelProviderRegistry.TryGetProvider(providerId, out var descriptor) || !descriptor.SharesConversations) return null;
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.GetOrCreateRuntimeAsync(providerId, cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return null; }
+        if (runtime is not IAgentModelProviderRuntime agent) return null;
+        var registration = agent.CreateProviderRegistration();
+        return registration.TurnExecutor is IAgentProviderExternalConversations reader ? (reader, registration.Provider) : null;
+    }
+
     private async Task<ProviderSessionRuntimeLease> CreateStartedProviderRuntimeAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken)
