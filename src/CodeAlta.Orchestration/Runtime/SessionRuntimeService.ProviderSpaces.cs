@@ -7,9 +7,12 @@ public sealed partial class SessionRuntimeService
     /// <summary>The status of a selection or a send whose provider is not available in the space of the session.</summary>
     public const string ProviderOutsideSpace = "provider_outside_space";
 
+    // Asked at every send and every read of the choices of a session: parsed again only when the file changes.
+    private CachedSpaceAssignments? _providerSpaceAssignments;
+
     /// <summary>
     /// Tells whether a provider is available in a space: a provider that the configuration assigns to no space is in
-    /// every space. A configuration that cannot be read assigns none.
+    /// every space. A configuration that cannot be read keeps the assignments it gave last, or none.
     /// </summary>
     /// <param name="providerKey">The key of the provider.</param>
     /// <param name="spaceId">The space; <see langword="null"/> for the default space.</param>
@@ -39,7 +42,7 @@ public sealed partial class SessionRuntimeService
     {
         try
         {
-            return (await new SpaceCatalog(_projectCatalog).ResolveSessionSpaceAsync(recordedSpaceId, projectId, cancellationToken).ConfigureAwait(false)).Id;
+            return (await _spaceCatalog.ResolveSessionSpaceAsync(recordedSpaceId, projectId, cancellationToken).ConfigureAwait(false)).Id;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -48,11 +51,5 @@ public sealed partial class SessionRuntimeService
     }
 
     private SpaceAssignments LoadSpaceAssignments()
-    {
-        try { return _configStore.LoadGlobalSpaceAssignments(); }
-        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
-        {
-            return SpaceAssignments.Empty;
-        }
-    }
+        => LazyInitializer.EnsureInitialized(ref _providerSpaceAssignments, () => new CachedSpaceAssignments(_configStore)).Current();
 }

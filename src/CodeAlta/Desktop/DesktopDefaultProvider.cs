@@ -14,12 +14,13 @@ internal sealed class DesktopDefaultProvider
     private readonly CatalogOptions _options;
     private readonly Lock _gate = new();
     private (DateTime Written, long Length, string? Key)? _global;
-    private (DateTime Written, long Length, SpaceAssignments Assignments)? _assignments;
+    private readonly CachedSpaceAssignments _assignments;
 
     internal DesktopDefaultProvider(CatalogOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
+        _assignments = new CachedSpaceAssignments(new CodeAltaConfigStore(options));
     }
 
     /// <summary>Gets the default provider the configuration names, whether or not it is enabled; null when it names none or cannot be read.</summary>
@@ -86,33 +87,10 @@ internal sealed class DesktopDefaultProvider
         => string.IsNullOrWhiteSpace(providerKey) || Assignments().IsAvailable(SpaceResourceKind.Provider, providerKey, spaceId);
 
     /// <summary>
-    /// Gets the spaces each provider is assigned to in the user's configuration; a configuration that cannot be read
-    /// assigns none, so that every provider stays in every space.
+    /// Gets the spaces each provider is assigned to in the user's configuration, read again when the file changes; a
+    /// configuration that cannot be read keeps the assignments it gave last, or none.
     /// </summary>
-    internal SpaceAssignments Assignments()
-    {
-        try
-        {
-            var file = new FileInfo(_options.ConfigPath);
-            var stamp = file.Exists ? (file.LastWriteTimeUtc, file.Length) : (default, -1L);
-            lock (_gate)
-            {
-                if (_assignments is { } known && (known.Written, known.Length) == stamp) return known.Assignments;
-            }
-
-            var assignments = new CodeAltaConfigStore(_options).LoadGlobalSpaceAssignments();
-            lock (_gate)
-            {
-                _assignments = (stamp.Item1, stamp.Item2, assignments);
-            }
-
-            return assignments;
-        }
-        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
-        {
-            return SpaceAssignments.Empty;
-        }
-    }
+    internal SpaceAssignments Assignments() => _assignments.Current();
 
     /// <summary>
     /// Gets the configured provider when it is one of the enabled ones, otherwise the first of them that its own
