@@ -46,6 +46,12 @@ public interface IPluginServices
     /// canvases existed has no window for them, and this member says so.
     /// </summary>
     IPluginCanvasService Canvases => NoopPluginCanvasService.Instance;
+
+    /// <summary>
+    /// Gets the identity of the work a plugin does for a session: the Git, GitHub and Jira identity of its space. A host
+    /// that was written before spaces had identities gives the usual settings.
+    /// </summary>
+    IPluginIdentityService Identity => NoopPluginIdentityService.Instance;
 }
 
 /// <summary>

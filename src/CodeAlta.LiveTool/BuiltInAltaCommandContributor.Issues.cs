@@ -84,7 +84,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             try
             {
-                foreach (var tracker in await source.GetTrackersAsync(project.ProjectPath, context.CancellationToken).ConfigureAwait(false))
+                // Read under the identity of the calling session: its GitHub profile, its Jira account.
+                foreach (var tracker in await source.GetTrackersAsync(project.ProjectPath, NormalizeOptionalText(context.Caller.SourceSessionId), context.CancellationToken).ConfigureAwait(false))
                 {
                     if (trackers.TrueForAll(known => known.Service != tracker.Service)) trackers.Add(tracker);
                 }

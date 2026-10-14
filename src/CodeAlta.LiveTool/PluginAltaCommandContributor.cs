@@ -192,5 +192,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         public IPluginAltaService Alta { get; } = alta;
 
         public IPluginCanvasService Canvases => inner.Canvases;
+
+        public IPluginIdentityService Identity => inner.Identity;
     }
 }

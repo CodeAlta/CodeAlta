@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Agent;
 
 namespace CodeAlta.Plugin.Git;
 
@@ -99,7 +100,21 @@ public sealed class GitIssueLookup
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="repository"/> is null.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
-    public static async ValueTask<GitRemoteCredential?> ResolveCredentialAsync(GitRepositoryReference repository, CancellationToken cancellationToken = default)
+    public static ValueTask<GitRemoteCredential?> ResolveCredentialAsync(GitRepositoryReference repository, CancellationToken cancellationToken = default)
+        => ResolveCredentialAsync(repository, null, cancellationToken);
+
+    /// <summary>
+    /// Resolves the credentials for the provider that hosts a repository like
+    /// <see cref="ResolveCredentialAsync(GitRepositoryReference, CancellationToken)"/>, with the provider CLI run in the
+    /// environment of a session: <c>gh auth token</c> reads the profile its <c>GH_CONFIG_DIR</c> names.
+    /// </summary>
+    /// <param name="repository">The repository the credentials are for.</param>
+    /// <param name="environment">The variables of the session, over the environment of the application; null for none.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The credentials, or <see langword="null"/> when requests must stay unauthenticated.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="repository"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    public static async ValueTask<GitRemoteCredential?> ResolveCredentialAsync(GitRepositoryReference repository, AgentProcessEnvironment? environment, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(repository);
         switch (repository.Provider)
@@ -110,7 +125,7 @@ public sealed class GitIssueLookup
                 var token = string.Equals(repository.Host, defaultHost, StringComparison.OrdinalIgnoreCase)
                     ? ReadEnvironment("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN")
                     : null;
-                token ??= await GitCommandLine.TryReadTokenAsync("glab", ["config", "get", "token", "--host", repository.Host], TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                token ??= await GitCommandLine.TryReadTokenAsync("glab", ["config", "get", "token", "--host", repository.Host], TimeSpan.FromSeconds(5), cancellationToken, environment).ConfigureAwait(false);
                 return GitRemoteCredential.TryBearer(token);
             }
 
@@ -136,14 +151,14 @@ public sealed class GitIssueLookup
                 // The Azure CLI starts a Python interpreter: it needs more time than the other CLIs.
                 var token = await GitCommandLine.TryReadTokenAsync(
                     "az", ["account", "get-access-token", "--resource", AzureDevOpsResource, "--query", "accessToken", "--output", "tsv"],
-                    TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+                    TimeSpan.FromSeconds(30), cancellationToken, environment).ConfigureAwait(false);
                 return GitRemoteCredential.TryBearer(token);
             }
 
             default:
             {
                 var token = ReadEnvironment("GITHUB_TOKEN", "GH_TOKEN")
-                            ?? await GitCommandLine.TryReadTokenAsync("gh", ["auth", "token"], TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                            ?? await GitCommandLine.TryReadTokenAsync("gh", ["auth", "token"], TimeSpan.FromSeconds(5), cancellationToken, environment).ConfigureAwait(false);
                 return GitRemoteCredential.TryBearer(token);
             }
         }
@@ -663,7 +678,7 @@ public sealed class GitIssueLookupOptions
 
     /// <summary>
     /// Gets the provider of the credentials sent with the requests for a repository (see
-    /// <see cref="GitIssueLookup.ResolveCredentialAsync"/>), or <see langword="null"/> to send only what
+    /// <see cref="GitIssueLookup.ResolveCredentialAsync(GitRepositoryReference, CancellationToken)"/>), or <see langword="null"/> to send only what
     /// the client itself carries. A provider that returns <see langword="null"/> leaves requests
     /// unauthenticated.
     /// </summary>

@@ -47,6 +47,63 @@ public sealed class JiraPluginTests
     }
 
     [TestMethod]
+    public void TheSpace_GivesTheSiteAndTheAccountTheProjectDoesNotWrite_AndWhatTheProjectWritesWins()
+    {
+        var business = new PluginIdentity { SpaceId = "business", JiraSite = "https://Contoso.atlassian.net", JiraEmail = "alex@contoso.example", JiraTokenVariable = "CONTOSO_JIRA_TOKEN" };
+
+        Assert.AreEqual(new JiraSettings("contoso.atlassian.net", "ALTA") { Email = "alex@contoso.example", TokenVariable = "CONTOSO_JIRA_TOKEN" },
+            JiraSettings.Parse("[plugins.jira]\nproject = \"ALTA\"", business));
+        Assert.AreEqual(new JiraSettings("example.atlassian.net", "ALTA") { Email = "me@example.com", TokenVariable = "CONTOSO_JIRA_TOKEN" },
+            JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\nemail = \"me@example.com\"", business));
+        Assert.IsNull(JiraSettings.Parse("[plugins.jira]\nsite = \"localhost\"\nproject = \"ALTA\"", business), "A site the project writes wrong is not replaced.");
+        Assert.IsNull(JiraSettings.Parse("[plugins.jira]\nproject = \"ALTA\""), "Without a space, a project names its site.");
+        Assert.IsNull(JiraSettings.Parse("[plugins.mcp]\nenabled = true", business), "A space does not turn Jira on for a project.");
+    }
+
+    [TestMethod]
+    public async Task OneUseOfJira_HoldsTheAccountOfTheCli_UntilItIsDone()
+    {
+        // The CLI has one login: a session of another space waits until the use of this one has run its commands.
+        using var root = new TempProject("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\n");
+        var cli = new FakeCli { Account = "example.atlassian.net", Switches = true };
+        var plugin = await CreateAsync(cli, root.Path);
+        var first = new JiraSettings("example.atlassian.net", "ALTA");
+        var second = new JiraSettings("contoso.atlassian.net", "PLAT");
+
+        var use = await plugin.UseAccountAsync(first, default);
+        Assert.IsNull(use.Problem);
+        var waiting = plugin.UseAccountAsync(second, default).AsTask();
+        await Task.Delay(100);
+        Assert.IsFalse(waiting.IsCompleted, "The other account waits.");
+        Assert.AreEqual("example.atlassian.net", cli.Account);
+
+        use.Dispose();
+        using var next = await waiting.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.IsNull(next.Problem);
+        Assert.AreEqual("contoso.atlassian.net", cli.Account, "Its turn come, the account is switched.");
+        use.Dispose();
+    }
+
+    [TestMethod]
+    public async Task AnAccountOfAnotherEmail_IsSignedInAgain_WithTheTokenOfTheSpace()
+    {
+        using var root = new TempProject("[plugins.jira]\nproject = \"ALTA\"\n");
+        var cli = new FakeCli { Account = "contoso.atlassian.net" };
+        var identity = new PluginIdentity { SpaceId = "business", JiraSite = "contoso.atlassian.net", JiraEmail = "alex@contoso.example", JiraTokenVariable = "CONTOSO_JIRA_TOKEN" };
+        var plugin = await CreateAsync(cli, root.Path, name => name == "CONTOSO_JIRA_TOKEN" ? "secret-token" : null, identity);
+
+        // The session of the space finds the Jira of its project on the site of the space.
+        var tracker = (await plugin.GetTrackersAsync(root.Path, "session-1", default)).Single();
+        Assert.AreEqual("https://contoso.atlassian.net/browse/ALTA", tracker.WebUrl);
+        cli.Answers["workitem search"] = _ => new(0, "[" + Issue + "]", string.Empty);
+        Assert.IsNull((await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default)).Problem);
+
+        // The CLI was signed in to the site as me@example.com: the account of the space signs in with its token.
+        Assert.IsTrue(cli.Runs.Contains("jira auth login --site contoso.atlassian.net --email alex@contoso.example --token"), string.Join("\n", cli.Runs));
+        CollectionAssert.AreEqual(new[] { "secret-token\n" }, cli.Inputs);
+    }
+
+    [TestMethod]
     public void AProject_CanNameSeveralJiraProjects_AndTheFirstIsWhereNewIssuesGo()
     {
         var one = JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"")!;
@@ -395,10 +452,11 @@ public sealed class JiraPluginTests
         }
     }
 
-    private static async Task<JiraPlugin> CreateAsync(FakeCli cli, string userData, Func<string, string?>? environment = null)
+    private static async Task<JiraPlugin> CreateAsync(FakeCli cli, string userData, Func<string, string?>? environment = null, PluginIdentity? identity = null)
     {
         var plugin = new JiraPlugin(_ => cli, environment ?? (static _ => null));
-        var services = NoopPluginServices.Create();
+        var noop = NoopPluginServices.Create();
+        IPluginServices services = identity is null ? noop : new IdentityServices(noop, identity);
         plugin.AttachRuntimeContext(new PluginRuntimeContext
         {
             Plugin = PluginDescriptorFactory.FromType(typeof(JiraPlugin)),
@@ -429,6 +487,25 @@ public sealed class JiraPluginTests
         }) };
         var code = await app.RunAsync(arguments, new CommandRunConfig { Out = TextWriter.Null, Error = stderr });
         return (code, stdout.ToString(), stderr.ToString());
+    }
+
+    // Host services whose every work has one identity.
+    private sealed class IdentityServices(IPluginServices inner, PluginIdentity identity) : IPluginServices, IPluginIdentityService
+    {
+        public XenoAtom.Logging.Logger Logger => inner.Logger;
+        public IPluginUiService Ui => inner.Ui;
+        public IPluginStateStore State => inner.State;
+        public IPluginWorkspaceService Workspace => inner.Workspace;
+        public IPluginSessionService Sessions => inner.Sessions;
+        public IPluginPromptService Prompts => inner.Prompts;
+        public IPluginAgentService Agents => inner.Agents;
+        public IPluginTaskService Tasks => inner.Tasks;
+        public IPluginAltaService Alta => inner.Alta;
+        public IPluginIdentityService Identity => this;
+
+        public ValueTask<PluginIdentity> GetIdentityAsync(string? sessionId, CancellationToken cancellationToken) => ValueTask.FromResult(identity);
+
+        public ValueTask<PluginIdentity> GetProjectIdentityAsync(string projectPath, CancellationToken cancellationToken) => ValueTask.FromResult(identity);
     }
 
     // A CLI that answers what a test says, and records what it was asked.

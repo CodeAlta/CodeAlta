@@ -67,7 +67,7 @@ public sealed record GitFeedPage(GitFeedStatus Status, GitRepositoryReference? R
 
 /// <summary>
 /// Reads the open issues and pull requests of the repository of a folder from GitHub, GitLab or Azure DevOps, with
-/// the credentials <see cref="GitIssueLookup.ResolveCredentialAsync"/> finds. A caller that looks again from time
+/// the credentials <see cref="GitIssueLookup.ResolveCredentialAsync(GitRepositoryReference, CancellationToken)"/> finds. A caller that looks again from time
 /// to time passes the entity tag of its last reading: GitHub then answers an unchanged list without counting the
 /// request.
 /// </summary>

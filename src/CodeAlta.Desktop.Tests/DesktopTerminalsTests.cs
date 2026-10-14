@@ -12,7 +12,7 @@ public sealed class DesktopTerminalsTests
     {
         private readonly DirectoryInfo _folder = Directory.CreateTempSubdirectory("codealta-terminals-");
 
-        public Fixture()
+        public Fixture(Func<TerminalRequest, CodeAlta.Agent.AgentProcessEnvironment?>? identity = null)
         {
             var shell = OperatingSystem.IsWindows() ? @"C:\shell\sh" : "/shell/sh";
             var profiles = new TerminalProfiles(name => name == "SHELL" ? shell : null, path => path == shell, static () => [], static _ => [], windows: false, mac: false);
@@ -22,7 +22,7 @@ public sealed class DesktopTerminalsTests
                 var program = new FakeTerminalProgram();
                 Programs.Add(program);
                 return program;
-            }, TimeProvider.System);
+            }, TimeProvider.System) { Identity = identity };
         }
 
         public DesktopTerminals Terminals { get; }
@@ -91,6 +91,25 @@ public sealed class DesktopTerminalsTests
             }
             feed.Dispose();
         }
+    }
+
+    [TestMethod]
+    public void AProgram_StartsWithTheIdentityOfItsTerminal()
+    {
+        var asked = new List<TerminalRequest>();
+        using var fixture = new Fixture(request =>
+        {
+            asked.Add(request);
+            return request.Agent ? null : new CodeAlta.Agent.AgentProcessEnvironment([new("GIT_AUTHOR_EMAIL", "alex@contoso.example")]);
+        });
+
+        fixture.Create();
+        fixture.Create(agent: true);
+
+        Assert.AreEqual("alex@contoso.example", fixture.Starts[0].Environment["GIT_AUTHOR_EMAIL"]);
+        Assert.AreEqual("CodeAlta", fixture.Starts[0].Environment["TERM_PROGRAM"], "What the terminal sets for itself stays.");
+        Assert.AreEqual(Environment.GetEnvironmentVariable("GIT_AUTHOR_EMAIL"), fixture.Starts[1].Environment.GetValueOrDefault("GIT_AUTHOR_EMAIL"), "Without an identity, the usual settings.");
+        Assert.AreEqual(2, asked.Count);
     }
 
     [TestMethod]

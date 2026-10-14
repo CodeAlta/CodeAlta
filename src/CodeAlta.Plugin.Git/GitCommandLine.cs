@@ -1,11 +1,13 @@
 using System.Diagnostics;
+using CodeAlta.Agent;
 
 namespace CodeAlta.Plugin.Git;
 
 /// <summary>Runs <c>git</c> and the provider CLIs (<c>gh</c>, <c>glab</c>, <c>az</c>) for the Git backend.</summary>
 internal static class GitCommandLine
 {
-    public static async Task<GitCommandLineResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
+    public static async Task<GitCommandLineResult> RunAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken,
+        AgentProcessEnvironment? environment = null)
     {
         using var process = new Process
         {
@@ -27,6 +29,8 @@ internal static class GitCommandLine
             process.StartInfo.ArgumentList.Add(argument);
         }
 
+        // The identity of the session the command is run for, such as the GitHub profile of its space.
+        environment?.ApplyTo(process.StartInfo.Environment);
         process.Start();
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
@@ -47,8 +51,9 @@ internal static class GitCommandLine
     }
 
     /// <summary>Runs a located CLI with its leading arguments followed by <paramref name="arguments"/>.</summary>
-    public static Task<GitCommandLineResult> RunAsync(GitCliCommand command, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
-        => RunAsync(command.FileName, [.. command.LeadingArguments, .. arguments], workingDirectory, timeout, cancellationToken);
+    public static Task<GitCommandLineResult> RunAsync(GitCliCommand command, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken,
+        AgentProcessEnvironment? environment = null)
+        => RunAsync(command.FileName, [.. command.LeadingArguments, .. arguments], workingDirectory, timeout, cancellationToken, environment);
 
     /// <summary>Reads the URL of one remote, or null when git is missing, fails or reports nothing.</summary>
     public static async Task<string?> TryGetGitRemoteUrlAsync(string workingDirectory, string remoteName, CancellationToken cancellationToken)
@@ -96,7 +101,8 @@ internal static class GitCommandLine
     /// Asks a provider CLI to print a token (<c>gh auth token</c>, <c>glab config get token</c>,
     /// <c>az account get-access-token</c>); null when the CLI is missing, signed out or fails.
     /// </summary>
-    public static async Task<string?> TryReadTokenAsync(string cliName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+    public static async Task<string?> TryReadTokenAsync(string cliName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken,
+        AgentProcessEnvironment? environment = null)
     {
         try
         {
@@ -105,7 +111,7 @@ internal static class GitCommandLine
                 return null;
             }
 
-            var result = await RunAsync(command, arguments, Environment.CurrentDirectory, timeout, cancellationToken).ConfigureAwait(false);
+            var result = await RunAsync(command, arguments, Environment.CurrentDirectory, timeout, cancellationToken, environment).ConfigureAwait(false);
             var token = result.ExitCode == 0 ? result.Stdout.Trim() : string.Empty;
             return string.IsNullOrWhiteSpace(token) ? null : token;
         }

@@ -9,6 +9,11 @@ namespace CodeAlta.Plugin.Jira;
 /// and reads their issues for the Issues tab, and gives agents the <c>alta jira</c> commands. Jira is reached
 /// through the Atlassian CLI (<c>acli</c>), which the plugin downloads the first time a project needs it.
 /// </summary>
+/// <remarks>
+/// The space of a session can give the site, the email and the token variable of its account. The CLI keeps one
+/// login for the whole machine: each use of Jira holds the account from the moment it is checked (and switched or
+/// signed in) until its commands are done, so that sessions of two spaces never work with each other's account.
+/// </remarks>
 [Plugin("jira", DisplayName = "Jira", Description = "The issues of a Jira project, for projects that say so in their configuration.")]
 public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSource
 {
@@ -22,10 +27,12 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     private readonly Func<string, IJiraCli>? _createCli;
     private readonly Func<string, string?> _environment;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    // Held by one use of Jira at a time: the CLI has one login, which a use of another account would switch.
+    private readonly SemaphoreSlim _account = new(1, 1);
     private readonly HashSet<string> _announced = new(StringComparer.OrdinalIgnoreCase);
     private IJiraCli? _cli;
     private JiraClient? _client;
-    private (string Site, long Checked)? _ready;
+    private (string Site, string? Email, long Checked)? _ready;
 
     /// <summary>Initializes the Jira plugin.</summary>
     public JiraPlugin()
@@ -57,22 +64,31 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     {
         (_cli as IDisposable)?.Dispose();
         _gate.Dispose();
+        _account.Dispose();
         return base.DisposeAsync();
     }
 
     /// <inheritdoc />
     public ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken)
+        => GetTrackersAsync(projectPath, null, cancellationToken);
+
+    /// <summary>Finds the Jira of the project in a folder, with the account of the space of the session, or of the window.</summary>
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, string? sessionId, CancellationToken cancellationToken)
     {
-        if (_client is null || JiraSettings.Read(projectPath) is not { } settings) return ValueTask.FromResult<IReadOnlyList<IIssueTracker>>([]);
-        return ValueTask.FromResult<IReadOnlyList<IIssueTracker>>([new JiraTracker(settings, _client, token => EnsureReadyAsync(settings, token))]);
+        if (_client is null || JiraSettings.Read(projectPath, await IdentityAsync(sessionId, cancellationToken).ConfigureAwait(false)) is not { } settings) return [];
+        return [new JiraTracker(settings, _client, token => UseAccountAsync(settings, token))];
     }
 
     /// <inheritdoc />
     public async ValueTask<TrackedEventPage?> ReadEventsAsync(string projectPath, string service, TrackedEventKind kind, TimeSpan window, CancellationToken cancellationToken)
     {
-        if (service != "jira" || _client is not { } client || JiraSettings.Read(projectPath) is not { } settings) return null;
+        if (service != "jira" || _client is not { } client) return null;
+        // An automation works for no session: with the account of the space its runs go to.
+        if (JiraSettings.Read(projectPath, await ProjectIdentityAsync(projectPath, cancellationToken).ConfigureAwait(false)) is not { } settings) return null;
         var page = new TrackedEventPage("Jira", string.Join(", ", settings.Projects), []);
-        if ((await EnsureReadyAsync(settings, cancellationToken).ConfigureAwait(false)).Problem is { } problem) return page with { Problem = problem };
+        using var use = await UseAccountAsync(settings, cancellationToken).ConfigureAwait(false);
+        if (use.Problem is { } problem) return page with { Problem = problem };
         // Jira reads a date as the account's own time: a number of minutes means the same everywhere.
         var minutes = Math.Clamp((int)Math.Ceiling(window.TotalMinutes) + 1, 2, 7 * 24 * 60);
         var field = kind == TrackedEventKind.Created ? "created" : "updated";
@@ -119,10 +135,11 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     /// <inheritdoc />
     public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContributions()
     {
-        yield return Prompt.Dynamic(PluginPromptChannel.Developer, (context, _) =>
+        yield return Prompt.Dynamic(PluginPromptChannel.Developer, async (context, cancellationToken) =>
         {
-            var settings = JiraSettings.Read(context.ProjectPath ?? context.Services.Workspace.SelectedProjectPath);
-            return ValueTask.FromResult(settings is null ? null : Guidance(settings));
+            var identity = await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false);
+            var settings = JiraSettings.Read(context.ProjectPath ?? context.Services.Workspace.SelectedProjectPath, identity);
+            return settings is null ? null : Guidance(settings);
         }, title: "Jira", kind: PluginPromptPartKind.ToolGuidance, order: 60);
     }
 
@@ -156,11 +173,11 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     internal async ValueTask<(string? Problem, bool NeedsSignIn)> EnsureReadyAsync(JiraSettings settings, CancellationToken cancellationToken)
     {
         if (_cli is not { } cli || _client is not { } client) return ("The Jira plugin is not ready.", false);
-        if (_ready is { } ready && ready.Site == settings.Site && Environment.TickCount64 - ready.Checked < AccountLifetime.TotalMilliseconds && cli.IsInstalled) return (null, false);
+        if (IsReady(settings) && cli.IsInstalled) return (null, false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_ready is { } known && known.Site == settings.Site && Environment.TickCount64 - known.Checked < AccountLifetime.TotalMilliseconds && cli.IsInstalled) return (null, false);
+            if (IsReady(settings) && cli.IsInstalled) return (null, false);
             var downloaded = false;
             var missing = await cli.EnsureInstalledAsync(() =>
             {
@@ -180,7 +197,8 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
                 account = await client.GetAccountAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            if (!account.SignedIn || !SameSite(account.Site, settings.Site))
+            // The account of the site is the one of the space when the space names it: another one is signed out of.
+            if (!account.SignedIn || !SameSite(account.Site, settings.Site) || !SameEmail(account.Email, settings.Email))
             {
                 if (Token(settings) is { } token && Email(settings) is { } email)
                 {
@@ -201,7 +219,7 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
                 }
             }
 
-            _ready = (settings.Site, Environment.TickCount64);
+            _ready = (settings.Site, settings.Email, Environment.TickCount64);
             return (null, false);
         }
         finally
@@ -210,8 +228,51 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
         }
     }
 
+    /// <summary>
+    /// Holds the account of the CLI for one use of Jira, made ready for the site and the account of the settings: the
+    /// use runs its commands, then disposes of what this returns, and no other use switches the account meanwhile.
+    /// </summary>
+    /// <returns>The use, with what is missing when Jira is not ready; it is disposed of in every case.</returns>
+    internal async ValueTask<JiraAccountUse> UseAccountAsync(JiraSettings settings, CancellationToken cancellationToken)
+    {
+        await _account.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var (problem, needsSignIn) = await EnsureReadyAsync(settings, cancellationToken).ConfigureAwait(false);
+            return new JiraAccountUse(_account, problem, needsSignIn);
+        }
+        catch
+        {
+            _account.Release();
+            throw;
+        }
+    }
+
+    /// <summary>Gets the identity of the work of a session, or of the window for null; the usual one outside a host.</summary>
+    internal async ValueTask<PluginIdentity> IdentityAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        IPluginIdentityService identities;
+        try { identities = Services.Identity; }
+        catch (InvalidOperationException) { return PluginIdentity.Usual; }
+        return await identities.GetIdentityAsync(string.IsNullOrWhiteSpace(sessionId) ? null : sessionId, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Signs in through the browser, then checks that the account is the one of the site of the project.</summary>
     internal async Task<string?> SignInWithBrowserAsync(JiraSettings settings, CancellationToken cancellationToken)
+    {
+        // The login of the CLI changes: no other use of Jira runs meanwhile.
+        await _account.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await SignInWithBrowserCoreAsync(settings, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _account.Release();
+        }
+    }
+
+    private async Task<string?> SignInWithBrowserCoreAsync(JiraSettings settings, CancellationToken cancellationToken)
     {
         if (_cli is not { } cli || _client is not { } client) return "The Jira plugin is not ready.";
         if (await cli.EnsureInstalledAsync(() => Notify("Jira: downloading the Atlassian CLI. This takes a moment."), cancellationToken).ConfigureAwait(false) is { } missing) return missing;
@@ -243,6 +304,23 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     }
 
     private static bool SameSite(string? left, string right) => string.Equals(JiraSettings.NormalizeSite(left), right, StringComparison.OrdinalIgnoreCase);
+
+    // An account the CLI does not name, or settings that name none, are not told apart by their email.
+    private static bool SameEmail(string? account, string? wanted)
+        => account is null || wanted is null || string.Equals(account.Trim(), wanted.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private bool IsReady(JiraSettings settings)
+        => _ready is { } ready && ready.Site == settings.Site && SameEmail(ready.Email, settings.Email)
+            && Environment.TickCount64 - ready.Checked < AccountLifetime.TotalMilliseconds;
+
+    // The identity of work on a project that no session does; the usual one outside a host.
+    private async ValueTask<PluginIdentity> ProjectIdentityAsync(string projectPath, CancellationToken cancellationToken)
+    {
+        IPluginIdentityService identities;
+        try { identities = Services.Identity; }
+        catch (InvalidOperationException) { return PluginIdentity.Usual; }
+        return await identities.GetProjectIdentityAsync(projectPath, cancellationToken).ConfigureAwait(false);
+    }
 
     private string? Token(JiraSettings settings)
         => settings.TokenVariable is { } named ? Value(named) : JiraSettings.TokenVariables.Select(Value).FirstOrDefault(static value => value is not null);
@@ -276,7 +354,8 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
 
     private async ValueTask<PluginCommandResult> SignInCommandAsync(PluginCommandContext context, CancellationToken cancellationToken)
     {
-        if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath)) is not { } settings)
+        if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath),
+                await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false)) is not { } settings)
             return PluginCommandResult.Message("This project does not use Jira. Add [plugins.jira] with site and project to its .alta/config.toml.");
         // The CLI asks which site to use once the browser is done: it is run in a terminal of the window, where the user
         // answers it. An application without terminals runs it itself, which is enough for an account of one site.
@@ -310,13 +389,41 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
 
     private async ValueTask<PluginCommandResult> StatusCommandAsync(PluginCommandContext context, CancellationToken cancellationToken)
     {
-        if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath)) is not { } settings)
+        if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath),
+                await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false)) is not { } settings)
             return PluginCommandResult.Message("This project does not use Jira. Add [plugins.jira] with site and project to its .alta/config.toml.");
         lock (_announced) _announced.Clear();
         Invalidate();
-        var (problem, _) = await EnsureReadyAsync(settings, cancellationToken).ConfigureAwait(false);
+        string? problem;
+        using (var use = await UseAccountAsync(settings, cancellationToken).ConfigureAwait(false)) problem = use.Problem;
         return PluginCommandResult.Message(problem ?? (settings.HasSeveralProjects
             ? $"Jira is ready: projects {string.Join(", ", settings.Projects)} on {settings.Site}. New issues go to {settings.Project}."
             : $"Jira is ready: project {settings.Project} on {settings.Site}."));
+    }
+}
+
+/// <summary>
+/// One use of the account of the Atlassian CLI (<see cref="JiraPlugin.UseAccountAsync"/>): it holds the account until
+/// it is disposed of, and says what is missing when Jira is not ready.
+/// </summary>
+internal sealed class JiraAccountUse : IDisposable
+{
+    private SemaphoreSlim? _account;
+
+    internal JiraAccountUse(SemaphoreSlim account, string? problem, bool needsSignIn)
+        => (_account, Problem, NeedsSignIn) = (account, problem, needsSignIn);
+
+    /// <summary>Gets what is missing for Jira to be used; null when it is ready.</summary>
+    public string? Problem { get; }
+
+    /// <summary>Gets whether signing in is what it takes.</summary>
+    public bool NeedsSignIn { get; }
+
+    /// <summary>Lets the next use of Jira run.</summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _account, null) is not { } account) return;
+        try { account.Release(); }
+        catch (ObjectDisposedException) { }
     }
 }

@@ -44,9 +44,10 @@ internal static class JiraCommands
         var command = Leaf("status", "Say whether the Jira of the project is ready: the CLI, the account, the site and the project.");
         command.Add(async (_, _) =>
         {
-            if (Settings(context) is not { } settings) return NotConfigured(context);
+            if (await SettingsAsync(plugin, context).ConfigureAwait(false) is not { } settings) return NotConfigured(context);
             plugin.Invalidate();
-            var (problem, needsSignIn) = await plugin.EnsureReadyAsync(settings, context.CancellationToken).ConfigureAwait(false);
+            using var use = await plugin.UseAccountAsync(settings, context.CancellationToken).ConfigureAwait(false);
+            var (problem, needsSignIn) = (use.Problem, use.NeedsSignIn);
             var account = problem is null ? await plugin.Client.GetAccountAsync(context.CancellationToken).ConfigureAwait(false) : null;
             Write(context, new { type = "alta.jira.status", version = 1, correlationId = context.CorrelationId, ready = problem is null, site = settings.Site, project = settings.Project,
                 projects = settings.Projects, account = account?.Email, signIn = account?.Kind, problem, needsSignIn = needsSignIn ? true : (bool?)null });
@@ -61,7 +62,7 @@ internal static class JiraCommands
         Help(command, "With an API token in the environment (JIRA_API_TOKEN and JIRA_EMAIL, or the variable `token_env` names) no browser is needed: `alta jira status` signs in by itself.");
         command.Add(async (_, _) =>
         {
-            if (Settings(context) is not { } settings) return NotConfigured(context);
+            if (await SettingsAsync(plugin, context).ConfigureAwait(false) is not { } settings) return NotConfigured(context);
             if (await plugin.SignInWithBrowserAsync(settings, context.CancellationToken).ConfigureAwait(false) is { } problem) return Fail(context, "jira.signInFailed", problem);
             Write(context, new { type = "alta.jira.signedIn", version = 1, correlationId = context.CorrelationId, site = settings.Site });
             return 0;
@@ -83,7 +84,7 @@ internal static class JiraCommands
         command.Add("label=", "A label; repeat the option for several.", value => { if (!string.IsNullOrWhiteSpace(value)) labels.Add(value.Trim()); });
         command.Add(async (_, _) =>
         {
-            if (Settings(context) is not { } settings) return NotConfigured(context);
+            if (await SettingsAsync(plugin, context).ConfigureAwait(false) is not { } settings) return NotConfigured(context);
             if (string.IsNullOrWhiteSpace(summary) || summary.Length > 255 || summary.Contains('\n', StringComparison.Ordinal)) return Fail(context, "usage.invalidSummary", "--summary is required: one line of at most 255 characters.", Usage);
             var body = stdin ? await context.Stdin.ReadToEndAsync(context.CancellationToken).ConfigureAwait(false) : description;
             if (body is { Length: > MaximumBody }) return Fail(context, "usage.descriptionTooLong", "The description is too long.", Usage);
@@ -91,7 +92,8 @@ internal static class JiraCommands
             var project = string.IsNullOrWhiteSpace(target) ? settings.Project : JiraSettings.NormalizeProject(target);
             if (project is null || !settings.Has(project))
                 return Fail(context, "usage.unknownProject", $"--jira-project names no Jira project of this project. {(settings.HasSeveralProjects ? "Its Jira projects are" : "Its Jira project is")} {string.Join(", ", settings.Projects)}.", Usage);
-            if (await Ready(plugin, context, settings).ConfigureAwait(false) is { } refused) return refused;
+            using var use = await plugin.UseAccountAsync(settings, context.CancellationToken).ConfigureAwait(false);
+            if (Refused(context, use) is { } refused) return refused;
             var created = await plugin.Client.CreateAsync(project, string.IsNullOrWhiteSpace(type) ? "Task" : type.Trim(), summary.Trim(), body?.Trim(), labels, context.CancellationToken).ConfigureAwait(false);
             if (created.Value is not { } key) return Fail(context, "jira.failed", created.Problem ?? "Jira did not create the issue.");
             Write(context, new { type = "alta.jira.created", version = 1, correlationId = context.CorrelationId, key, url = settings.BrowseUrl(key), project });
@@ -140,21 +142,21 @@ internal static class JiraCommands
 
     private static async ValueTask<int> Change(JiraPlugin plugin, PluginAltaCommandContext context, string? key, string type, Func<string, CancellationToken, Task<string?>> change, string? value = null)
     {
-        if (Settings(context) is not { } settings) return NotConfigured(context);
+        if (await SettingsAsync(plugin, context).ConfigureAwait(false) is not { } settings) return NotConfigured(context);
         if (Key(settings, key) is not { } issue) return Fail(context, "usage.missingKey", "An issue key is required, such as " + settings.Project + "-12.", Usage);
-        if (await Ready(plugin, context, settings).ConfigureAwait(false) is { } refused) return refused;
+        using var use = await plugin.UseAccountAsync(settings, context.CancellationToken).ConfigureAwait(false);
+        if (Refused(context, use) is { } refused) return refused;
         if (await change(issue, context.CancellationToken).ConfigureAwait(false) is { } problem) return Fail(context, "jira.failed", problem);
         Write(context, new { type, version = 1, correlationId = context.CorrelationId, key = issue, url = settings.BrowseUrl(issue), value });
         return 0;
     }
 
-    private static async ValueTask<int?> Ready(JiraPlugin plugin, PluginAltaCommandContext context, JiraSettings settings)
-    {
-        var (problem, needsSignIn) = await plugin.EnsureReadyAsync(settings, context.CancellationToken).ConfigureAwait(false);
-        return problem is null ? null : Fail(context, needsSignIn ? "jira.signInRequired" : "jira.unavailable", problem);
-    }
+    private static int? Refused(PluginAltaCommandContext context, JiraAccountUse use)
+        => use.Problem is { } problem ? Fail(context, use.NeedsSignIn ? "jira.signInRequired" : "jira.unavailable", problem) : null;
 
-    private static JiraSettings? Settings(PluginAltaCommandContext context) => JiraSettings.Read(JiraPlugin.ProjectPath(context));
+    // The Jira of the project, with the account of the space of the session that calls.
+    private static async ValueTask<JiraSettings?> SettingsAsync(JiraPlugin plugin, PluginAltaCommandContext context)
+        => JiraSettings.Read(JiraPlugin.ProjectPath(context), await plugin.IdentityAsync(context.SourceSessionId, context.CancellationToken).ConfigureAwait(false));
 
     private static string? Key(JiraSettings settings, string? value)
     {

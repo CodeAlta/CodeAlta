@@ -42,7 +42,8 @@ internal sealed class GitIssuesService : IDisposable
     private readonly ProjectCatalog _projects;
     private readonly string _epoch;
     private readonly HttpClient _client;
-    private readonly GitIssueLookup _lookup;
+    private readonly GitIssueLookups _lookups;
+    private readonly Func<CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? _environment;
 
     /// <summary>Creates the service for an owned host, using git, the user's provider credentials and the provider REST APIs.</summary>
     /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
@@ -50,7 +51,19 @@ internal sealed class GitIssuesService : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
     internal GitIssuesService(ProjectCatalog projects, string epoch)
-        : this(projects, epoch, GitIssueLookup.CreateHttpClient(), new GitIssueLookupOptions { CredentialProvider = GitIssueLookup.ResolveCredentialAsync })
+        : this(projects, epoch, null)
+    {
+    }
+
+    /// <summary>Creates the service for an owned host, reading with the GitHub profile of the space the window shows.</summary>
+    /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
+    /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <param name="environment">Gives the variables of the space the window shows; null for the usual profile.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
+    internal GitIssuesService(ProjectCatalog projects, string epoch, Func<CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? environment)
+        : this(projects, epoch, GitIssueLookup.CreateHttpClient(), new GitIssueLookupOptions { CredentialProvider = GitIssueLookup.ResolveCredentialAsync },
+            GitIssueLookup.ResolveCredentialAsync, environment)
     {
     }
 
@@ -62,11 +75,13 @@ internal sealed class GitIssuesService : IDisposable
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
     internal GitIssuesService(ProjectCatalog projects, string epoch, HttpMessageHandler handler, GitIssueLookupOptions options)
-        : this(projects, epoch, GitIssueLookup.CreateHttpClient(handler), options)
+        : this(projects, epoch, GitIssueLookup.CreateHttpClient(handler), options, null, null)
     {
     }
 
-    private GitIssuesService(ProjectCatalog projects, string epoch, HttpClient client, GitIssueLookupOptions options)
+    private GitIssuesService(ProjectCatalog projects, string epoch, HttpClient client, GitIssueLookupOptions options,
+        Func<GitRepositoryReference, CodeAlta.Agent.AgentProcessEnvironment?, CancellationToken, ValueTask<GitRemoteCredential?>>? credentials,
+        Func<CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? environment)
     {
         _client = client;
         try
@@ -75,7 +90,8 @@ internal sealed class GitIssuesService : IDisposable
             ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
             _projects = projects;
             _epoch = epoch;
-            _lookup = new GitIssueLookup(client, options);
+            _lookups = new GitIssueLookups(client, options, credentials);
+            _environment = environment;
         }
         catch
         {
@@ -107,14 +123,16 @@ internal sealed class GitIssuesService : IDisposable
         {
             // The lookup only recognizes a remote that spells an ordinary repository path: nothing else is
             // sent to a provider or to the page.
-            var repository = await _lookup.ResolveRepositoryAsync(root, cancellationToken).ConfigureAwait(false);
+            // Read with the GitHub profile of the space the window shows, where the prompt is written.
+            var lookup = _lookups.For(_environment is null ? null : await _environment(cancellationToken).ConfigureAwait(false));
+            var repository = await lookup.ResolveRepositoryAsync(root, cancellationToken).ConfigureAwait(false);
             if (repository is null || repository.FullName.Length > MaximumRepositoryLength) return Refused("no_repository");
             provider = ProviderName(repository.Provider);
             repositoryName = repository.FullName;
-            var result = await _lookup.QueryAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false);
+            var result = await lookup.QueryAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false);
             // The pull requests are found beside the issues: a provider that refuses them still shows its issues.
             IReadOnlyList<GitIssueReferenceItem> pulls = [];
-            try { pulls = await _lookup.QueryPullRequestsAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false); }
+            try { pulls = await lookup.QueryPullRequestsAsync(repository, request.Query, limit, cancellationToken).ConfigureAwait(false); }
             catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested) { }
             var issues = Entries(Merge(result.Issues, pulls), repository.Host, limit);
             // Matches found beside a refused request (a rate-limited search) are still worth showing.

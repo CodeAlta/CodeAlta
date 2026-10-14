@@ -179,7 +179,7 @@ internal static class DesktopPlugins
 /// pane where a plugin command was started; outside both there is none, and a plugin uses the project its
 /// operation context carries.
 /// </remarks>
-internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null) : IPluginServices
+internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -207,6 +207,9 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
     // The tabs plugins provide; a host started without them has no window to show any.
     public IPluginCanvasService Canvases { get; } = (IPluginCanvasService?)canvases ?? NoopPluginCanvasService.Instance;
 
+    // The identity of each session, of the space shown and of a project, once the host runs.
+    public IPluginIdentityService Identity { get; } = (IPluginIdentityService?)identities ?? NoopPluginIdentityService.Instance;
+
     private sealed class RunWorkspace(DesktopPluginUi ui) : IPluginWorkspaceService
     {
         public string? SelectedProjectId => PluginOrchestrationBridge.CurrentToolOperation?.ProjectId ?? ui.Scope?.ProjectId;
@@ -231,4 +234,50 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
             return !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
         }
     }
+}
+
+/// <summary>
+/// The identities the plugins of the window work under: the one of a session's space as the session attached with
+/// it, the one of the space the window shows, and the one of the space the new sessions of a project go to. Until
+/// the host is attached (while the plugins start), every work has the usual settings.
+/// </summary>
+internal sealed class DesktopPluginIdentities : IPluginIdentityService
+{
+    private Func<string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>>? _session;
+    private Func<string, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>>? _project;
+
+    /// <summary>Gives the identities of the host once it runs.</summary>
+    /// <param name="session">Gives the identity of a session, or of the space the window shows for null.</param>
+    /// <param name="project">Gives the identity of the space the new sessions of a project, by its folder, go to.</param>
+    internal void Attach(Func<string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>> session,
+        Func<string, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>> project)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(project);
+        Volatile.Write(ref _project, project);
+        Volatile.Write(ref _session, session);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<PluginIdentity> GetIdentityAsync(string? sessionId, CancellationToken cancellationToken)
+        => Volatile.Read(ref _session) is { } session ? ToPlugin(await session(sessionId, cancellationToken).ConfigureAwait(false)) : PluginIdentity.Usual;
+
+    /// <inheritdoc />
+    public async ValueTask<PluginIdentity> GetProjectIdentityAsync(string projectPath, CancellationToken cancellationToken)
+        => Volatile.Read(ref _project) is { } project && !string.IsNullOrWhiteSpace(projectPath)
+            ? ToPlugin(await project(projectPath, cancellationToken).ConfigureAwait(false))
+            : PluginIdentity.Usual;
+
+    // What a plugin is given: references only, as the space has them.
+    internal static PluginIdentity ToPlugin(CodeAlta.Orchestration.Runtime.SessionIdentity identity)
+        => identity.IsUsual
+            ? PluginIdentity.Usual with { SpaceId = identity.SpaceId }
+            : new PluginIdentity
+            {
+                SpaceId = identity.SpaceId,
+                Environment = identity.Environment,
+                JiraSite = identity.Identity?.Jira?.Site,
+                JiraEmail = identity.Identity?.Jira?.Email,
+                JiraTokenVariable = identity.Identity?.Jira?.TokenEnv,
+            };
 }

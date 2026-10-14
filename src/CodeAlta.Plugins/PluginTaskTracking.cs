@@ -309,6 +309,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
 
     public IPluginCanvasService Canvases { get; }
 
+    public IPluginIdentityService Identity => _inner.Identity;
+
     private sealed class PluginRuntimeAltaService(
         string pluginRuntimeKey,
         PluginScope scope,

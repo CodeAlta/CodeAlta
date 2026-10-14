@@ -254,13 +254,13 @@ internal sealed class JiraTracker : IIssueTracker
     private static readonly TrackedItemKind[] Issues = [TrackedItemKind.Issue];
     private readonly JiraSettings _settings;
     private readonly JiraClient _client;
-    private readonly Func<CancellationToken, ValueTask<(string? Problem, bool NeedsSignIn)>> _ready;
+    private readonly Func<CancellationToken, ValueTask<JiraAccountUse>> _ready;
 
     /// <summary>Creates the tracker.</summary>
     /// <param name="settings">The site and its projects.</param>
     /// <param name="client">The Jira of the CLI.</param>
-    /// <param name="ready">Makes the CLI ready and signed in for the site, or says why it is not.</param>
-    internal JiraTracker(JiraSettings settings, JiraClient client, Func<CancellationToken, ValueTask<(string? Problem, bool NeedsSignIn)>> ready)
+    /// <param name="ready">Holds the account of the CLI, ready and signed in for the site, or says why it is not.</param>
+    internal JiraTracker(JiraSettings settings, JiraClient client, Func<CancellationToken, ValueTask<JiraAccountUse>> ready)
         => (_settings, _client, _ready) = (settings, client, ready);
 
     /// <inheritdoc />
@@ -310,8 +310,8 @@ internal sealed class JiraTracker : IIssueTracker
     {
         ArgumentNullException.ThrowIfNull(query);
         if (query.Kind != TrackedItemKind.Issue || query.Filter == TrackedItemFilter.Merged) return new([]);
-        var (problem, needsSignIn) = await _ready(cancellationToken).ConfigureAwait(false);
-        if (problem is not null) return new([]) { Problem = problem, NeedsSignIn = needsSignIn };
+        using var use = await _ready(cancellationToken).ConfigureAwait(false);
+        if (use.Problem is { } problem) return new([]) { Problem = problem, NeedsSignIn = use.NeedsSignIn };
         var limit = Math.Clamp(query.Limit, 1, 100);
         // One project of several is asked alone; a key the settings do not name is not asked at all.
         IReadOnlyList<string> asked = _settings.Projects;
@@ -330,7 +330,8 @@ internal sealed class JiraTracker : IIssueTracker
     public async ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
     {
         if (kind != TrackedItemKind.Issue || !JiraClient.IsKey(id)) return null;
-        if ((await _ready(cancellationToken).ConfigureAwait(false)).Problem is not null) return null;
+        using var use = await _ready(cancellationToken).ConfigureAwait(false);
+        if (use.Problem is not null) return null;
         return (await _client.ViewAsync(_settings, id.ToUpperInvariant(), cancellationToken).ConfigureAwait(false)).Value;
     }
 }

@@ -13,6 +13,38 @@ namespace CodeAlta.Desktop.Tests;
 public sealed class DesktopPluginsTests
 {
     [TestMethod]
+    public async Task Identities_AreTheUsualOnesUntilTheHostRuns_ThenTheSpaceOfTheWork()
+    {
+        var identities = new DesktopPluginIdentities();
+        Assert.AreSame(PluginIdentity.Usual, await identities.GetIdentityAsync("session-1", default));
+
+        var business = new SpaceDescriptor
+        {
+            Id = "business",
+            Name = "Business",
+            Settings = new SpaceSettings(Identity: new SpaceIdentity(new SpaceGitIdentity(Email: "alex@contoso.example"), new SpaceGitHubIdentity("gh-contoso"),
+                new SpaceJiraIdentity("contoso.atlassian.net", "alex@contoso.example", "CONTOSO_JIRA_TOKEN"))),
+        };
+        var resolver = new CodeAlta.Orchestration.Runtime.SessionIdentityResolver(null);
+        var asked = new List<string?>();
+        identities.Attach((sessionId, _) =>
+        {
+            asked.Add(sessionId);
+            return Task.FromResult(resolver.Of(business));
+        }, (_, _) => Task.FromResult(resolver.Of(SpaceDescriptor.CreateDefault())));
+
+        var session = await identities.GetIdentityAsync("session-1", default);
+        Assert.AreEqual(("business", "contoso.atlassian.net", "alex@contoso.example", "CONTOSO_JIRA_TOKEN"), (session.SpaceId, session.JiraSite, session.JiraEmail, session.JiraTokenVariable));
+        Assert.AreEqual("gh-contoso", session.Environment.Get("GH_CONFIG_DIR"));
+        Assert.AreEqual("alex@contoso.example", session.Environment.Get("GIT_AUTHOR_EMAIL"));
+        await identities.GetIdentityAsync(null, default);
+        CollectionAssert.AreEqual(new string?[] { "session-1", null }, asked);
+
+        var project = await identities.GetProjectIdentityAsync("C:/repo", default);
+        Assert.AreEqual(("default", true), (project.SpaceId, project.Environment.IsEmpty), "A space without identity changes nothing.");
+    }
+
+    [TestMethod]
     public void BuiltIns_AreTheTerminalPluginsWithoutTheirTerminalPresentation()
     {
         // The ids are what [plugins.<id>] in the configuration names, in both frontends.

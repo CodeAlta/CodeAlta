@@ -183,6 +183,17 @@ public interface IIssueTrackerSource
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The trackers, or none when the plugin has nothing for this folder.</returns>
     ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finds the trackers of the project in a folder for the work of a session, which reads them under the identity of
+    /// its space (<see cref="IPluginServices.Identity"/>). A plugin without identities finds the same as without a session.
+    /// </summary>
+    /// <param name="projectPath">The folder of the project.</param>
+    /// <param name="sessionId">The session that reads them; null for the window.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The trackers, or none when the plugin has nothing for this folder.</returns>
+    ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, string? sessionId, CancellationToken cancellationToken)
+        => GetTrackersAsync(projectPath, cancellationToken);
 }
 
 /// <summary>What happened to an item of a tracker.</summary>

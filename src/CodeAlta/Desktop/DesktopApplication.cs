@@ -369,6 +369,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             using var scratchpadStartupStatus = startupScratchpadCleanup.Subscribe(startupStatus.SetScratchpadCleanup);
             var retentionProtection = DesktopSessionRetention.CreateProtection();
             var pluginUi = new DesktopPluginUi(retentionProtection);
+            var pluginIdentities = new DesktopPluginIdentities();
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             pluginUi.Modules = canvases?.Modules;
@@ -412,7 +413,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot)), PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
             }, CancellationToken.None));
@@ -609,7 +610,26 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The window then has the default space alone. */ }
                 editorView = new DesktopEditorView();
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
-                terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"));
+                // A plugin works for a session under the identity of its space, and for the window under the one shown.
+                pluginIdentities.Attach(
+                    (sessionId, token) => sessionId is null
+                        ? host.Identities.ResolveSpaceAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, token)
+                        : host.RuntimeService.GetSessionIdentityAsync(sessionId, token),
+                    async (projectPath, token) =>
+                    {
+                        var full = Path.GetFullPath(projectPath);
+                        var project = (await host.ProjectCatalog.LoadAsync(token).ConfigureAwait(false))
+                            .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.ProjectPath)
+                                && string.Equals(Path.GetFullPath(candidate.ProjectPath), full, StringComparison.OrdinalIgnoreCase));
+                        return await host.Identities.ResolveAsync(null, project?.Id, token).ConfigureAwait(false);
+                    });
+                terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"))
+                {
+                    // A terminal of the window has the identity of the space it shows; one a session opens, the session's.
+                    Identity = request => (request.Agent && request.SessionId is { } owner
+                        ? host.RuntimeService.GetSessionIdentityAsync(owner)
+                        : host.Identities.ResolveSpaceAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId)).GetAwaiter().GetResult().Environment,
+                };
                 shell.BusyTerminals = () => terminals.Busy;
                 // The definitions are shared with every instance; what ran is this instance's. The developer
                 // instance starts paused, so that it does not run again what the normal one already runs.
@@ -744,7 +764,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddIssuesService(new IssuesService(
                         () => [.. (pluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueTrackerSource>()],
                         host.ProjectCatalog, sessionStarter, epoch));
-                    gitIssues = new GitIssuesService(host.ProjectCatalog, epoch);
+                    gitIssues = new GitIssuesService(host.ProjectCatalog, epoch,
+                        async token => (await host.Identities.ResolveSpaceAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, token).ConfigureAwait(false)).Environment);
                     builder.AddGitIssuesService(gitIssues);
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);

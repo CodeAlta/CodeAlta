@@ -1,3 +1,4 @@
+using CodeAlta.Plugins.Abstractions;
 using Tomlyn;
 using Tomlyn.Model;
 using Tomlyn.Serialization;
@@ -23,7 +24,9 @@ namespace CodeAlta.Plugin.Jira;
 /// token_env = "JIRA_API_TOKEN"   # the environment variable that holds the token
 /// </code>
 /// Without <c>project</c>, the first key of <c>projects</c> is the one new issues go to.
-/// Jira is used by a project only: the table of the configuration of the user is not read.
+/// Jira is used by a project only: the table of the configuration of the user is not read. The identity of the space
+/// of the session gives the site, the email and the token variable the project does not write: what the project
+/// writes wins.
 /// </remarks>
 public sealed record JiraSettings(string Site, string Project)
 {
@@ -83,13 +86,19 @@ public sealed record JiraSettings(string Site, string Project)
     /// <summary>Reads what a project says of its Jira.</summary>
     /// <param name="projectPath">The folder of the project.</param>
     /// <returns>The settings; null when the project does not use Jira, or does not say which site and project.</returns>
-    public static JiraSettings? Read(string? projectPath)
+    public static JiraSettings? Read(string? projectPath) => Read(projectPath, null);
+
+    /// <summary>Reads what a project says of its Jira, completed by the identity of the space of the work.</summary>
+    /// <param name="projectPath">The folder of the project.</param>
+    /// <param name="identity">The identity of the space; null for none.</param>
+    /// <returns>The settings; null when the project does not use Jira, or no site and project are known.</returns>
+    public static JiraSettings? Read(string? projectPath, PluginIdentity? identity)
     {
         if (string.IsNullOrWhiteSpace(projectPath)) return null;
         try
         {
             var path = ConfigPath(projectPath);
-            return File.Exists(path) ? Parse(File.ReadAllText(path)) : null;
+            return File.Exists(path) ? Parse(File.ReadAllText(path), identity) : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -103,7 +112,16 @@ public sealed record JiraSettings(string Site, string Project)
     /// The settings; null when Jira is not enabled there, the site is missing or malformed, <c>project</c> is malformed,
     /// or no Jira project is named. A malformed key of <c>projects</c> is left out.
     /// </returns>
-    public static JiraSettings? Parse(string toml)
+    public static JiraSettings? Parse(string toml) => Parse(toml, null);
+
+    /// <summary>
+    /// Reads the settings from the text of a configuration file, completed by the identity of a space: its site, its
+    /// email and its token variable stand for the ones the file does not write.
+    /// </summary>
+    /// <param name="toml">The text of the file.</param>
+    /// <param name="identity">The identity of the space; null for none.</param>
+    /// <returns>The settings, as <see cref="Parse(string)"/> says; a site the file does not write is the one of the space.</returns>
+    public static JiraSettings? Parse(string toml, PluginIdentity? identity)
     {
         ArgumentNullException.ThrowIfNull(toml);
         TomlTable root;
@@ -112,11 +130,13 @@ public sealed record JiraSettings(string Site, string Project)
         if (!root.TryGetValue("plugins", out var plugins) || plugins is not TomlTable pluginTable
             || !pluginTable.TryGetValue("jira", out var jira) || jira is not TomlTable table) return null;
         if (table.TryGetValue("enabled", out var enabled) && enabled is false) return null;
-        if (NormalizeSite(Text(table, "site") ?? Text(table, "url")) is not { } site) return null;
+        // A site the project writes wrong is not replaced by the one of the space: the project says it uses another.
+        var written = Text(table, "site") ?? Text(table, "url");
+        if ((written is null ? NormalizeSite(identity?.JiraSite) : NormalizeSite(written)) is not { } site) return null;
         var projects = new List<string>();
-        if (Text(table, "project") is { } written)
+        if (Text(table, "project") is { } named)
         {
-            if (NormalizeProject(written) is not { } project) return null;
+            if (NormalizeProject(named) is not { } project) return null;
             projects.Add(project);
         }
 
@@ -128,7 +148,12 @@ public sealed record JiraSettings(string Site, string Project)
             }
         }
 
-        return projects.Count == 0 ? null : new(site, projects[0]) { Projects = projects, Email = Text(table, "email"), TokenVariable = Text(table, "token_env") };
+        return projects.Count == 0 ? null : new(site, projects[0])
+        {
+            Projects = projects,
+            Email = Text(table, "email") ?? Blank(identity?.JiraEmail),
+            TokenVariable = Text(table, "token_env") ?? Blank(identity?.JiraTokenVariable),
+        };
     }
 
     /// <summary>Reduces what a user writes for a site (an address, a host) to its host name.</summary>
@@ -156,6 +181,8 @@ public sealed record JiraSettings(string Site, string Project)
         var text = value?.Trim().ToUpperInvariant();
         return text is { Length: > 0 and <= 32 } && char.IsAsciiLetter(text[0]) && text.All(static character => char.IsAsciiLetterOrDigit(character) || character == '_') ? text : null;
     }
+
+    private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
     private static string? Text(TomlTable table, string key)
         => table.TryGetValue(key, out var value) && value is string text && !string.IsNullOrWhiteSpace(text) ? text.Trim() : null;

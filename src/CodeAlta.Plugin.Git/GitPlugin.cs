@@ -17,7 +17,7 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
     private readonly GitPluginBackend _backend;
     private IReadOnlyList<KeyValuePair<GitCliTool, GitCliCommand>> _clis = [];
     private HttpClient? _httpClient;
-    private GitIssueLookup? _lookup;
+    private GitIssueLookups? _lookups;
 
     /// <summary>Initializes a Git backend without prompt-editor presentation.</summary>
     public GitPlugin()
@@ -42,14 +42,26 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
     }
 
     /// <inheritdoc />
-    public async ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken)
-        => _lookup is { } lookup && await lookup.GetTrackerAsync(projectPath, cancellationToken).ConfigureAwait(false) is { } tracker ? [tracker] : [];
+    public ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken)
+        => GetTrackersAsync(projectPath, null, cancellationToken);
+
+    /// <summary>
+    /// Finds the tracker of the project in a folder, read with the GitHub profile of the session, or of the space the
+    /// window shows when no session asks.
+    /// </summary>
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, string? sessionId, CancellationToken cancellationToken)
+    {
+        if (_lookups is not { } lookups) return [];
+        var lookup = lookups.For((await IdentityAsync(sessionId, cancellationToken).ConfigureAwait(false)).Environment);
+        return await lookup.GetTrackerAsync(projectPath, cancellationToken).ConfigureAwait(false) is { } tracker ? [tracker] : [];
+    }
 
     /// <inheritdoc />
     public override async ValueTask InitializeAsync(CancellationToken cancellationToken = default)
     {
         _httpClient = _backend.CreateHttpClient();
-        _lookup = new GitIssueLookup(_httpClient, _backend.LookupOptions);
+        _lookups = new GitIssueLookups(_httpClient, _backend.LookupOptions, _backend.Credentials);
         var clis = new List<KeyValuePair<GitCliTool, GitCliCommand>>(GitCliTool.All.Count);
         foreach (var tool in GitCliTool.All)
         {
@@ -79,8 +91,8 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The repository, or <see langword="null" /> when the project has no remote of a supported provider.</returns>
     public ValueTask<GitRepositoryReference?> ResolveIssueRepositoryAsync(string? projectPath, CancellationToken cancellationToken = default)
-        => _lookup is { } lookup
-            ? lookup.ResolveRepositoryAsync(ResolveProjectPath(projectPath), cancellationToken)
+        => _lookups is { } lookups
+            ? lookups.Usual.ResolveRepositoryAsync(ResolveProjectPath(projectPath), cancellationToken)
             : GitIssueLookup.DetectRepositoryAsync(ResolveProjectPath(projectPath), cancellationToken);
 
     /// <summary>
@@ -93,10 +105,13 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
     /// <returns>Issue references, or <see langword="null" /> when the project has no remote of a supported provider.</returns>
     public async ValueTask<IReadOnlyList<GitIssueReferenceItem>?> QueryIssueReferencesAsync(string? projectPath, string queryText, int maximumResults, CancellationToken cancellationToken = default)
     {
-        if (_lookup is not { } lookup)
+        if (_lookups is null)
         {
             return null;
         }
+
+        // The issues are read with the GitHub profile of what the window shows.
+        var lookup = _lookups.For((await IdentityAsync(null, cancellationToken).ConfigureAwait(false)).Environment);
 
         var repository = await lookup.ResolveRepositoryAsync(ResolveProjectPath(projectPath), cancellationToken).ConfigureAwait(false);
         if (repository is null)
@@ -151,7 +166,7 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
     /// <inheritdoc />
     public override ValueTask DisposeAsync()
     {
-        _lookup = null;
+        _lookups = null;
         _httpClient?.Dispose();
         _httpClient = null;
         return ValueTask.CompletedTask;
@@ -174,7 +189,9 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
             return Failure($"The {tool.Name} workingDirectory must be inside the selected project.");
         }
 
-        var result = await GitCommandLine.RunAsync(command, arguments, cwd, timeout, cancellationToken).ConfigureAwait(false);
+        // The CLI runs as the session's own commands do: `gh` with the GitHub profile of its space.
+        var identity = await IdentityAsync(invocation.SessionId, cancellationToken).ConfigureAwait(false);
+        var result = await GitCommandLine.RunAsync(command, arguments, cwd, timeout, cancellationToken, identity.Environment).ConfigureAwait(false);
         var output = new StringBuilder();
         output.AppendLine(FormattableString.Invariant($"exit_code: {result.ExitCode}"));
         output.AppendLine(FormattableString.Invariant($"working_directory: {result.WorkingDirectory}"));
@@ -189,8 +206,8 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
     {
         try
         {
-            if (_lookup is not { } lookup ||
-                await lookup.ResolveRepositoryAsync(ResolveProjectPath(Services.Workspace.SelectedProjectPath), cancellationToken).ConfigureAwait(false) is not { } repository)
+            if (_lookups is not { } lookups ||
+                await lookups.Usual.ResolveRepositoryAsync(ResolveProjectPath(Services.Workspace.SelectedProjectPath), cancellationToken).ConfigureAwait(false) is not { } repository)
             {
                 return;
             }
@@ -221,6 +238,15 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
         {
             Logger.Warn(ex, "Failed to check the provider CLI of the current project.");
         }
+    }
+
+    // The identity of the work of a session, or of the window; the usual one for a plugin that runs outside a host.
+    private async ValueTask<PluginIdentity> IdentityAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        IPluginIdentityService identities;
+        try { identities = Services.Identity; }
+        catch (InvalidOperationException) { return PluginIdentity.Usual; }
+        return await identities.GetIdentityAsync(string.IsNullOrWhiteSpace(sessionId) ? null : sessionId, cancellationToken).ConfigureAwait(false);
     }
 
     private static JsonElement CreateToolSchema(GitCliTool tool)
@@ -331,12 +357,15 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
 /// <param name="LocateCli">Finds a provider CLI by its bare name, or returns null when it is not installed.</param>
 /// <param name="CreateHttpClient">Creates the client the plugin owns for the provider REST requests.</param>
 /// <param name="LookupOptions">The cache, git, host and credential behavior of the issue lookup.</param>
-internal sealed record GitPluginBackend(Func<string, GitCliCommand?> LocateCli, Func<HttpClient> CreateHttpClient, GitIssueLookupOptions LookupOptions)
+/// <param name="Credentials">Finds credentials in the environment of a GitHub profile; null to use those of <paramref name="LookupOptions"/> for all.</param>
+internal sealed record GitPluginBackend(Func<string, GitCliCommand?> LocateCli, Func<HttpClient> CreateHttpClient, GitIssueLookupOptions LookupOptions,
+    Func<GitRepositoryReference, AgentProcessEnvironment?, CancellationToken, ValueTask<GitRemoteCredential?>>? Credentials = null)
 {
     public static GitPluginBackend Default { get; } = new(
         GitCliLocator.Find,
         GitIssueLookup.CreateHttpClient,
-        new GitIssueLookupOptions { CredentialProvider = GitIssueLookup.ResolveCredentialAsync });
+        new GitIssueLookupOptions { CredentialProvider = GitIssueLookup.ResolveCredentialAsync },
+        GitIssueLookup.ResolveCredentialAsync);
 }
 
 /// <summary>A provider CLI offered to agents as a tool of the same name.</summary>

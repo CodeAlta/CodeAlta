@@ -85,6 +85,12 @@ internal sealed class DesktopTerminals
         (_version, _profiles, _start, _time, _scripts) = (version, profiles, start, time, scripts);
     }
 
+    /// <summary>
+    /// Gets or initializes what gives the program of a terminal the identity it works under (the Git author and the
+    /// GitHub profile of a space), over the environment of the application; null for none.
+    /// </summary>
+    internal Func<TerminalRequest, CodeAlta.Agent.AgentProcessEnvironment?>? Identity { get; init; }
+
     /// <summary>The command interpreters a terminal can start, the default one first.</summary>
     public IReadOnlyList<TerminalProfile> Profiles => _profiles.List();
 
@@ -132,6 +138,7 @@ internal sealed class DesktopTerminals
         try
         {
             var environment = TerminalEnvironment.Create(id, _version);
+            foreach (var (name, value) in Identity?.Invoke(request)?.Variables ?? []) environment[name] = value;
             var arguments = profile.Arguments;
             if (request.Integration)
             {

@@ -317,6 +317,42 @@ public sealed class GitPluginTests
         }
     }
 
+    [TestMethod]
+    public async Task TheGitHubProfileOfTheSession_ReachesTheGhToolAndTheIssueLookup()
+    {
+        using var tempDirectory = TempDirectory.CreateRepository("https://github.com/org/repo.git");
+        var identities = new FakeIdentities(new AgentProcessEnvironment([new("GH_CONFIG_DIR", "gh-contoso")]));
+        var credentials = new List<string?>();
+        // A fake gh: a shell that prints the profile it was given.
+        var echo = OperatingSystem.IsWindows()
+            ? new GitCliCommand(CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.GetWindowsShellFileNameForCurrentProcess(), ["-NoProfile", "-Command", "Write-Output \"[$env:GH_CONFIG_DIR]\" #"])
+            : new GitCliCommand("/bin/sh", ["-c", "echo \"[$GH_CONFIG_DIR]\""]);
+        await using var plugin = await CreateInitializedPluginAsync(new FakeIssueHandler("[]"), name => name == "gh" ? echo : null, identities,
+            (_, environment, _) =>
+            {
+                lock (credentials) credentials.Add(environment?.Get("GH_CONFIG_DIR"));
+                return ValueTask.FromResult<GitRemoteCredential?>(GitRemoteCredential.Bearer("token"));
+            });
+        var previousCurrentDirectory = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = tempDirectory.Path;
+            var tool = plugin.GetAgentTools().Single(contribution => contribution.Definition.Spec.Name == "gh").Definition;
+            var ran = await InvokeAsync(tool, """{ "arguments": ["api"] }""");
+            StringAssert.Contains(Assert.IsInstanceOfType<AgentToolResultItem.Text>(ran.Items.Single()).Value, "[gh-contoso]");
+        }
+        finally
+        {
+            Environment.CurrentDirectory = previousCurrentDirectory;
+        }
+
+        Assert.IsNotNull(await plugin.QueryIssueReferencesAsync(tempDirectory.Path, string.Empty, 10, CancellationToken.None));
+        Assert.AreEqual(1, (await plugin.GetTrackersAsync(tempDirectory.Path, "session-b", CancellationToken.None)).Count);
+
+        CollectionAssert.AreEqual(new[] { "gh-contoso" }, credentials, "The issues are read with the token of that profile.");
+        CollectionAssert.AreEqual(new string?[] { "session", null, "session-b" }, identities.Asked);
+    }
+
     private static Task<AgentToolResult> InvokeAsync(AgentToolDefinition tool, string json)
     {
         using var document = JsonDocument.Parse(json);
@@ -324,10 +360,13 @@ public sealed class GitPluginTests
     }
 
     /// <summary>Creates a plugin over a literal handler and CLI locator, attached to no-op host services and initialized.</summary>
-    private static async Task<GitPlugin> CreateInitializedPluginAsync(HttpMessageHandler handler, Func<string, GitCliCommand?>? locateCli = null)
+    private static async Task<GitPlugin> CreateInitializedPluginAsync(HttpMessageHandler handler, Func<string, GitCliCommand?>? locateCli = null,
+        IPluginIdentityService? identities = null,
+        Func<GitRepositoryReference, AgentProcessEnvironment?, CancellationToken, ValueTask<GitRemoteCredential?>>? credentials = null)
     {
-        var plugin = new GitPlugin(null, new GitPluginBackend(locateCli ?? (static _ => null), () => new HttpClient(handler), new GitIssueLookupOptions { GitLabHosts = [] }));
-        var services = NoopPluginServices.Create();
+        var plugin = new GitPlugin(null, new GitPluginBackend(locateCli ?? (static _ => null), () => new HttpClient(handler), new GitIssueLookupOptions { GitLabHosts = [] }, credentials));
+        var noop = NoopPluginServices.Create();
+        IPluginServices services = identities is null ? noop : new IdentityServices(noop, identities);
         plugin.AttachRuntimeContext(new PluginRuntimeContext
         {
             Plugin = PluginDescriptorFactory.FromType(typeof(GitPlugin)),
@@ -474,6 +513,35 @@ public sealed class GitPluginTests
                 Content = new StringContent(responseJson),
             });
         }
+    }
+
+    // Gives every session, and the window, the same identity, and remembers who asked.
+    private sealed class FakeIdentities(AgentProcessEnvironment environment) : IPluginIdentityService
+    {
+        public List<string?> Asked { get; } = [];
+
+        public ValueTask<PluginIdentity> GetIdentityAsync(string? sessionId, CancellationToken cancellationToken)
+        {
+            lock (Asked) Asked.Add(sessionId);
+            return ValueTask.FromResult(new PluginIdentity { SpaceId = "business", Environment = environment });
+        }
+
+        public ValueTask<PluginIdentity> GetProjectIdentityAsync(string projectPath, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new PluginIdentity { SpaceId = "business", Environment = environment });
+    }
+
+    private sealed class IdentityServices(IPluginServices inner, IPluginIdentityService identity) : IPluginServices
+    {
+        public XenoAtom.Logging.Logger Logger => inner.Logger;
+        public IPluginUiService Ui => inner.Ui;
+        public IPluginStateStore State => inner.State;
+        public IPluginWorkspaceService Workspace => inner.Workspace;
+        public IPluginSessionService Sessions => inner.Sessions;
+        public IPluginPromptService Prompts => inner.Prompts;
+        public IPluginAgentService Agents => inner.Agents;
+        public IPluginTaskService Tasks => inner.Tasks;
+        public IPluginAltaService Alta => inner.Alta;
+        public IPluginIdentityService Identity => identity;
     }
 
     private sealed class FakeIssueHandler(string responseJson) : HttpMessageHandler
