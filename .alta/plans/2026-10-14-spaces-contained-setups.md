@@ -233,7 +233,7 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
 - [ ] 8. **F — Tool exclusion** (`alta/disabled-tools`, #130), after B merges, since both touch agent prompts.
 - [ ] 9. **Docs** in each workstream: `doc/desktop.md`, `doc/catalog-and-config.md`, `doc/live-tool.md`, `doc/providers.md`, `doc/mcp.md`, `doc/skills.md`, `doc/statistics.md`, `site/docs/spaces.md` (rewritten around "a space is a setup"), `site/docs/model-providers.md`, `troubleshooting.md`, the built-in plugin skill, `readme.md`.
 - [ ] 10. **Final UX pass** (one session, after everything merges): the whole space journey on a fresh isolated profile, both themes, the narrow window; retake the spaces pictures of the site with the recipe of the site screenshots.
-- [ ] 11. Close #130–#134 and #136 with a comment each; push `main` to origin; watch CI until it is green.
+- [ ] 11. Close #130–#134, #136 and #137–#142 with a comment each; push `main` to origin; watch CI until it is green.
 
 ### Discovered tasks
 
@@ -242,6 +242,10 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
 - [ ] 13. **I — Test stability** (after the spaces workstreams, to avoid conflicts): the pending tasks under `.alta/tasks/` about flaky tests, so that 1.9.0 ships with a quiet suite:
   - `2026-10-14-fix-the-landing-card-invalidation-test-racing-its-event-watc-n8jp` (found by G: the fixture registers its watcher on a `Task.Run`, the event is dropped);
   - `2026-10-10-stabilize-orchestration-lifecycle-tests-under-full-suite-loa-thb2`, `2026-10-13-find-why-orchestration-tests-time-out-when-the-whole-net-sui-6zqz`, `2026-10-13-stabilize-the-system-prompt-dialog-browser-test-under-load-9k4x` (failed again once under load during A1), and the canvas plugin reload test (`CanvasRpcSourcePluginTests…FollowsAReloadOfItsPlugin`, `not_watching` under load, task proposed by E).
+- [ ] 15. **New 1.9.0 issues** (added to the milestone on 2026-10-14 evening), grouped to limit conflicts:
+  - **A3 — #141** chat deletion and hidden descendants (session A after A2, since it owns listing across spaces): from the warning and the parent's menu, **View child sessions** across projects and spaces (hierarchy, counts, scope, status, navigation, parent backlinks); explicit parent-only semantics; **Delete session and all descendants** with a preview and its own confirmation; active descendants handled; tests.
+  - **K1 — #138, #140, #142** shell fixes (one session, after E's UI check frees capacity): Ctrl+Tab / Ctrl+Shift+Tab cycle every workspace tab with predictable direction and wrapping from any focus, without creating tabs, and the code editor's own file tabs keep precedence when it has focus; the activity rail stays reachable at the minimum and collapsed sidebar widths (responsive or an overflow button, Settings always visible); Ctrl+Shift+N really hides and shows the Notes, and the collapsed tab drags to the left edge (bounds of the visible tab). Browser tests for each.
+  - **K2 — #137, #139** reading fixes (after A2 merges, since #139 touches the Explorer rows): Ctrl+F / Cmd+F in the Documentation tab opens a find box for the current page (highlights, count, next/previous, Esc), `/` keeps the guide search; full text of truncated session titles and Settings navigation labels on hover and keyboard focus (the hidden `.session-tooltip` in the IDE shell, labels in French). Browser tests.
 - [ ] 14. **J — Other pending tasks** worth 1.9.0, triaged after I: `2026-10-13-send-the-queued-prompts-of-a-session-whose-tab-was-closed-or-xgjx`, `2026-10-13-remove-the-pane-owners-of-sessions-that-no-longer-have-a-pan-fm5t`, `2026-10-11-handle-unavailable-codex-defaults-when-the-live-catalog-chan-p9zh`, `2026-10-11-allow-provider-refresh-after-synchronous-initialization-qbpw`, `2026-10-10-fix-the-native-split-right-crash-in-narrow-panes-6xsd`, and the doc corrections of 2026-10-10.
 
 ### How the work is run
