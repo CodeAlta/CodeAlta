@@ -218,7 +218,7 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
 - [x] 1. **G — Quick items**: PR #127 fixes on the contributor branch, squash-merge (this session); culture fix of the tests (child session). #117 stays open until you have checked a dictation in French (no question is asked: the user is away).
   - PR #127 merged as `4b6480ba` after CI (the fork run needed approval); #103 closed.
   - Culture fix merged as `baed80cd`: `SR` reads `DefaultThreadCurrentUICulture` before `InstalledUICulture`, every test project sets en-US; full suite 0 failures normally and with German simulated (108 failures reproduced before the fix).
-- [ ] 2. **A1 — Space foundation** (`alta/spaces-core`):
+- [x] 2. **A1 — Space foundation** (`alta/spaces-core`), merged as `4e3963b4`..`fcc1939e` (UI check done with A2). Work items, issues and guide questions take the shown space; TUI sessions write no space:
   - `space_id` in header, cache, descriptors and RPC; inheritance rules; `alta session create --space` and the own-space rule; Runtime Context line.
   - `SpaceScope` and the reader/writer of `spaces` in `config.toml` for all kinds.
   - The new fields of the space file (`new_sessions`, `identity`, `tools`, `tiers`), parsed and validated but not yet used.
