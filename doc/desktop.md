@@ -536,6 +536,11 @@ lays the rows out in a browser and checks where the buttons are in both cases. I
 what they stand for: a project is a folder, open or closed (an archive box once archived), a session a
 robot head, a session started by another one an arrow under its parent, a session started by an
 automation a bolt, and the chats two speech bubbles.
+A session title the width of the Explorer cuts is shown whole in a tip under its row, while the pointer
+rests on the row or the keyboard is on it (`OverflowTip`, one tip for every row, drawn in a portal so the
+panel does not clip it, and only for a title that is cut). The tip is not read by a screen reader: the row
+keeps its whole title and what it says besides (`aria-describedby`); the native `title` of the row is put
+aside while the tip is shown.
 **Rename project…** and a session's **Rename…** open a small popover beside the row, with the current
 name selected: Enter or **Rename** saves it; Escape, **Cancel** or a click elsewhere leaves the name
 as it is. A rename that is refused says why under the field. A session keeps the name it was created
@@ -2154,6 +2159,9 @@ packages. The script refuses a file that holds anything but a drawing.
 
 Settings still opens on Appearance. The Personalization group lists Appearance, General and Spaces in
 that order. This organization changes no preference keys, defaults or state owners.
+A page name longer than the navigation (200 px) goes on a second line, broken between its words; one longer
+still, or a word wider than the navigation (a narrow window), is cut with an ellipsis and shown whole by the
+same tip as the session titles of the Explorer, drawn in the window of Settings.
 
 ### General
 

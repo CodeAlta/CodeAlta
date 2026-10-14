@@ -135,6 +135,7 @@ import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, 
 import { batchDeleteCandidate, createSessionBatchDeletion } from "./sessionBatchDeletion";
 import type { BatchDeleteControls } from "./SessionBatchDeletePanel";
 import { ConfirmPopover } from "./ConfirmPopover";
+import { OverflowTip } from "./OverflowTip";
 import { RenamePopover } from "./RenamePopover";
 import { createProjectRename, projectNameVisible, projectRenameMessage, projectRenameSelectionCurrent, type ProjectNameTarget } from "./projectRename";
 import { sessionHierarchy } from "./sessionHierarchy";
@@ -3804,6 +3805,7 @@ function App() {
           {projectRenameLocked && <button type="button" className="quiet-button" onClick={() => void refreshProjectRename()}>{t("Refresh project name (no retry)")}</button>}
           <SpaceActivityBar spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} calls={calls}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onOpen={(id, session) => void openSpaceSession(id, session)} />
+          <OverflowTip within={projectRail} target=".session-row > button:first-child" label=".session-title" />
         </aside>; }}
           splitter={<PaneSplitter className="session-splitter" label={t("Resize Explorer")} value={ideWidth.width} hidden={narrow || !railVisible}
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
@@ -3854,7 +3856,7 @@ function App() {
                   openSessionMenu(session.id, event.currentTarget.querySelector<HTMLButtonElement>(".session-actions-trigger"));
                 }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-expanded={twist && !twist.collapsed} aria-describedby={`session-tooltip-${index}`} title={tooltip}
-                style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
+                data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
                 onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}
                 onDoubleClick={() => keepSession(projectId, session)}>
                 <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{sessionMarks(session, projectId)}
@@ -4233,6 +4235,7 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
 }) {
   const { t } = useShellLanguage();
   const composingEscape = useRef(false);
+  const navigation = useRef<HTMLElement>(null);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
     ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["speech", "Speech", "mic"], ["spaces", "Spaces", "space"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
@@ -4254,12 +4257,13 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
     <div className="settings-dialog-body">
-      <nav className="settings-dialog-navigation" aria-label={t("Settings pages")}>
+      <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation}>
         {destinations.map(([group, pages]) => <div className="settings-dialog-group" key={group}>
           <h3>{t(group)}</h3>
           {pages.map(([value, label, icon]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
             data-settings-section={value} onClick={() => onSection(value)}><AppIcon name={icon} size={16} /><span>{t(label)}</span></button>)}
         </div>)}
+        <OverflowTip within={navigation} target=".settings-dialog-navigation button" label=":scope > span" />
       </nav>
       <div className="settings-dialog-content" key={section}>{children}</div>
     </div>

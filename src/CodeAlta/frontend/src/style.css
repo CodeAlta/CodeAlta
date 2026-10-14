@@ -755,6 +755,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .session-actions-trigger:hover:not(:disabled), .ide-shell .session-actions-trigger[aria-expanded="true"] { border-color: var(--line-strong); background: var(--panel-3); color: var(--text); }
 .ide-shell .session-row:hover > .session-actions-trigger, .ide-shell .session-row:focus-within > .session-actions-trigger,
 .ide-shell .session-row > .session-actions-trigger[aria-expanded="true"] { opacity: 1; }
+/* What a row says besides its title is for a screen reader; a title the row cuts is shown whole by the OverflowTip. */
 .ide-shell .session-tooltip { display: none; }
 .ide-shell .notes-pane { flex-shrink: 0; min-height: 80px; border-top: 1px solid var(--line); margin-top: auto; }
 .ide-shell .composer-toolbar { flex-wrap: wrap; gap: 4px; }
@@ -1389,7 +1390,13 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-dialog-navigation button { display: flex; align-items: center; gap: 9px; }
 .settings-dialog-navigation button > svg { flex: 0 0 auto; color: var(--muted); }
 .settings-dialog-navigation button[aria-current="page"] > svg { color: var(--accent); }
-.settings-dialog-navigation button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A long name (in French, German…) goes on a second line, between its words; one longer still, or a word wider than
+   the navigation, is cut, and shown whole by its tip. */
+.settings-dialog-navigation button > span { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; overflow-wrap: normal; text-overflow: ellipsis; }
+
+/* The whole text of a label its place cuts (OverflowTip), over the panel that cuts it. */
+.overflow-tip { position: fixed; z-index: 40; box-sizing: border-box; width: max-content; padding: 6px 9px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel-3); color: var(--text);
+  box-shadow: var(--shadow); font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; pointer-events: none; }
 
 /* Editable settings pages (MCP servers, agent prompts, skills, plugins): heading with actions, then
    either a master list with an edit form, or one list of rows with switches. */

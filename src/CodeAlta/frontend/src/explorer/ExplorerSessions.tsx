@@ -1,6 +1,6 @@
 import { SubAgentBadge } from "../SessionReference";
 import type { WorkspaceSession } from "#neoastra";
-import { useContext, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useContext, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { ProviderBrandsContext, ProviderIcon, useProviderBrand } from "../ProviderIcon";
@@ -108,11 +108,13 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   const { t } = useShellLanguage();
   const brands = useContext(ProviderBrandsContext);
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
+  // What a row says besides its title (whose session started it, what is wrong with it), for a screen reader.
+  const tipId = useId();
   const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
   // One menu is open at a time: its row is what plugins are asked about, whatever project and session are selected.
   const pluginEntries = usePluginMenuEntries("SessionMenu", menu ? { projectId, sessionId: menu.id } : null);
   return <div className="session-rail"><div className="session-list">
-    {entries.map(entry => {
+    {entries.map((entry, index) => {
       if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
         onMore={() => tree.more(entry.parentId)} onFewer={() => tree.fewer(entry.parentId)} />;
       const { session, depth, diagnostic, tooltip, subAgents } = entry.row;
@@ -137,10 +139,11 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           event.preventDefault(); event.stopPropagation();
           show(session.id, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
         }}>
-        <button type="button" aria-pressed={false} aria-expanded={twist && !twist.collapsed} title={tooltip} style={{ paddingLeft: sessionRowIndent(depth) }}
+        <button type="button" aria-pressed={false} aria-expanded={twist && !twist.collapsed} aria-describedby={`${tipId}-${index}`} title={tooltip} data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }}
           onClick={() => onAction(session, "open")} onDoubleClick={() => onKeep?.(session)} onKeyDown={event => sessionTwistKey(event, twist)}>
           <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} />{marks(session)}
         </button>
+        <span id={`${tipId}-${index}`} role="tooltip" className="session-tooltip">{tooltip}</span>
         <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for {title} (ID: {id})", { title: session.title, id: session.id })}
           aria-haspopup="menu" aria-expanded={!!shown} onClick={event => show(session.id, event.currentTarget)}><AppIcon name="ellipsis" size={16} /></button>
         {shown && allowed && <SessionTabMenu anchor={shown.anchor} container={document.body} title={t("Session actions for {title}", { title: session.title })}
