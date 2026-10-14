@@ -74,6 +74,7 @@ Both apps edit the same providers and share the same credentials, so a provider 
 - in CodeAlta Desktop, **Add provider** lists the built-in providers you do not have yet: choose one to add it with its key and type, or **Custom provider…** for an entry of your own;
 - in CodeAlta Desktop, choose the **Icon** of a provider among the brand logos and the general icons, and its **Icon color**;
 - in CodeAlta Desktop, **Duplicate** a provider to add another account of the same type, and for Claude Code set its **Account folder**, download the tested Claude Code CLI and copy the command that signs in (see [Claude Code](#claude-code));
+- in CodeAlta Desktop, choose the **Spaces** of a provider with the chip on its row or in its form: its sessions are in those spaces only (see [Providers of a space](spaces.md#providers-of-a-space));
 - validate provider keys, endpoint URLs, required credentials, and conflicting settings;
 - store an API key directly or refer to an environment variable;
 - list and choose a provider model on demand when the Model field is not using its default;

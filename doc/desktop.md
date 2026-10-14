@@ -2396,10 +2396,10 @@ space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSetti
   - **General** (`SpaceGeneral`): name, icon, color and "What it is for", each saved when it changes;
   - **Projects** (`SpaceProjects` in the same file): the checklist of every project, with a search above
     eight; the Default space says that every project is in it;
-  - **Available here** (`SpaceAvailable`): tabs MCP Servers, Skills, Agent prompts and Plugins (the
-    providers get theirs with their own spaces), each with a count of what is in the space. It lists the
-    resources of the user through the list RPC of each page with no project (a resource of a project
-    follows its project and is not listed), a row each with its logo, its name, its source tag, the chip of
+  - **Available here** (`SpaceAvailable`): tabs Providers, MCP Servers, Skills, Agent prompts and Plugins,
+    each with a count of what is in the space; Providers is the first one shown. It lists the
+    resources of the user through the list RPC of each page with no project, `globalConfig.providers` for the
+    providers (a resource of a project follows its project and is not listed), a row each with its logo, its name, its source tag, the chip of
     its spaces and a switch "Available in <space>". Turning it on writes `SpaceScope.With`. Turning off a
     resource of every space, or one that would be in no space (`spacesWithout` returns null), opens a
     popover beside the switch: the first says the other spaces keep it and a new space will not get it
@@ -2502,6 +2502,10 @@ whose cause is one of a fixed list (`reason` of the `probe` response: `claude-co
 `claude-code-not-found`, `claude-code-unavailable`) shows the page's own text for it, which says what to do. An abandoned
 probe is still joined by the host before disposal; do not assume its outcome from a timed-out
 browser request. Catalog-only mode lists saved descriptors read-only without runtime tests.
+While the catalog has a space besides Default, each row and the form of a saved provider show the chip
+of its spaces (`ResourceSpaceChip`, kind `provider`): a click saves at once through
+`spaces.assignResource`, and a save of the provider reads the assignments again, since a rename keeps
+its spaces under the new key.
 When the application starts without any enabled model provider, which is how a new profile starts,
 Settings opens on **Providers**, as the TUI opens its Model Providers dialog. The
 first time, a **setup guide** runs over the page in three stops, each lighting the control it is

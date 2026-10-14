@@ -73,7 +73,7 @@ Click the name of a space, or its card, to open the page of that space. **Spaces
 
 - **General**: its name, its icon, its color and **What it is for**;
 - **Projects**: a checklist of all the projects, to tick the ones the space holds;
-- **Available here**: the MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has));
+- **Available here**: the providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has));
 - **New sessions**: the agent prompt its new sessions start with;
 - **Show**, to show that space in the window, and **Delete**, which asks before it deletes the space.
 
@@ -98,11 +98,11 @@ Deleting a space leaves its projects, their folders and their sessions alone. Th
 
 ## What a space has
 
-Each session belongs to one space. It uses the MCP servers, skills, agent prompts and plugins of that space, whatever space the window shows. A Business session keeps the tools of Business when you switch to Personal.
+Each session belongs to one space. It uses the providers, MCP servers, skills, agent prompts and plugins of that space, whatever space the window shows. A Business session keeps the tools of Business when you switch to Personal.
 
 A resource is in every space until you choose its spaces. Choose them in either place:
 
-- on its page of Settings (**MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip on its row shows its spaces, or **All spaces**. Click it to pick **All spaces** or some spaces, Default among them;
+- on its page of Settings (**Providers**, **MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip on its row shows its spaces, or **All spaces**. Click it to pick **All spaces** or some spaces, Default among them. The form of a provider has the same chip, under **Spaces**;
 - on the page of a space, in **Available here**: one tab per kind, with a switch per resource. Turn it off to take the resource out of this space. For a resource of every space, a small popover asks first: the other spaces keep it, and a space you create later will not get it.
 
 When a resource would be left in no space, the popover offers to turn it off instead.
@@ -121,6 +121,14 @@ What a session cannot use in its space:
 - is dropped from the session when you take it out of the space: an MCP server it activated is gone at its next turn.
 
 An agent also forks and sends prompts only to sessions of its own space. You reach every session.
+
+### Providers of a space
+
+A space can have its own provider: a Claude Code account for Business and another one for Personal, for example (see [several accounts](model-providers.md#claude-code)).
+
+- A new session, a task or an issue you start, and an automation run start with a provider of their space: the default provider when it is in the space, else the first provider of the space. The provider chooser of a new session lists the providers of the space the window shows.
+- A provider of another space is refused, also when an agent asks for it with `alta session create`.
+- A session whose provider you take out of its space sends nothing more: its status line says why and the provider chooser opens, to pick a provider of the space. A run that fails does not fall back to a provider of another space.
 
 A resource of a project (in its `.alta` folder) follows its project, which is already in its spaces. A project cannot bring into a space what the space does not have: a skill or an MCP server assigned to Business stays out of Personal, also when a project of Personal defines one with the same name.
 
@@ -229,9 +237,14 @@ spaces: [work, open-source]
 
 A project that is only in the Default space has no `spaces` line. An id that no space has is ignored.
 
-The spaces of the MCP servers, skills, agent prompts and plugins are in `~/.alta/config.toml`, beside their settings. A resource without a `spaces` list is in every space:
+The spaces of the providers, MCP servers, skills, agent prompts and plugins are in `~/.alta/config.toml`, beside their settings. A resource without a `spaces` list is in every space:
 
 ```toml
+[providers.claude-business]
+type = "claude-code"
+config_dir = "~/.claude-business"
+spaces = ["business"]
+
 [plugins.mcp.servers.atlassian]
 spaces = ["business"]
 
