@@ -185,7 +185,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         _reviewPermissions = reviewPermissions;
         _enableUserInput = enableUserInput;
         Asks = new OwnedSessionAskService(enableAsks, (request, context) => AdmitSendCore(request, context, CancellationToken.None));
+        Fallback = new SessionFallbackCoordinator(this, runtime);
+        runtime.RunFailureFallback = Fallback.TryClaim;
     }
+
+    /// <summary>Gets what goes on with the next model of a session's tier when a run fails on its provider.</summary>
+    internal SessionFallbackCoordinator Fallback { get; }
 
     /// <summary>Gets the command-owned restricted ask service, disabled unless explicitly configured.</summary>
     public OwnedSessionAskService Asks { get; }
@@ -1216,6 +1221,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             // Stops any folder traversal still feeding the reference index; it completes synchronously.
             _ = _indexedReferences?.DisposeAsync().AsTask();
         }
+        // A fallback that waits stops waiting and lets its failure through.
+        _ = Fallback.CloseAsync();
         // Release every control before joining any of them. No cancellation callback runs under _gate.
         try { Asks.CloseAdmission(); }
         catch (Exception failure)

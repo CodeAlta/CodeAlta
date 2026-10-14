@@ -22,6 +22,11 @@ public sealed partial class SessionRuntimeService
         }, CancellationToken.None).AsTask(), CancellationToken.None);
 
     internal Task<string> SelectOwnedProviderAsync(OwnedProviderSelectionContext expected, string providerKey)
+        => SelectOwnedProviderAsync(expected, providerKey, carryOver: null);
+
+    // carryOver: what the session takes on the provider (a fallback), instead of the provider's defaults.
+    internal Task<string> SelectOwnedProviderAsync(OwnedProviderSelectionContext expected, string providerKey,
+        Catalog.SessionViewProviderCarryOver? carryOver)
         => AdmitAsync(async () =>
         {
             var actor = GetActorForWork(expected.SessionId);
@@ -44,7 +49,7 @@ public sealed partial class SessionRuntimeService
                 if (target.ProviderId.Value == session.ResolvedProviderKey) return "ok";
                 if (entry?.PendingAgentPromptId is not null) return "pending_selection";
                 // The original attachment stays intact through preparation and the atomic durable decision.
-                await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, token).ConfigureAwait(false);
+                await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, carryOver, token).ConfigureAwait(false);
                 if (entry is not null)
                 {
                     retirement = _forwarding.RetireAsync(entry.Attachment);

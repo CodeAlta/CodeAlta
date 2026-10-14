@@ -3,6 +3,12 @@ using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Catalog;
 
+/// <summary>What a session takes on the provider it switches to, instead of the provider's configured defaults.</summary>
+/// <param name="ModelId">The model, or <see langword="null"/> for the provider's own.</param>
+/// <param name="ReasoningEffort">The reasoning effort, or <see langword="null"/> for the model's own.</param>
+/// <param name="PermissionMode">The permission mode, or <see langword="null"/> for the provider's configured one.</param>
+public sealed record SessionViewProviderCarryOver(string? ModelId, AgentReasoningEffort? ReasoningEffort, string? PermissionMode);
+
 public sealed partial class SessionViewJournalStore
 {
     /// <summary>Atomically saves an idle provider selection, cleared continuation, and local state in the existing journal.</summary>
@@ -14,8 +20,24 @@ public sealed partial class SessionViewJournalStore
     /// <exception cref="InvalidOperationException">The session changed, contains queued work, or requires recovery.</exception>
     /// <exception cref="IOException">Preparing or replacing the journal failed.</exception>
     /// <exception cref="OperationCanceledException">Canceled before the commit point.</exception>
-    public async Task SelectProviderAsync(SessionViewDescriptor session, string expectedProvider, ModelProviderDescriptor target,
+    public Task SelectProviderAsync(SessionViewDescriptor session, string expectedProvider, ModelProviderDescriptor target,
         CancellationToken cancellationToken = default)
+        => SelectProviderAsync(session, expectedProvider, target, carryOver: null, cancellationToken);
+
+    /// <summary>
+    /// Atomically saves an idle provider selection with the model, the reasoning effort and the permission mode the
+    /// session takes on the new provider, as a fallback chooses them: the session never runs in a mode wider than
+    /// the one it had.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="expectedProvider">The provider the session is expected to be on.</param>
+    /// <param name="target">The provider the session goes to.</param>
+    /// <param name="carryOver">What the session takes on the new provider; null for its configured defaults.</param>
+    /// <param name="cancellationToken">Cancels before the commit point.</param>
+    /// <returns>A task that completes once the selection is saved.</returns>
+    /// <inheritdoc cref="SelectProviderAsync(SessionViewDescriptor, string, ModelProviderDescriptor, CancellationToken)" path="/exception"/>
+    public async Task SelectProviderAsync(SessionViewDescriptor session, string expectedProvider, ModelProviderDescriptor target,
+        SessionViewProviderCarryOver? carryOver, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(target);
@@ -37,14 +59,15 @@ public sealed partial class SessionViewJournalStore
             throw new InvalidOperationException("Queued work must be resolved before switching providers.");
         var now = DateTimeOffset.UtcNow;
         var summary = original.Summary with { ProviderId = target.ProviderId, ProviderKey = target.ProviderId.Value,
-            ProtocolFamily = target.ProviderType, ModelId = null, ReasoningEffort = null, UpdatedAt = now };
+            ProtocolFamily = target.ProviderType, ModelId = carryOver?.ModelId, ReasoningEffort = carryOver?.ReasoningEffort, UpdatedAt = now };
         var state = original.State with { ProviderKey = target.ProviderId.Value, ProtocolFamily = target.ProviderType,
             ProviderSessionId = null, ProviderState = null, UpdatedAt = now };
         local.ProviderKey = target.ProviderId.Value;
-        local.ModelId = null;
-        local.ReasoningEffort = null;
-        // The modes are those of a provider: the session starts on the new one with its configured mode.
-        local.PermissionMode = null;
+        local.ModelId = carryOver?.ModelId;
+        local.ReasoningEffort = carryOver?.ReasoningEffort;
+        // The modes are those of a provider: the session starts on the new one with its configured mode, unless the
+        // switch names the mode it keeps.
+        local.PermissionMode = carryOver?.PermissionMode;
         var selected = SessionViewJournalHeader.FromDescriptor(session).ToDescriptor();
         selected.ProviderId = target.ProviderId.Value;
         selected.ProviderKey = target.ProviderId.Value;

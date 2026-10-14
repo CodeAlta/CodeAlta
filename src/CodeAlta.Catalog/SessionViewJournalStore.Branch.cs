@@ -177,6 +177,7 @@ public sealed partial class SessionViewJournalStore
             ReasoningEffort = sourceLocal?.ReasoningEffort,
             PermissionMode = sourceLocal?.PermissionMode,
             TitleMode = sourceLocal?.TitleMode,
+            Tier = sourceLocal?.Tier,
             AgentPromptId = sourceLocal?.AgentPromptId,
             Archived = target.Status == SessionViewStatus.Archived,
             ParentSessionId = target.ParentSessionId,

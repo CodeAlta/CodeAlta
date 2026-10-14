@@ -35,6 +35,10 @@ public sealed partial class OwnedSessionCommandService
     /// and shutdown already honor and drain this reservation. No automatic retry is performed.</remarks>
     /// <exception cref="ArgumentNullException">The expected observation is null.</exception>
     public Task<string> SelectProviderAsync(OwnedProviderSelectionContext expected, string providerKey)
+        => SelectProviderAsync(expected, providerKey, carryOver: null);
+
+    // carryOver: the model, effort and permission mode a fallback gives the session on the provider.
+    internal Task<string> SelectProviderAsync(OwnedProviderSelectionContext expected, string providerKey, Catalog.SessionViewProviderCarryOver? carryOver)
     {
         ArgumentNullException.ThrowIfNull(expected);
         TaskCompletionSource<string> completion;
@@ -49,14 +53,23 @@ public sealed partial class OwnedSessionCommandService
                 || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == expected.SessionId)) return Task.FromResult("busy");
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _deleteWork = completion.Task;
-            _ = SelectProviderOwnedAsync(expected, providerKey, completion);
+            _ = SelectProviderOwnedAsync(expected, providerKey, carryOver, completion);
         }
         return completion.Task;
     }
 
-    private async Task SelectProviderOwnedAsync(OwnedProviderSelectionContext expected, string target, TaskCompletionSource<string> completion)
+    // Under _gate: whether a send, a steer, a queue or another command of the session still holds it.
+    private bool IsSessionHeld(string sessionId)
+        => _deleteWork is not null || _active.ContainsKey(sessionId) || _steering.Contains(sessionId)
+           || _compacting.Contains(sessionId) || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
+           || _remoteControlling.ContainsKey(sessionId)
+           || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)
+           || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == sessionId);
+
+    private async Task SelectProviderOwnedAsync(OwnedProviderSelectionContext expected, string target,
+        Catalog.SessionViewProviderCarryOver? carryOver, TaskCompletionSource<string> completion)
     {
-        try { completion.TrySetResult(await _runtime.SelectOwnedProviderAsync(expected, target).ConfigureAwait(false)); }
+        try { completion.TrySetResult(await _runtime.SelectOwnedProviderAsync(expected, target, carryOver).ConfigureAwait(false)); }
         catch (Exception) { completion.TrySetResult("selection_unconfirmed"); }
         finally { lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; } }
     }

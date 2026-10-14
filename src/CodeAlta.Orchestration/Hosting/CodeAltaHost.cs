@@ -84,6 +84,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
                     && state.Availability == ModelProviderAvailability.Ready)?.Models ?? [],
         };
+        Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
         WorkspaceReads = new OwnedSessionWorkspace(projectCatalog, sessionViewCatalog.JournalStore, runtimeService);
         _earlyReadShutdown = new HostDisposalStage(() => WorkspaceReads.DisposeAsync().AsTask());
         _earlyCommandShutdown = new HostDisposalStage(() => Commands.DisposeAsync().AsTask());

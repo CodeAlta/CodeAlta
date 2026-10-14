@@ -3485,6 +3485,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         IDisposable? parentNotificationClaim = null;
         var retainParentNotificationClaim = false;
         var actorChoresCompleted = false;
+        Action<HeldRunFailure>? fallback = null;
+        HeldRunFailure? heldFailure = null;
         var publication = new LiveEventPublication(new { Runtime = this, Projector = projector, Use = projectionUse });
         try
         {
@@ -3508,6 +3510,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         mark(CapturePluginEvent(sanitized, sessionId, projectId, workingDirectory));
                     RefuseUnavailableOwnedQueue(sessionId);
                     notifications = projector.Entry!.TakeParentNotifications(sanitized);
+                    // A failure the session goes on from with the next model of its tier is not told to the parent,
+                    // and its queue waits for the run that continues: both are held until the fallback settles.
+                    if (sanitized is AgentErrorEvent failed
+                        && await TryClaimRunFailureAsync(sessionId, projector.Entry!, failed).ConfigureAwait(false) is { } claimed)
+                    {
+                        fallback = claimed;
+                        heldFailure = new HeldRunFailure(this, sessionId, notifications);
+                        notifications = [];
+                    }
                     actorChoresCompleted = true;
                     // The session that runs writes its title: the sessions that are listed after a prompt or after
                     // the end of a run are read again, and show it.
@@ -3523,7 +3534,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     effects.Add(() => InvalidateFileSearchCacheAsync(published, workingDirectory).AsTask());
                 foreach (var notification in notifications)
                     effects.Add(() => DeliverParentNotificationAsync(notification));
-                if (actorChoresCompleted && IsQueueDrainTrigger(@event))
+                if (fallback is not null && heldFailure is not null)
+                {
+                    // The fallback runs on its own: it waits for the send of the failed run to be released.
+                    var held = heldFailure;
+                    var start = fallback;
+                    effects.Add(() =>
+                    {
+                        start(held);
+                        return Task.CompletedTask;
+                    });
+                }
+                else if (actorChoresCompleted && IsQueueDrainTrigger(@event))
                     effects.Add(() => TryDrainNextQueuedPromptAsync(sessionId));
                 publication.IndependentWork = new LiveEventIndependentWork(effects);
                 return publication.IndependentWork.RunAsync();
@@ -5084,7 +5106,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     private sealed record ParentFinalNotificationCandidate(string? RunId, string ContentId, string Content);
 
-    private sealed record ParentNotificationWork(
+    internal sealed record ParentNotificationWork(
         string SourceSessionId,
         string? SourceProjectId,
         string SourceAgentId,

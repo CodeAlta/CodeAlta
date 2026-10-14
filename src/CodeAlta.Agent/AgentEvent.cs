@@ -302,6 +302,12 @@ public enum AgentSessionUpdateKind
     /// A diff or patch preview changed.
     /// </summary>
     DiffUpdated,
+
+    /// <summary>
+    /// A run failed on its provider (an exhausted quota, an unavailable provider) and the session goes on with the
+    /// next target of its tier of models. The details name the reason, the model left, the model taken and the reset.
+    /// </summary>
+    ProviderFallback,
 }
 
 /// <summary>

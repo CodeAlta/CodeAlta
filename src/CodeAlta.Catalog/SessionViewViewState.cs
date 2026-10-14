@@ -294,6 +294,13 @@ public sealed class SessionViewLocalState
     public string? TitleMode { get; set; }
 
     /// <summary>
+    /// Gets or sets the tier of models the session runs on (<c>complex</c>, <c>standard</c> or <c>quick</c>), or
+    /// <see langword="null"/> for a model chosen by hand. A fallback goes on with the next target of that tier.
+    /// </summary>
+    [JsonPropertyName("tier")]
+    public string? Tier { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]
