@@ -1,0 +1,16 @@
+/* The child sessions of a session: their tree, where each one is, and their deletion with it. */
+dialog.session-children-dialog:has(> .app-window) > .app-window > .app-window-body { gap: 0; padding: 0; overflow: hidden; }
+.session-children-note { width: auto; margin: 10px 12px 8px; font-size: 12px; }
+.session-children-list { margin: 0; list-style: none; }
+.session-children-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; min-height: 28px;
+  padding-block: 3px; padding-inline-end: 10px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; font-size: 13px; text-align: start; cursor: default; }
+.session-children-row:hover, .session-children-row:focus-visible { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); outline: none; }
+.session-children-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-children-root .session-children-title { font-weight: 600; }
+.session-children-work { grid-column: 3; }
+.session-children-where { display: inline-flex; grid-column: 4; align-items: center; gap: 10px; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.session-children-space { display: inline-flex; align-items: center; gap: 4px; }
+dialog:has(> .app-window) > .app-window > .app-window-body > footer.session-children-footer { position: static; margin: auto 0 0; }
+.session-children-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.session-children-status { min-width: 0; color: var(--muted); font-size: 12px; }
+.session-children-delete { position: relative; display: inline-flex; flex: none; }

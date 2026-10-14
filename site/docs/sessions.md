@@ -255,6 +255,15 @@ In CodeAlta Desktop:
   <figcaption class="small text-secondary mt-2">The sub-agents of a session under it in the sidebar, <strong>Show more…</strong> for the fifth, and their answers as agent messages.</figcaption>
 </figure>
 
+### Delete a session and its child sessions
+
+A child session can be in another project, in the chats or in another space than its parent: an agent of a chat can start sessions in projects. Such a child is not listed under its parent: it is listed at the top of its own project.
+
+- **Child sessions…** in the menu of a session lists every session below it, wherever it is: the tree, how many are direct children and how many there are in all, the project or chat and the space of each one, and the ones at work. Click one to open it.
+- **Open parent session** in the menu of a child session opens the session that started it, also in another project or space.
+- **Delete** deletes one session only, and never a session that has child sessions: they would lose their parent. Deleting such a session shows its child sessions instead.
+- **Delete with all child sessions…** in that list deletes the session and every session below it, after a question of its own. Nothing is deleted while one of them is at work: let it finish, or stop it, first. Projects and their files are kept.
+
 ## Prompting for delegated work
 
 You can also ask the current agent to create and coordinate child sessions for you.

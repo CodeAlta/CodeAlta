@@ -76,7 +76,7 @@ export function sessionDeletionMessage(code: string): string {
     case "invalid_confirmation": return "The title of this session could not be confirmed. Refresh the sessions and try again.";
     case "scope_missing": case "session_missing": return "The session, title or project changed. Refresh before deciding whether to delete.";
     case "session_in_use": return "This session has active runtime work. Wait for it to finish and refresh before deleting.";
-    case "has_children": return "This session has child sessions. Exact-session deletion will not remove them.";
+    case "has_children": return "This session has child sessions, and Delete removes one session only. Its menu shows them, with the choice to delete them with it.";
     case "stale_epoch": return "The host changed. Reload before deleting.";
     case "busy": return "A session operation is in progress. Nothing was deleted.";
     case "closed": return "The host is closing; deletion was not admitted.";

@@ -207,6 +207,8 @@ import { SpaceActivityBar, SpaceSwitch } from "./spaces/SpaceViews";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
 import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
+import { SessionChildrenDialog } from "./sessionChildren/SessionChildrenDialog";
+import { deleteSessionTree, readSessionChildren, type SessionChildren, type SessionTreeDeletion } from "./sessionChildren/sessionChildren";
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
 import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, type Space, type WaitingSubSession } from "./spaces/spaces";
@@ -259,6 +261,7 @@ import { findKeyKept } from "./documentation/documentationFind";
 import { createDocumentationHub } from "./documentation/documentationHub";
 import "./pluginButtons/pluginButtons.css";
 import "./sessionBranch/sessionBranch.css";
+import "./sessionChildren/sessionChildren.css";
 import { SessionBranchDialog, type BranchDialogHost } from "./sessionBranch/SessionBranchDialog";
 import { SessionLineageBanner, SessionLineageMark } from "./sessionBranch/SessionLineage";
 import { composerPrompt, type BranchMode } from "./sessionBranch/branchPoints";
@@ -723,6 +726,8 @@ function App() {
   const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
   const [movingToSpace, setMovingToSpace] = useState<Readonly<{ id: string; title: string; projectId: string | null; spaceId: string }> | null>(null);
+  // The window of the sessions below a session; `deleting` when Delete led to it.
+  const [childrenView, setChildrenView] = useState<Readonly<{ id: string; title: string; deleting: boolean }> | null>(null);
   // The row of a session dragged onto the row of another project, and that project.
   const rowDrag = useSessionRowDrag(id => currentSnapshot.current?.projects.find(project => project.id === id),
     (drag, project) => { if (!movingPending.current) { setMenuTarget(null); void moveSessionTo(drag, project); } });
@@ -2790,7 +2795,7 @@ function App() {
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={sessionBookmarkEntries} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionBookmarkEntries(session), ...sessionLineageEntries(session)]} deleteAsks={confirms.sessionDelete}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
@@ -2821,6 +2826,8 @@ function App() {
   // The session is the selected one. It is asked about beside its row, unless the user answered not to be asked again.
   function beginSessionDelete(row: WorkspaceSession) {
     setDeletingMessage("");
+    // A session that others come from is not deleted alone: what is below it is shown, with the choice to delete it all.
+    if (knownChildren(row.id)) { showSessionChildren(row, true); return; }
     if (confirms.sessionDelete) setDeletingId(row.id);
     else { setDeletingId(null); void deleteSessionRow(row, false); }
   }
@@ -2885,6 +2892,48 @@ function App() {
       publishWorkspaceState(fresh.configured ? { kind: "ready", snapshot: fresh } : { kind: "unconfigured" });
       return fresh;
     } catch { return undefined; }
+  }
+
+  // The sessions below a session, wherever they are: the whole catalog knows of them, not only the shown space.
+  function knownChildren(id: string) {
+    return catalog.current?.sessions.some(session => session.parentSessionId === id) ?? false;
+  }
+  function showSessionChildren(row: WorkspaceSession, deleting: boolean) {
+    setRenamingId(null);
+    setDeletingId(null);
+    setChildrenView({ id: row.id, title: plainTitle(row.title), deleting });
+  }
+  // The entries of a session's menu about its family: its child sessions, and its parent, which can be in another scope.
+  const sessionLineageEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
+    const parent = session.parentSessionId ? catalog.current?.sessions.find(value => value.id === session.parentSessionId) : undefined;
+    return [
+      ...(knownChildren(session.id) ? [{ key: "children", label: t("Child sessions…"), icon: "tree" as const, onSelect: () => showSessionChildren(session, false) }] : []),
+      ...(parent ? [{ key: "parent", label: t("Open parent session"), icon: "arrowUp" as const, onSelect: () => revealSession(parent) }] : []),
+    ];
+  };
+  // Deletes a session with the sessions below it, as the window of its child sessions showed them.
+  async function deleteChildrenTree(tree: SessionChildren): Promise<SessionTreeDeletion> {
+    const capability = mutation?.capability;
+    const root = tree.root;
+    const project = root.scopeKind === "project" ? catalog.current?.projects.find(value => value.id === root.projectId) : undefined;
+    if (batchDeletion.locked() || deletingPending.current || !owned || !capability?.canMutate() || !root.workspacePath
+      || root.scopeKind === "project" && (!project || project.archived)) return { kind: "error", code: "busy", deleted: [], blocking: null };
+    const target: RenameTarget = project ? { scope: "project", projectId: project.id, projectPath: project.path }
+      : { scope: "global", projectPath: root.workspacePath };
+    deletingPending.current = true;
+    setDeletingBusy(true);
+    try {
+      const result = await deleteSessionTree(workspace.deleteSessionTree, status?.hostEpoch, target, tree);
+      if (!creationAlive.current) return result;
+      if (result.deleted.length > 0 || result.kind === "error" && result.code === "delete_unconfirmed") {
+        const fresh = await refreshProjects(creationRefresh.current.signal);
+        // The selected session is gone: its scope shows the next one.
+        if (fresh?.configured && selectedSessionId.current && result.deleted.includes(selectedSessionId.current))
+          setSessionId(sessionsForProject(fresh, selectedScope.current)[0]?.id ?? null);
+      }
+      if (result.kind === "deleted") showToast({ message: t("Deleted {count} sessions.", { count: result.deleted.length }), intent: "success", icon: "tick", timeout: 4000 });
+      return result;
+    } finally { deletingPending.current = false; if (creationAlive.current) setDeletingBusy(false); }
   }
 
   // The session is the selected one, in the selected project: the window asks which project it goes to.
@@ -3503,6 +3552,10 @@ function App() {
           setDeleteLocked(true);
           failed("Deletion may have completed, but the refreshed catalog did not confirm absence. No retry will be sent.");
         }
+      } else if (result.code === "has_children") {
+        // Children the window did not know of: they are shown, with the choice to delete them with it.
+        setDeletingId(null);
+        showSessionChildren(session, true);
       } else {
         if (result.code === "delete_unconfirmed") {
           uncertainDelete.current = captured;
@@ -3878,6 +3931,7 @@ function App() {
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...sessionBookmarkEntries(session),
+                  ...sessionLineageEntries(session),
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
@@ -4169,6 +4223,10 @@ function App() {
       style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
     {movingToSpace && <MoveToSpaceDialog title={movingToSpace.title} spaces={spacesState.spaces} currentId={movingToSpace.spaceId} busy={movingBusy}
       onMove={space => void moveSessionToSpaceNow(movingToSpace, space)} onClose={() => { if (!movingPending.current) setMovingToSpace(null); }} />}
+    {childrenView && <SessionChildrenDialog key={childrenView.id} title={childrenView.title} deleting={childrenView.deleting}
+      read={() => readSessionChildren(workspace.sessionChildren, status?.hostEpoch, childrenView.id)}
+      projects={catalog.current?.projects ?? []} spaces={spacesState.spaces} canDelete={owned && !!mutation?.capability.canMutate()}
+      onOpen={session => { setChildrenView(null); revealSession(session); }} onDelete={deleteChildrenTree} onClose={() => setChildrenView(null)} />}
     {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
       projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
       onClose={() => { if (!movingPending.current) setMovingSession(null); }} />}

@@ -5,6 +5,7 @@ import { documentationMessages } from "./documentation/messages";
 import { bookmarkMessages } from "./bookmarks/messages";
 import { storageMessages } from "./storage/messages";
 import { sessionBranchMessages } from "./sessionBranch/messages";
+import { sessionChildrenMessages } from "./sessionChildren/messages";
 import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
 import { claudeCliMessages } from "./claudeCli/messages";
@@ -2495,6 +2496,7 @@ export const messages = dictionary({
   ...documentationMessages,
   ...storageMessages,
   ...sessionBranchMessages,
+  ...sessionChildrenMessages,
   ...bookmarkMessages,
   ...speechMessages,
   ...modelTierMessages,

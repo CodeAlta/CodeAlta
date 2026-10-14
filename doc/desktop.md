@@ -570,6 +570,35 @@ is no longer that one. After a deletion the row that takes the place of the dele
 so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
 is hidden.
 
+**Child sessions…** (`sessionChildren/`) lists the sessions below a session wherever they are: in other
+projects, in the chats, in other spaces. The menu of a session offers it when the whole catalog
+(`catalog.current`, not the snapshot of the shown space) has a session whose `parentSessionId` is that
+one, and **Open parent session** when the parent of the session is in it: `revealSession` shows the space
+of the parent first. The window reads `workspace.sessionChildren` (`WorkspaceSessionChildrenRpc.cs`). The
+host reads every session (`OwnedSessionWorkspace.ReadSnapshotAsync`, not the bounded snapshot of the
+window) and follows the three links a deletion refuses to break, `ParentSessionId`, `CreatedBySessionId`
+and the `ParentSessionId` of the view, with `SessionLineage.Descendants`: each descendant once, under the
+nearest session that names it, the tree from the top, children oldest first, a cycle ending where it comes
+back. Each row has its scope (its project, or **Chat**), its space (`sessionHome`) and **At work** from
+`OwnedSessionCommandService.ReadSessionsAtWorkAsync` (a run, a queue, a question, a permission, a job,
+background work, Remote Control). The answer has at most 200 rows, the direct and total counts, and the
+identities of up to 2000 descendants: beyond that, the window does not offer to delete them in one go.
+
+**Delete** stays parent-only: the host refuses a session that has children (`has_children`), so no child
+is left with a parent that no longer exists. **Delete…** of a session that the catalog knows children of
+opens the window instead of the question, with a warning that says what Delete does; a `has_children`
+answer of the host opens it too. **Delete with all child sessions…** asks in the `ConfirmPopover` that is
+always asked (no **Do not ask again**, **Cancel** has the focus) and sends `workspace.deleteSessionTree`
+with the title of the session and the identities of the descendants that were shown. The host
+(`SessionRuntimeService.DeleteOwnedCatalogSessionTreeBodyAsync`) reads the journals from disk and refuses
+with nothing deleted: `descendants_changed` when the tree is no longer the one shown (the window reads it
+again), `session_in_use` with the session at work (a run is never stopped to delete its session). It then
+claims every session as a project deletion does, deletes the descendants from the bottom of the tree, and
+the session last, through the checks of Delete (title, scope, no new child). A failure after the first
+removal answers `delete_partial` with what was deleted. The deletion shares the slot of the deletions,
+in `WorkspaceService` and in the command owner (`_deleteWork`); the projects and their files are not
+touched.
+
 **Delete project…**, in the menu of a project and in the menu of the Projects header for the selected
 project, archived or not, asks in that same popover, every time: it has no **Do not ask again**, and
 **Cancel** has the focus, so Enter leaves everything as it is (`always` of `ConfirmPopover`). **Delete**
