@@ -385,6 +385,37 @@ public sealed class AgentRuntimeTests
     }
 
     [TestMethod]
+    public async Task AgentRuntime_Resume_KeepsTheContinuation_OfASummaryThatNamesTheProviderKeyAsFamily()
+    {
+        // CodeAlta 1.8 wrote the key of a custom provider as the family of the summary when it attached a session.
+        using var temp = TestTempDirectory.Create();
+        var executor = new RecordingTurnExecutor();
+        var runtime = CreateAgentRuntime(temp.Path, executor, providerKey: "neuralwatt", displayName: "Neuralwatt", protocolFamily: "openai-chat",
+            transportKind: AgentTransportKind.OpenAIChatCompletions, ProviderId: new ModelProviderId("neuralwatt"));
+        static Task<AgentPermissionDecision> Allow(AgentPermissionRequest request, CancellationToken token)
+            => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+        string sessionId;
+        await using (var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+            { ProviderKey = "neuralwatt", Model = "model", WorkingDirectory = "C:\\repo\\sample", OnPermissionRequest = Allow }))
+        {
+            sessionId = session.SessionId;
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt") });
+        }
+
+        var store = CreateSessionStore(temp.Path);
+        var state = await store.GetStateAsync("openai-chat", "neuralwatt", sessionId);
+        await store.UpsertStateAsync(state! with { ProviderSessionId = "kept-continuation" });
+        await store.UpsertSessionAsync((await store.GetSessionSummaryAsync(sessionId))! with { ProtocolFamily = "neuralwatt" });
+
+        await using (var resumed = await runtime.ResumeSessionAsync(sessionId, new AgentSessionResumeOptions
+            { ProviderKey = "neuralwatt", Model = "model", WorkingDirectory = "C:\\repo\\sample", OnPermissionRequest = Allow }))
+            _ = await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt") });
+
+        Assert.AreEqual("kept-continuation", executor.Requests[^1].State.ProviderSessionId, "The session is not transferred to its own provider.");
+        Assert.AreEqual("openai-chat", (await CreateSessionStore(temp.Path).GetSessionSummaryAsync(sessionId))!.ProtocolFamily, "The summary is repaired.");
+    }
+
+    [TestMethod]
     public async Task AgentRuntime_ResumeMissingSession_DoesNotCreateReplacementOrExecuteProvider()
     {
         using var temp = TestTempDirectory.Create();

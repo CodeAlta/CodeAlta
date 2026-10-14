@@ -872,11 +872,16 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     }
 
     internal Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, CancellationToken cancellationToken)
-        => ReadTransferSnapshotAsync(sessionId, requireState: true, cancellationToken);
+        => ReadTransferSnapshotAsync(sessionId, requireState: true, runtimeFamily: null, cancellationToken);
+
+    internal Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, bool requireState, CancellationToken cancellationToken)
+        => ReadTransferSnapshotAsync(sessionId, requireState, runtimeFamily: null, cancellationToken);
 
     // A session that never ran has no provider state: a move takes it as one with nothing to continue, a provider
-    // transfer does not.
-    internal async Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, bool requireState, CancellationToken cancellationToken)
+    // transfer does not. runtimeFamily: the protocol family of the runtime of the session's provider, when the caller
+    // knows it; a summary that names the provider key as family instead is then read with that family.
+    internal async Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, bool requireState, string? runtimeFamily,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         cancellationToken.ThrowIfCancellationRequested();
@@ -895,6 +900,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             if (!requireState && summary is not null && state is null)
                 state = new AgentSessionState { SessionId = summary.SessionId, ProviderKey = summary.ProviderKey,
                     ProtocolFamily = summary.ProtocolFamily, UpdatedAt = summary.UpdatedAt };
+            if (summary is not null && state is not null && AgentSessionProtocolFamily.IsKeyWrittenAsFamily(summary, state, runtimeFamily))
+                summary = summary with { ProtocolFamily = state.ProtocolFamily };
             if (summary is null || state is null || summary.SessionId != sessionId || state.SessionId != sessionId
                 || !string.Equals(summary.ProviderKey, state.ProviderKey, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(summary.ProtocolFamily, state.ProtocolFamily, StringComparison.OrdinalIgnoreCase))

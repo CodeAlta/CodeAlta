@@ -138,6 +138,22 @@ public sealed class SessionRuntimeMoveTests
     }
 
     [TestMethod]
+    public async Task MoveOwnedSessionAsync_MovesASessionOf18WhoseSummaryNamesTheProviderKeyAsFamily()
+    {
+        // A custom OpenAI-compatible provider of 1.8: its attachment wrote the key as the family of the summary.
+        var provider = new AccountProvider("neuralwatt", "openai-chat");
+        await using var f = await Fixture.CreateAsync(registry => registry.RegisterOrReplace(provider.Descriptor, () => provider));
+        await f.CreateSessionAsync("session", f.Source, title: "Kept", provider: "neuralwatt", summaryFamily: "neuralwatt", stateFamily: "openai-chat");
+
+        var result = await f.Runtime.MoveOwnedSessionAsync("session", f.Source.Id, f.Source.ProjectPath, f.Target.Id, f.Target.ProjectPath, static _ => false);
+
+        Assert.AreEqual("ok", result.Status, string.Join(" ", result.Warnings));
+        var store = f.Journal.CreateSessionStore();
+        Assert.AreEqual("openai-chat", (await store.GetSessionSummaryAsync("session"))!.ProtocolFamily);
+        Assert.AreEqual("opaque", (await store.GetStateAsync("session"))!.ProviderSessionId, "The conversation goes on.");
+    }
+
+    [TestMethod]
     public void KeptWorktree_KeepsAWorktreeOfTheRepositoryOfTheTarget_Only()
     {
         using var temp = new TempDirectory();
@@ -199,7 +215,8 @@ public sealed class SessionRuntimeMoveTests
             return new Fixture(temp, hub, runtime, sessionViewCatalog.JournalStore, source, target);
         }
 
-        public async Task CreateSessionAsync(string id, ProjectDescriptor project, string? title, string? parent = null, string provider = "codex")
+        public async Task CreateSessionAsync(string id, ProjectDescriptor project, string? title, string? parent = null, string provider = "codex",
+            string? summaryFamily = null, string? stateFamily = null)
         {
             var session = new SessionViewDescriptor
             {
@@ -209,10 +226,10 @@ public sealed class SessionRuntimeMoveTests
             };
             await Journal.EnsureHeaderAsync(session);
             var store = Journal.CreateSessionStore();
-            await store.UpsertSessionAsync(new() { SessionId = id, ProviderId = new(provider), ProviderKey = provider, ProtocolFamily = provider,
+            await store.UpsertSessionAsync(new() { SessionId = id, ProviderId = new(provider), ProviderKey = provider, ProtocolFamily = summaryFamily ?? provider,
                 WorkingDirectory = project.ProjectPath, Title = title ?? project.DisplayName, ParentSessionId = parent,
                 CreatedAt = CreatedAt, UpdatedAt = CreatedAt });
-            await store.UpsertStateAsync(new() { SessionId = id, ProviderKey = provider, ProtocolFamily = provider, ProviderSessionId = "opaque", UpdatedAt = CreatedAt });
+            await store.UpsertStateAsync(new() { SessionId = id, ProviderKey = provider, ProtocolFamily = stateFamily ?? provider, ProviderSessionId = "opaque", UpdatedAt = CreatedAt });
             await Journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = provider, ParentSessionId = parent });
         }
 
@@ -245,13 +262,14 @@ public sealed class SessionRuntimeMoveTests
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
-    private sealed class AccountProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    // A provider whose key is not its type: a second Claude Code account by default.
+    private sealed class AccountProvider(string key = "claude-business", string family = "claude-code") : IAgentModelProviderRuntime, IModelProviderTurnExecutor
     {
-        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("claude-business"), "Claude Business", "claude-code") { DefaultModelId = "fake-model" };
+        public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(key), key, family) { DefaultModelId = "fake-model" };
 
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
         {
-            ProtocolFamily = "claude-code", ProviderKey = "claude-business", DisplayName = "Claude Business", TransportKind = AgentTransportKind.OpenAIResponses,
+            ProtocolFamily = family, ProviderKey = key, DisplayName = key, TransportKind = AgentTransportKind.OpenAIResponses,
         };
 
         public IModelProviderModelCatalog? ModelCatalog => null;

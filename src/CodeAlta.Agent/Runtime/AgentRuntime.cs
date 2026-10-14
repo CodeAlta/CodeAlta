@@ -267,6 +267,13 @@ public sealed class AgentRuntime : IAsyncDisposable
                 UpdatedAt = summary.UpdatedAt,
             };
         var history = await Store.ReadEventsAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        // A summary of 1.8 that names the provider key as family is repaired: the provider continuation stays.
+        if (MatchesProvider(state, provider.Provider) && AgentSessionProtocolFamily.IsKeyWrittenAsFamily(summary, state, provider.Provider.ProtocolFamily))
+        {
+            summary = summary with { ProtocolFamily = provider.Provider.ProtocolFamily };
+            await Store.UpsertSessionAsync(summary, cancellationToken).ConfigureAwait(false);
+        }
+
         if (!MatchesProvider(summary, provider.Provider) || !MatchesProvider(state, provider.Provider))
         {
             var now = DateTimeOffset.UtcNow;

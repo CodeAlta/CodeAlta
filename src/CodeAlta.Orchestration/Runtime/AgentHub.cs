@@ -556,6 +556,22 @@ public sealed partial class AgentHub : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Reads the protocol family of the runtime of a provider. Nothing of the provider is started.
+    /// </summary>
+    /// <returns>The family; <see langword="null"/> when the provider is not registered or owns its sessions itself.</returns>
+    internal async Task<string?> GetProviderProtocolFamilyAsync(string providerKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey)) return null;
+        IModelProviderRuntime runtime;
+        try { runtime = await _modelProviderRegistry.CreateRuntimeAsync(new ModelProviderId(providerKey), cancellationToken).ConfigureAwait(false); }
+        catch (KeyNotFoundException) { return null; }
+        await using (runtime.ConfigureAwait(false))
+        {
+            return runtime is IAgentModelProviderRuntime agent ? agent.RuntimeDescriptor.ProtocolFamily : null;
+        }
+    }
+
     private async Task<ProviderSessionRuntimeLease> CreateStartedProviderRuntimeAsync(
         ModelProviderId providerId,
         CancellationToken cancellationToken)

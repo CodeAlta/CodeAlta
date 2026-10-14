@@ -183,7 +183,8 @@ public sealed partial class SessionRuntimeService
             var preview = summary.Summary == UnnamedProjectSessionSummary(source) ? UnnamedProjectSessionSummary(target) : null;
             providerState = await store.GetStateAsync(sessionId, token).ConfigureAwait(false);
             await _sessionViewCatalog.JournalStore.MoveSessionAsync(session,
-                new SessionViewMove(target.Id, target.ProjectPath, worktree, title, preview), token).ConfigureAwait(false);
+                new SessionViewMove(target.Id, target.ProjectPath, worktree, title, preview)
+                    { ProviderFamily = await RuntimeFamilyOfKeyWrittenAsFamilyAsync(summary, token).ConfigureAwait(false) }, token).ConfigureAwait(false);
             written = new MovedSummaryFields(summary.Title, string.IsNullOrWhiteSpace(title) ? null : title.Trim(), summary.Summary, preview);
             if (_entries.TryGetValue(sessionId, out var entry))
             {
@@ -301,6 +302,15 @@ public sealed partial class SessionRuntimeService
             warnings.Add($"The session {done.SessionId} moved, but its last turn may have written its old folder back: {exception.Message}");
         }
     }
+
+    // The family of the runtime of the provider of a session whose summary names the provider key as family, as
+    // CodeAlta 1.8 wrote it when it attached a session of a custom-keyed provider: a move or a switch reads that
+    // summary with this family. Null for any other summary, which is read as it is.
+    private async Task<string?> RuntimeFamilyOfKeyWrittenAsFamilyAsync(AgentSessionSummary? summary, CancellationToken token)
+        => summary is not null && !string.IsNullOrWhiteSpace(summary.ProviderKey)
+           && string.Equals(summary.ProtocolFamily, summary.ProviderKey, StringComparison.OrdinalIgnoreCase)
+            ? await _agentHub.GetProviderProtocolFamilyAsync(summary.ProviderKey, token).ConfigureAwait(false)
+            : null;
 
     // The worktree a moved session keeps working in: the one it works in, when that folder still exists, belongs to
     // the repository of the target and is not the checkout the target itself lives in.

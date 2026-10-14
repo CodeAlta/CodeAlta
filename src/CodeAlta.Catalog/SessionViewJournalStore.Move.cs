@@ -9,7 +9,14 @@ namespace CodeAlta.Catalog;
 /// <param name="WorktreeDirectory">The git worktree the session keeps working in, or <see langword="null"/>.</param>
 /// <param name="Title">The new saved title, or <see langword="null"/> to keep the saved one.</param>
 /// <param name="Summary">The new summary, or <see langword="null"/> to keep the saved one.</param>
-public sealed record SessionViewMove(string ProjectRef, string WorkingDirectory, string? WorktreeDirectory, string? Title, string? Summary);
+public sealed record SessionViewMove(string ProjectRef, string WorkingDirectory, string? WorktreeDirectory, string? Title, string? Summary)
+{
+    /// <summary>
+    /// Gets the protocol family of the runtime of the session's provider, or <see langword="null"/> when it is not
+    /// known. A summary that names the provider key as family, as CodeAlta 1.8 wrote it, is moved with this family.
+    /// </summary>
+    public string? ProviderFamily { get; init; }
+}
 
 public sealed partial class SessionViewJournalStore
 {
@@ -37,7 +44,7 @@ public sealed partial class SessionViewJournalStore
         if (session.Kind != SessionViewKind.ProjectSession)
             throw new InvalidOperationException("Only a project session can be moved to another project.");
         var store = CreateSessionStore();
-        var original = await store.ReadTransferSnapshotAsync(session.SessionId, requireState: false, cancellationToken).ConfigureAwait(false);
+        var original = await store.ReadTransferSnapshotAsync(session.SessionId, requireState: false, move.ProviderFamily, cancellationToken).ConfigureAwait(false);
         // Replacement rewrites the existing first-line view header; never discard a history record from an
         // unsupported/headerless journal in order to manufacture one.
         if (await ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) is not { } header

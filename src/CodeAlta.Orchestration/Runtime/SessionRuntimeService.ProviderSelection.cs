@@ -56,7 +56,9 @@ public sealed partial class SessionRuntimeService
                     return ProviderOutsideSpace;
                 if (entry?.PendingAgentPromptId is not null) return "pending_selection";
                 // The original attachment stays intact through preparation and the atomic durable decision.
-                await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, carryOver, token).ConfigureAwait(false);
+                var family = await RuntimeFamilyOfKeyWrittenAsFamilyAsync(
+                    await _sessionViewCatalog.JournalStore.CreateSessionStore().GetSessionSummaryAsync(session.SessionId, token).ConfigureAwait(false), token).ConfigureAwait(false);
+                await _sessionViewCatalog.JournalStore.SelectProviderAsync(session, expected.ProviderKey, target, carryOver, family, token).ConfigureAwait(false);
                 if (entry is not null)
                 {
                     retirement = _forwarding.RetireAsync(entry.Attachment);

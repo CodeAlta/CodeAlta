@@ -102,14 +102,58 @@ public sealed class SessionViewJournalMoveTests
         Assert.AreEqual(@"C:\code\source", (await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!.WorkingDirectory);
     }
 
-    private static async Task<SessionViewDescriptor> CreateSessionAsync(SessionViewJournalStore journal, string? worktree, bool ran = true)
+    [TestMethod]
+    public async Task MoveAndSwitch_ReadTheSummaryOf18ThatNamesTheProviderKeyAsFamily_WithTheFamilyOfItsRuntime_Only()
+    {
+        // CodeAlta 1.8 attached a session of a custom-keyed provider by writing its key as the family of the summary;
+        // the provider state kept the family of the runtime.
+        using var root = TempDirectory.Create();
+        var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = root.Path }).JournalStore;
+        var session = await CreateSessionAsync(journal, worktree: null, provider: "neuralwatt", summaryFamily: "neuralwatt", stateFamily: "openai-chat");
+        var path = Directory.EnumerateFiles(root.Path, "*.jsonl", SearchOption.AllDirectories).Single();
+        var before = await File.ReadAllBytesAsync(path);
+
+        // Without the family of its runtime, or with another one, the session still needs recovery.
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target with { ProviderFamily = "openai-responses" }));
+        var other = new ModelProviderDescriptor(new ModelProviderId("codex"), "Codex", "codex");
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.SelectProviderAsync(session, "neuralwatt", other, carryOver: null, providerFamily: null));
+        CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(path), "A refused move or switch leaves the journal as it was.");
+
+        await journal.MoveSessionAsync(session, Target with { ProviderFamily = "openai-chat" });
+        var store = journal.CreateSessionStore();
+        Assert.AreEqual("openai-chat", (await store.GetSessionSummaryAsync(session.SessionId))!.ProtocolFamily, "The move repairs the summary.");
+        Assert.AreEqual("opaque-provider", (await store.GetStateAsync(session.SessionId))!.ProviderSessionId);
+
+        // A switch reads such a summary the same way.
+        using var second = TempDirectory.Create();
+        var switched = new SessionViewCatalog(new CatalogOptions { GlobalRoot = second.Path }).JournalStore;
+        var stale = await CreateSessionAsync(switched, worktree: null, provider: "neuralwatt", summaryFamily: "neuralwatt", stateFamily: "openai-chat");
+        await switched.SelectProviderAsync(stale, "neuralwatt", other, carryOver: null, providerFamily: "openai-chat");
+        Assert.AreEqual("codex", (await switched.CreateSessionStore().GetSessionSummaryAsync(stale.SessionId))!.ProviderKey);
+    }
+
+    [TestMethod]
+    public async Task Move_RefusesAnyOtherDisagreementOnTheFamily()
+    {
+        using var root = TempDirectory.Create();
+        var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = root.Path }).JournalStore;
+        // The summary names another family than the key: that is not what 1.8 wrote.
+        var session = await CreateSessionAsync(journal, worktree: null, provider: "neuralwatt", summaryFamily: "openai-responses", stateFamily: "openai-chat");
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target with { ProviderFamily = "openai-chat" }));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target with { ProviderFamily = "openai-responses" }));
+    }
+
+    private static async Task<SessionViewDescriptor> CreateSessionAsync(SessionViewJournalStore journal, string? worktree, bool ran = true,
+        string provider = "codex", string? summaryFamily = null, string? stateFamily = null)
     {
         var session = new SessionViewDescriptor
         {
             SessionId = "moved-session",
             Kind = SessionViewKind.ProjectSession,
-            ProviderId = "codex",
-            ProviderKey = "codex",
+            ProviderId = provider,
+            ProviderKey = provider,
             ProjectRef = "source-project",
             ParentSessionId = "parent",
             WorkingDirectory = @"C:\code\source",
@@ -121,12 +165,12 @@ public sealed class SessionViewJournalMoveTests
         };
         await journal.EnsureHeaderAsync(session);
         var store = journal.CreateSessionStore();
-        await store.UpsertSessionAsync(new() { SessionId = session.SessionId, ProviderId = new("codex"), ProviderKey = "codex",
-            ProtocolFamily = "codex", WorkingDirectory = session.WorkingDirectory, WorktreeDirectory = worktree, Title = "Saved title",
+        await store.UpsertSessionAsync(new() { SessionId = session.SessionId, ProviderId = new(provider), ProviderKey = provider,
+            ProtocolFamily = summaryFamily ?? provider, WorkingDirectory = session.WorkingDirectory, WorktreeDirectory = worktree, Title = "Saved title",
             CreatedAt = CreatedAt, UpdatedAt = CreatedAt });
-        if (ran) await store.UpsertStateAsync(new() { SessionId = session.SessionId, ProviderKey = "codex", ProtocolFamily = "codex",
+        if (ran) await store.UpsertStateAsync(new() { SessionId = session.SessionId, ProviderKey = provider, ProtocolFamily = stateFamily ?? provider,
             ProviderSessionId = "opaque-provider", UpdatedAt = CreatedAt });
-        await journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = "codex", PermissionMode = "acceptEdits" });
+        await journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = provider, PermissionMode = "acceptEdits" });
         return session;
     }
 

@@ -36,13 +36,30 @@ public sealed partial class SessionViewJournalStore
     /// <param name="cancellationToken">Cancels before the commit point.</param>
     /// <returns>A task that completes once the selection is saved.</returns>
     /// <inheritdoc cref="SelectProviderAsync(SessionViewDescriptor, string, ModelProviderDescriptor, CancellationToken)" path="/exception"/>
-    public async Task SelectProviderAsync(SessionViewDescriptor session, string expectedProvider, ModelProviderDescriptor target,
+    public Task SelectProviderAsync(SessionViewDescriptor session, string expectedProvider, ModelProviderDescriptor target,
         SessionViewProviderCarryOver? carryOver, CancellationToken cancellationToken = default)
+        => SelectProviderAsync(session, expectedProvider, target, carryOver, providerFamily: null, cancellationToken);
+
+    /// <summary>
+    /// Atomically saves an idle provider selection, knowing the protocol family of the runtime of the provider the
+    /// session is on: a summary that names that provider's key as family, as CodeAlta 1.8 wrote it, does not make
+    /// the session need recovery.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="expectedProvider">The provider the session is expected to be on.</param>
+    /// <param name="target">The provider the session goes to.</param>
+    /// <param name="carryOver">What the session takes on the new provider; null for its configured defaults.</param>
+    /// <param name="providerFamily">The protocol family of the runtime of <paramref name="expectedProvider"/>; null when unknown.</param>
+    /// <param name="cancellationToken">Cancels before the commit point.</param>
+    /// <returns>A task that completes once the selection is saved.</returns>
+    /// <inheritdoc cref="SelectProviderAsync(SessionViewDescriptor, string, ModelProviderDescriptor, CancellationToken)" path="/exception"/>
+    public async Task SelectProviderAsync(SessionViewDescriptor session, string expectedProvider, ModelProviderDescriptor target,
+        SessionViewProviderCarryOver? carryOver, string? providerFamily, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(target);
         var store = CreateSessionStore();
-        var original = await store.ReadTransferSnapshotAsync(session.SessionId, cancellationToken).ConfigureAwait(false);
+        var original = await store.ReadTransferSnapshotAsync(session.SessionId, requireState: true, providerFamily, cancellationToken).ConfigureAwait(false);
         if (original.Summary.ProviderKey != expectedProvider) throw new InvalidOperationException("The provider selection changed.");
         // Replacement updates the existing first-line view header; never discard a history
         // record from an unsupported/headerless journal in order to manufacture one.
