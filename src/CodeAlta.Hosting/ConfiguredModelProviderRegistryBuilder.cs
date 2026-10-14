@@ -655,6 +655,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
             PermissionMode = NormalizeText(definition.PermissionMode),
             ApiKeyPolicy = ClaudeCodeModelProviderRuntimeOptions.ParseApiKeyPolicy(definition.AnthropicApiKey),
+            PromptSuggestions = definition.PromptSuggestions == true,
             SingleModelId = NormalizeText(definition.SingleModelId),
             ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
             DefaultModelId = NormalizeText(definition.Model),

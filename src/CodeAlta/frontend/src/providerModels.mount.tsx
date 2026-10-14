@@ -5,7 +5,7 @@ import { ProviderSettings } from "./ProviderSettings";
 
 const provider = (key: string): GlobalConfigProvider => ({ key, type: "openai-chat", enabled: true, displayName: key, effectiveName: key, model: null,
   reasoningEffort: null, apiUrl: "http://localhost/v1", effectiveApiUrl: "http://localhost/v1", apiKeyEnv: null, hasApiKey: false,
-  defaults: { displayName: key, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null, permissionMode: null });
+  defaults: { displayName: key, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null, permissionMode: null, promptSuggestions: false });
 const state = { calls: [] as ModelCatalogModelsRequest[], saved: [] as unknown[], status: "ok", hold: false, pending: [] as (() => void)[],
   replyEpoch: "epoch", replyProvider: null as string | null, empty: false, truncated: false };
 const providers = [provider("first"), provider("second")];

@@ -17,9 +17,11 @@ export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "sele
 };
 
 export function PromptEditor({ ref, value, onChange, disabled = false, expanded = false, id, label, placeholder,
-  onPaste, onKeyDown, onCompositionStart }: {
+  suggested = false, onPaste, onKeyDown, onCompositionStart }: {
   ref?: Ref<PromptInput>; value: string; onChange: (text: string) => void; disabled?: boolean; expanded?: boolean;
   id?: string; label: string; placeholder?: string; onPaste?: ClipboardEventHandler<HTMLElement>;
+  /** Whether the placeholder is a prompt suggested to the user, which a key takes, and not the usual hint. */
+  suggested?: boolean;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>; onCompositionStart?: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -121,5 +123,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   return <div id={id} ref={host} className={`prompt-editor ${Classes.MONOSPACE_TEXT}${expanded ? " expanded" : ""}`}
     tabIndex={-1} onFocus={event => { if (event.target === event.currentTarget) editor.current?.focus(); }}
     onKeyDownCapture={onKeyDown} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} onCompositionStart={onCompositionStart}
-    aria-label={label} data-placeholder={!value ? placeholder : undefined}><div className="prompt-editor-surface" /></div>;
+    aria-label={label} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
+    // The placeholder is drawn by a style: a suggested prompt is also said to who does not see it.
+    aria-description={!value && placeholder && suggested ? placeholder : undefined}><div className="prompt-editor-surface" /></div>;
 }

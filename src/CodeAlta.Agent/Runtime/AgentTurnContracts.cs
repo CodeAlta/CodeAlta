@@ -136,6 +136,24 @@ internal interface IAgentProviderRemoteControl
 }
 
 /// <summary>
+/// A turn executor whose provider can suggest the next prompt of the user once a turn ended (Claude Code's prompt
+/// suggestions), when it is set to. It makes them for the sessions that take them
+/// (<see cref="AgentTurnRequest.PromptSuggestions"/>).
+/// </summary>
+internal interface IAgentProviderPromptSuggestions
+{
+    /// <summary>
+    /// Registers what is called when the provider suggested a prompt for a session. The handler is called while the
+    /// provider is being read: it must not wait. A suggestion does not have to come with the answer: the provider
+    /// calls the handler once the turn is over; what it suggests while a run of the session goes on is dropped.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="handler">What is called for each suggestion.</param>
+    /// <returns>The registration, which is disposed to end it.</returns>
+    IDisposable OnPromptSuggestion(string sessionId, Action<string> handler);
+}
+
+/// <summary>
 /// A turn executor whose provider runs tools itself (an agent CLI): the session still shows and records each
 /// tool call, but the definition that "runs" it comes from the executor.
 /// </summary>
@@ -260,6 +278,12 @@ public sealed record AgentTurnRequest
     /// of the provider. Null leaves the mode the provider is configured with.
     /// </summary>
     public string? PermissionMode { get; init; }
+
+    /// <summary>
+    /// Gets or initializes whether the session takes a suggestion for the next prompt of the user once the turn
+    /// ended. A provider that has no suggestions, or is set not to make any, ignores it.
+    /// </summary>
+    public bool PromptSuggestions { get; init; }
 
     /// <summary>
     /// Gets or initializes the maximum number of output tokens the provider should generate when supported.

@@ -15,6 +15,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderBackgroundTasks,
     IAgentProviderRemoteControl,
     IAgentProviderPermissionMode,
+    IAgentProviderPromptSuggestions,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -110,6 +111,13 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         ArgumentNullException.ThrowIfNull(request);
         return GetSession(request.SessionId).SetRemoteControlAsync(request, enabled, name, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public IDisposable OnPromptSuggestion(string sessionId, Action<string> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        return GetSession(sessionId).OnPromptSuggestion(handler);
     }
 
     /// <inheritdoc />

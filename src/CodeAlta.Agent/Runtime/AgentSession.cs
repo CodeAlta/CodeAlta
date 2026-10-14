@@ -54,11 +54,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly Lock _publication = new();
     private readonly IDisposable? _backgroundTasksRegistration;
     private readonly IDisposable? _remoteControlRegistration;
+    private readonly IDisposable? _promptSuggestionRegistration;
     private readonly SemaphoreSlim _stateGate = new(initialCount: 1, maxCount: 1);
     // Turns release the state gate while they run. Serialize their summary snapshots with live Rename separately.
     private readonly SemaphoreSlim _summaryGate = new(initialCount: 1, maxCount: 1);
     // How the session titles itself: read by the runs, set from any thread.
     private int _titleMode;
+    // Whether the session takes the suggestions of its provider for the next prompt.
+    private readonly bool _promptSuggestions;
     // The title the first prompt of the session gives it; null until a prompt a person or an agent wrote had text.
     private string? _firstPromptTitle;
     // The assistant texts that stream now, by content: a title tag is never shown, not even in part.
@@ -133,6 +136,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _options = options;
         _permissionMode = NormalizeOptionalText(options.PermissionMode);
         _titleMode = (int)(options.TitleMode ?? AgentSessionTitles.DefaultMode);
+        _promptSuggestions = options.PromptSuggestions;
         _firstPromptTitle = FirstPromptTitle(history);
         _allowProviderContinuation = allowProviderContinuation;
         _summary = summary;
@@ -152,6 +156,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             : null;
         _backgroundTasksRegistration = turnExecutor is IAgentProviderBackgroundTasks background
             ? background.OnBackgroundTasksChanged(summary.SessionId, PublishBackgroundTasks)
+            : null;
+        _promptSuggestionRegistration = turnExecutor is IAgentProviderPromptSuggestions suggestions
+            ? suggestions.OnPromptSuggestion(summary.SessionId, PublishPromptSuggestion)
             : null;
     }
 
@@ -434,6 +441,18 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         if (!_disposed)
         {
             Publish(new AgentRemoteControlEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, remoteControl));
+        }
+    }
+
+    // A suggestion answers the turn that just ended: told, never recorded, and only while no run goes on. One
+    // that comes while a run goes on was made for the turn before it: nobody is to send it after the answer that
+    // follows.
+    private void PublishPromptSuggestion(string suggestion)
+    {
+        if (!_disposed && _promptSuggestions && Volatile.Read(ref _activeRun) is null
+            && AgentPromptSuggestionEvent.Normalize(suggestion) is { } text)
+        {
+            Publish(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text));
         }
     }
 
@@ -1226,6 +1245,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         run?.SignalCancellation();
         _backgroundTasksRegistration?.Dispose();
         _remoteControlRegistration?.Dispose();
+        _promptSuggestionRegistration?.Dispose();
         List<Exception> failures = [];
         // Start cancellation before joining operation scopes, which include actual hooks and all
         // registration/traversal disposal. No new operation can enter after _disposed was published.
@@ -1632,6 +1652,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             // A run has the mode it started with, or the one it was given since (ApplyPermissionModeNowAsync); what
             // runs outside one takes the current mode.
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
+            PromptSuggestions = _promptSuggestions,
             Conversation = _toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,

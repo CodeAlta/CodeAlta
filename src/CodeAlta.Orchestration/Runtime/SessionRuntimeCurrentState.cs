@@ -64,6 +64,12 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
     /// event of its provider told it; off for a provider that has none.
     /// </summary>
     public AgentRemoteControl RemoteControl { get; init; } = AgentRemoteControl.Off;
+
+    /// <summary>
+    /// What the provider of the session suggested as the next prompt of the user once its last turn ended (Claude
+    /// Code's prompt suggestion); null when it suggested nothing, and once a run started since.
+    /// </summary>
+    public string? PromptSuggestion { get; init; }
 }
 
 /// <summary>A background task of a session, as the runtime last heard of it.</summary>

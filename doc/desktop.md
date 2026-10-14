@@ -643,6 +643,30 @@ unavailable; this tolerance does not promise cross-version RPC contract compatib
 Opening the dialog adds no metadata reads, and Copy remains session ID only. Existing
 snapshot identity/scope checks, catalog freshness and epoch/clipboard limits remain.
 
+### Prompt suggestions
+
+A provider can suggest the next prompt of the user once a turn ended (Claude Code: `doc/providers.md`, "Prompt
+suggestions"), while the provider is set to: **Suggest the next prompt** in the provider editor, shown for a
+provider that runs the Claude Code CLI only and saved as `prompt_suggestions` of the provider
+(`GlobalConfigProviderEdit.PromptSuggestions`). The suggestion comes with the runtime state of the session,
+which the panel of a session reads every second (`entry.promptSuggestion`), and `promptSuggestion.ts` decides
+what is shown:
+
+- it is one line of at most 256 characters, of an attachment that neither runs nor ends (`entryPromptSuggestion`);
+- it takes the place of the placeholder of the prompt (`data-placeholder` of `PromptEditor`, with
+  `data-suggested`: slanted, in the colour of the usual hint, so that it does not read as what was written) only
+  while the prompt is empty, has no image, is not expanded and nothing is being sent or compacted, and the status line
+  then says **Tab or → takes the suggestion** (`shownPromptSuggestion`);
+- Tab or the right arrow, alone, puts it in the prompt with the caret after it and sends nothing
+  (`takesPromptSuggestion`, before the other keys of the composer). An empty prompt has nothing else for these
+  keys to do: Tab otherwise leaves the editor;
+- it is shown again whenever the prompt is empty again, and no longer once a prompt was sent after it
+  (`answered`), before the host says so. The host forgets a suggestion when a
+  run starts, so the next turn brings a new one or none.
+
+Nothing of it is kept: a window loaded again shows the suggestion the host still holds, and a session attached
+again has none.
+
 ### Running sessions
 
 While a session works, an activity spinner shows in three places: before the title of its tab, on its

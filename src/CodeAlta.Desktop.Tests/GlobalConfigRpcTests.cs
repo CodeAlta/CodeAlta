@@ -308,6 +308,34 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task SaveProvider_WritesThePromptSuggestionsOfClaudeCode_AndOfNoOtherType()
+    {
+        await using var fixture = new Fixture(ProvidersConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        var edit = new GlobalConfigProviderEdit("claude", "claude-code", true, null, null, null, null, null, null, true);
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { PromptSuggestions = true }, false, false));
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "prompt_suggestions = true");
+        var after = fixture.Service.Providers(new(Epoch));
+        Assert.IsTrue(after.Providers.Single(static provider => provider.Key == "claude").PromptSuggestions);
+        Assert.IsFalse(after.Providers.Single(static provider => provider.Key == "local").PromptSuggestions);
+
+        // A type that does not run Claude Code does not keep it: the configuration file refuses it there.
+        var retyped = fixture.Service.SaveProvider(new(Epoch, saved.Revision, "claude",
+            edit with { Type = "anthropic", ApiKeyEnv = "CODEALTA_ANTHROPIC_API_KEY", ClearApiKey = false, PromptSuggestions = true }, false, false));
+        Assert.AreEqual("ok", retyped.Status, retyped.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("prompt_suggestions", StringComparison.Ordinal));
+
+        // Off is the absence of the setting.
+        var back = fixture.Service.SaveProvider(new(Epoch, retyped.Revision, "claude", edit with { PromptSuggestions = true }, false, false));
+        Assert.AreEqual("ok", back.Status, back.Message);
+        var off = fixture.Service.SaveProvider(new(Epoch, back.Revision, "claude", edit, false, false));
+        Assert.AreEqual("ok", off.Status, off.Message);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("prompt_suggestions", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task SaveProvider_WritesTheChoiceForAnthropicApiKeyOfClaudeCode_AndOfNoOtherType()
     {
         await using var fixture = new Fixture(ProvidersConfig);

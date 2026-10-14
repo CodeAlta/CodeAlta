@@ -487,6 +487,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
             args = ["--add-dir", "/data"]
             permission_mode = " acceptEdits "
             anthropic_api_key = " ignore "
+            prompt_suggestions = true
             models_include_regex = "sonnet|opus"
             """);
 
@@ -501,6 +502,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         CollectionAssert.AreEqual(new[] { "--add-dir", "/data" }, provider.Arguments);
         Assert.AreEqual("acceptEdits", provider.PermissionMode);
         Assert.AreEqual("ignore", provider.AnthropicApiKey);
+        Assert.AreEqual(true, provider.PromptSuggestions);
         Assert.AreEqual("Claude Code", CodeAltaConfigStore.CreateProviderTypeDefaults("claude-code").DisplayName);
 
         // The settings of the CLI are written back, and the default display name is not.
@@ -509,6 +511,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
         StringAssert.Contains(saved, "command = \"~/.local/bin/claude\"");
         StringAssert.Contains(saved, "permission_mode = \"acceptEdits\"");
         StringAssert.Contains(saved, "anthropic_api_key = \"ignore\"");
+        StringAssert.Contains(saved, "prompt_suggestions = true");
         StringAssert.Contains(saved, "args = [");
         Assert.IsFalse(saved.Contains("display_name", StringComparison.Ordinal));
         var reloaded = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
@@ -545,6 +548,7 @@ public sealed class CodeAltaConfigStoreRawApiTests
     [DataRow("args = [\"--verbose\"]", "args")]
     [DataRow("permission_mode = \"plan\"", "permission_mode")]
     [DataRow("anthropic_api_key = \"use\"", "anthropic_api_key")]
+    [DataRow("prompt_suggestions = true", "prompt_suggestions")]
     public void LoadGlobalProviderDefinitions_RejectsCliSettingsForApiProviders(string setting, string field)
     {
         using var temp = TempDirectory.Create();

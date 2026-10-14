@@ -396,6 +396,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 ReviewOwnedPermissionsPolicy = () => options.ReviewOwnedCommandPermissions || shell.ReviewPermissions,
                 // The mode chosen for a session comes first; a host started with that flag reviews every session.
                 SessionPermissionModes = !options.ReviewOwnedCommandPermissions,
+                // The prompt of a session shows what its provider suggests.
+                ShowsPromptSuggestions = true,
                 // A session an agent creates does not ask, unless the user chose that it asks what its creator asks.
                 InheritPermissionModePolicy = () => shell.InheritPermissions,
                 EnableOwnedAsks = true,

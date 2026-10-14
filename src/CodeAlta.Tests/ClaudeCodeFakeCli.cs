@@ -32,6 +32,9 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     /// <summary>Gets or sets a value indicating whether the CLI predates the option that shows the reasoning.</summary>
     public bool RefuseReasoningDisplay { get; set; }
 
+    /// <summary>Whether the CLI predates the prompt suggestions: it refuses to start with their option.</summary>
+    public bool RefusePromptSuggestions { get; set; }
+
     /// <summary>Gets or sets a value indicating whether the CLI lists the tools of CodeAlta once initialized, as the real one does.</summary>
     public bool ListsToolsAtStart { get; set; }
 
@@ -93,10 +96,11 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     }
 
     /// <summary>The options of a provider that runs this CLI.</summary>
-    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code")
+    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", bool promptSuggestions = false)
         => new()
         {
             ProviderKey = providerKey,
+            PromptSuggestions = promptSuggestions,
             DisplayName = "Claude Code",
             TransportFactory = this,
             ResolveCli = static () => new ClaudeCodeCliResolution("/fake/bin/claude", null),
@@ -137,6 +141,12 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         if (cli.RefuseReasoningDisplay && launch.Arguments.Contains("--thinking-display"))
         {
             StandardErrorTail = "error: unknown option '--thinking-display'";
+            ExitCode = 1;
+            _output.Writer.TryComplete();
+        }
+        else if (cli.RefusePromptSuggestions && launch.Arguments.FirstOrDefault(static argument => argument.StartsWith("--prompt-suggestions", StringComparison.Ordinal)) is { } suggestions)
+        {
+            StandardErrorTail = $"error: unknown option '{suggestions}'";
             ExitCode = 1;
             _output.Writer.TryComplete();
         }
