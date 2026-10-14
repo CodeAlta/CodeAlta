@@ -325,6 +325,45 @@ internal sealed partial class BuiltInAltaCommandContributor
         return all.First(space => string.Equals(space.Id, id, StringComparison.Ordinal));
     }
 
+    // The provider of a new session is one of its space. One that was asked for (--provider, --model, --model-ref,
+    // --tier, --same-model-as) and is not there is refused; one that only came from the defaults or from the calling session
+    // gives way to the default provider of the space, else to the first enabled provider of the space.
+    private static async Task<ModelResolutionResult> KeepProviderInNewSessionSpaceAsync(AltaCommandContext context, AltaModelSelectionOptions request,
+        ModelResolutionResult resolved, SpaceDescriptor? space, string? projectRoot)
+    {
+        if (space is null || resolved.Selection is not { } selection)
+        {
+            return resolved;
+        }
+
+        var configStore = context.Services.Get<CodeAltaConfigStore>()
+            ?? (context.Services.Get<CatalogOptions>() is { } catalogOptions ? new CodeAltaConfigStore(catalogOptions) : null);
+        var filter = SpaceFilter.Load(configStore, space.Id);
+        if (filter.Allows(SpaceResourceKind.Provider, selection.ProviderKey))
+        {
+            return resolved;
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.ModelRef) || !string.IsNullOrWhiteSpace(request.ProviderKey) || !string.IsNullOrWhiteSpace(request.ModelId)
+            || !string.IsNullOrWhiteSpace(request.SameModelAsSessionId) || request.Tier is not null)
+        {
+            return ModelResolutionResult.Fail(Unsupported(context, "provider.notInSpace",
+                ResourceNotInSpaceException.MessageOf(SpaceResourceKind.Provider, selection.ProviderKey, space.Id)));
+        }
+
+        var enabled = GetProviderDescriptors(context).Where(descriptor => descriptor.IsEnabled && filter.Allows(SpaceResourceKind.Provider, descriptor.ProviderId.Value)).ToArray();
+        var configured = GetConfiguredDefaultProvider(context, projectRoot);
+        var chosen = enabled.FirstOrDefault(descriptor => string.Equals(descriptor.ProviderId.Value, configured, StringComparison.OrdinalIgnoreCase)) ?? enabled.FirstOrDefault();
+        if (chosen is null)
+        {
+            return ModelResolutionResult.Fail(NotFound(context, "provider.notFound",
+                $"No enabled provider is available in the space '{space.Name}' ({space.Id}). Only the user assigns providers to spaces, in Settings of the CodeAlta window."));
+        }
+
+        return await ResolveModelSelectionAsync(context, new AltaModelSelectionOptions { ProviderKey = chosen.ProviderId.Value, ReasoningEffort = request.ReasoningEffort },
+            "alta session create", projectRoot, sessionPreparation: true).ConfigureAwait(false);
+    }
+
     // Refuses, for an agent, a resource that its own space does not have. True when it was refused (written to stderr).
     private static bool RefuseOutsideCallerSpace(AltaCommandContext context, SpaceFilter? space, SpaceResourceKind kind, string key, string code, out int exitCode)
     {

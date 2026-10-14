@@ -2695,6 +2695,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var promptId = promptChoice.PromptId!;
 
+        // The provider must be one of the space of the new session as well.
+        modelSelection = await KeepProviderInNewSessionSpaceAsync(context, options.Model, modelSelection, newSessionSpace, project?.ProjectPath).ConfigureAwait(false);
+        if (modelSelection.ExitCode != AltaExitCodes.Success)
+        {
+            return modelSelection.ExitCode;
+        }
+
         var workingDirectory = project?.ProjectPath ?? GetGlobalRootOrCwd(context);
         // Where a project session works: a worktree of its own, the worktree of the session that creates it, or
         // the folder of the project.

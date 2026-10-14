@@ -254,6 +254,11 @@ A calling session reaches only the resources of its own space (`SpaceFilter`, fr
   `prompt.notFound`.
 - `alta session create` without `--prompt-id` starts the session with the agent prompt of its space
   (`new_sessions.agent_prompt`), else `default`.
+- `alta session create` starts a session with a provider of its space, for any caller. A provider asked for
+  (`--provider`, `--model`, `--model-ref`, `--tier`, `--same-model-as`) that the space does not have is
+  refused with `provider.notInSpace` (exit code 7); a provider that only comes from the default provider
+  or from the calling session gives way to the default provider of the space, else to its first enabled
+  provider.
 - `alta skill list` and `alta skill show` leave out the skills of other spaces; `alta skill activate`
   refuses one with `skill.notInSpace`.
 - `alta mcp activate`, `alta mcp server enable` and `alta mcp list` do the same for MCP servers

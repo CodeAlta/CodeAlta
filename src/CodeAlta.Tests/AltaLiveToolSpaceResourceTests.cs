@@ -43,6 +43,34 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ANewSession_StartsWithAProviderOfItsSpace_AndOneAskedForOutsideItIsRefused()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync("claude-business").ConfigureAwait(false);
+        fixture.WriteConfig("""
+            [chat]
+            default_provider = "claude-business"
+
+            [providers.claude-business]
+            type = "claude-code"
+            spaces = ["business"]
+            """);
+        static string? Provider(JsonElement created) => created.GetProperty("modelSelection").GetProperty("providerKey").GetString();
+
+        // The default provider where it is; the first provider of the space where it is not.
+        Assert.AreEqual("claude-business", Provider(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "business").ConfigureAwait(false)));
+        var personal = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        Assert.AreEqual("alpha", Provider(personal));
+
+        // A provider asked for is never replaced: one of another space is refused, for the user and for an agent.
+        var refused = await fixture.Dispatcher.InvokeAsync(["session", "create", "--global", "--space", "personal", "--provider", "claude-business"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        fixture.AssertRefused(refused, "provider.notInSpace");
+        StringAssert.Contains(refused.Stdout + refused.Stderr, "space 'personal'");
+        fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", "create", "--global", "--model-ref", "claude-business:sonnet"], caller: Agent(personal)).ConfigureAwait(false),
+            "provider.notInSpace");
+        Assert.AreEqual("alpha", Provider(await fixture.CreateAsync(Agent(personal), "--global").ConfigureAwait(false)), "An agent creates in its own space, with a provider of it.");
+    }
+
+    [TestMethod]
     public async Task Skills_OfAnotherSpace_AreNotListed_NorActivated()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
@@ -104,7 +132,7 @@ public sealed partial class AltaLiveToolTests
 
         public AltaCommandDispatcher Dispatcher { get; }
 
-        public static async Task<SpaceResourceFixture> CreateAsync()
+        public static async Task<SpaceResourceFixture> CreateAsync(params string[] moreProviders)
         {
             var root = TempDirectory.Create();
             var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
@@ -116,6 +144,11 @@ public sealed partial class AltaLiveToolTests
             var descriptor = new ModelProviderDescriptor(new ModelProviderId("alpha"), "Alpha");
             var registry = new ModelProviderRegistry();
             registry.RegisterOrReplaceSessionRuntime(descriptor, () => new StatefulProviderRuntime(descriptor.ProviderId));
+            ModelProviderDescriptor[] descriptors = [descriptor, .. moreProviders.Select(static key => new ModelProviderDescriptor(new ModelProviderId(key), key))];
+            foreach (var more in descriptors.Skip(1))
+            {
+                registry.RegisterOrReplaceSessionRuntime(more, () => new StatefulProviderRuntime(more.ProviderId));
+            }
             var runtime = CreateRuntime(options, registry);
             var dispatcher = CreateDispatcher(new AltaServiceCollection()
                 .Add(options)
@@ -125,7 +158,7 @@ public sealed partial class AltaLiveToolTests
                 .Add(new SessionViewCatalog(options))
                 .Add(runtime)
                 .Add(new Catalog.Skills.SkillCatalog())
-                .Add<IReadOnlyList<ModelProviderDescriptor>>([descriptor])
+                .Add<IReadOnlyList<ModelProviderDescriptor>>(descriptors)
                 .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
             return new SpaceResourceFixture(root, options, spaces, runtime, dispatcher);
         }
