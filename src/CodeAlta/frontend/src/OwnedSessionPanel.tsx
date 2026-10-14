@@ -1182,6 +1182,8 @@ ${value}` : value);
           setChoices(value); setChoicesNotice("");
           loadModelChoices();
           void runtimeScope.current?.refresh();
+          // A provider chosen by hand is not a model of a tier.
+          if (value.tier) void recordTier(null);
         }} />}
       model={<ComposerModelPicker id={`composer-model-${sessionId}`} value={selected?.modelId ?? null} models={activeChoices?.models ?? noModels} providerKey={selected?.providerKey}
         disabled={invalidEpoch || !!pending} loading={loadingChoices} onChange={modelId => select("modelId", modelId)}

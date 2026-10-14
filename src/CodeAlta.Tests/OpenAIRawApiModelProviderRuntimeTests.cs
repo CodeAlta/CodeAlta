@@ -5081,6 +5081,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(AgentFailureKind.QuotaExhausted, Kind(new HttpRequestException("You exceeded your current quota (insufficient_quota).", null, HttpStatusCode.TooManyRequests)));
         Assert.AreEqual(AgentFailureKind.QuotaExhausted, Kind(new ClientResultException(new TestPipelineResponse("{\"error\":{\"code\":\"usage_not_included\"}}", status: 403, reasonPhrase: "Forbidden"))));
         Assert.AreEqual(AgentFailureKind.QuotaExhausted, Kind(new ClientResultException(new TestPipelineResponse("{\"error\":{\"message\":\"Monthly quota exceeded\"}}", status: 402, reasonPhrase: "Payment Required"))));
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, Kind(new ClientResultException(new TestPipelineResponse("{\"error\":{\"message\":\"Payment is due.\"}}", status: 402, reasonPhrase: "Payment Required"))));
         Assert.AreEqual(AgentFailureKind.RateLimited, Kind(new HttpRequestException("Rate limit reached, slow down.", null, HttpStatusCode.TooManyRequests)));
         Assert.AreEqual(AgentFailureKind.Unavailable, Kind(new HttpRequestException("Service unavailable.", null, HttpStatusCode.ServiceUnavailable)));
         Assert.AreEqual(AgentFailureKind.Unavailable, Kind(new InvalidOperationException("wrapper", new HttpRequestException("Bad gateway.", null, HttpStatusCode.BadGateway))));

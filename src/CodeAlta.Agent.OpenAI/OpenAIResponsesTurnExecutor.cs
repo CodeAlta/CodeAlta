@@ -2545,7 +2545,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return new AgentFailureInfo(AgentFailureKind.Unavailable, resetsAt, retryAfterSeconds);
         }
 
-        return AgentFailureClassifier.Classify(exception);
+        // A status of the SDK client (402 of a Copilot account without credits) is not an HttpRequestException.
+        return (status is { } other ? AgentFailureClassifier.FromHttpStatus((int)other, detail, retryAfterSeconds, resetsAt) : null)
+            ?? AgentFailureClassifier.Classify(exception);
     }
 
     // The reset of an exhausted Codex limit: `resets_at` (Unix seconds) or `resets_in_seconds` of the error body, or
