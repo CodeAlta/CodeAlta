@@ -202,6 +202,29 @@ the process is killed elsewhere). After readiness `waitForBrowserPort` keeps the
 longer lets it hold the test process: on macOS Edge's crash handler outlives the browser for minutes with the
 other end of that pipe, and a test file that had passed went on running until it was gone.
 
+### Tests that hold on a loaded machine
+
+The whole suite runs while other sessions build and test on the same computer, and each test project runs
+many methods at once: a test that passes alone must still pass there.
+
+- A test that waits for an event starts listening before it causes the event. Start the reader of a
+  `WatchAsync` or `StreamEventsAsync` on the calling thread (call the async method that enumerates it), not
+  on `Task.Run`: its first read registers the watch before it returns, while a `Task.Run` may start it after
+  the event was raised and dropped.
+- A deadline tells a hang from a slow machine; it is not a measure of speed. Size it from what the test takes
+  on an idle run (the console logger at normal verbosity gives each duration) with room for a machine several
+  times slower: the session runtime fixtures use `TestDeadlines.Hang`. A deadline that includes the start of
+  a process (a shell, an MCP server) or of a whole host is at least tens of seconds.
+- Order across async paths only as the product orders it: two events published by separate continuations can
+  arrive in either order, so a fake CLI or provider waits for the first to be seen before it causes the second.
+- Reproduce a load failure without loading the computer: pin the test run to one or two processors (the test
+  host inherits the processor affinity of `dotnet test`), delay the step that races in a temporary copy of the
+  test, or start a fake slowly. A failure that goes away with a larger minimum thread pool
+  (`DOTNET_ThreadPool_ForceMinWorkerThreads`) was time spent waiting for threads, not a hang.
+- Windows can release the working directory of a process a moment after its exit is seen: test temp folders
+  wait a bounded time for that (`TestTempDirectory`) instead of failing at once, so that the error of the
+  cleanup does not hide the failure of the test.
+
 The browser tests run on three systems with three fonts and their own gestures. Assert what the product
 promises (an order, "no overlap", "shorter than"), not a margin that one font gives, and name the system
 where a gesture differs: on macOS a Ctrl+click opens the context menu and gives the page no `click`.
