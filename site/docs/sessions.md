@@ -109,6 +109,20 @@ In CodeAlta Desktop, a project session can move to another project: for example 
 
 Chats cannot be moved to a project, and a project session cannot become a chat.
 
+## Archive a session
+
+Archive a session you are done with for now but may come back to. In CodeAlta Desktop:
+
+- Choose **Archive** in the menu of the session. It leaves the sidebar, and its tab closes. Its history, its project and its space are kept.
+- A session that has child sessions asks first, beside its row: **Archive with its N child sessions** is chosen; choose **Archive this session only** to leave them where they are.
+- A session can be archived only while it is idle, and while the sessions below it are idle: not while one of them runs, waits for an answer or has queued prompts.
+- To find an archived session, click **Archived** in the session browser (`Ctrl+Alt+B`), or type its name in the search (`Ctrl+P`): archived sessions come last, under **Archived sessions**.
+- **Restore** puts the session back where it was, with the sessions archived below it, and opens it. **Restore** in the message shown just after an archive does the same.
+- In the session browser, **Info…** shows what is recorded of an archived session, with when it was archived, and **Delete** deletes it.
+- Statistics keep counting archived sessions: they are not deleted.
+
+An agent archives and restores with `alta session archive <id>` and `alta session restore <id>`, with `--with-children` for the sessions below it, and only for sessions of its own space. `alta session list` leaves archived sessions out unless `--archived` is given. CodeAlta TUI does not list archived sessions.
+
 ## Busy sessions and queues
 
 `Enter` sends immediately when idle and enqueues when busy, in both Desktop and TUI.

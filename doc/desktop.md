@@ -601,6 +601,31 @@ removal answers `delete_partial` with what was deleted. The deletion shares the 
 in `WorkspaceService` and in the command owner (`_deleteWork`); the projects and their files are not
 touched.
 
+**Archive** (`sessionArchive/`) is in the menu of a session, in the Explorer and in the scope lists, before
+**Delete**. A session with child sessions that are not archived (`archivableDescendants`, over
+`catalog.current`) is asked about in the `ConfirmPopover` beside its row, with a `RadioGroup` in its slot:
+**Archive with its N child sessions** is chosen, **Archive this session only** leaves them; the button that
+confirms has the focus. A session without such children is archived at once, with a toast whose
+**Restore** brings it back. The window sends `workspace.archiveSession` / `workspace.restoreSession`
+(`WorkspaceArchiveSessionRpc.cs`, sharing the slot of the moves), the command owner holds the
+catalog-mutation reservation (`OwnedSessionCommandService.SetSessionArchivedAsync`), and
+`SessionRuntimeService.SetOwnedSessionArchivedAsync` writes `archived` and `archived_at` in the local state
+of each journal. An archive is refused with the session at work (`session_in_use`, `queue_pending`,
+`interaction_pending`, `BlockingSessionId`) when the session or any session below it works, also for an
+archive of the session alone: what a child does reports to its parent. The owned attachment of an archived
+session is retired; a restore never refuses. Restore in the window restores the archived sessions below it
+too, and opens the session.
+
+The snapshot carries archived sessions (`WorkspaceSession.archived`, `archivedAt`; the host lists them after
+the others, so the 500-row bound keeps the active ones). `workspace.snapshot` keeps them in `catalog.current`
+and gives the window `withoutArchived(scopeSnapshot(...))`: the Explorer, the tabs (reconciled away), the
+counts and the search of the shown space have no archived session. `shownArchivedSessions()` reads them from
+the catalog for the space shown: the session browser has an **Archived** toggle (`ArchivedSessionControls`:
+**Restore**, `Enter` or a double-click restores and opens, **Info…** opens Session info, which shows
+**Archived** with its time, **Delete** deletes through `workspace.deleteSession`, or opens **Child
+sessions…** for a session with children), and the search has an **Archived** category and group, listed
+last and only for a query, where `Enter` restores and opens.
+
 **Delete project…**, in the menu of a project and in the menu of the Projects header for the selected
 project, archived or not, asks in that same popover, every time: it has no **Do not ask again**, and
 **Cancel** has the focus, so Enter leaves everything as it is (`always` of `ConfirmPopover`). **Delete**

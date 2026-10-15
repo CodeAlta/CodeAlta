@@ -320,7 +320,21 @@ alta session abort <session-id> --reason "Superseded"
 alta session compact <session-id>
 alta session fork <session-id> --before <turn>
 alta session rewind <session-id> --before <turn>
+alta session archive <session-id> [--with-children]
+alta session restore <session-id> [--with-children]
 ```
+
+`alta session archive <session-id>` archives a session: it leaves the lists of the window and of
+`alta session list`, and keeps its history, its project and its space. `--with-children` archives the
+sessions below it too. The session and every session below it must be idle (`session.running`,
+`session.queuePending`, `session.interactionPending`, exit code 7, naming the session at work); a session
+does not archive itself. `alta session restore <session-id>` takes it out of the archive, with the
+archived sessions below it under `--with-children`. Both are refused for an agent on a session of another
+space (`space.notOwnSpace`), for each session they change. The records are `alta.session.archived` and
+`alta.session.restored`, with `changed`, the sessions whose state changed. In the desktop window they go
+through the command owner (`ISessionArchive`), so a send it has under way refuses the archive too.
+`alta session list` leaves archived sessions out unless `--archived` (or `--state all`) is given;
+`--state archived` lists only them. The records of a session name `archivedAt` for an archived session.
 
 `alta session title [<session-id>]` is about the title of a session, the calling one by default.
 Without an option it only reads: its record (`alta.session.title`) has `title`, `titleSource`

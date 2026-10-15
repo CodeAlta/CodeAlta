@@ -385,6 +385,16 @@ CodeAlta uses two related records for active work:
 
 **Where a session works.** The working directory of a session is the folder it belongs to: the folder of its project, or the global root for a chat. It is written once, in the header of the journal, and it is what ties a session to its project. A session that works in a git worktree records that folder beside it, as `worktreeDirectory` in `local.sessionSummary` (`AgentSessionSummary.WorktreeDirectory`, `AgentSessionMetadata.WorktreePath`, `SessionViewDescriptor.WorktreeDirectory`): the tools of the agent run there. Journals written before worktrees have no such value and read as sessions that work in their folder. The value is cleared when the session continues after its worktree was removed. The SQLite projection keeps the whole summary, so the cache needs no column for it.
 
+**An archived session.** The local state of a session has `archived` and `archived_at` (the time of
+the archive; absent for one archived before the time was kept). Only an archive or a restore changes them
+(`SessionRuntimeService.SetSessionArchivedAsync`): a local state written from a descriptor keeps them as
+they were read, since the status `Archived` of a descriptor also says that its attachment ended. A session
+that the catalog could not delete is hidden this way too. The SQLite projection keeps `archived` and
+`local_archived_at_utc_ticks` (schema 4: a cache of an older build gets the column and keeps its rows), and
+`AgentSessionViewStateMetadata.ArchivedAt` carries the time to the lists. An archived session keeps its
+journal, its project and its space, so the statistics still count it. CodeAlta TUI leaves archived sessions
+out of its lists.
+
 **The tier of a session.** The local state of a session (`SessionViewLocalState`, the `codealta.sessionState` record) has `tier`: `complex`, `standard` or `quick` when the session runs on a tier of models, absent for a model chosen by hand. `SessionRuntimeService.SetSessionTierAsync` writes it (a session created with `--tier` or on the default `standard` tier, a tier chosen in the model picker of CodeAlta Desktop, a fallback) and `GetSessionTierAsync` reads it. It decides what the session falls back on, not the model it runs. A fork keeps it.
 
 `SessionViewJournalStore` still reads and writes the legacy header/state event names in the same journal used by the agent runtime. This avoids maintaining separate provider-bound state files for the same session while preserving existing user data.
