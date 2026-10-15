@@ -51,6 +51,7 @@ internal sealed class DesktopShell
     private readonly DesktopPreferencesWriter _writer;
     private readonly Action _exit;
     private readonly Lock _gate = new();
+    private readonly Lock _widthNotices = new();
     private readonly List<Action<DesktopShellEvent>> _watchers = [];
     // The width some sessions are shown with instead of the user's setting: what `alta appearance set` changes.
     private readonly Dictionary<string, int> _sessionWidths = new(StringComparer.OrdinalIgnoreCase);
@@ -397,10 +398,10 @@ internal sealed class DesktopShell
         if (preferences is not null)
         {
             _writer.Write();
-            Publish(new("session-width", 0, SessionWidth: value));
+            PublishSessionWidth(null);
         }
 
-        if (released) Publish(new("session-width", 0, SessionId: resized!.Trim()));
+        if (released) PublishSessionWidth(resized!.Trim());
         return true;
     }
 
@@ -440,8 +441,20 @@ internal sealed class DesktopShell
             }
         }
 
-        Publish(new("session-width", 0, SessionWidth: value ?? 0, SessionId: id));
+        PublishSessionWidth(id);
         return true;
+    }
+
+    // Changes come from calls that run side by side: a notice says the width as it is when it is sent, and the notices
+    // are sent one at a time, so the last one the pages get is the current width, whichever change finished first.
+    private void PublishSessionWidth(string? sessionId)
+    {
+        lock (_widthNotices)
+        {
+            int width;
+            lock (_gate) width = sessionId is null ? _preferences.SessionWidth : _sessionWidths.GetValueOrDefault(sessionId);
+            Publish(new("session-width", 0, SessionWidth: width, SessionId: sessionId));
+        }
     }
 
     /// <summary>The zoom of the window's view, in percent.</summary>
