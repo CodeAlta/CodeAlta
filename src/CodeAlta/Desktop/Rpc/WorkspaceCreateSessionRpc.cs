@@ -169,6 +169,7 @@ internal sealed partial class WorkspaceService
         cancellationToken.ThrowIfCancellationRequested();
 
         Task<WorkspaceCreateSessionResponse> work;
+        Func<Task>? create = null;
         lock (_sessionGate)
         {
             // The same request again is the same creation: its outcome, never a second session.
@@ -184,12 +185,14 @@ internal sealed partial class WorkspaceService
                 _sessionWork = work = completion.Task;
                 var steps = new SessionCreationSteps();
                 RecordSessionOutcome(request.RequestId, new(work, steps));
-                // The page calls on the thread of the window, and a handler runs there until it first yields: the
-                // configuration, the catalog and the folders are read, and the session created, on the thread pool.
                 var named = matches.Length == 1 ? matches[0] : null;
-                _ = Task.Run(() => CreateSessionOwnedAsync(request, named, providers, steps, completion));
+                create = () => CreateSessionOwnedAsync(request, named, providers, steps, completion);
             }
         }
+
+        // Out of the gate, on the thread pool where NeoAstra runs the handler: the configuration, the catalog and the
+        // folders are read there. The creation is not the wait's: it goes on when the page stops waiting.
+        if (create is not null) _ = create();
         return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 

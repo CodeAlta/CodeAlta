@@ -1,12 +1,14 @@
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Threading.Channels;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -575,14 +577,24 @@ public sealed class WorkspaceCreateSessionTests
                 ran.TrySetResult((Environment.CurrentManagedThreadId, SynchronizationContext.Current));
                 return Task.FromResult(new SessionViewDescriptor { SessionId = "created", Kind = SessionViewKind.GlobalSession, WorkingDirectory = root });
             });
-            // NeoAstra calls a handler on the thread of the window, which runs it until it first yields.
+            var builder = new NeoRpcBuilder(new NeoRpcOptions { ContractHash = string.Empty, Release = true });
+            builder.AddWorkspaceService(service);
+            await using var host = builder.Build();
+            var answers = Channel.CreateUnbounded<string>();
+            await using var session = host.OpenSession(new NeoRpcSessionIdentity("window", "page"), (json, _) =>
+            {
+                answers.Writer.TryWrite(json);
+                return ValueTask.CompletedTask;
+            });
+            // The view gives the frames of the page to the host on the thread of the window: the handler runs elsewhere.
             SynchronizationContext.SetSynchronizationContext(window);
-            var created = service.CreateSessionAsync(new(Epoch, "global", null, null, null), CancellationToken.None);
+            _ = session.ReceiveAsync($$$"""{"neoastra":1,"kind":"invoke","id":"r1","command":"workspace.createSession","args":{"expectedHostEpoch":"{{{Epoch}}}","scope":"global"}}""");
             SynchronizationContext.SetSynchronizationContext(previous);
             var (thread, context) = await ran.Task.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.AreNotEqual(caller, thread, "The session is not created on the thread of the window.");
             Assert.AreNotSame(window, context);
-            Assert.AreEqual("ok", (await created.WaitAsync(TimeSpan.FromSeconds(30))).Status);
+            using var answer = JsonDocument.Parse(await answers.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.AreEqual("ok", answer.RootElement.GetProperty("value").GetProperty("status").GetString(), answer.RootElement.GetRawText());
             await service.CloseSessionsAsync(); await service.CloseImportsAsync();
         }
         finally
