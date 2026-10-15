@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Anthropic;
 using Anthropic.Core;
 using Anthropic.Credentials;
@@ -186,7 +187,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         }
 
         var client = CreateSdkClient(provider, providerDescriptor);
-        var chatClient = client.AsIChatClient();
+        // Adaptive thinking, with its output_config.effort, is what AnthropicAdaptiveThinkingChatClient gives the models
+        // that take it. Every other model gets the thinking budget of the effort (thinking.type=enabled): older models
+        // reject adaptive thinking and an effort, which the SDK sends by default.
+        var chatClient = client.AsIChatClient(defaultModelId: null, defaultMaxOutputTokens: null, AnthropicThinkingMode.Extended);
         if (provider.HttpClient is null)
         {
             chatClient = new OwnedChatClient(chatClient, client);
@@ -346,13 +350,59 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             ["maxInputTokens"] = model.MaxInputTokens,
             ["maxTokens"] = model.MaxTokens,
         };
+        var efforts = ReadReasoningEfforts(model.RawData);
+        if (efforts is not null)
+        {
+            capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
+        }
 
         return new AgentModelInfo(
             model.ID,
             DisplayName: model.DisplayName,
             Description: null,
             Provider: provider.ProviderKey,
+            SupportedReasoningEfforts: efforts,
             Capabilities: capabilities);
+    }
+
+    // The efforts a model takes, from the capabilities of the Models API:
+    // {"effort":{"supported":true,"low":{"supported":true},"medium":{...},"high":{...},"xhigh":{...},"max":{...}}}.
+    // Null when the endpoint says nothing of them (an Anthropic-compatible endpoint, an older API).
+    internal static IReadOnlyList<AgentReasoningEffort>? ReadReasoningEfforts(IReadOnlyDictionary<string, JsonElement> rawData)
+    {
+        if (!rawData.TryGetValue("capabilities", out var capabilities) ||
+            capabilities.ValueKind != JsonValueKind.Object ||
+            !capabilities.TryGetProperty("effort", out var effort) ||
+            effort.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (!IsSupported(effort))
+        {
+            return [];
+        }
+
+        var efforts = new List<AgentReasoningEffort>();
+        if (IsSupported(effort, "low")) efforts.Add(AgentReasoningEffort.Low);
+        if (IsSupported(effort, "medium")) efforts.Add(AgentReasoningEffort.Medium);
+        if (IsSupported(effort, "high")) efforts.Add(AgentReasoningEffort.High);
+        // The highest effort of a session is sent as xhigh where the model takes it, else as max
+        // (AnthropicAdaptiveThinkingChatClient).
+        if (IsSupported(effort, "xhigh") || IsSupported(effort, "max")) efforts.Add(AgentReasoningEffort.XHigh);
+        return efforts;
+
+        static bool IsSupported(JsonElement element, string? level = null)
+        {
+            if (level is not null && !element.TryGetProperty(level, out element))
+            {
+                return false;
+            }
+
+            return element.ValueKind == JsonValueKind.Object &&
+                element.TryGetProperty("supported", out var supported) &&
+                supported.ValueKind == JsonValueKind.True;
+        }
     }
 
     private static void LogInfo(string message)

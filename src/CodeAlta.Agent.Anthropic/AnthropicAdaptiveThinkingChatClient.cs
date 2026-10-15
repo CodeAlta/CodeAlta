@@ -83,7 +83,8 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : I
             return false;
         }
 
-        // The Anthropic MEAI adapter maps generic ReasoningOptions to legacy
+        // The Anthropic MEAI adapter is created in its Extended mode
+        // (AnthropicModelProviderRuntime), which maps generic ReasoningOptions to legacy
         // thinking.type=enabled. Anthropic's adaptive-thinking guidance marks
         // older Claude models (Sonnet 4.5, Opus 4.5, etc.) as the manual-only
         // boundary. Prefer that version cutoff over a fixed allow-list so future

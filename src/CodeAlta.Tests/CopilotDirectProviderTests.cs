@@ -900,22 +900,22 @@ public sealed class CopilotDirectProviderTests
             },
             HttpClient = new HttpClient(handler),
         });
-        AgentTurnRequest CreateRequest(AgentReasoningEffort effort, IReadOnlyList<AgentReasoningEffort>? efforts) => new()
+        AgentTurnRequest CreateRequest(AgentReasoningEffort effort, IReadOnlyList<AgentReasoningEffort>? efforts, string modelId = "claude-haiku-4.5") => new()
         {
             Provider = provider,
             ProviderId = new ModelProviderId(provider.ProviderKey),
             SessionId = "session-test",
             RunId = new AgentRunId("run-test"),
-            ModelId = "claude-haiku-4.5",
+            ModelId = modelId,
             ReasoningEffort = effort,
             ModelInfo = new AgentModelInfo(
-                "claude-haiku-4.5",
+                modelId,
                 Provider: "github-copilot",
                 SupportedReasoningEfforts: efforts,
                 Capabilities: new Dictionary<string, object?>
                 {
                     ["copilotEndpointKind"] = "AnthropicMessages",
-                    ["family"] = "claude-haiku-4.5",
+                    ["family"] = modelId,
                     ["outputTokenLimit"] = 64000L,
                 }),
             Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("hi")])],
@@ -931,21 +931,26 @@ public sealed class CopilotDirectProviderTests
         static bool HasEffort(string json)
         {
             using var body = JsonDocument.Parse(json);
-            var hasEffort = body.RootElement.TryGetProperty("output_config", out var outputConfig) && outputConfig.TryGetProperty("effort", out _);
-            Assert.AreEqual(hasEffort, body.RootElement.TryGetProperty("thinking", out _), "Thinking is asked for with the effort only.");
-            return hasEffort;
+            return body.RootElement.TryGetProperty("output_config", out var outputConfig) && outputConfig.TryGetProperty("effort", out _);
+        }
+
+        static string? Thinking(string json)
+        {
+            using var body = JsonDocument.Parse(json);
+            return body.RootElement.TryGetProperty("thinking", out var thinking) ? thinking.GetProperty("type").GetString() : null;
         }
 
         Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
         try
         {
-            // The catalog lists no effort for the model: none is sent.
+            // The catalog lists no effort for the model: none is sent, and no thinking.
             var response = await CreateExecutor().ExecuteTurnAsync(
                 CreateRequest(AgentReasoningEffort.High, []),
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
             Assert.AreEqual("ok", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
             Assert.AreEqual(1, bodies.Count);
             Assert.IsFalse(HasEffort(bodies[0]));
+            Assert.IsNull(Thinking(bodies[0]));
 
             // An effort the catalog does not list for the model is not sent either.
             bodies.Clear();
@@ -954,22 +959,36 @@ public sealed class CopilotDirectProviderTests
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
             Assert.AreEqual(1, bodies.Count);
             Assert.IsFalse(HasEffort(bodies[0]));
+            Assert.IsNull(Thinking(bodies[0]));
 
-            // The catalog says nothing of the efforts of the model: the effort the server rejects is sent once, the
-            // request is made again without it, and the model gets no effort for the rest of the session.
+            // The catalog says nothing of the efforts of a model older than adaptive thinking: it is sent the thinking
+            // budget of the effort, which the server takes.
+            bodies.Clear();
+            _ = await CreateExecutor().ExecuteTurnAsync(
+                CreateRequest(AgentReasoningEffort.High, null),
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            Assert.AreEqual(1, bodies.Count);
+            Assert.IsFalse(HasEffort(bodies[0]));
+            Assert.AreEqual("enabled", Thinking(bodies[0]));
+
+            // The catalog says nothing of the efforts of a model that takes adaptive thinking by its version: the effort
+            // the server rejects is sent once, the request is made again without it, and the model gets no effort for
+            // the rest of the session.
             bodies.Clear();
             var executor = CreateExecutor();
             response = await executor.ExecuteTurnAsync(
-                CreateRequest(AgentReasoningEffort.Low, null),
+                CreateRequest(AgentReasoningEffort.Low, null, "claude-haiku-4.7"),
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
             Assert.AreEqual("ok", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
             Assert.AreEqual(2, bodies.Count);
             Assert.IsTrue(HasEffort(bodies[0]));
+            Assert.AreEqual("adaptive", Thinking(bodies[0]));
             Assert.IsFalse(HasEffort(bodies[1]));
+            Assert.IsNull(Thinking(bodies[1]));
 
             bodies.Clear();
             _ = await executor.ExecuteTurnAsync(
-                CreateRequest(AgentReasoningEffort.High, null),
+                CreateRequest(AgentReasoningEffort.High, null, "claude-haiku-4.7"),
                 static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
             Assert.AreEqual(1, bodies.Count);
             Assert.IsFalse(HasEffort(bodies[0]));
