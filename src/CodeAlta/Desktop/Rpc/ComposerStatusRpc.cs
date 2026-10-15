@@ -45,6 +45,12 @@ internal sealed class ComposerStatusService
     /// <summary>Gets what the space of a session has, which the MCP servers it counts are filtered by.</summary>
     internal Func<string, CancellationToken, Task<SpaceFilter>>? SessionSpaceFilter { get; init; }
 
+    /// <summary>
+    /// Gets what the space a new session of a project (null for a chat) will be created in has: the space the window
+    /// shows, as the creation of the session decides it. The composer of a session that does not exist yet counts by it.
+    /// </summary>
+    internal Func<string?, CancellationToken, Task<SpaceFilter>>? NewSessionSpaceFilter { get; init; }
+
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal ComposerStatusService()
     {
@@ -84,10 +90,11 @@ internal sealed class ComposerStatusService
         {
             var items = new List<ComposerStatusItem>();
             var snapshot = _mcp.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Root, UserHomeDirectory = _home, ProbeWritability = false });
-            if (request.SessionId is { } owner && SessionSpaceFilter is { } filter)
-            {
-                snapshot = InSpace(snapshot, await filter(owner, cancellationToken).ConfigureAwait(false));
-            }
+            // The space of the session, or the one the session of a composer without one will be created in.
+            var inSpace = request.SessionId is { } owner
+                ? SessionSpaceFilter is { } filter ? await filter(owner, cancellationToken).ConfigureAwait(false) : null
+                : NewSessionSpaceFilter is { } created ? await created(request.ProjectId, cancellationToken).ConfigureAwait(false) : null;
+            if (inSpace is not null) snapshot = InSpace(snapshot, inSpace);
 
             var active = _plugins?.ActivePlugins ?? [];
             var plugin = active.Select(static plugin => plugin.Instance).OfType<McpPlugin>().FirstOrDefault();
@@ -100,7 +107,7 @@ internal sealed class ComposerStatusService
                 {
                     ProjectId = request.ProjectId, ProjectPath = project.Root, SessionId = request.SessionId, HasInteractiveUi = true,
                     // The plugins of the session's space only.
-                    SpaceId = request.SessionId is { } sessionId && SessionSpace is { } space ? await space(sessionId, cancellationToken).ConfigureAwait(false) : null,
+                    SpaceId = request.SessionId is { } sessionId && SessionSpace is { } space ? await space(sessionId, cancellationToken).ConfigureAwait(false) : inSpace?.SpaceId,
                 };
                 var statuses = _plugins.Adapter.GetStatusEntries(active, PluginUiRegion.SessionStatus, options);
                 var commands = _plugins.Adapter.GetContributions<PluginCommandContribution>(PluginPoint.Command, options);

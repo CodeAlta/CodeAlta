@@ -804,6 +804,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
                         SessionSpaceFilter = (sessionId, token) => host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token),
+                        // A new session is created in the space the window shows, as the page asks for it.
+                        NewSessionSpaceFilter = async (projectId, token) => await host.RuntimeService.GetSpaceFilterAsync(spaceView.ShownSpaceId,
+                            projectId is null ? null : await host.ProjectCatalog.GetByIdAsync(projectId, token).ConfigureAwait(false), token).ConfigureAwait(false),
                     });
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch, canvases)
                     {
