@@ -393,11 +393,14 @@ function usageSummary(text: string | null): string | null {
 
 function modelPresentation(text: string | null, details: JsonObject | null) {
   const provider = stringAt(details, "providerKey") ?? stringAt(details, "providerId");
-  const model = stringAt(details, "modelId") ?? capture(text, /model\s+`([^`]+)`/i);
+  // A provider that answered with another model than the one requested (a reroute, a fallback on a refusal).
+  const effective = stringAt(details, "effectiveModel");
+  const requested = effective ? stringAt(details, "requestedModel") : null;
+  const model = stringAt(details, "modelId") ?? effective ?? capture(text, /model\s+`([^`]+)`/i);
   const reasoning = stringAt(details, "reasoningEffort") ?? capture(text, /reasoning:\s*`([^`]+)`/i);
   return {
     title: model ? `Model · ${model}` : "Model changed",
-    subtitle: provider ? `Provider ${provider}` : null,
+    subtitle: provider ? `Provider ${provider}` : requested ? `Instead of ${requested}` : null,
     summary: reasoning ? `Reasoning: ${friendly(reasoning)}` : null,
     keepMessage: !provider && !model && !reasoning,
   };

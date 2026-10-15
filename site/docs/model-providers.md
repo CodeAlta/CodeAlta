@@ -490,6 +490,13 @@ CodeAlta always sends an explicit Anthropic output-token limit, using the select
 
 When a Claude model declines a request (a refusal of its safety classifiers), the run fails with a message that names the category and the explanation Anthropic gives. What the model wrote before it stopped is not kept. Rephrase the request, or continue with another model.
 
+On the Claude API, Claude Fable 5.1, Claude Opus 5.5, Claude Opus 5 and Claude Sonnet 5.5 are sent Anthropic's refusal fallback: a request their classifiers decline is run again by Anthropic on another model, chosen by the category of the refusal, and the answer comes from that model. The timeline then shows a model line with the model that answered. The run fails on a refusal only when the fallback model declines too, or when the category has no fallback. To turn it off for a provider:
+
+```toml
+[providers.anthropic]
+refusal_fallback = false   # default: true
+```
+
 ### Gemini / Google GenAI
 
 Use `google-genai` for the Gemini API with an API key. Leave `model` unset

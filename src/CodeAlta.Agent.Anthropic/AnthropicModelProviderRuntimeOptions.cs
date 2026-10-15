@@ -98,6 +98,13 @@ public sealed class AnthropicProviderOptions
     public IReadOnlyDictionary<string, AgentModelOverride>? ModelOverrides { get; set; }
 
     /// <summary>
+    /// Gets or sets whether a request of a model that takes it asks the Claude API to run a request its safety
+    /// classifiers decline again on another model (<c>fallbacks: "default"</c>). True by default; only the Claude API
+    /// is sent it.
+    /// </summary>
+    public bool RefusalFallback { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the shared models.dev catalog service.
     /// </summary>
     public ModelsDevCatalogService? ModelCatalog { get; set; }

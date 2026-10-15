@@ -111,8 +111,56 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             prepareRequest: MarkCacheBreakpoints,
             classifyFailure: ClassifyFailure,
             promptCacheLifetime: AnthropicPromptCache.Lifetime,
-            describeContentFilter: DescribeRefusal);
+            describeContentFilter: DescribeRefusal,
+            reviewResponse: ReviewFallback);
     }
+
+    // The server-side fallback marks where another model went on with a `fallback` content block, which the SDK
+    // keeps as raw JSON: {"type":"fallback","from":{"model":...},"to":{"model":...}}. What the declined model thought
+    // or called before it is not replayed (its text is: the fallback model was given it); the model that answered is
+    // the one of the last block, or the one message_start names when the conversation already fell back.
+    internal static string? ReviewFallback(List<ChatResponseUpdate> updates, AgentTurnRequest request)
+    {
+        var boundary = -1;
+        string? fallbackModel = null;
+        for (var index = 0; index < updates.Count; index++)
+        {
+            if (updates[index].RawRepresentation is global::Anthropic.Models.Messages.RawMessageStreamEvent { Value: global::Anthropic.Models.Messages.RawContentBlockStartEvent start } &&
+                start.ContentBlock.Value is null &&
+                TryReadFallbackModel(start.ContentBlock.Json) is { } model)
+            {
+                boundary = index;
+                fallbackModel = model;
+            }
+        }
+
+        for (var index = 0; index < boundary; index++)
+        {
+            var update = updates[index];
+            if (update.Contents.Any(static content => content is TextReasoningContent or FunctionCallContent))
+            {
+                update.Contents = [.. update.Contents.Where(static content => content is not (TextReasoningContent or FunctionCallContent))];
+            }
+        }
+
+        var served = fallbackModel ?? updates.Select(static update => update.ModelId).FirstOrDefault(static model => !string.IsNullOrWhiteSpace(model));
+        return IsReroute(request.ModelId, served) ? served : null;
+    }
+
+    private static string? TryReadFallbackModel(JsonElement block)
+        => block.ValueKind == JsonValueKind.Object &&
+            block.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "fallback" &&
+            block.TryGetProperty("to", out var to) && to.ValueKind == JsonValueKind.Object &&
+            to.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(model.GetString())
+                ? model.GetString()
+                : null;
+
+    // An alias answered by its dated model (claude-haiku-4-5 by claude-haiku-4-5-20251001) is not a reroute.
+    private static bool IsReroute(string? requested, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? served)
+        => !string.IsNullOrWhiteSpace(requested) && !string.IsNullOrWhiteSpace(served) &&
+            !served.StartsWith(requested, StringComparison.OrdinalIgnoreCase) &&
+            !requested.StartsWith(served, StringComparison.OrdinalIgnoreCase);
 
     // A refusal (stop_reason "refusal") names its policy category and an explanation in the stop_details of the
     // message_delta event, when the API gives them.
@@ -236,12 +284,14 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 
         if (provider.ChatClientFactory is not null)
         {
+            var claudeApi = IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri);
             return ValueTask.FromResult(
                 WrapChatClient(
                     provider.ChatClientFactory(),
                     providerDescriptor,
                     useStreamingCompatibilityFallback,
-                    IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri)));
+                    claudeApi,
+                    claudeApi && provider.RefusalFallback));
         }
 
         var client = CreateSdkClient(provider, providerDescriptor);
@@ -255,8 +305,9 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         }
 
         // The SDK resolves the endpoint: the provider's URL, else ANTHROPIC_BASE_URL, else the Claude API.
+        var isClaudeApi = IsClaudeApi(new Uri(client.BaseUrl));
         return ValueTask.FromResult<IChatClient>(
-            WrapChatClient(chatClient, providerDescriptor, useStreamingCompatibilityFallback, IsClaudeApi(new Uri(client.BaseUrl))));
+            WrapChatClient(chatClient, providerDescriptor, useStreamingCompatibilityFallback, isClaudeApi, isClaudeApi && provider.RefusalFallback));
     }
 
     // Only the Claude API is known to take the thinking block binding control: an Anthropic-compatible endpoint
@@ -367,12 +418,13 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         IChatClient chatClient,
         ModelProviderRuntimeDescriptor providerDescriptor,
         bool useStreamingCompatibilityFallback,
-        bool isClaudeApi)
+        bool isClaudeApi,
+        bool refusalFallback)
     {
         ArgumentNullException.ThrowIfNull(chatClient);
         ArgumentNullException.ThrowIfNull(providerDescriptor);
 
-        var adaptiveThinkingChatClient = new AnthropicAdaptiveThinkingChatClient(chatClient, dropMismatchedThinking: isClaudeApi);
+        var adaptiveThinkingChatClient = new AnthropicAdaptiveThinkingChatClient(chatClient, dropMismatchedThinking: isClaudeApi, refusalFallback);
         if (!useStreamingCompatibilityFallback)
         {
             return adaptiveThinkingChatClient;

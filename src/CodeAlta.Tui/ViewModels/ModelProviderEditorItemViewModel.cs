@@ -257,6 +257,8 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.Arguments = runsCli ? definition.Arguments : null;
         definition.AnthropicApiKey = runsCli ? definition.AnthropicApiKey : null;
         definition.PromptSuggestions = runsCli ? definition.PromptSuggestions : null;
+        // Edited in the TOML of the provider too; only the anthropic type reads it.
+        definition.RefusalFallback = ProviderType == "anthropic" ? definition.RefusalFallback : null;
         definition.OrganizationId = UseDefaultOrganizationId ? null : NormalizeText(OrganizationId);
         definition.ProjectId = UseDefaultProjectId ? null : NormalizeText(ProjectId);
         definition.Project = UseDefaultProject ? null : NormalizeText(Project);
@@ -377,6 +379,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             PermissionMode = definition.PermissionMode,
             AnthropicApiKey = definition.AnthropicApiKey,
             PromptSuggestions = definition.PromptSuggestions,
+            RefusalFallback = definition.RefusalFallback,
             ConfigDir = definition.ConfigDir,
             CodexHome = definition.CodexHome,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,

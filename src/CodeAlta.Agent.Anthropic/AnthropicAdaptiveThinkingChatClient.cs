@@ -16,10 +16,17 @@ namespace CodeAlta.Agent.Anthropic;
 /// </summary>
 /// <param name="inner">The client that sends the requests.</param>
 /// <param name="dropMismatchedThinking">Whether the endpoint is the Claude API, which takes the binding control.</param>
-internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, bool dropMismatchedThinking) : IChatClient
+/// <param name="refusalFallback">
+/// Whether a model that takes it is sent the server-side fallback of the Claude API (<c>fallbacks: "default"</c>,
+/// beta <see cref="RefusalFallbackBeta"/>): a request its safety classifiers decline runs again on another model.
+/// </param>
+internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, bool dropMismatchedThinking, bool refusalFallback = false) : IChatClient
 {
     /// <summary>The beta that the thinking block binding control requires.</summary>
     internal const string ThinkingBindingBeta = "thinking-binding-controls-2026-08-01";
+
+    /// <summary>The beta of the <c>"default"</c> form of the server-side fallback.</summary>
+    internal const string RefusalFallbackBeta = "server-side-fallback-2026-07-01";
 
     /// <summary>
     /// The key of <see cref="ChatOptions.AdditionalProperties"/> that names the effort the highest effort is sent as,
@@ -52,6 +59,35 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
     }
 
     private ChatOptions? CreateOptions(ChatOptions? options)
+    {
+        var withThinking = CreateThinkingOptions(options);
+        if (withThinking is null || !refusalFallback || !TakesDefaultFallback(withThinking.ModelId))
+        {
+            return withThinking;
+        }
+
+        // The "default" form routes by the category of the refusal, so no model list is kept here.
+        var originalRawRepresentationFactory = withThinking.RawRepresentationFactory;
+        var adjusted = withThinking.Clone();
+        adjusted.RawRepresentationFactory = implementation =>
+        {
+            var createParams = originalRawRepresentationFactory?.Invoke(implementation) as MessageCreateParams ?? new MessageCreateParams
+            {
+                MaxTokens = withThinking.MaxOutputTokens ?? throw new InvalidOperationException(
+                    "An Anthropic request requires an explicit maximum output-token limit."),
+                Messages = [],
+                Model = withThinking.ModelId!,
+            };
+            var body = new Dictionary<string, JsonElement>(createParams.RawBodyData, StringComparer.Ordinal)
+            {
+                ["fallbacks"] = ParseJson("\"default\""),
+            };
+            return AddBeta(MessageCreateParams.FromRawUnchecked(createParams.RawHeaderData, createParams.RawQueryData, body), RefusalFallbackBeta);
+        };
+        return adjusted;
+    }
+
+    private ChatOptions? CreateThinkingOptions(ChatOptions? options)
     {
         if (options is null)
         {
@@ -163,6 +199,21 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
     {
         using var document = JsonDocument.Parse(json);
         return document.RootElement.Clone();
+    }
+
+    // The models the Claude API runs the "default" fallback for: Claude Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5.
+    internal static bool TakesDefaultFallback(string? modelId)
+    {
+        if (!TryGetClaudeModelId(modelId, out var normalizedClaudeModelId) ||
+            !TryReadClaudeVersion(normalizedClaudeModelId, out var major, out var minor))
+        {
+            return false;
+        }
+
+        return major == 5 &&
+            (normalizedClaudeModelId.StartsWith("claude-fable-", StringComparison.Ordinal) && minor == 1 ||
+                normalizedClaudeModelId.StartsWith("claude-opus-", StringComparison.Ordinal) && minor is 0 or 5 ||
+                normalizedClaudeModelId.StartsWith("claude-sonnet-", StringComparison.Ordinal) && minor == 5);
     }
 
     // The Claude models from the fifth generation on run adaptive thinking when the request names no thinking.

@@ -347,6 +347,13 @@ public sealed class CodeAltaProviderDocument
     public bool? PromptSuggestions { get; set; }
 
     /// <summary>
+    /// Gets or sets whether an <c>anthropic</c> provider asks the Claude API to run a request its safety classifiers
+    /// decline again on another model (<c>fallbacks: "default"</c>), for the models that take it; true when absent.
+    /// </summary>
+    [JsonPropertyName("refusal_fallback")]
+    public bool? RefusalFallback { get; set; }
+
+    /// <summary>
     /// Gets or sets the configuration folder of a <c>claude-code</c> provider, given to the CLI as
     /// <c>CLAUDE_CONFIG_DIR</c>: one folder per Claude account. A leading <c>~</c> is the home folder. When it is
     /// empty the CLI uses its own folder (<c>~/.claude</c>, or <c>CLAUDE_CONFIG_DIR</c> of the environment).

@@ -420,6 +420,15 @@ test("model changes show provider, model, and reasoning without a verbose primar
   assert.equal(item.markdown, null);
 });
 
+test("a model the provider answered with instead of the requested one is the model of the line", () => {
+  const [item] = buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "ModelChanged",
+    text: "The provider answered with claude-opus-4-8 instead of claude-opus-5-5.",
+    details: JSON.stringify({ requestedModel: "claude-opus-5-5", effectiveModel: "claude-opus-4-8" }) })]);
+  assert.equal(item.title, "Model · claude-opus-4-8");
+  assert.equal(item.subtitle, "Instead of claude-opus-5-5");
+  assert.equal(item.markdown, null);
+});
+
 test("a fallback after a failure shows why and the models left and taken", () => {
   const [item] = buildTimelineItems([entry({ eventType: "sessionUpdate", kind: "ProviderFallback",
     text: "Claude Code quota reached until 18:00, continuing on Codex GPT-6.1 high.",

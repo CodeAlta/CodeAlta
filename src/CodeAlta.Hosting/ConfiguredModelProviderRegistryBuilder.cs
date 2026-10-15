@@ -729,6 +729,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                         definition.Request),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
+                    RefusalFallback = definition.RefusalFallback != false,
                 },
             },
         };

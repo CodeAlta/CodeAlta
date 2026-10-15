@@ -43,6 +43,7 @@ public sealed class CodeAltaConfigStore
     private const string CopilotDirectProviderType = "copilot";
     private const string XaiDirectProviderType = "xai";
     private const string ClaudeCodeProviderType = "claude-code";
+    private const string AnthropicProviderType = "anthropic";
     private const string ClaudeCodeDefaultDisplayName = "Claude Code";
     private static readonly string[] ClaudeCodePermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
     private static readonly string[] ClaudeCodeApiKeyChoices = ["use", "ignore"];
@@ -1792,6 +1793,12 @@ public sealed class CodeAltaConfigStore
         ApplyCopilotDirectDefaults(definition);
         ApplyXaiDirectDefaults(definition);
         ApplyClaudeCodeDefaults(definition);
+        if (string.Equals(definition.ProviderType, AnthropicProviderType, StringComparison.Ordinal))
+        {
+            // On is the absence of the setting.
+            definition.RefusalFallback = definition.RefusalFallback == false ? false : null;
+        }
+
         ValidateProviderFields(definition);
     }
 
@@ -1880,6 +1887,11 @@ public sealed class CodeAltaConfigStore
             RejectUnsupportedField(definition, "anthropic_api_key", definition.AnthropicApiKey);
             RejectUnsupportedField(definition, "prompt_suggestions", definition.PromptSuggestions);
             RejectUnsupportedField(definition, "config_dir", definition.ConfigDir);
+        }
+
+        if (!string.Equals(definition.ProviderType, AnthropicProviderType, StringComparison.Ordinal))
+        {
+            RejectUnsupportedField(definition, "refusal_fallback", definition.RefusalFallback);
         }
 
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
@@ -2535,6 +2547,7 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.PermissionMode) ||
                !string.IsNullOrWhiteSpace(definition.AnthropicApiKey) ||
                definition.PromptSuggestions is not null ||
+               definition.RefusalFallback is not null ||
                !string.IsNullOrWhiteSpace(definition.ConfigDir) ||
                !string.IsNullOrWhiteSpace(definition.CodexHome) ||
                !string.IsNullOrWhiteSpace(definition.GitHubEnterpriseUrl) ||
@@ -2640,6 +2653,7 @@ public sealed class CodeAltaConfigStore
             PermissionMode = definition.PermissionMode,
             AnthropicApiKey = definition.AnthropicApiKey,
             PromptSuggestions = definition.PromptSuggestions,
+            RefusalFallback = definition.RefusalFallback,
             ConfigDir = definition.ConfigDir,
             CodexHome = definition.CodexHome,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,

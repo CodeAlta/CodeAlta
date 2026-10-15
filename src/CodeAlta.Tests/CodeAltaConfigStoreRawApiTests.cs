@@ -573,6 +573,43 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    public void LoadGlobalProviderDefinitions_AnthropicReadsRefusalFallback_AndOtherTypesRejectIt()
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.anthropic]
+            type = "anthropic"
+            api_key_env = "CODEALTA_ANTHROPIC_API_KEY"
+            refusal_fallback = false
+
+            [providers.anthropic-default]
+            type = "anthropic"
+            api_key_env = "CODEALTA_ANTHROPIC_API_KEY"
+            refusal_fallback = true
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var providers = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToDictionary(static provider => provider.ProviderKey, StringComparer.OrdinalIgnoreCase);
+
+        Assert.AreEqual(false, providers["anthropic"].RefusalFallback);
+        // On is the absence of the setting.
+        Assert.IsNull(providers["anthropic-default"].RefusalFallback);
+
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            """
+            [providers.openai]
+            type = "openai-responses"
+            api_key_env = "OPENAI_API_KEY"
+            refusal_fallback = false
+            """);
+        var failure = Assert.ThrowsExactly<InvalidDataException>(() => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path }).LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(failure.InnerException?.Message, "'refusal_fallback'");
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_CodexSubscriptionAppliesDefaults()
     {
         using var temp = TempDirectory.Create();

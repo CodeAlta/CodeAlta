@@ -30,6 +30,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     private readonly Func<Exception, AgentFailureInfo?>? _classifyFailure;
     private readonly TimeSpan? _promptCacheLifetime;
     private readonly Func<IReadOnlyList<ChatResponseUpdate>, string?>? _describeContentFilter;
+    private readonly Func<List<ChatResponseUpdate>, AgentTurnRequest, string?>? _reviewResponse;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
@@ -54,6 +55,11 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// Optional provider-specific sentence for a response the provider stopped by its content filter (a refusal), read
     /// from the updates of the response; a generic sentence otherwise.
     /// </param>
+    /// <param name="reviewResponse">
+    /// Optional provider-specific review of the updates of a response before they are read: it may remove what the
+    /// provider says is not part of the answer, and returns the model that answered when the provider ran the request
+    /// on another model than the one requested; null otherwise.
+    /// </param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
         Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
@@ -62,7 +68,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         ChatClientRequestPreparer? prepareRequest = null,
         Func<Exception, AgentFailureInfo?>? classifyFailure = null,
         TimeSpan? promptCacheLifetime = null,
-        Func<IReadOnlyList<ChatResponseUpdate>, string?>? describeContentFilter = null)
+        Func<IReadOnlyList<ChatResponseUpdate>, string?>? describeContentFilter = null,
+        Func<List<ChatResponseUpdate>, AgentTurnRequest, string?>? reviewResponse = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -75,6 +82,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         _classifyFailure = classifyFailure;
         _promptCacheLifetime = promptCacheLifetime;
         _describeContentFilter = describeContentFilter;
+        _reviewResponse = reviewResponse;
     }
 
     /// <inheritdoc />
@@ -84,13 +92,22 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         => _listModelsAsync(provider, cancellationToken);
 
     /// <inheritdoc />
+    public Task<AgentTurnResponse> ExecuteTurnAsync(
+        AgentTurnRequest request,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        CancellationToken cancellationToken = default)
+        => ExecuteTurnAsync(request, onUpdate, static (_, _) => ValueTask.CompletedTask, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<AgentTurnResponse> ExecuteTurnAsync(
         AgentTurnRequest request,
         Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(onUpdate);
+        ArgumentNullException.ThrowIfNull(onSessionUpdate);
 
         try
         {
@@ -119,7 +136,19 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     }
                 }
 
+                var reroutedTo = _reviewResponse?.Invoke(updates, request);
                 var response = updates.ToChatResponse();
+                if (!string.IsNullOrWhiteSpace(reroutedTo))
+                {
+                    response.ModelId = reroutedTo;
+                    await onSessionUpdate(new AgentTurnSessionUpdate
+                    {
+                        Kind = AgentSessionUpdateKind.ModelChanged,
+                        Message = $"The provider answered with {reroutedTo} instead of {request.ModelId}.",
+                        Details = CreateRerouteDetails(request.ModelId, reroutedTo),
+                    }, cancellationToken).ConfigureAwait(false);
+                }
+
                 // A response stopped by the content filter (a refusal of the model) fails the turn: what it wrote
                 // before is not an answer, and is not kept.
                 if (response.FinishReason == ChatFinishReason.ContentFilter)
@@ -568,6 +597,25 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         => usage.AdditionalCounts is { } counts && counts.TryGetValue("CacheCreationInputTokens", out var tokens) && tokens > 0
             ? tokens
             : null;
+
+    // The shape of a reroute the other executors report: no modelId, so the session keeps the model it selected.
+    private static JsonElement CreateRerouteDetails(string? requestedModel, string effectiveModel)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            if (!string.IsNullOrWhiteSpace(requestedModel))
+            {
+                writer.WriteString("requestedModel", requestedModel);
+            }
+
+            writer.WriteString("effectiveModel", effectiveModel);
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
 
     private static JsonElement? CreateProviderState(ChatResponse response)
     {
