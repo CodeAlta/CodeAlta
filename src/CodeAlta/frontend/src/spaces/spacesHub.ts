@@ -1,5 +1,6 @@
 // The page's link to the spaces of the catalog: what they are now, what their sessions do, and the calls that change them.
 import type { spaces as spacesService, SpaceChangeResponse, SpaceSessionActivity, SpaceSessionResourcesResponse } from "#neoastra";
+import { createOrderedCalls } from "../orderedCalls";
 import { defaultSpace, noAssignments, readAssignments, readSessionActivity, readSpaces, sameSessions, sameSpaces, spaceActivities, type ResourceAssignments,
   type Space, type SpaceActivity, type SpaceResourceKind } from "./spaces";
 
@@ -49,6 +50,8 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
   visible: () => boolean = () => typeof document === "undefined" || document.visibilityState !== "hidden") {
   let state = empty;
   let epoch: string | null = null;
+  // The host keeps the space it was told last: a switch through several spaces tells it in the order they were shown.
+  const inOrder = createOrderedCalls();
   let listing = 0;
   let latest: Promise<void> = Promise.resolve();
   let request: (kind: "show" | "changed", spaceId: string | null) => void = () => { };
@@ -178,7 +181,7 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
     /** Tells the host which space the page shows: the commands of the sessions read it as their current space. */
     shown(id: string) {
       const host = epoch;
-      if (host) void api.shown({ expectedEpoch: host, id }, { timeoutMilliseconds: 10_000 }).catch(() => { /* The host then goes on with what it knew. */ });
+      if (host) void inOrder("shown", () => api.shown({ expectedEpoch: host, id }, { timeoutMilliseconds: 10_000 })).catch(() => { /* The host then goes on with what it knew. */ });
     },
     /** Creates a space; with `copyFrom`, it starts with the setup of that space (not its identity nor its projects). */
     create: (name: string, description: string | null, icon: string | null, color: string | null, projectIds: readonly string[] = [], copyFrom: string | null = null) =>

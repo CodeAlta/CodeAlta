@@ -1,5 +1,6 @@
 // The page's link to the terminals of the application: which there are, and what those the page shows write.
 import type { TerminalItem, terminals } from "#neoastra";
+import { createOrderedCalls } from "../orderedCalls";
 
 /** What shows a terminal on the page. The hub gives it what the terminal wrote; it tells the hub what it took in. */
 export type TerminalSink = Readonly<{
@@ -48,6 +49,8 @@ export function createTerminalHub(api: TerminalsApi, timers: Timers = { set: (ru
 
   const notify = () => { for (const listener of [...listeners]) listener(); };
   const quietly = (call: Promise<unknown>) => void call.catch(() => { /* The host is gone or the terminal is: the next list says which. */ });
+  // Attached, detached, shown: the host keeps what it was told last, so these calls of a terminal go in the order they were asked.
+  const inOrder = createOrderedCalls();
 
   function acknowledge() {
     acknowledging = null;
@@ -93,10 +96,11 @@ export function createTerminalHub(api: TerminalsApi, timers: Timers = { set: (ru
   }
 
   function attachAll() {
-    if (!feed || !epoch) return;
+    const current = feed, host = epoch;
+    if (!current || !host) return;
     for (const id of sinks.keys()) {
-      quietly(api.attach({ expectedEpoch: epoch, feed, id }));
-      if (shown.has(id)) quietly(api.show({ expectedEpoch: epoch, feed, id, visible: true }));
+      quietly(inOrder(id, () => api.attach({ expectedEpoch: host, feed: current, id })));
+      if (shown.has(id)) quietly(inOrder(id, () => api.show({ expectedEpoch: host, feed: current, id, visible: true })));
     }
   }
 
@@ -162,20 +166,23 @@ export function createTerminalHub(api: TerminalsApi, timers: Timers = { set: (ru
     /** The page starts showing a terminal: what it wrote, then what it writes, goes to the sink. */
     attach(id: string, sink: TerminalSink) {
       sinks.set(id, sink);
-      if (feed && epoch) quietly(api.attach({ expectedEpoch: epoch, feed, id }));
+      const current = feed, host = epoch;
+      if (current && host) quietly(inOrder(id, () => api.attach({ expectedEpoch: host, feed: current, id })));
     },
     /** The page stops showing a terminal. The terminal keeps running. */
     detach(id: string) {
       if (!sinks.delete(id)) return;
       shown.delete(id);
       taken.delete(id);
-      if (feed && epoch) quietly(api.detach({ expectedEpoch: epoch, feed, id }));
+      const current = feed, host = epoch;
+      if (current && host) quietly(inOrder(id, () => api.detach({ expectedEpoch: host, feed: current, id })));
     },
     /** The tab of a terminal is the one shown, or no longer is. */
     show(id: string, visible: boolean) {
       if (shown.has(id) === visible) return;
       if (visible) shown.add(id); else shown.delete(id);
-      if (feed && epoch && sinks.has(id)) quietly(api.show({ expectedEpoch: epoch, feed, id, visible }));
+      const current = feed, host = epoch;
+      if (current && host && sinks.has(id)) quietly(inOrder(id, () => api.show({ expectedEpoch: host, feed: current, id, visible })));
     },
     /** Types text in a terminal. */
     input(id: string, data: string) {

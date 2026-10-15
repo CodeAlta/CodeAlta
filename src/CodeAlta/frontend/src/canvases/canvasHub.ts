@@ -1,5 +1,6 @@
 // The page's link to the canvases of plugins: what plugins declare, the instances that tabs show, and what plugins push to them.
 import type { canvases, CanvasActionResponse, CanvasEvent, CanvasItem, CanvasOpenResponse } from "#neoastra";
+import { createOrderedCalls } from "../orderedCalls";
 import { pluginIconFiles } from "../pluginButtons/pluginIcons";
 import type { CanvasRpcCarrier, CanvasRpcListener } from "./canvasRpc";
 
@@ -98,6 +99,8 @@ function mergeUpdates(older: Extract<CanvasInstanceEvent, { kind: "update" }>, n
  */
 export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, milliseconds) => setTimeout(run, milliseconds), clear: timer => clearTimeout(timer as number) }) {
   let epoch: string | null = null;
+  // Shown, hidden, shown again: the host keeps what it was told last, so the calls of an instance go in the order they were asked.
+  const inOrder = createOrderedCalls();
   let catalog: readonly CanvasItem[] = [];
   let listing = 0;
   let version = 0;
@@ -292,7 +295,7 @@ export function createCanvasHub(api: CanvasApi, timers: Timers = { set: (run, mi
     async setVisible(instanceId: string, visible: boolean): Promise<string> {
       const host = epoch;
       if (!host) return "unreachable";
-      try { return (await api.visible({ expectedEpoch: host, instanceId, visible }, { timeoutMilliseconds: 10_000 })).status; } catch { return "unreachable"; }
+      try { return (await inOrder(instanceId, () => api.visible({ expectedEpoch: host, instanceId, visible }, { timeoutMilliseconds: 10_000 }))).status; } catch { return "unreachable"; }
     },
     /** Closes the instance of a tab that was closed. */
     async close(instanceId: string): Promise<void> {

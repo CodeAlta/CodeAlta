@@ -95,7 +95,33 @@ test("the page lists the terminals the host tells, and is told what those it sho
   hub.show("a", false);
   hub.detach("a");
   hub.detach("a");
+  await settle();
   assert.deepEqual(take(), ['show {"expectedEpoch":"epoch","feed":"f1","id":"a","visible":false}', 'detach {"expectedEpoch":"epoch","feed":"f1","id":"a"}']);
+  stop();
+});
+
+test("what the page asks of a terminal reaches the host in order: the host runs its calls side by side", async () => {
+  const sent: string[] = [];
+  const held: Array<() => void> = [];
+  const answer = (name: string) => (request: { visible?: boolean }) => {
+    sent.push(request.visible === undefined ? name : `${name} ${request.visible}`);
+    return new Promise<{ status: string }>(resolve => held.push(() => resolve({ status: "ok" })));
+  };
+  const api = {
+    profiles: () => new Promise(() => { }),
+    watch: () => Promise.resolve((async function* () { yield event("feed", { feed: "f1" }); await new Promise(() => { }); })()),
+    attach: answer("attach"), detach: answer("detach"), show: answer("show"),
+  } as unknown as TerminalsApi;
+  const hub = createTerminalHub(api);
+  const stop = hub.connect("epoch");
+  await settle();
+  hub.attach("a", { start: () => { }, write: () => { } });
+  hub.show("a", true);
+  hub.show("a", false);
+  hub.show("a", true);
+  assert.deepEqual(sent, ["attach"], "a terminal is shown once the host has it");
+  for (let turn = 0; turn < 3; turn++) { held.shift()!(); await settle(); }
+  assert.deepEqual(sent, ["attach", "show true", "show false", "show true"]);
   stop();
 });
 
