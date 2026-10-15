@@ -1182,6 +1182,89 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task PromptCache_ExpiresAfterTheLifetimeTheRequestWroteItFor()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        // Claude Code writes the cache for an hour.
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+        AssertCacheLifetime(TimeSpan.FromHours(1), first.Usage!);
+
+        // A request that wrote it for five minutes keeps it five minutes.
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("two")), usage: CacheUsage(read: 2000, write: 300, write1h: 0, write5m: 300));
+            process.EmitResult("two", user);
+            return Task.CompletedTask;
+        };
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first));
+        AssertCacheLifetime(TimeSpan.FromMinutes(5), second.Usage!);
+
+        // A request that only read it refreshes it for the lifetime it was written for.
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitAssistant("msg_3", new JsonArray(ClaudeCodeFakeProcess.TextBlock("three")), usage: CacheUsage(read: 2300, write: 0, write1h: 0, write5m: 0));
+            process.EmitResult("three", user);
+            return Task.CompletedTask;
+        };
+        var third = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second));
+        AssertCacheLifetime(TimeSpan.FromMinutes(5), third.Usage!);
+
+        // A request that neither read nor wrote it has no cache.
+        cli.OnUserMessage = static (process, user) =>
+        {
+            process.EmitAssistant("msg_4", new JsonArray(ClaudeCodeFakeProcess.TextBlock("four")), usage: new JsonObject { ["input_tokens"] = 40, ["output_tokens"] = 1 });
+            process.EmitResult("four", user);
+            return Task.CompletedTask;
+        };
+        var fourth = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three"), third.AssistantMessage, User("four")], third));
+        Assert.IsNull(fourth.Usage!.PromptCacheExpiresAt);
+    }
+
+    [TestMethod]
+    public async Task PromptCache_OfOnlyTotalsLastsTheHourOfClaudeCode()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = static (process, user) =>
+        {
+            // A subagent caches another prefix, for five minutes: that is not the cache of the session.
+            process.EmitAssistant("msg_sub", new JsonArray(ClaudeCodeFakeProcess.TextBlock("sub")), parentToolUseId: "toolu_task", usage: CacheUsage(read: 0, write: 500, write1h: 0, write5m: 500));
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.TextBlock("one")), usage: new JsonObject
+            {
+                ["input_tokens"] = 100,
+                ["cache_read_input_tokens"] = 2000,
+                ["cache_creation_input_tokens"] = 300,
+                ["output_tokens"] = 1,
+            });
+            process.EmitResult("one", user);
+            return Task.CompletedTask;
+        };
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        var response = await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        AssertCacheLifetime(TimeSpan.FromHours(1), response.Usage!);
+    }
+
+    private static JsonObject CacheUsage(long read, long write, long write1h, long write5m) => new()
+    {
+        ["input_tokens"] = 10,
+        ["cache_read_input_tokens"] = read,
+        ["cache_creation_input_tokens"] = write,
+        ["cache_creation"] = new JsonObject { ["ephemeral_1h_input_tokens"] = write1h, ["ephemeral_5m_input_tokens"] = write5m },
+        ["output_tokens"] = 1,
+    };
+
+    // The expiry is taken when the message ends, the time of the usage just after it.
+    private static void AssertCacheLifetime(TimeSpan lifetime, AgentSessionUsage usage)
+    {
+        var expiresAt = usage.PromptCacheExpiresAt ?? throw new AssertFailedException("The usage has no expiry of the prompt cache.");
+        var left = expiresAt - usage.UpdatedAt;
+        Assert.IsTrue(left <= lifetime && left > lifetime - TimeSpan.FromSeconds(30), $"Expected about {lifetime}, got {left}.");
+    }
+
+    [TestMethod]
     public async Task CostOfATurn_IsReportedOnceWithItsAnswer()
     {
         var cli = new ClaudeCodeFakeCli();

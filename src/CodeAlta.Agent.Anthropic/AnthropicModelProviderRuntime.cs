@@ -105,7 +105,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
             configureOptions: ConfigureOptions,
             prepareRequest: MarkCacheBreakpoints,
-            classifyFailure: ClassifyFailure);
+            classifyFailure: ClassifyFailure,
+            promptCacheLifetime: AnthropicPromptCache.Lifetime);
     }
 
     // The SDK's exceptions carry the HTTP status and body; an error in the stream carries its error type

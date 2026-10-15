@@ -428,7 +428,7 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         => Emit(new JsonObject { ["type"] = "stream_event", ["event"] = @event, ["session_id"] = SessionId, ["parent_tool_use_id"] = parentToolUseId });
 
     /// <summary>Writes an assistant message that holds the given content blocks.</summary>
-    public void EmitAssistant(string messageId, JsonArray content, string? parentToolUseId = null, string? error = null, string model = "claude-test-1")
+    public void EmitAssistant(string messageId, JsonArray content, string? parentToolUseId = null, string? error = null, string model = "claude-test-1", JsonObject? usage = null)
     {
         var message = new JsonObject
         {
@@ -443,11 +443,12 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
                 ["role"] = "assistant",
                 ["model"] = model,
                 ["content"] = content,
-                ["usage"] = new JsonObject
+                ["usage"] = usage ?? new JsonObject
                 {
                     ["input_tokens"] = 100,
                     ["cache_read_input_tokens"] = 2000,
                     ["cache_creation_input_tokens"] = 300,
+                    ["cache_creation"] = new JsonObject { ["ephemeral_1h_input_tokens"] = 300, ["ephemeral_5m_input_tokens"] = 0 },
                     ["output_tokens"] = 1,
                 },
             },

@@ -90,6 +90,7 @@ public sealed class ChatClientTurnExecutorTests
         Assert.AreEqual(200000L, response.Usage.TokenLimit);
         Assert.AreEqual(AgentUsageScope.CurrentWindow, response.Usage.Scope);
         Assert.AreEqual(AgentUsageSource.ProviderUsage, response.Usage.Source);
+        Assert.IsNull(response.Usage.PromptCacheExpiresAt, "A provider that names no cache lifetime gives no expiry, even when it read the cache.");
         Assert.IsNotNull(response.ProviderState);
         Assert.AreEqual("response-1", response.ProviderState.Value.GetProperty("responseId").GetString());
         Assert.AreEqual("conversation-1", response.ProviderState.Value.GetProperty("conversationId").GetString());

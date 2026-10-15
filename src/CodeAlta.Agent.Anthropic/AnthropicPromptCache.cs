@@ -17,6 +17,11 @@ namespace CodeAlta.Agent.Anthropic;
 /// </remarks>
 internal static class AnthropicPromptCache
 {
+    /// <summary>
+    /// How long the API keeps what a request read or wrote: the markers name no TTL, which is five minutes.
+    /// </summary>
+    public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(5);
+
     /// <summary>Returns the messages and the options of a request with its breakpoints marked.</summary>
     /// <param name="messages">The messages of the request. They belong to it: the marker is set on their content.</param>
     /// <param name="options">The options of the request, which are left as they are; null for none.</param>

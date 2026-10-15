@@ -155,6 +155,40 @@ public sealed class AnthropicPromptCachingTests
         Assert.AreEqual(9_304L, operation.InputTokens);
         Assert.AreEqual(9_000L, operation.CachedInputTokens);
         Assert.AreEqual(300L, operation.CacheWriteTokens);
+        Assert.AreEqual(response.Usage.UpdatedAt + TimeSpan.FromMinutes(5), response.Usage.PromptCacheExpiresAt, "The markers name no TTL: the API keeps the cache five minutes.");
+    }
+
+    [TestMethod]
+    public async Task AnthropicTurn_ReadingThePromptCacheKeepsItFiveMinutesMore()
+    {
+        var usage = await SendUsageAsync(new UsageDetails { InputTokenCount = 9_004, CachedInputTokenCount = 9_000, OutputTokenCount = 7 }).ConfigureAwait(false);
+
+        Assert.AreEqual(usage.UpdatedAt + TimeSpan.FromMinutes(5), usage.PromptCacheExpiresAt);
+    }
+
+    [TestMethod]
+    public async Task AnthropicTurn_WithoutTheCacheGivesNoExpiry()
+    {
+        // A prompt shorter than the API caches is neither read from nor written to the cache.
+        var usage = await SendUsageAsync(new UsageDetails { InputTokenCount = 40, CachedInputTokenCount = 0, OutputTokenCount = 7 }).ConfigureAwait(false);
+
+        Assert.IsNull(usage.PromptCacheExpiresAt);
+    }
+
+    private static async Task<AgentSessionUsage> SendUsageAsync(UsageDetails usage)
+    {
+        var client = new RecordingChatClient(
+        [
+            new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")]),
+            new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(usage)]),
+        ]);
+        var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(new AnthropicProviderOptions
+        {
+            ProviderKey = "anthropic",
+            ChatClientFactory = () => client,
+        });
+        var response = await executor.ExecuteTurnAsync(CreateRequest(profile: null), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        return response.Usage!;
     }
 
     [TestMethod]

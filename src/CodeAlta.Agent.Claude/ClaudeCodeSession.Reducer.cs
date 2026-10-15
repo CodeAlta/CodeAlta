@@ -67,6 +67,10 @@ internal sealed partial class ClaudeCodeSession
     private bool _stoppedByDecision;
     private long? _contextWindow;
     private JsonElement? _lastUsage;
+    // Claude Code writes the prompt cache for an hour; a request that does not say for how long keeps the last
+    // lifetime this session saw.
+    private TimeSpan _promptCacheLifetime = TimeSpan.FromHours(1);
+    private DateTimeOffset? _promptCacheExpiresAt;
     private long? _lastOutputTokens;
     private string? _lastModel;
     private AgentRateLimitSummary? _rateLimits;
@@ -366,7 +370,7 @@ internal sealed partial class ClaudeCodeSession
         {
             if (segment?.Usage is { } emptyUsage)
             {
-                _lastUsage = emptyUsage;
+                SetLastUsage(emptyUsage);
             }
 
             return null;
@@ -687,7 +691,7 @@ internal sealed partial class ClaudeCodeSession
 
         if (segment.Usage is { } usage)
         {
-            _lastUsage = usage;
+            SetLastUsage(usage);
             _lastOutputTokens = segment.OutputTokens;
         }
 
@@ -720,6 +724,28 @@ internal sealed partial class ClaudeCodeSession
                 ? new ClaudeCodeProviderState(sessionId, _syncedUsers, _syncedAssistants, _instructionsHash, _costTotal, _leaf).ToJson()
                 : null,
         };
+    }
+
+    // A request that read or wrote the prompt cache keeps it for its lifetime from now: a read refreshes it too.
+    // `cache_creation` says for how long the request wrote it.
+    private void SetLastUsage(JsonElement usage)
+    {
+        _lastUsage = usage;
+        if (ClaudeCodeJson.TryGetObject(usage, "cache_creation", out var creation))
+        {
+            if (ClaudeCodeJson.GetInt64(creation, "ephemeral_1h_input_tokens") is > 0)
+            {
+                _promptCacheLifetime = TimeSpan.FromHours(1);
+            }
+            else if (ClaudeCodeJson.GetInt64(creation, "ephemeral_5m_input_tokens") is > 0)
+            {
+                _promptCacheLifetime = TimeSpan.FromMinutes(5);
+            }
+        }
+
+        var cached = ClaudeCodeJson.GetInt64(usage, "cache_read_input_tokens") is > 0 ||
+                     ClaudeCodeJson.GetInt64(usage, "cache_creation_input_tokens") is > 0;
+        _promptCacheExpiresAt = cached ? DateTimeOffset.UtcNow + _promptCacheLifetime : null;
     }
 
     // The usage of the last request of the model: what it read is what the context of the session holds.
@@ -760,7 +786,8 @@ internal sealed partial class ClaudeCodeSession
             RateLimits: _rateLimits,
             Scope: AgentUsageScope.CurrentWindow,
             Source: AgentUsageSource.ProviderUsage,
-            UpdatedAt: DateTimeOffset.UtcNow);
+            UpdatedAt: DateTimeOffset.UtcNow,
+            PromptCacheExpiresAt: _promptCacheExpiresAt);
     }
 
     // Claude Code ends a turn that was stopped while the model wrote or while its tools ran with these reasons.

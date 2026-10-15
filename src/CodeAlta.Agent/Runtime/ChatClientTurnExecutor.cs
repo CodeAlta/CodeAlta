@@ -28,6 +28,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     private readonly Action<AgentTurnRequest, ChatOptions>? _configureOptions;
     private readonly ChatClientRequestPreparer? _prepareRequest;
     private readonly Func<Exception, AgentFailureInfo?>? _classifyFailure;
+    private readonly TimeSpan? _promptCacheLifetime;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
@@ -44,13 +45,18 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// <param name="classifyFailure">
     /// Optional provider-specific kind of the failure that ended a turn; the HTTP status of the exception otherwise.
     /// </param>
+    /// <param name="promptCacheLifetime">
+    /// How long the provider keeps the prompt cache a request read or wrote; null when it is not known, and the usage
+    /// then gives no expiry.
+    /// </param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
         Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
         Func<AgentTurnRequest, AgentReasoningEffort, bool>? supportsReasoningEffort = null,
         Action<AgentTurnRequest, ChatOptions>? configureOptions = null,
         ChatClientRequestPreparer? prepareRequest = null,
-        Func<Exception, AgentFailureInfo?>? classifyFailure = null)
+        Func<Exception, AgentFailureInfo?>? classifyFailure = null,
+        TimeSpan? promptCacheLifetime = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -61,6 +67,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         _configureOptions = configureOptions;
         _prepareRequest = prepareRequest;
         _classifyFailure = classifyFailure;
+        _promptCacheLifetime = promptCacheLifetime;
     }
 
     /// <inheritdoc />
@@ -489,14 +496,15 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private static AgentSessionUsage? CreateUsage(AgentTurnRequest request, ChatResponse response)
+    private AgentSessionUsage? CreateUsage(AgentTurnRequest request, ChatResponse response)
     {
         if (response.Usage is null)
         {
             return null;
         }
 
-        return AgentUsageFactory.CreateOperationUsage(
+        var cacheWriteTokens = GetCacheWriteTokens(response.Usage);
+        var usage = AgentUsageFactory.CreateOperationUsage(
             modelId: response.ModelId ?? request.ModelId,
             modelInfo: request.ModelInfo,
             inputTokens: response.Usage.InputTokenCount,
@@ -505,7 +513,13 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             cachedInputTokens: response.Usage.CachedInputTokenCount,
             reasoningTokens: response.Usage.ReasoningTokenCount,
             updatedAt: response.CreatedAt ?? DateTimeOffset.UtcNow,
-            cacheWriteTokens: GetCacheWriteTokens(response.Usage));
+            cacheWriteTokens: cacheWriteTokens);
+
+        // A request that read or wrote the cache keeps it for the lifetime of the provider from then: a read
+        // refreshes it too.
+        return _promptCacheLifetime is { } lifetime && (response.Usage.CachedInputTokenCount is > 0 || cacheWriteTokens is > 0)
+            ? usage with { PromptCacheExpiresAt = usage.UpdatedAt + lifetime }
+            : usage;
     }
 
     // The Anthropic client reports what a request wrote to the prompt cache as an additional count, under the name

@@ -1377,6 +1377,71 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_SendAsync_KeepsThePromptCacheExpiryUntilARequestSaysOtherwise()
+    {
+        using var temp = TestTempDirectory.Create();
+        var root = Path.Combine(temp.Path, "machine", "agents");
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-cache-expiry");
+        var state = CreateState("session-cache-expiry");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        var expiresAt = new DateTimeOffset(2026, 10, 15, 12, 0, 0, TimeSpan.Zero);
+        var rateLimits = new AgentRateLimitSummary(Name: "five_hour", Primary: new AgentRateLimitWindow(UsedPercent: 40));
+
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("First answer.")]),
+                    Usage = CreateWindowUsageSnapshot(5_000, 272_000, 4_900, 100) with { PromptCacheExpiresAt = expiresAt },
+                }),
+                // An answer with only rate limits is no request: the cache is as the request before left it.
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Second answer.")]),
+                    Usage = new AgentSessionUsage(RateLimits: rateLimits, Scope: AgentUsageScope.RateLimitOnly, Source: AgentUsageSource.ProviderUsage, UpdatedAt: expiresAt.AddMinutes(-50)),
+                }),
+                // A request that reports its tokens without an expiry used no cache, or one whose lifetime is not known.
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Third answer.")]),
+                    Usage = CreateWindowUsageSnapshot(6_000, 272_000, 5_900, 100),
+                })),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
+            });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt") }).ConfigureAwait(false);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt") }).ConfigureAwait(false);
+
+        var second = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.AreEqual(expiresAt, second?.Usage?.PromptCacheExpiresAt);
+        Assert.AreEqual(rateLimits, second?.Usage?.RateLimits);
+        // The summary is saved with it: a restart still knows when the cache expires.
+        var reopened = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(root));
+        var saved = await reopened.GetSessionAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.AreEqual(expiresAt, saved?.Usage?.PromptCacheExpiresAt);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Third prompt") }).ConfigureAwait(false);
+
+        var third = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.AreEqual(6_000L, third?.Usage?.LastOperation?.InputTokens + third?.Usage?.LastOperation?.OutputTokens);
+        Assert.IsNull(third?.Usage?.PromptCacheExpiresAt);
+    }
+
+    [TestMethod]
     public async Task AgentSession_SendAsync_UsesProviderCatalogWhenRuntimeModelCacheIsEmpty()
     {
         using var temp = TestTempDirectory.Create();

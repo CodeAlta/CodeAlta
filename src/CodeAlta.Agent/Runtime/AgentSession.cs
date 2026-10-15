@@ -1713,7 +1713,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             conversation.Count,
             DateTimeOffset.UtcNow,
             label);
-        return AgentUsageFactory.AttachMessageCount(usageWithWindow, conversation.Count);
+        var snapshot = AgentUsageFactory.AttachMessageCount(usageWithWindow, conversation.Count);
+        return snapshot is null
+            ? null
+            : snapshot with { PromptCacheExpiresAt = AgentUsageFactory.ResolvePromptCacheExpiry(previousUsage, usage) };
     }
 
     private static AgentSessionUsage SelectUsageForConversationEstimate(
@@ -3369,7 +3372,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Scope: AgentUsageScope.Compaction,
             Source: AgentUsageSource.RecoveredHistory,
             UpdatedAt: DateTimeOffset.UtcNow,
-            Details: previousUsage?.Details);
+            Details: previousUsage?.Details,
+            PromptCacheExpiresAt: previousUsage?.PromptCacheExpiresAt);
     }
 
     private long CountDurableEvents()

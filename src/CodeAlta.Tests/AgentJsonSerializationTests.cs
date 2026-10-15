@@ -379,6 +379,20 @@ public sealed class AgentJsonSerializationTests
     }
 
     [TestMethod]
+    public void AgentSessionUsage_PromptCacheExpiry_RoundTripsAndIsNullInOlderRecords()
+    {
+        var expiresAt = DateTimeOffset.Parse("2026-10-15T13:37:00+02:00");
+        var usage = new AgentSessionUsage(Source: AgentUsageSource.ProviderUsage, PromptCacheExpiresAt: expiresAt);
+
+        var json = JsonSerializer.Serialize(usage, AgentJsonSerializerContext.Default.AgentSessionUsage);
+        var roundTripped = JsonSerializer.Deserialize(json, AgentJsonSerializerContext.Default.AgentSessionUsage);
+        var older = JsonSerializer.Deserialize("""{"source":"LocalProviderUsage"}""", AgentJsonSerializerContext.Default.AgentSessionUsage);
+
+        Assert.AreEqual(expiresAt, roundTripped?.PromptCacheExpiresAt);
+        Assert.IsNull(older?.PromptCacheExpiresAt);
+    }
+
+    [TestMethod]
     public void AgentTurnContracts_AndNamedCodexRateLimits_RoundTripAdditively()
     {
         var usage = new AgentSessionUsage(

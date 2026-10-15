@@ -12,6 +12,10 @@ namespace CodeAlta.Agent;
 /// <param name="Source">The provider/runtime event source that produced this usage snapshot.</param>
 /// <param name="UpdatedAt">The time the usage snapshot was last updated.</param>
 /// <param name="Details">Optional provider/runtime-specific usage details.</param>
+/// <param name="PromptCacheExpiresAt">
+/// When the prompt cache the last request wrote or read is expected to expire; null when the provider's cache
+/// lifetime is not known or the last request used no cache.
+/// </param>
 public sealed record AgentSessionUsage(
     AgentWindowUsageSnapshot? Window = null,
     AgentOperationUsageSnapshot? LastOperation = null,
@@ -19,7 +23,8 @@ public sealed record AgentSessionUsage(
     AgentUsageScope Scope = AgentUsageScope.Unknown,
     AgentUsageSource Source = AgentUsageSource.Unknown,
     DateTimeOffset UpdatedAt = default,
-    AgentSessionUsageDetails? Details = null)
+    AgentSessionUsageDetails? Details = null,
+    DateTimeOffset? PromptCacheExpiresAt = null)
 {
     /// <summary>
     /// Gets the current number of tokens in the active input context when known.

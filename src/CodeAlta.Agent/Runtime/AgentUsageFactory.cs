@@ -184,8 +184,19 @@ internal static class AgentUsageFactory
             Scope: incoming.Scope,
             Source: incoming.Source,
             UpdatedAt: incoming.UpdatedAt,
-            Details: incoming.Details ?? current.Details);
+            Details: incoming.Details ?? current.Details,
+            PromptCacheExpiresAt: ResolvePromptCacheExpiry(current, incoming));
     }
+
+    /// <summary>
+    /// Returns when the prompt cache expires after <paramref name="usage"/>: a request that reports its tokens says
+    /// it, with null for a provider whose cache lifetime is not known; an update that is not a request (rate limits,
+    /// an estimate, a compaction) leaves the cache as the request before it left it.
+    /// </summary>
+    public static DateTimeOffset? ResolvePromptCacheExpiry(AgentSessionUsage? previous, AgentSessionUsage usage)
+        => usage.PromptCacheExpiresAt is not null || usage.LastOperation is { InputTokens: not null } or { OutputTokens: not null }
+            ? usage.PromptCacheExpiresAt
+            : previous?.PromptCacheExpiresAt;
 
     private static AgentWindowUsageSnapshot? MergeWindowUsage(AgentWindowUsageSnapshot? current, AgentWindowUsageSnapshot? incoming)
     {
